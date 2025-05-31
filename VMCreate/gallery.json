@@ -1,0 +1,38 @@
+{
+  "$schema": "https://raw.githubusercontent.com/MicrosoftDocs/Virtualization-Documentation/live/hyperv-tools/vmgallery/vm-gallery-schema.json",
+  "images": [
+    {
+      "name": "Kali Linux",
+      "publisher": "OffSec Services Limited",
+      "lastUpdated": "2025-04-23T10:48:55+02:00",
+      "version": "2025.1c",
+      "locale": "en-US",
+      "description": [
+        "Kali Linux is an open-source, Debian-based Linux distribution geared towards various information security tasks, such as Penetration Testing, Security Research, Computer Forensics and Reverse Engineering."
+      ],
+      "config": {
+        "secureBoot": "false",
+        "enhancedSessionTransportType": "HvSocket"
+      },
+      "requirements": { "diskSpace": "1600041774" },
+      "disk": {
+        "uri": "https://cdimage.kali.org/kali-2025.1c/kali-linux-2025.1c-hyperv-amd64.7z",
+        "hash": "sha256:91286AA7CA19C6E94E9A9EF8166D1FD03C5289B67ACBA0FD8345AE0DCE588763",
+        "archiveRelativePath": "kali-linux-2025.1c-hyperv-amd64\\kali-linux-2025.1c-hyperv-amd64.vhdx"
+      },
+      "logo": {
+        "uri": "https://pkg.kali.org/static/img/kali-logo.png",
+        "hash": "sha256:B3B7DF4DEF895EA3A1FE290444C70D063E8E01FF9BB34FB8A37C11C90F022F4F"
+      },
+      "symbol": {
+        "uri": "https://www.kali.org/blog/kali-linux-2022-4-release/images/kali-logo-dragon-blue-transparent.png",
+        "hash": "sha256:0281AEC458BF649C84DF14DAEF2063F1DA66BD22CC2D6771A853B205EAC37996"
+      },
+      "thumbnail": {
+        "uri": "https://www.kali.org/images/notebook-kali-2024.1.jpg",
+        "hash": "sha256:2E29854C80EE1EE08110017452A7A9C7DA6325A167F6CA4131DFED71BF5EB002"
+      },
+      "details": []
+    }
+  ]
+}

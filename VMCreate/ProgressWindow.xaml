@@ -1,7 +1,7 @@
 ﻿<Window x:Class="VMCreateVM.ProgressWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Progress" Height="220" Width="400" WindowStartupLocation="CenterOwner">
+        Title="Progress" Height="220" Width="500" WindowStartupLocation="CenterOwner">
     <Window.Resources>
         <Style x:Key="CommonButton" TargetType="{x:Type Button}">
             <Setter Property="FontFamily" Value="Segoe UI"/>
@@ -26,7 +26,10 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
-        <TextBlock x:Name="StatusText" Grid.Row="0" Style="{StaticResource ExplanationText}" Text="Downloading..."/>
+        <Grid Grid.Row="0">
+            <TextBlock x:Name="StatusText" Style="{StaticResource ExplanationText}" Text="Downloading..."/>
+            <TextBlock x:Name="PercentText" HorizontalAlignment="Right" Style="{StaticResource ExplanationText}" Text="0%"/>
+        </Grid>
         <TextBlock x:Name="LinkText" Grid.Row="1" Style="{StaticResource ExplanationText}" Text="" Visibility="Visible"/>
         <TextBlock x:Name="SpeedText" Grid.Row="2" Style="{StaticResource ExplanationText}" Text="Download Speed: 0 MB/s"/>
         <ProgressBar x:Name="ProgressBar" Grid.Row="3" Height="20" Minimum="0" Maximum="100" Foreground="Green"/>

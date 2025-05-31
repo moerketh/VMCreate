@@ -14,26 +14,54 @@ using SharpCompress.Common;
 using System.Management.Automation;
 using System.Collections.ObjectModel;
 using System.Xml.Linq;
+using System.Net;
 
 namespace VMCreateVM
 {
     public partial class MainWindow : Window
     {
         private readonly string logPath = Path.Combine(Path.GetTempPath(), "VMCreate.log");
-        private readonly ObservableCollection<GalleryItem> galleryItems = new ObservableCollection<GalleryItem>();
-        private readonly string tempPath = Path.GetTempPath();
         private readonly string zipFilePath = Path.Combine(Path.GetTempPath(), "vm_image.7z");
         private readonly string extractPath = Path.Combine(Path.GetTempPath(), "VMExtracted");
-        private readonly string vmPath = @"C:\VMs";
+        private readonly string vmPath;
+        private readonly ObservableCollection<GalleryItem> galleryItems = new ObservableCollection<GalleryItem>();
 
         public MainWindow()
         {
+            vmPath = GetDefaultVirtualHardDiskPath();
             InitializeComponent();
             GalleryListBox.ItemsSource = galleryItems;
             LoadGalleryItems();
             SearchTextBox.TextChanged += SearchTextBox_TextChanged;
             GalleryListBox.SelectionChanged += GalleryListBox_SelectionChanged;
             CreateVMButton.Click += CreateVMButton_Click;
+        }
+
+        private string GetDefaultVirtualHardDiskPath()
+        {
+            string defaultPath = @"C:\ProgramData\Microsoft\Windows\Virtual Hard Disks";
+            try
+            {
+                string registryPath = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Virtualization";
+                using (RegistryKey key = Registry.LocalMachine.OpenSubKey(registryPath))
+                {
+                    if (key != null)
+                    {
+                        string path = key.GetValue("DefaultVirtualHardDiskPath") as string;
+                        if (!string.IsNullOrEmpty(path) && Directory.Exists(path))
+                        {
+                            WriteLog($"Using DefaultVirtualHardDiskPath from registry: {path}");
+                            return path;
+                        }
+                    }
+                }
+                WriteLog($"DefaultVirtualHardDiskPath not found or invalid. Using default: {defaultPath}");
+            }
+            catch (Exception ex)
+            {
+                WriteLog($"Error reading DefaultVirtualHardDiskPath: {ex.Message}");
+            }
+            return defaultPath;
         }
 
         private void WriteLog(string message)
@@ -65,21 +93,7 @@ namespace VMCreateVM
 
                 if (locations == null || locations.Length == 0)
                 {
-                    WriteLog("GalleryLocations registry key not found or empty. Using default sources: Ubuntu XML, https://go.microsoft.com/fwlink/?linkid=851584");
-                    // Load Ubuntu XML first
-                    newItems = await LoadXmlFromUrl("https://raw.githubusercontent.com/canonical/ubuntu-desktop-hyper-v/master/HyperVGallery/Ubuntu-24.04.xml");
-                    foreach (var item in newItems.Where(item => !loadedNames.Contains(item.Name)))
-                    {
-                        galleryItems.Add(item);
-                        loadedNames.Add(item.Name);
-                    }
-                    // Then load Microsoft JSON
-                    newItems = await LoadJsonFromUrl("https://go.microsoft.com/fwlink/?linkid=851584");
-                    foreach (var item in newItems.Where(item => !loadedNames.Contains(item.Name)))
-                    {
-                        galleryItems.Add(item);
-                        loadedNames.Add(item.Name);
-                    }
+                    WriteLog("GalleryLocations registry key not found or empty. Using default sources: Ubuntu XML, Microsoft JSON, local JSON.");
                 }
                 else
                 {
@@ -110,6 +124,44 @@ namespace VMCreateVM
                         }
                     }
                 }
+
+                // Load local JSON file
+                string localJsonPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "gallery.json");
+                if (File.Exists(localJsonPath))
+                {
+                    WriteLog($"Loading local JSON from: {localJsonPath}");
+                    newItems = LoadJsonFromFile(localJsonPath);
+                    foreach (var item in newItems.Where(item => !loadedNames.Contains(item.Name)))
+                    {
+                        galleryItems.Add(item);
+                        loadedNames.Add(item.Name);
+                    }
+                }
+                else
+                {
+                    WriteLog($"Local JSON file not found: {localJsonPath}");
+                }
+
+                // Load Ubuntu from repo XML 
+                newItems = await LoadXmlFromUrl("https://raw.githubusercontent.com/canonical/ubuntu-desktop-hyper-v/master/HyperVGallery/Ubuntu-24.04.xml");
+                foreach (var item in newItems.Where(item => !loadedNames.Contains(item.Name)))
+                {
+                    galleryItems.Add(item);
+                    loadedNames.Add(item.Name);
+                }
+                // Load Microsoft Default gallery items
+                newItems = await LoadJsonFromUrl("https://go.microsoft.com/fwlink/?linkid=851584");
+                foreach (var item in newItems.Where(item => !loadedNames.Contains(item.Name)))
+                {
+                    galleryItems.Add(item);
+                    loadedNames.Add(item.Name);
+                }
+
+                if (galleryItems.Count == 0)
+                {
+                    WriteLog("No gallery items loaded from any source.");
+                    MessageBox.Show("No gallery items could be loaded. Please check your configuration.", "Warning", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
                 WriteLog($"Populated ListBox with {galleryItems.Count} items.");
             }
             catch (Exception ex)
@@ -117,6 +169,23 @@ namespace VMCreateVM
                 WriteLog($"Failed to load gallery items: {ex.Message}");
                 MessageBox.Show($"Failed to load gallery items: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+
+        private List<GalleryItem> LoadJsonFromFile(string path)
+        {
+            var items = new List<GalleryItem>();
+            try
+            {
+                WriteLog($"Parsing local JSON file: {path}");
+                string json = File.ReadAllText(path);
+                items.AddRange(ParseJson(json));
+                WriteLog($"Parsed JSON from {path}");
+            }
+            catch (Exception ex)
+            {
+                WriteLog($"Failed to parse JSON from {path}: {ex.Message}");
+            }
+            return items;
         }
 
         private async Task<List<GalleryItem>> LoadJsonFromUrl(string url)
@@ -146,10 +215,7 @@ namespace VMCreateVM
             {
                 foreach (string file in Directory.GetFiles(path, "*.json"))
                 {
-                    WriteLog($"Parsing local JSON: {file}");
-                    string json = File.ReadAllText(file);
-                    items.AddRange(ParseJson(json));
-                    WriteLog($"Parsed JSON from {file}");
+                    items.AddRange(LoadJsonFromFile(file));
                 }
             }
             catch (Exception ex)
@@ -381,7 +447,7 @@ namespace VMCreateVM
                 WriteLog($"Resolved mirror URI: {mirrorUri}");
 
                 // Show progress window
-                var progressWindow = new ProgressWindow();
+                var progressWindow = new ProgressWindow { Owner = this };
                 progressWindow.Show();
                 progressWindow.SetStatus("Downloading...", mirrorUri);
 
@@ -406,7 +472,7 @@ namespace VMCreateVM
                 progressWindow.Close();
 
                 // Show success window
-                var successWindow = new SuccessWindow();
+                var successWindow = new SuccessWindow { Owner = this };
                 successWindow.ShowDialog();
                 WriteLog("Displayed success window.");
             }
@@ -414,6 +480,10 @@ namespace VMCreateVM
             {
                 WriteLog($"Error in Create VM: {ex.Message}");
                 MessageBox.Show($"Error: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                CleanupTempFiles();
             }
         }
 
@@ -447,6 +517,7 @@ namespace VMCreateVM
                 using (HttpClient client = new HttpClient())
                 {
                     client.DefaultRequestHeaders.Add("User-Agent", "VMCreateVM");
+                    DateTime startTime = DateTime.Now;
                     using (var response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead))
                     {
                         response.EnsureSuccessStatusCode();
@@ -454,10 +525,10 @@ namespace VMCreateVM
                         WriteLog($"Content-Length: {contentLength} bytes");
 
                         using (var contentStream = await response.Content.ReadAsStreamAsync())
-                        using (var fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None, 8192, true))
+                        using (var fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None, 65536, true))
                         {
                             long totalBytesRead = 0;
-                            byte[] buffer = new byte[8192];
+                            byte[] buffer = new byte[65536];
                             int bytesRead;
                             DateTime lastUpdate = DateTime.Now;
                             long lastBytesRead = 0;
@@ -488,6 +559,10 @@ namespace VMCreateVM
 
                             progressWindow.UpdateProgress(100, 0);
                             WriteLog("Download completed.");
+
+                            double duration = (DateTime.Now - startTime).TotalSeconds;
+                            double avgSpeedMBps = contentLength.HasValue ? (contentLength.Value / duration) / 1024 / 1024 : 0;
+                            WriteLog($"Download completed in {duration:F2} seconds. Average speed: {avgSpeedMBps:F2} MB/s");
                         }
                     }
                 }
@@ -519,6 +594,7 @@ namespace VMCreateVM
                     {
                         if (progressWindow.IsCancelled)
                         {
+                            WriteLog("Unpacking cancelled.");
                             return;
                         }
 
@@ -585,23 +661,57 @@ namespace VMCreateVM
                     await Task.Run(() => ps.Invoke());
                     progressWindow.UpdateProgress(75, 0);
 
+                    // Move VHD to vmPath
+                    string vhdSourceFile = Path.Combine(extractPath, item.ArchiveRelativePath);
+                    string vhdDestFile = Path.Combine(vmPath, Path.GetFileName(item.ArchiveRelativePath));
+                    if (File.Exists(vhdSourceFile))
+                    {
+                        WriteLog($"Moving VHD from {vhdSourceFile} to {vhdDestFile}");
+                        if (File.Exists(vhdDestFile))
+                        {
+                            File.Delete(vhdDestFile);
+                            WriteLog($"Deleted existing VHD at: {vhdDestFile}");
+                        }
+                        File.Move(vhdSourceFile, vhdDestFile);
+                    }
+                    else
+                    {
+                        WriteLog($"VHD not found at: {vhdSourceFile}");
+                        throw new Exception($"VHD not found at {vhdSourceFile}");
+                    }
+
                     // Attach VHD
-                    string vhdFullPath = Path.Combine(extractPath, item.ArchiveRelativePath);
-                    if (File.Exists(vhdFullPath))
+                    if (File.Exists(vhdDestFile))
                     {
                         ps.Commands.Clear();
                         ps.AddCommand("Set-VMHardDiskDrive")
                             .AddParameter("VMName", vmName)
-                            .AddParameter("Path", vhdFullPath)
+                            .AddParameter("Path", vhdDestFile)
                             .AddParameter("ControllerType", "SCSI");
                         await Task.Run(() => ps.Invoke());
-                        WriteLog($"Attached VHD: {vhdFullPath}");
+                        WriteLog($"Attached VHD: {vhdDestFile}");
                     }
                     else
                     {
-                        WriteLog($"VHD not found at: {vhdFullPath}");
-                        throw new Exception($"VHD not found at {vhdFullPath}");
+                        WriteLog($"VHD not found at: {vhdDestFile}");
+                        throw new Exception($"VHD not found at {vhdDestFile}");
                     }
+
+                    // Enable virtualization extensions if checkbox is checked
+                    if (VirtualizationEnabledCheckBox.IsChecked == true)
+                    {
+                        ps.Commands.Clear();
+                        ps.AddCommand("Set-VMProcessor")
+                            .AddParameter("VMName", vmName)
+                            .AddParameter("ExposeVirtualizationExtensions", true);
+                        await Task.Run(() => ps.Invoke());
+                        WriteLog($"Enabled virtualization extensions for VM: {vmName}");
+                    }
+                    else
+                    {
+                        WriteLog("Virtualization extensions not enabled for VM creation.");
+                    }
+
                     progressWindow.UpdateProgress(100, 0);
                 }
             }
@@ -609,6 +719,26 @@ namespace VMCreateVM
             {
                 WriteLog($"Error creating VM: {ex.Message}");
                 throw;
+            }
+        }
+        private void CleanupTempFiles()
+        {
+            try
+            {
+                if (File.Exists(zipFilePath))
+                {
+                    File.Delete(zipFilePath);
+                    WriteLog($"Deleted temporary file: {zipFilePath}");
+                }
+                if (Directory.Exists(extractPath))
+                {
+                    Directory.Delete(extractPath, true);
+                    WriteLog($"Deleted temporary directory: {extractPath}");
+                }
+            }
+            catch (Exception ex)
+            {
+                WriteLog($"Error cleaning up temporary files: {ex.Message}");
             }
         }
     }
