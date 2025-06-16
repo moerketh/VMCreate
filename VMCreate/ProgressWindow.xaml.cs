@@ -1,50 +1,35 @@
 ﻿using System;
+using System.Threading;
 using System.Windows;
+using VMCreate;
 
 namespace VMCreateVM
 {
     public partial class ProgressWindow : Window
     {
-        public bool IsCancelled { get; private set; }
+        private readonly CancellationTokenSource _cancellationTokenSource;
 
-        public ProgressWindow()
+        public ProgressWindow(CancellationTokenSource cts)
         {
             InitializeComponent();
-            IsCancelled = false;
+            _cancellationTokenSource = cts;
         }
 
-        public void SetStatus(string status, string link)
+        public void UpdateProgress(CreateVMProgressInfo createVMProgressInfo)
         {
-            StatusText.Text = status;
-            PercentText.Text = "0%";
-            if (string.IsNullOrEmpty(link))
+            StatusText.Text = createVMProgressInfo.Phase;
+            LinkText.Text = createVMProgressInfo.URI;
+            ProgressBar.Value = Math.Min(createVMProgressInfo.ProgressPercentage, 100);
+            PercentText.Text = $"{createVMProgressInfo.ProgressPercentage}%";
+            if (createVMProgressInfo.DownloadSpeed >= 0)
             {
-                LinkText.Visibility = Visibility.Hidden;
-                SpeedText.Visibility = Visibility.Hidden;
-            }
-            else
-            {
-                LinkText.Text = link.Length > 100 ? link.Substring(0, 97) + "..." : link;
-                LinkText.Visibility = Visibility.Visible;
-                SpeedText.Visibility = Visibility.Visible;
-            }
-            ProgressBar.Value = 0;
-            CancelButton.IsEnabled = status == "Downloading...";
-        }
-
-        public void UpdateProgress(double progress, double speedMBps)
-        {
-            ProgressBar.Value = Math.Min(progress, 100);
-            PercentText.Text = $"{Math.Floor(progress)}%";
-            if (speedMBps >= 0)
-            {
-                SpeedText.Text = $"Download Speed: {speedMBps:F2} MB/s";
+                SpeedText.Text = $"Download Speed: {createVMProgressInfo.DownloadSpeed:F2} MB/s";
             }
         }
 
         private void CancelButton_Click(object sender, RoutedEventArgs e)
         {
-            IsCancelled = true;
+            _cancellationTokenSource.Cancel();
             CancelButton.IsEnabled = false;
         }
     }

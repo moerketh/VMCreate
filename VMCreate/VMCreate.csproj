@@ -39,8 +39,32 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="Microsoft.Bcl.AsyncInterfaces, Version=9.0.0.5, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
-      <HintPath>..\packages\Microsoft.Bcl.AsyncInterfaces.9.0.5\lib\net462\Microsoft.Bcl.AsyncInterfaces.dll</HintPath>
+    <Reference Include="Microsoft.Bcl.AsyncInterfaces, Version=9.0.0.6, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
+      <HintPath>..\packages\Microsoft.Bcl.AsyncInterfaces.9.0.6\lib\net462\Microsoft.Bcl.AsyncInterfaces.dll</HintPath>
+    </Reference>
+    <Reference Include="Microsoft.Extensions.Configuration.Abstractions, Version=9.0.0.6, Culture=neutral, PublicKeyToken=adb9793829ddae60, processorArchitecture=MSIL">
+      <HintPath>..\packages\Microsoft.Extensions.Configuration.Abstractions.9.0.6\lib\net462\Microsoft.Extensions.Configuration.Abstractions.dll</HintPath>
+    </Reference>
+    <Reference Include="Microsoft.Extensions.DependencyInjection, Version=9.0.0.6, Culture=neutral, PublicKeyToken=adb9793829ddae60, processorArchitecture=MSIL">
+      <HintPath>..\packages\Microsoft.Extensions.DependencyInjection.9.0.6\lib\net462\Microsoft.Extensions.DependencyInjection.dll</HintPath>
+    </Reference>
+    <Reference Include="Microsoft.Extensions.DependencyInjection.Abstractions, Version=9.0.0.6, Culture=neutral, PublicKeyToken=adb9793829ddae60, processorArchitecture=MSIL">
+      <HintPath>..\packages\Microsoft.Extensions.DependencyInjection.Abstractions.9.0.6\lib\net462\Microsoft.Extensions.DependencyInjection.Abstractions.dll</HintPath>
+    </Reference>
+    <Reference Include="Microsoft.Extensions.Http, Version=9.0.0.6, Culture=neutral, PublicKeyToken=adb9793829ddae60, processorArchitecture=MSIL">
+      <HintPath>..\packages\Microsoft.Extensions.Http.9.0.6\lib\net462\Microsoft.Extensions.Http.dll</HintPath>
+    </Reference>
+    <Reference Include="Microsoft.Extensions.Logging, Version=9.0.0.6, Culture=neutral, PublicKeyToken=adb9793829ddae60, processorArchitecture=MSIL">
+      <HintPath>..\packages\Microsoft.Extensions.Logging.9.0.6\lib\net462\Microsoft.Extensions.Logging.dll</HintPath>
+    </Reference>
+    <Reference Include="Microsoft.Extensions.Logging.Abstractions, Version=9.0.0.6, Culture=neutral, PublicKeyToken=adb9793829ddae60, processorArchitecture=MSIL">
+      <HintPath>..\packages\Microsoft.Extensions.Logging.Abstractions.9.0.6\lib\net462\Microsoft.Extensions.Logging.Abstractions.dll</HintPath>
+    </Reference>
+    <Reference Include="Microsoft.Extensions.Options, Version=9.0.0.6, Culture=neutral, PublicKeyToken=adb9793829ddae60, processorArchitecture=MSIL">
+      <HintPath>..\packages\Microsoft.Extensions.Options.9.0.6\lib\net462\Microsoft.Extensions.Options.dll</HintPath>
+    </Reference>
+    <Reference Include="Microsoft.Extensions.Primitives, Version=9.0.0.6, Culture=neutral, PublicKeyToken=adb9793829ddae60, processorArchitecture=MSIL">
+      <HintPath>..\packages\Microsoft.Extensions.Primitives.9.0.6\lib\net462\Microsoft.Extensions.Primitives.dll</HintPath>
     </Reference>
     <Reference Include="SharpCompress, Version=0.39.0.0, Culture=neutral, PublicKeyToken=afb0a02973931d96, processorArchitecture=MSIL">
       <HintPath>..\packages\SharpCompress.0.39.0\lib\netstandard2.0\SharpCompress.dll</HintPath>
@@ -49,7 +73,11 @@
     <Reference Include="System.Buffers, Version=4.0.4.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
       <HintPath>..\packages\System.Buffers.4.6.0\lib\net462\System.Buffers.dll</HintPath>
     </Reference>
+    <Reference Include="System.ComponentModel.DataAnnotations" />
     <Reference Include="System.Data" />
+    <Reference Include="System.Diagnostics.DiagnosticSource, Version=9.0.0.6, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
+      <HintPath>..\packages\System.Diagnostics.DiagnosticSource.9.0.6\lib\net462\System.Diagnostics.DiagnosticSource.dll</HintPath>
+    </Reference>
     <Reference Include="System.IO.Pipelines, Version=9.0.0.5, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
       <HintPath>..\packages\System.IO.Pipelines.9.0.5\lib\net462\System.IO.Pipelines.dll</HintPath>
     </Reference>
@@ -102,9 +130,26 @@
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </ApplicationDefinition>
+    <Compile Include="CreateVM.cs" />
+    <Compile Include="CreateVMProgressInfo.cs" />
+    <Compile Include="Gallery\AggregateGalleryLoader.cs" />
+    <Compile Include="Gallery\IGalleryLoader.cs" />
+    <Compile Include="Gallery\distributions\LoadBlackArchCurrent.cs" />
+    <Compile Include="Gallery\LoadFromMicrosoftURI.cs" />
+    <Compile Include="Gallery\LoadFromRegistry.cs" />
+    <Compile Include="Gallery\distributions\LoadFromUbuntuGitHub.cs" />
+    <Compile Include="Gallery\distributions\LoadKaliCurrent.cs" />
+    <Compile Include="Gallery\LoadFromLocalJsonFile.cs" />
+    <Compile Include="Gallery\distributions\LoadParrotCurrent.cs" />
+    <Compile Include="Gallery\distributions\LoadPentooCurrent.cs" />
+    <Compile Include="HttpFileDownloader.cs" />
+    <Compile Include="Gallery\GalleryItem.cs" />
+    <Compile Include="HyperVVmCreator.cs" />
+    <Compile Include="SevenZipExtractor.cs" />
     <Compile Include="SuccessWindow.xaml.cs">
       <DependentUpon>SuccessWindow.xaml</DependentUpon>
     </Compile>
+    <Compile Include="VmSettings.cs" />
     <Page Include="MainWindow.xaml">
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
