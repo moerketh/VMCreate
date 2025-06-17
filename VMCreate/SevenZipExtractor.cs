@@ -2,8 +2,6 @@
 using System.IO;
 using System.Linq;
 using System.Threading;
-using System.Threading.Tasks;
-using System.Windows;
 using SharpCompress.Archives;
 using SharpCompress.Common;
 using VMCreate;
@@ -32,15 +30,7 @@ namespace VMCreateVM
         {
             try
             {
-                WriteLog("Starting 7zip unpacking.");
-                var progressInfo = new CreateVMProgressInfo
-                {
-                    Phase = "Unpacking...",
-                    URI = zipFilePath,
-                    DownloadSpeed = -1,
-                    ProgressPercentage = 0
-                };
-                progressReportInfo.Report(progressInfo);
+                //WriteLog("Starting 7zip unpacking.");
                 if (Directory.Exists(extractPath))
                 {
                     Directory.Delete(extractPath, true);
@@ -49,7 +39,7 @@ namespace VMCreateVM
                 using (var archive = ArchiveFactory.Open(zipFilePath))
                 {
                     var totalSize = archive.TotalUncompressSize;
-                    //report progress
+                    //progress handler
                     archive.CompressedBytesRead += (sender, e) =>
                     {
                         var progress = ((double)e.CompressedBytesRead / (double)totalSize) * 100;
@@ -64,15 +54,13 @@ namespace VMCreateVM
                     foreach (var entry in archive.Entries.Where(e => !e.IsDirectory))
                     {
                         cancellationToken.ThrowIfCancellationRequested();
-
-                        //extract entry
                         entry.WriteToDirectory(extractPath, new ExtractionOptions { ExtractFullPath = true, Overwrite = true });                        
                     }
                 }
             }
             catch (Exception ex)
             {
-                WriteLog($"Error unpacking 7zip: {ex.Message}");
+                //WriteLog($"Error unpacking 7zip: {ex.Message}");
                 throw;
             }
         }

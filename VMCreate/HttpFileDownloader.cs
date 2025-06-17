@@ -69,12 +69,6 @@ namespace VMCreateVM
                                             ProgressPercentage = Convert.ToInt32(contentLength.HasValue ? (double)totalBytesRead / contentLength.Value * 100 : 0)
                                         };
                                         progressReportInfo.Report(progressInfo);
-                                        //Application.Current.Dispatcher.Invoke(() =>
-                                        //{
-                                        //    progressReport.Report(progress);
-                                        //    WriteLog($"Progress updated: {progress:F0}%");
-                                        //    //WriteLog($"Speed updated: {speedMBps:F2} MB/s");
-                                        //});
                                         lastUpdate = DateTime.Now;
                                         lastBytesRead = totalBytesRead;
                                         
@@ -88,12 +82,12 @@ namespace VMCreateVM
                             }
                         }
                     }
-                    return; // Success, exit retry loop
+                    return;
                 }
                 catch (OperationCanceledException)
                 {
                     WriteLog("Download cancelled.");
-                    throw; // Re-throw cancellation exception
+                    throw;
                 }
                 catch (HttpRequestException ex)
                 {
@@ -102,7 +96,7 @@ namespace VMCreateVM
                     {
                         throw new Exception($"Failed to download after {maxRetries} attempts: {ex.Message}");
                     }
-                    await Task.Delay(1000); // Wait 1 second before retry
+                    await Task.Delay(1000);
                 }
                 catch (Exception ex)
                 {

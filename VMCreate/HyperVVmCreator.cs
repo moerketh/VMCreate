@@ -155,11 +155,6 @@ namespace VMCreateVM
                     {
                         WriteLog("Virtualization extensions not enabled for VM creation.");
                     }
-
-                    Application.Current.Dispatcher.Invoke(() =>
-                    {
-  //                      progressWindow.UpdateProgress(100, -1);
-                    });
                 }
             }
             catch (Exception ex)
