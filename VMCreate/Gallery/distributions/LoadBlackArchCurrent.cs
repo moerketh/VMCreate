@@ -17,6 +17,7 @@ namespace VMCreate.Gallery
         {
             _clientFactory = clientFactory ?? throw new ArgumentNullException(nameof(clientFactory));
         }
+
         public async Task<List<GalleryItem>> LoadGalleryItems()
         {
             var galleryItem = new GalleryItem();
@@ -25,13 +26,13 @@ namespace VMCreate.Gallery
                 var client = _clientFactory.CreateClient();
                 client.DefaultRequestHeaders.Add("User-Agent", "VMCreate/1.0");
 
-                // Fetch the directory listing  
+                // Fetch the directory listing
                 var response = await client.GetAsync(BaseUrl);
                 response.EnsureSuccessStatusCode();
                 var htmlContent = await response.Content.ReadAsStringAsync();
 
-                // Regular expression to match rows for Full ISO (x86_64)  
-                var pattern = @"<tr>\s*<td><a href=""(blackarch-linux-full-\d{4}\.\d{2}\.\d{2}-x86_64\.iso)"">\1</a></td>\s*<td>(\d+\.\d+G)</td>\s*<td>(\d{4}-\d{2}-\d{2} \d{2}:\d{2})</td>\s*</tr>";
+                // Regular expression to match rows for Full ISO (x86_64)
+                string pattern = @"<tr>\s*<td class=""n""><a href=""(blackarch-linux-full-\d{4}\.\d{2}\.\d{2}-x86_64\.iso)"">\1</a></td>\s*<td class=""m"">(\d{4}-[A-Za-z]{3}-\d{2} \d{2}:\d{2}:\d{2})</td>\s*<td class=""s"">(\d+\.\d+G)</td>\s*<td class=""t"">application/x-iso9660-image</td>\s*</tr>"; 
                 var matches = Regex.Matches(htmlContent, pattern, RegexOptions.Singleline);
 
                 if (matches.Count == 0)
@@ -39,18 +40,18 @@ namespace VMCreate.Gallery
                     throw new Exception("Could not find BlackArch Full ISO in the directory listing.");
                 }
 
-                // Convert MatchCollection to a list for LINQ operations  
+                // Convert MatchCollection to a list for LINQ operations
                 var matchList = matches.Cast<Match>().ToList();
 
-                // Sort matches by filename (which includes the version date) and select the latest  
+                // Sort matches by filename (which includes the version date) and select the latest
                 var sortedMatches = matchList.OrderBy(m => m.Groups[1].Value).ToList();
                 var latestMatch = sortedMatches.Last();
 
                 var fileName = latestMatch.Groups[1].Value;
-                var size = latestMatch.Groups[2].Value;
-                var dateStr = latestMatch.Groups[3].Value;
+                var dateStr = latestMatch.Groups[2].Value;
+                var size = latestMatch.Groups[3].Value;
 
-                // Extract version from filename  
+                // Extract version from filename
                 var versionPattern = @"blackarch-linux-full-(\d{4}\.\d{2}\.\d{2})-x86_64\.iso";
                 var versionMatch = Regex.Match(fileName, versionPattern);
                 if (!versionMatch.Success)
@@ -59,33 +60,36 @@ namespace VMCreate.Gallery
                 }
                 var version = versionMatch.Groups[1].Value;
 
-                // Parse the last modified date, assuming UTC  
-                if (!DateTime.TryParseExact(dateStr, "yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out var lastUpdated))
+                // Parse the last modified date, assuming UTC
+                if (!DateTime.TryParseExact(dateStr, "yyyy-MMM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out var lastUpdated))
                 {
                     throw new Exception("Could not parse last updated date.");
                 }
 
-                // Construct the full download URL  
+                // Construct the full download URL
                 var downloadUrl = BaseUrl + fileName;
 
-                // Create GalleryItem  
+                // Create GalleryItem
                 galleryItem = new GalleryItem
                 {
                     Name = "BlackArch Linux",
                     Publisher = "BlackArch Project",
                     Description = $"BlackArch Linux is an Arch Linux-based penetration testing distribution for penetration testers and security researchers. This is the Full ISO (version {version}), which contains a complete, functional BlackArch Linux system with all available tools.",
-                    ThumbnailUri = null, // No thumbnail found  
+                    ThumbnailUri = "https://www.blackarch.org/images/screenshots/thumbnails/menu_slim.jpg", // No thumbnail found
+                    SymbolUri = "",                    
                     LogoUri = "https://blackarch.org/img/logo.png",
                     DiskUri = downloadUrl,
-                    ArchiveRelativePath = null, // Not applicable for ISO  
+                    ArchiveRelativePath = null, // Not applicable for ISO
                     SecureBoot = "false",
                     EnhancedSessionTransportType = "HvSocket",
                     Version = version,
-                    LastUpdated = lastUpdated.ToString("o") // ISO 8601 format  
+                    LastUpdated = lastUpdated.ToString("o") // ISO 8601 format
                 };
             }
             catch (Exception ex)
-            { }
+            {
+                throw;
+            }
             return new List<GalleryItem> { galleryItem };
         }
     }

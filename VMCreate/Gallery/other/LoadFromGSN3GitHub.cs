@@ -59,7 +59,7 @@ namespace VMCreate.Gallery
                         LogoUri = "https://github.com/GNS3/gns3-gui/raw/master/docs/gns3_logo.png",
                         SymbolUri = "",
                         DiskUri = downloadUrl,
-                        ArchiveRelativePath = "GNS3 VM - disk001.vhd",
+                        ArchiveRelativePath = "GNS3 VM-disk001.vhd",
                         SecureBoot = "false",
                         EnhancedSessionTransportType = "HvSocket",
                         Version = version,

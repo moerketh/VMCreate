@@ -1,15 +1,17 @@
 ﻿using System;
 using System.IO;
+using System.Linq;
 using System.Net.Http;
-using System.Threading.Tasks;
+using System.Runtime.CompilerServices;
 using System.Threading;
+using System.Threading.Tasks;
 using VMCreate;
 
 namespace VMCreateVM
 {
     public interface IDownloader
     {
-        Task DownloadFileAsync(string uri, string filePath, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo> progressReportInfo);
+        Task<string> DownloadFileAsync(string uri, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo> progressReportInfo);
     }
 
     public class HttpFileDownloader : IDownloader
@@ -25,10 +27,11 @@ namespace VMCreateVM
             catch { }
         }
 
-        public async Task DownloadFileAsync(string uri, string filePath, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo> progressReportInfo)
+        public async Task<string> DownloadFileAsync(string uri, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo> progressReportInfo)
         {
             const int maxRetries = 3;
             int attempt = 0;
+            string fileName = string.Empty;
 
             while (attempt < maxRetries)
             {
@@ -45,9 +48,11 @@ namespace VMCreateVM
                             response.EnsureSuccessStatusCode();
                             long? contentLength = response.Content.Headers.ContentLength;
                             WriteLog($"Content-Length: {contentLength} bytes");
+                            fileName = uri.Split('/').Last();
 
+                            fileName = Path.Combine(Path.GetTempPath(), fileName);
                             using (var contentStream = await response.Content.ReadAsStreamAsync())
-                            using (var fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None, 65536, true))
+                            using (var fileStream = new FileStream(fileName, FileMode.Create, FileAccess.Write, FileShare.None, 65536, true))
                             {
                                 long totalBytesRead = 0;
                                 byte[] buffer = new byte[65536];
@@ -71,7 +76,7 @@ namespace VMCreateVM
                                         progressReportInfo.Report(progressInfo);
                                         lastUpdate = DateTime.Now;
                                         lastBytesRead = totalBytesRead;
-                                        
+
                                         cancellationToken.ThrowIfCancellationRequested();
                                     }
                                 }
@@ -82,7 +87,7 @@ namespace VMCreateVM
                             }
                         }
                     }
-                    return;
+                    return fileName;
                 }
                 catch (OperationCanceledException)
                 {
@@ -104,6 +109,7 @@ namespace VMCreateVM
                     throw;
                 }
             }
+            return fileName;
         }
     }
 }

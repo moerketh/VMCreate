@@ -1,6 +1,5 @@
 ﻿using System;
 using System.IO;
-using System.Linq;
 using System.Threading;
 using SharpCompress.Archives;
 using SharpCompress.Common;
@@ -10,26 +9,19 @@ namespace VMCreateVM
 {
     public interface IExtractor
     {
-        void Unpack7ZipAsync(string zipFilePath, string extractPath, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo> progressReportInfo);
+        void Extract(string zipFilePath, string extractPath, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo> progressReportInfo);
     }
 
     public class SevenZipExtractor : IExtractor
     {
-        private readonly string logPath = Path.Combine(Path.GetTempPath(), "VMCreate.log");
-
-        private void WriteLog(string message)
+        public void Extract(string zipFilePath, string extractPath, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo> progressReportInfo)
         {
             try
             {
-                File.AppendAllText(logPath, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {message}\n");
-            }
-            catch { }
-        }
-
-        public void Unpack7ZipAsync(string zipFilePath, string extractPath, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo> progressReportInfo)
-        {
-            try
-            {
+                string filePart = "";
+                double bytesRead = 0;
+                double totalBytesRead = 0;                
+                
                 //WriteLog("Starting 7zip unpacking.");
                 if (Directory.Exists(extractPath))
                 {
@@ -38,24 +30,26 @@ namespace VMCreateVM
                 Directory.CreateDirectory(extractPath);
                 using (var archive = ArchiveFactory.Open(zipFilePath))
                 {
-                    var totalSize = archive.TotalUncompressSize;
+                    archive.FilePartExtractionBegin += (sender, e) =>
+                    {
+                        filePart = e.Name;
+                        totalBytesRead += bytesRead;
+                    };
+
                     //progress handler
                     archive.CompressedBytesRead += (sender, e) =>
-                    {
-                        var progress = ((double)e.CompressedBytesRead / (double)totalSize) * 100;
+                    {                        
+                        var progress = (((double)e.CompressedBytesRead + totalBytesRead) / (double)archive.TotalUncompressSize) * 100;
                         progressReportInfo.Report(new CreateVMProgressInfo
                         {
-                            Phase = "Unpacking...",
-                            URI = zipFilePath,
+                            Phase = "Extracting...",
+                            URI = Path.Combine(extractPath, filePart),
                             DownloadSpeed = -1,
                             ProgressPercentage = Convert.ToInt32(progress)
                         });
+                        bytesRead = e.CompressedBytesRead;
                     };
-                    foreach (var entry in archive.Entries.Where(e => !e.IsDirectory))
-                    {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        entry.WriteToDirectory(extractPath, new ExtractionOptions { ExtractFullPath = true, Overwrite = true });                        
-                    }
+                    archive.WriteToDirectory(extractPath, new ExtractionOptions { ExtractFullPath = true, Overwrite = true });
                 }
             }
             catch (Exception ex)

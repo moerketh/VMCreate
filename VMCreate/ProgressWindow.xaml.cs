@@ -25,6 +25,7 @@ namespace VMCreateVM
             {
                 SpeedText.Text = $"Download Speed: {createVMProgressInfo.DownloadSpeed:F2} MB/s";
             }
+            else { SpeedText.Visibility = Visibility.Hidden; }
         }
 
         private void CancelButton_Click(object sender, RoutedEventArgs e)

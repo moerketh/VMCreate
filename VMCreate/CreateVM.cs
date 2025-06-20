@@ -9,7 +9,6 @@ namespace VMCreate
 {
     public class CreateVM
     {
-        private readonly string zipFilePath = Path.Combine(Path.GetTempPath(), "vm_image.7z");
         private readonly string extractPath = Path.Combine(Path.GetTempPath(), "VMExtracted");
         private readonly string logPath = Path.Combine(Path.GetTempPath(), "VMCreate.log");
         private readonly IDownloader _downloader;
@@ -56,14 +55,15 @@ namespace VMCreate
 
         public async Task StartCreateVMAsync(VmSettings vmSettings, GalleryItem galleryItem, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo> createVmProgressInfo)
         {
+            var filename = string.Empty;
             try
             {
                 //resolve mirror link
                 var mirrorUri = ResolveMirrorUri(galleryItem.DiskUri);
                 // Download file  
-                await _downloader.DownloadFileAsync(mirrorUri, zipFilePath, cancellationToken, createVmProgressInfo);
+                filename = await _downloader.DownloadFileAsync(mirrorUri, cancellationToken, createVmProgressInfo);
                 // Transition to unpacking
-                await Task.Run(() => _extractor.Unpack7ZipAsync(zipFilePath, extractPath, cancellationToken, createVmProgressInfo));
+                await Task.Run(() => _extractor.Extract(filename, extractPath, cancellationToken, createVmProgressInfo));
                 // Create VM
                 await _vmCreator.CreateVMAsync(vmSettings, extractPath, galleryItem, cancellationToken, createVmProgressInfo);
             }
@@ -74,18 +74,22 @@ namespace VMCreate
             }
             finally
             {
-                CleanupTempFiles();
+                //CleanupTempFiles(filename, true);
             }
         }
 
-        private void CleanupTempFiles()
+        private void CleanupTempFiles(string filename, bool keepCache)
         {
             try
             {
-                if (File.Exists(zipFilePath))
+                if (File.Exists(filename) && !keepCache)
                 {
-                    File.Delete(zipFilePath);
-                    WriteLog($"Deleted temporary file: {zipFilePath}");
+                    File.Delete(filename);
+                    WriteLog($"Deleted temporary file: {filename}");
+                }
+                else
+                {
+                    WriteLog($"Keeping temporary file: {filename}");
                 }
                 if (Directory.Exists(extractPath))
                 {

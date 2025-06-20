@@ -34,7 +34,9 @@ namespace VMCreateVM
             services.AddTransient<LoadBlackArchCurrent>();
             services.AddTransient<LoadFromUbuntuGitHub>();
             services.AddTransient<LoadKaliCurrent>();
-            services.AddTransient<LoadParrotCurrent>();
+            services.AddTransient<LoadParrotHome>();
+            services.AddTransient<LoadParrotSecurity>();
+            services.AddTransient<LoadParrotHtb>();
             services.AddTransient<LoadPentooCurrent>();
             //other
             services.AddTransient<LoadFromGNS3GitHub>();
@@ -175,12 +177,14 @@ namespace VMCreateVM
             {
                 Log.Error($"Error in Create VM setup: {ex.Message}");
                 MessageBox.Show($"Error: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                _progressWindow.Close();
             }
             finally {
                 this.CreateVMButton.IsEnabled = true;
             }
             if (completed)
             {
+                _progressWindow.Close();
                 _successWindow = new SuccessWindow { Owner = this };
                 _successWindow.Show();
             }
