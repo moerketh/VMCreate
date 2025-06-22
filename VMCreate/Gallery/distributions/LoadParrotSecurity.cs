@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Net.Http;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
@@ -67,7 +68,7 @@ namespace VMCreate.Gallery
                 LogoUri = LogoUri,
                 SymbolUri = SymbolUri,
                 DiskUri = downloadUrl,
-                ArchiveRelativePath = null,
+                ArchiveRelativePath = filename.EndsWith(".xz", StringComparison.InvariantCultureIgnoreCase) ? Path.GetFileNameWithoutExtension(filename) : filename,
                 SecureBoot = "false",
                 EnhancedSessionTransportType = "HvSocket",
                 Version = version,

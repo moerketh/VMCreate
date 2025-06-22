@@ -2,7 +2,6 @@
 using System.IO;
 using System.Linq;
 using System.Net.Http;
-using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using VMCreate;
@@ -11,7 +10,7 @@ namespace VMCreateVM
 {
     public interface IDownloader
     {
-        Task<string> DownloadFileAsync(string uri, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo> progressReportInfo);
+        Task<string> DownloadFileAsync(string uri, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo> progressReportInfo, bool useCache);
     }
 
     public class HttpFileDownloader : IDownloader
@@ -27,7 +26,7 @@ namespace VMCreateVM
             catch { }
         }
 
-        public async Task<string> DownloadFileAsync(string uri, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo> progressReportInfo)
+        public async Task<string> DownloadFileAsync(string uri, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo> progressReportInfo, bool useCache)
         {
             const int maxRetries = 3;
             int attempt = 0;
@@ -49,8 +48,9 @@ namespace VMCreateVM
                             long? contentLength = response.Content.Headers.ContentLength;
                             WriteLog($"Content-Length: {contentLength} bytes");
                             fileName = uri.Split('/').Last();
-
                             fileName = Path.Combine(Path.GetTempPath(), fileName);
+                            if (File.Exists(fileName) && useCache) return fileName;
+
                             using (var contentStream = await response.Content.ReadAsStreamAsync())
                             using (var fileStream = new FileStream(fileName, FileMode.Create, FileAccess.Write, FileShare.None, 65536, true))
                             {

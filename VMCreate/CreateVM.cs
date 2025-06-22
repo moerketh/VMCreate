@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Microsoft.Extensions.Logging;
+using System;
 using System.IO;
 using System.Net.Http;
 using System.Threading;
@@ -10,24 +11,18 @@ namespace VMCreate
     public class CreateVM
     {
         private readonly string extractPath = Path.Combine(Path.GetTempPath(), "VMExtracted");
-        private readonly string logPath = Path.Combine(Path.GetTempPath(), "VMCreate.log");
         private readonly IDownloader _downloader;
         private readonly IExtractor _extractor;
         private readonly IVmCreator _vmCreator;
+        private readonly ILogger<CreateVM> _logger;
+        private bool _useCache = true;
 
-        public CreateVM(IDownloader downloader, IExtractor extractor, IVmCreator vmCreator)
+        public CreateVM(IDownloader downloader, IExtractor extractor, IVmCreator vmCreator, ILogger<CreateVM> logger)
         {
             _downloader = downloader ?? throw new ArgumentNullException(nameof(downloader));
             _extractor = extractor ?? throw new ArgumentNullException(nameof(extractor));
             _vmCreator = vmCreator ?? throw new ArgumentNullException(nameof(vmCreator));
-        }
-        private void WriteLog(string message)
-        {
-            try
-            {
-                File.AppendAllText(logPath, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {message}\n");
-            }
-            catch { }
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
         private string ResolveMirrorUri(string uri)
@@ -41,67 +36,78 @@ namespace VMCreate
                     var response = client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead).Result;
                     if (response.StatusCode == System.Net.HttpStatusCode.Found || response.StatusCode == System.Net.HttpStatusCode.Moved)
                     {
+                        _logger.LogDebug("Resolved mirror URI from {OriginalUri} to {ResolvedUri}", uri, response.Headers.Location.ToString());
                         return response.Headers.Location.ToString();
                     }
+                    _logger.LogDebug("No mirror redirect needed for URI {Uri}", uri);
                     return uri;
                 }
             }
             catch (Exception ex)
             {
-                WriteLog($"Error resolving mirror URI: {ex.Message}");
+                _logger.LogWarning(ex, "Failed to resolve mirror URI {Uri}, using original URI", uri);
                 return uri;
             }
         }
 
         public async Task StartCreateVMAsync(VmSettings vmSettings, GalleryItem galleryItem, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo> createVmProgressInfo)
         {
-            var filename = string.Empty;
+            string filename = string.Empty;
             try
             {
-                //resolve mirror link
+                _logger.LogInformation("Starting VM creation for {VMName}", vmSettings.VMName);
+
+                // Resolve mirror link
                 var mirrorUri = ResolveMirrorUri(galleryItem.DiskUri);
-                // Download file  
-                filename = await _downloader.DownloadFileAsync(mirrorUri, cancellationToken, createVmProgressInfo);
+                _logger.LogDebug("Using disk URI {DiskUri}", mirrorUri);
+
+                // Download file
+                filename = await _downloader.DownloadFileAsync(mirrorUri, cancellationToken, createVmProgressInfo, _useCache);
+                _logger.LogInformation("Downloaded file {FileName}", filename);
+
                 // Transition to unpacking
                 await Task.Run(() => _extractor.Extract(filename, extractPath, cancellationToken, createVmProgressInfo));
+                _logger.LogInformation("Extracted file to {ExtractPath}", extractPath);
+
                 // Create VM
                 await _vmCreator.CreateVMAsync(vmSettings, extractPath, galleryItem, cancellationToken, createVmProgressInfo);
+                _logger.LogInformation("Successfully created VM {VMName}", vmSettings.VMName);
             }
             catch (Exception ex)
             {
-                WriteLog($"Error in VM creation process: {ex.Message}");
+                _logger.LogError(ex, "Failed to create VM {VMName}", vmSettings.VMName);
                 throw;
             }
             finally
             {
-                //CleanupTempFiles(filename, true);
+                CleanupTempFiles(filename, _useCache);
             }
         }
 
-        private void CleanupTempFiles(string filename, bool keepCache)
+        private void CleanupTempFiles(string filename, bool useCache)
         {
             try
             {
-                if (File.Exists(filename) && !keepCache)
+                if (File.Exists(filename) && !useCache)
                 {
                     File.Delete(filename);
-                    WriteLog($"Deleted temporary file: {filename}");
+                    _logger.LogDebug("Deleted temporary file {FileName}", filename);
                 }
                 else
                 {
-                    WriteLog($"Keeping temporary file: {filename}");
+                    _logger.LogDebug("Keeping temporary file {FileName}", filename);
                 }
+
                 if (Directory.Exists(extractPath))
                 {
                     Directory.Delete(extractPath, true);
-                    WriteLog($"Deleted temporary directory: {extractPath}");
+                    _logger.LogDebug("Deleted temporary directory {ExtractPath}", extractPath);
                 }
             }
             catch (Exception ex)
             {
-                WriteLog($"Error cleaning up temporary files: {ex.Message}");
+                _logger.LogWarning(ex, "Failed to clean up temporary files");
             }
         }
-
     }
 }

@@ -55,6 +55,7 @@ namespace VMCreate.Gallery
             // Create GalleryItem
             var galleryItem = new GalleryItem
             {
+                ArchiveRelativePath = $"kali-linux-{version}-hyperv-amd64\\kali-linux-{version}-hyperv-amd64.vhdx",
                 Name = $"Kali Linux {version}",
                 Description = $"Kali Linux Hyper-V Image ({fileName}) - Released: {date}",
                 Publisher = "OffSec Services Limited",
