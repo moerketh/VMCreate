@@ -11,6 +11,7 @@ using System.Windows.Controls;
 using System.Windows.Media.Imaging;
 using VMCreate;
 using VMCreate.Gallery;
+using VMCreateVM.MediaHandlers;
 
 namespace VMCreateVM
 {
@@ -48,13 +49,17 @@ namespace VMCreateVM
             services.AddTransient<LoadFromMicrosoftURI>();
             services.AddTransient<LoadFromRegistry>();
             services.AddTransient<LoadFromLocalJsonFile>();
+            services.AddTransient<FedoraSilverblue>();
             services.AddTransient<LoadBlackArchCurrent>();
+            services.AddTransient<NixOS>();
             services.AddTransient<LoadFromUbuntuGitHub>();
+            services.AddTransient<LoadClearLinuxCurrent>();
             services.AddTransient<LoadKaliCurrent>();
             services.AddTransient<LoadParrotHome>();
             services.AddTransient<LoadParrotSecurity>();
             services.AddTransient<LoadParrotHtb>();
             services.AddTransient<LoadPentooCurrent>();
+            services.AddTransient<LoadFedoraSecurityLab>();
             services.AddTransient<LoadFromGNS3GitHub>();
             services.AddTransient<IGalleryLoader, AggregateGalleryLoader>();
             services.AddTransient<IDownloader, HttpFileDownloader>();
@@ -65,6 +70,9 @@ namespace VMCreateVM
                 provider.GetRequiredService<ArchiveExtractor>(),
                 provider.GetRequiredService<ILogger<ExtractorFactory>>()));
             services.AddTransient<CreateVM>();
+            services.AddSingleton<IPartitionSchemeDetector, PartitionSchemeDetector>();
+            services.AddSingleton<MediaHandlerFactory>();
+            services.AddSingleton<DiskConverter>();
 
             // Register DiskConverter and HyperVVmCreator
             services.AddTransient<DiskConverter>();

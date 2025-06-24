@@ -87,7 +87,7 @@ namespace VMCreateVM
                             {
                                 if (progress != null)
                                 {
-                                    progress.Report(new CreateVMProgressInfo() { ProgressPercentage = Convert.ToInt32(percentage), Phase = "Converting to VHDX...", URI = $"Converting {sourcePath}: {percentage:F2}%" });
+                                    progress.Report(new CreateVMProgressInfo() { ProgressPercentage = Convert.ToInt32(percentage), Phase = "Converting to VHDX...", URI = $"Converting {sourcePath}" });
                                 }
                                 _logger.LogDebug("qemu-img progress: {Percentage}%", Convert.ToInt32(percentage));
                             }
@@ -137,18 +137,17 @@ namespace VMCreateVM
                     {
                         await destStream.WriteAsync(buffer, 0, bytesRead);
                         bytesCopied += bytesRead;
-                        double copyPercentage = (bytesCopied / totalBytes);
+                        double copyPercentage = ((double)bytesCopied / (double)totalBytes);
                         if (progress != null)
                         {
-                            progress.Report(new CreateVMProgressInfo() { ProgressPercentage = Convert.ToInt32(copyPercentage), Phase = "Copying non-sparse file...", URI = $"Copying to {destinationPath}: {copyPercentage:F2}%" });
+                            progress.Report(new CreateVMProgressInfo() { ProgressPercentage = Convert.ToInt32(copyPercentage), Phase = "Copy to non-sparse file...", URI = $"Copying to {destinationPath}" });
                         }
-                        _logger.LogDebug("File copy progress: {BytesCopied} of {TotalBytes} bytes, {Percentage:F2}%", bytesCopied, totalBytes, copyPercentage);
                     }
                 }
 
                 if (progress != null)
                 {
-                    progress.Report(new CreateVMProgressInfo() { ProgressPercentage = 100, Phase = "Copying non-sparse file...", URI = $"Completed copy to {destinationPath}" });
+                    progress.Report(new CreateVMProgressInfo() { ProgressPercentage = 100, Phase = "Copy to non-sparse file...", URI = $"Completed copy to {destinationPath}" });
                 }
                 File.Delete(tmpDestinationPath);
                 _logger.LogInformation("Successfully created non-sparse file: {DestinationPath}", destinationPath);

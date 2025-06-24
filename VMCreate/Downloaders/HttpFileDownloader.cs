@@ -4,6 +4,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 using VMCreate;
 
 namespace VMCreateVM
@@ -15,15 +16,11 @@ namespace VMCreateVM
 
     public class HttpFileDownloader : IDownloader
     {
-        private readonly string logPath = Path.Combine(Path.GetTempPath(), "VMCreate.log");
+        private readonly ILogger<HttpFileDownloader> _logger;
 
-        private void WriteLog(string message)
+        public HttpFileDownloader(ILogger<HttpFileDownloader> logger)
         {
-            try
-            {
-                File.AppendAllText(logPath, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {message}\n");
-            }
-            catch { }
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
         public async Task<string> DownloadFileAsync(string uri, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo> progressReportInfo, bool useCache)
@@ -37,7 +34,7 @@ namespace VMCreateVM
                 try
                 {
                     attempt++;
-                    WriteLog($"Download attempt {attempt} for URI: {uri}");
+                    _logger.LogInformation("Download attempt {Attempt} for URI: {Uri}", attempt, uri);
                     using (HttpClient client = new HttpClient())
                     {
                         client.DefaultRequestHeaders.Add("User-Agent", "VMCreateVM");
@@ -45,11 +42,18 @@ namespace VMCreateVM
                         using (var response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead))
                         {
                             response.EnsureSuccessStatusCode();
+                            // Capture the final URI after redirects
+                            string finalUri = response.RequestMessage.RequestUri.ToString();
+                            _logger.LogInformation("Final URI after redirects: {FinalUri}", finalUri);
                             long? contentLength = response.Content.Headers.ContentLength;
-                            WriteLog($"Content-Length: {contentLength} bytes");
-                            fileName = uri.Split('/').Last();
+                            _logger.LogInformation("Content-Length: {ContentLength} bytes", contentLength);
+                            fileName = finalUri.Split('/').Last();
                             fileName = Path.Combine(Path.GetTempPath(), fileName);
-                            if (File.Exists(fileName) && useCache) return fileName;
+                            if (File.Exists(fileName) && useCache)
+                            {
+                                _logger.LogInformation("Using cached file: {FileName}", fileName);
+                                return fileName;
+                            }
 
                             using (var contentStream = await response.Content.ReadAsStreamAsync())
                             using (var fileStream = new FileStream(fileName, FileMode.Create, FileAccess.Write, FileShare.None, 65536, true))
@@ -69,7 +73,7 @@ namespace VMCreateVM
                                     {
                                         var progressInfo = new CreateVMProgressInfo
                                         {
-                                            URI = uri,
+                                            URI = finalUri, // Use the final URI after redirects
                                             DownloadSpeed = (totalBytesRead - lastBytesRead) / (DateTime.Now - lastUpdate).TotalSeconds / 1024 / 1024, // Speed in MB/s
                                             ProgressPercentage = Convert.ToInt32(contentLength.HasValue ? (double)totalBytesRead / contentLength.Value * 100 : 0)
                                         };
@@ -83,7 +87,7 @@ namespace VMCreateVM
 
                                 double duration = (DateTime.Now - startTime).TotalSeconds;
                                 double avgSpeedMBps = contentLength.HasValue ? (contentLength.Value / duration) / 1024 / 1024 : 0;
-                                WriteLog($"Download completed in {duration:F2} seconds. Average speed: {avgSpeedMBps:F2} MB/s");
+                                _logger.LogInformation("Download completed in {Duration:F2} seconds. Average speed: {AvgSpeed:F2} MB/s", duration, avgSpeedMBps);
                             }
                         }
                     }
@@ -91,21 +95,23 @@ namespace VMCreateVM
                 }
                 catch (OperationCanceledException)
                 {
-                    WriteLog("Download cancelled.");
+                    _logger.LogWarning("Download cancelled for URI: {Uri}", uri);
+                    if (File.Exists(fileName)) File.Delete(fileName);
+                    _logger.LogWarning("Deleted temporary download file: {fileName}", fileName);
                     throw;
                 }
                 catch (HttpRequestException ex)
                 {
-                    WriteLog($"Download attempt {attempt} failed: {ex.Message}");
+                    _logger.LogError(ex, "Download attempt {Attempt} failed for URI: {Uri}", attempt, uri);
                     if (attempt >= maxRetries)
                     {
-                        throw new Exception($"Failed to download after {maxRetries} attempts: {ex.Message}");
+                        throw new Exception($"Failed to download after {maxRetries} attempts: {ex.Message}", ex);
                     }
                     await Task.Delay(1000);
                 }
                 catch (Exception ex)
                 {
-                    WriteLog($"Unexpected error during download attempt {attempt}: {ex.Message}");
+                    _logger.LogError(ex, "Unexpected error during download attempt {Attempt} for URI: {Uri}", attempt, uri);
                     throw;
                 }
             }

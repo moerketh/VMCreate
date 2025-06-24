@@ -10,7 +10,7 @@ namespace VMCreate
 {
     public class CreateVM
     {
-        private readonly string extractPath = Path.Combine(Path.GetTempPath(), "VMExtracted");
+        private readonly string _extractPath = Path.Combine(Path.GetTempPath(), "VMExtracted");
         private readonly IDownloader _downloader;
         private readonly IExtractor _extractor;
         private readonly IVmCreator _vmCreator;
@@ -25,53 +25,38 @@ namespace VMCreate
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
-        private string ResolveMirrorUri(string uri)
-        {
-            try
-            {
-                using (HttpClient client = new HttpClient())
-                {
-                    client.DefaultRequestHeaders.Add("User-Agent", "VMCreateVM");
-                    var request = new HttpRequestMessage(HttpMethod.Head, uri);
-                    var response = client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead).Result;
-                    if (response.StatusCode == System.Net.HttpStatusCode.Found || response.StatusCode == System.Net.HttpStatusCode.Moved)
-                    {
-                        _logger.LogDebug("Resolved mirror URI from {OriginalUri} to {ResolvedUri}", uri, response.Headers.Location.ToString());
-                        return response.Headers.Location.ToString();
-                    }
-                    _logger.LogDebug("No mirror redirect needed for URI {Uri}", uri);
-                    return uri;
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to resolve mirror URI {Uri}, using original URI", uri);
-                return uri;
-            }
-        }
-
         public async Task StartCreateVMAsync(VmSettings vmSettings, GalleryItem galleryItem, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo> createVmProgressInfo)
         {
             string filename = string.Empty;
             try
             {
+                if(!galleryItem.FileType.StartsWith("vhd") && !File.Exists("C:\\Program Files\\qemu\\qemu-img.exe"))
+                {
+                    throw new Exception("Please install QEMU to support disk image conversion.");
+                }
+
                 _logger.LogInformation("Starting VM creation for {VMName}", vmSettings.VMName);
 
-                // Resolve mirror link
-                var mirrorUri = ResolveMirrorUri(galleryItem.DiskUri);
-                _logger.LogDebug("Using disk URI {DiskUri}", mirrorUri);
-
                 // Download file
-                filename = await _downloader.DownloadFileAsync(mirrorUri, cancellationToken, createVmProgressInfo, _useCache);
+                filename = await _downloader.DownloadFileAsync(galleryItem.DiskUri, cancellationToken, createVmProgressInfo, _useCache);
                 _logger.LogInformation("Downloaded file {FileName}", filename);
 
-                // Transition to unpacking
-                await Task.Run(() => _extractor.Extract(filename, extractPath, cancellationToken, createVmProgressInfo));
-                _logger.LogInformation("Extracted file to {ExtractPath}", extractPath);
+                // Extract if not ISO
+                if (galleryItem.FileType != "ISO")
+                {
+                    await Task.Run(() => _extractor.Extract(filename, _extractPath, cancellationToken, createVmProgressInfo));
+                    _logger.LogInformation("Extracted file to {ExtractPath}", _extractPath);
 
-                // Create VM
-                await _vmCreator.CreateVMAsync(vmSettings, extractPath, galleryItem, cancellationToken, createVmProgressInfo);
-                _logger.LogInformation("Successfully created VM {VMName}", vmSettings.VMName);
+                    // Create VM
+                    await _vmCreator.CreateVMAsync(vmSettings, Path.Combine(_extractPath, galleryItem.ArchiveRelativePath ?? throw new Exception("ArchiveRelativePath is null")), galleryItem, cancellationToken, createVmProgressInfo);
+                    _logger.LogInformation("Successfully created VM {VMName}", vmSettings.VMName);
+                }
+                else
+                {
+                    // Create VM
+                    await _vmCreator.CreateVMAsync(vmSettings, filename, galleryItem, cancellationToken, createVmProgressInfo);
+                    _logger.LogInformation("Successfully created VM {VMName}", vmSettings.VMName);
+                }
             }
             catch (Exception ex)
             {
@@ -98,10 +83,10 @@ namespace VMCreate
                     _logger.LogDebug("Keeping temporary file {FileName}", filename);
                 }
 
-                if (Directory.Exists(extractPath))
+                if (Directory.Exists(_extractPath))
                 {
-                    Directory.Delete(extractPath, true);
-                    _logger.LogDebug("Deleted temporary directory {ExtractPath}", extractPath);
+                    Directory.Delete(_extractPath, true);
+                    _logger.LogDebug("Deleted temporary directory {ExtractPath}", _extractPath);
                 }
             }
             catch (Exception ex)
