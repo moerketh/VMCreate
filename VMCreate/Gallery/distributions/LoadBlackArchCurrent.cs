@@ -10,8 +10,9 @@ namespace VMCreate.Gallery
 {
     public class LoadBlackArchCurrent : IGalleryLoader
     {
-        private const string BaseUrl = "https://distro.ibiblio.org/blackarch/iso/";
+        private const string DownloadsUrl = "https://www.blackarch.org/downloads.html";
         private readonly IHttpClientFactory _clientFactory;
+        private const string PinnedVersion = "2023.04.01";
 
         public LoadBlackArchCurrent(IHttpClientFactory clientFactory)
         {
@@ -20,77 +21,83 @@ namespace VMCreate.Gallery
 
         public async Task<List<GalleryItem>> LoadGalleryItems()
         {
-            var galleryItem = new GalleryItem();
+            var galleryItems = new List<GalleryItem>();
             try
             {
                 var client = _clientFactory.CreateClient();
                 client.DefaultRequestHeaders.Add("User-Agent", "VMCreate/1.0");
 
-                // Fetch the directory listing
-                var response = await client.GetAsync(BaseUrl);
+                // Fetch the downloads page
+                var response = await client.GetAsync(DownloadsUrl);
                 response.EnsureSuccessStatusCode();
                 var htmlContent = await response.Content.ReadAsStringAsync();
 
-                // Regular expression to match rows for Full ISO (x86_64)
-                string pattern = @"<tr>\s*<td class=""n""><a href=""(blackarch-linux-full-\d{4}\.\d{2}\.\d{2}-x86_64\.iso)"">\1</a></td>\s*<td class=""m"">(\d{4}-[A-Za-z]{3}-\d{2} \d{2}:\d{2}:\d{2})</td>\s*<td class=""s"">(\d+\.\d+G)</td>\s*<td class=""t"">application/x-iso9660-image</td>\s*</tr>"; 
-                var matches = Regex.Matches(htmlContent, pattern, RegexOptions.Singleline);
+                // Simplified regex for Slim ISO URL
+                string slimPattern = @"<a href=""(https:\/\/[^""]+blackarch-linux-slim-2023\.05\.01-x86_64\.iso)""";
+                string ovaPattern = @"<a href=""(https:\/\/[^""]+blackarch-linux-2023\.04\.01\.ova)""";
 
-                if (matches.Count == 0)
+                // Find Slim ISO
+                var slimMatch = Regex.Match(htmlContent, slimPattern);
+                if (slimMatch.Success)
                 {
-                    throw new Exception("Could not find BlackArch Full ISO in the directory listing.");
+                    var slimUrl = slimMatch.Groups[1].Value;
+
+                    var slimItem = new GalleryItem
+                    {
+                        Name = "BlackArch Linux 64 bit Slim ISO",
+                        Publisher = "BlackArch Project",
+                        Description = $"BlackArch Linux is an Arch Linux-based penetration testing distribution for penetration testers and security researchers. This is the Slim ISO (version {PinnedVersion}), which contains a functional BlackArch Linux system with a selected set of common/well-known tools and system utilities for pentesting.",
+                        ThumbnailUri = "https://blackarch.org/images/screenshots/menu_slim.png",
+                        SymbolUri = "https://www.blackarch.org/images/logo/ba-logo.png",
+                        LogoUri = "https://blackarch.org/img/logo.png",
+                        DiskUri = slimUrl,
+                        ArchiveRelativePath = null,
+                        SecureBoot = "false",
+                        EnhancedSessionTransportType = "HvSocket",
+                        Version = PinnedVersion,
+                        LastUpdated = DateTime.ParseExact(PinnedVersion, "yyyy.MM.dd", System.Globalization.CultureInfo.InvariantCulture).ToString("o")
+                    };
+                    galleryItems.Add(slimItem);
+                }
+                else
+                {
+                    throw new Exception("Could not find BlackArch Slim ISO URL in the downloads page.");
                 }
 
-                // Convert MatchCollection to a list for LINQ operations
-                var matchList = matches.Cast<Match>().ToList();
-
-                // Sort matches by filename (which includes the version date) and select the latest
-                var sortedMatches = matchList.OrderBy(m => m.Groups[1].Value).ToList();
-                var latestMatch = sortedMatches.Last();
-
-                var fileName = latestMatch.Groups[1].Value;
-                var dateStr = latestMatch.Groups[2].Value;
-                var size = latestMatch.Groups[3].Value;
-
-                // Extract version from filename
-                var versionPattern = @"blackarch-linux-full-(\d{4}\.\d{2}\.\d{2})-x86_64\.iso";
-                var versionMatch = Regex.Match(fileName, versionPattern);
-                if (!versionMatch.Success)
+                // Find OVA Image
+                var ovaMatch = Regex.Match(htmlContent, ovaPattern);
+                if (ovaMatch.Success)
                 {
-                    throw new Exception("Could not extract version from ISO filename.");
+                    var ovaUrl = ovaMatch.Groups[1].Value;
+
+                    var ovaItem = new GalleryItem
+                    {
+                        Name = "BlackArch Linux 64 bit OVA Image",
+                        Publisher = "BlackArch Project",
+                        Description = $"BlackArch Linux is an Arch Linux-based penetration testing distribution for penetration testers and security researchers. This is the OVA Image (version {PinnedVersion}), suitable for running in VirtualBox, VMware, and QEMU.",
+                        ThumbnailUri = "https://blackarch.org/images/screenshots/menu_slim.png",
+                        SymbolUri = "https://www.blackarch.org/images/logo/ba-logo.png",
+                        LogoUri = "https://www.blackarch.org/images/logo/ba-logo.png",
+                        DiskUri = ovaUrl,
+                        ArchiveRelativePath = "blackarch-disk001.vmdk",
+                        SecureBoot = "false",
+                        EnhancedSessionTransportType = "HvSocket",
+                        Version = PinnedVersion,
+                        LastUpdated = DateTime.ParseExact(PinnedVersion, "yyyy.MM.dd", System.Globalization.CultureInfo.InvariantCulture).ToString("o")
+                    };
+                    galleryItems.Add(ovaItem);
                 }
-                var version = versionMatch.Groups[1].Value;
-
-                // Parse the last modified date, assuming UTC
-                if (!DateTime.TryParseExact(dateStr, "yyyy-MMM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out var lastUpdated))
+                else
                 {
-                    throw new Exception("Could not parse last updated date.");
+                    throw new Exception("Could not find BlackArch OVA Image URL in the downloads page.");
                 }
-
-                // Construct the full download URL
-                var downloadUrl = BaseUrl + fileName;
-
-                // Create GalleryItem
-                galleryItem = new GalleryItem
-                {
-                    Name = "BlackArch Linux",
-                    Publisher = "BlackArch Project",
-                    Description = $"BlackArch Linux is an Arch Linux-based penetration testing distribution for penetration testers and security researchers. This is the Full ISO (version {version}), which contains a complete, functional BlackArch Linux system with all available tools.",
-                    ThumbnailUri = "https://www.blackarch.org/images/screenshots/thumbnails/menu_slim.jpg", // No thumbnail found
-                    SymbolUri = "",                    
-                    LogoUri = "https://blackarch.org/img/logo.png",
-                    DiskUri = downloadUrl,
-                    ArchiveRelativePath = null, // Not applicable for ISO
-                    SecureBoot = "false",
-                    EnhancedSessionTransportType = "HvSocket",
-                    Version = version,
-                    LastUpdated = lastUpdated.ToString("o") // ISO 8601 format
-                };
             }
             catch (Exception ex)
             {
                 throw;
             }
-            return new List<GalleryItem> { galleryItem };
+
+            return galleryItems;
         }
     }
 }
