@@ -138,9 +138,10 @@ namespace VMCreateVM
                         await destStream.WriteAsync(buffer, 0, bytesRead);
                         bytesCopied += bytesRead;
                         double copyPercentage = ((double)bytesCopied / (double)totalBytes);
+                        int percentage = Convert.ToInt32(Math.Round(copyPercentage * 100)); // Scale to 0-100 and round
                         if (progress != null)
                         {
-                            progress.Report(new CreateVMProgressInfo() { ProgressPercentage = Convert.ToInt32(copyPercentage), Phase = "Copy to non-sparse file...", URI = $"Copying to {destinationPath}" });
+                            progress.Report(new CreateVMProgressInfo() { ProgressPercentage = percentage, Phase = "Copy to non-sparse file...", URI = $"Copying to {destinationPath}" });
                         }
                     }
                 }

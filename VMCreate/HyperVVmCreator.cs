@@ -67,20 +67,126 @@ namespace VMCreateVM
                     IMediaHandler mediaHandler = _mediaHandlerFactory.CreateHandler(item.FileType);
                     await mediaHandler.PrepareMediaAsync(sourceFile, vmPath, item, createVMProgressInfo, cancellationToken);
 
-                    int generation = mediaHandler.VmGeneration;
+                    int detectedGeneration = mediaHandler.VmGeneration;  // 1 for MBR, 2 for GPT
+                    int targetGeneration = 2;  // Always target Gen 2
+
+                    string mediaPath = Path.Combine(vmPath, Path.GetFileName(sourceFile));
+
+                    // Create VM (always Gen 2)
                     ps.AddCommand("New-VM")
                         .AddParameter("Name", vmSettings.VMName)
                         .AddParameter("MemoryStartupBytes", vmSettings.MemoryMB * 1024L * 1024L)
                         .AddParameter("Path", vmPath)
-                        .AddParameter("Generation", generation);
+                        .AddParameter("Generation", targetGeneration)
+                        .AddParameter("NoVHD", true);  // No default VHD, we'll attach manually
                     await Task.Run(() => ps.Invoke());
-                    _logger.LogInformation("Created VM: {VMName} with generation {Generation}", vmSettings.VMName, generation);
+                    _logger.LogInformation("Created Gen 2 VM: {VMName}", vmSettings.VMName);
 
-                    if (ps.HadErrors)
+                    if (ps.HadErrors) throw new Exception(ps.Streams.Error[0].ToString());
+
+                    ps.Commands.Clear();
+                    ps.AddCommand("Add-VMNetworkAdapter")
+                        .AddParameter("VMName", vmSettings.VMName)
+                        .AddParameter("Name", "Network Adapter");
+                    await Task.Run(() => ps.Invoke());
+                    if (ps.HadErrors) throw new Exception(ps.Streams.Error[0].ToString());
+
+                    ps.Commands.Clear();
+                    ps.AddCommand("Connect-VMNetworkAdapter")
+                        .AddParameter("VMName", vmSettings.VMName)
+                        .AddParameter("SwitchName", "Default Switch");
+                    await Task.Run(() => ps.Invoke());
+                    _logger.LogInformation("Connected VM to Default Switch for internet access.");
+                    if (ps.HadErrors) throw new Exception(ps.Streams.Error[0].ToString());
+
+                    if (detectedGeneration == 2)
                     {
-                        throw new Exception(ps.Streams.Error[0].ToString());
+                        // Already GPT: Attach media directly as primary boot disk
+                        ps.Commands.Clear();
+                        ps.AddCommand("Add-VMHardDiskDrive")
+                            .AddParameter("VMName", vmSettings.VMName)
+                            .AddParameter("Path", mediaPath)
+                            .AddParameter("ControllerType", "SCSI")
+                            .AddParameter("ControllerNumber", 0)
+                            .AddParameter("ControllerLocation", 0);
+                        await Task.Run(() => ps.Invoke());
+                        _logger.LogInformation("Attached GPT-compatible disk directly: {MediaPath}", mediaPath);
+
+                        if (ps.HadErrors)
+                        {
+                            throw new Exception($"Failed to check DVD drive: {ps.Streams.Error[0]}");
+                        }
+                    }
+                    else if (detectedGeneration == 1)
+                    {
+                        // MBR: Create new dynamic VHDX, attach as primary, old as secondary, attach cloning ISO
+                        string newVhdPath = Path.Combine(vmPath, $"{vmSettings.VMName}.vhdx");
+                        ps.Commands.Clear();
+                        ps.AddCommand("New-VHD")
+                            .AddParameter("Path", newVhdPath)
+                            .AddParameter("Dynamic", true)
+                            //.AddParameter("SizeBytes", vmSettings.VmDiskSizeGB * 1024L * 1024L * 1024L);  // User-specified max size
+                            .AddParameter("SizeBytes", 150 * 1024L * 1024L * 1024L);
+                        await Task.Run(() => ps.Invoke());
+                        if (ps.HadErrors) throw new Exception(ps.Streams.Error[0].ToString());
+                        _logger.LogInformation("Created new dynamic VHDX for cloning: {NewVhdPath}", newVhdPath);
+
+                        if (ps.HadErrors)
+                        {
+                            throw new Exception($"Failed to check DVD drive: {ps.Streams.Error[0]}");
+                        }
+
+                        // Attach new VHDX as primary
+                        ps.Commands.Clear();
+                        ps.AddCommand("Add-VMHardDiskDrive")
+                            .AddParameter("VMName", vmSettings.VMName)
+                            .AddParameter("Path", newVhdPath)
+                            .AddParameter("ControllerType", "SCSI")
+                            .AddParameter("ControllerNumber", 0)
+                            .AddParameter("ControllerLocation", 0);
+                        await Task.Run(() => ps.Invoke());
+                        _logger.LogInformation("Attached new dynamic VHDX for cloning: {NewVhdPath}", newVhdPath);
+
+                        if (ps.HadErrors)
+                        {
+                            throw new Exception($"Failed to check DVD drive: {ps.Streams.Error[0]}");
+                        }
+
+                        // Attach old disk as secondary
+                        await mediaHandler.AttachMediaAsync(ps, vmSettings.VMName, mediaPath, item, _logger);
+                        _logger.LogInformation("Attached MBR disk as secondary for cloning: {MediaPath}", mediaPath);
+
+                        if (ps.HadErrors)
+                        {
+                            throw new Exception($"Failed to check DVD drive: {ps.Streams.Error[0]}");
+                        }
+
+                        // Attach cloning ISO (set as first boot device)
+                        string cloningIsoPath = "C:\\Users\\Thomas\\Desktop\\custom-autorun.iso";  // Pre-built path
+                        var isoHandler = _mediaHandlerFactory.CreateHandler("ISO");
+                        await isoHandler.AttachMediaAsync(ps, vmSettings.VMName, cloningIsoPath, item, _logger);
+
+                        // Set ISO as first boot (for one-time clone)
+                        ps.Commands.Clear();
+                        ps.AddCommand("Get-VMDvdDrive")
+                            .AddParameter("VMName", vmSettings.VMName);
+                        var dvdDrive = (await Task.Run(() => ps.Invoke())).FirstOrDefault();
+                        if (dvdDrive == null)
+                        {
+                            throw new Exception("No DVD drive found for VM. Ensure the cloning ISO is attached.");
+                        }
+                        ps.Commands.Clear();
+                        ps.AddCommand("Set-VMFirmware")
+                            .AddParameter("VMName", vmSettings.VMName)
+                            .AddParameter("FirstBootDevice", dvdDrive);
+                        await Task.Run(() => ps.Invoke());
+                    }
+                    else
+                    {
+                        throw new Exception($"Unsupported generation detected: {detectedGeneration}");
                     }
 
+                    // Common settings: CPU, enhanced session, secure boot
                     ps.Commands.Clear();
                     ps.AddCommand("Set-VMProcessor")
                         .AddParameter("VMName", vmSettings.VMName)
@@ -93,19 +199,13 @@ namespace VMCreateVM
                         .AddParameter("EnhancedSessionTransportType", item.EnhancedSessionTransportType);
                     await Task.Run(() => ps.Invoke());
 
-                    if (generation == 2)
-                    {
-                        ps.Commands.Clear();
-                        ps.AddCommand("Set-VMFirmware")
-                            .AddParameter("VMName", vmSettings.VMName)
-                            .AddParameter("EnableSecureBoot", item.SecureBoot == "true" ? "On" : "Off");
-                        await Task.Run(() => ps.Invoke());
-                    }
+                    ps.Commands.Clear();
+                    ps.AddCommand("Set-VMFirmware")
+                        .AddParameter("VMName", vmSettings.VMName)
+                        .AddParameter("EnableSecureBoot", item.SecureBoot == "true" ? "On" : "Off");
+                    await Task.Run(() => ps.Invoke());
 
-                    string mediaPath = Path.Combine(vmPath, Path.GetFileName(sourceFile));
-
-                    await mediaHandler.AttachMediaAsync(ps, vmSettings.VMName, mediaPath, item, _logger);
-
+                    // Enable nested virt if checked
                     if (Application.Current.MainWindow is MainWindow mainWindow && mainWindow.VirtualizationEnabledCheckBox.IsChecked == true)
                     {
                         ps.Commands.Clear();

@@ -40,9 +40,7 @@ namespace VMCreateVM.MediaHandlers
                 logger.LogInformation("No DVD drive found, adding one to VM: {VMName}", vmName);
                 ps.Commands.Clear();
                 ps.AddCommand("Add-VMDvdDrive")
-                    .AddParameter("VMName", vmName)
-                    .AddParameter("ControllerNumber", 0)
-                    .AddParameter("ControllerLocation", 0);
+                    .AddParameter("VMName", vmName);
                 await Task.Run(() => ps.Invoke());
 
                 if (ps.HadErrors)

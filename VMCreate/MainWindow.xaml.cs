@@ -3,11 +3,13 @@ using Microsoft.Extensions.Logging;
 using Serilog;
 using System;
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using VMCreate;
 using VMCreate.Gallery;
@@ -50,6 +52,7 @@ namespace VMCreateVM
             services.AddTransient<LoadFromRegistry>();
             services.AddTransient<LoadFromLocalJsonFile>();
             services.AddTransient<FedoraSilverblue>();
+            services.AddTransient<PwnCloudOS>();
             services.AddTransient<LoadBlackArchCurrent>();
             services.AddTransient<NixOS>();
             services.AddTransient<LoadFromUbuntuGitHub>();
@@ -130,7 +133,8 @@ namespace VMCreateVM
                 VMNameTextBox.Text = selectedItem.Name;
                 if (!string.IsNullOrEmpty(selectedItem.ThumbnailUri))
                 {
-                    DetailScreenshot.Source = new BitmapImage(new Uri(selectedItem.ThumbnailUri));
+                    var converter = new ImageSourceConverter();
+                    DetailScreenshot.Source = converter.Convert(selectedItem.ThumbnailUri, typeof(ImageSource), null, CultureInfo.CurrentCulture) as ImageSource;
                 }
                 DetailName.Text = $"Name: {selectedItem.Name}";
                 DetailPublisher.Text = $"Publisher: {selectedItem.Publisher}";
@@ -193,10 +197,10 @@ namespace VMCreateVM
                     _logger.LogDebug("Invalid Disk URI: {Uri}", selectedItem.DiskUri);
                     throw new Exception($"Invalid disk URI: {selectedItem.DiskUri}");
                 }
-                
+
                 _logger.LogDebug("Validated inputs: VMName={VMName}, Memory={Memory}MB, CPU={CPU}, DiskUri={DiskUri}",
                     vmSettings.VMName, memoryMB, cpuCount, selectedItem.DiskUri);
-                
+
 
                 var cancellationTokenSource = new CancellationTokenSource();
                 _progressWindow = new ProgressWindow(cancellationTokenSource) { Owner = this };
@@ -220,7 +224,7 @@ namespace VMCreateVM
             {
                 _logger.LogError(ex, "Error in Create VM setup");
                 MessageBox.Show($"Error: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
-                _progressWindow.Close();
+                if (_progressWindow != null) _progressWindow.Close();
             }
             finally
             {
