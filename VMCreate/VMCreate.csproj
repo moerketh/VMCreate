@@ -189,6 +189,7 @@
     </ApplicationDefinition>
     <Compile Include="CreateVM.cs" />
     <Compile Include="CreateVMProgressInfo.cs" />
+    <Compile Include="Gallery\distributions\Arch.cs" />
     <Compile Include="Gallery\distributions\PwnCloudOS\PwnCloudOS.cs" />
     <Compile Include="Gallery\distributions\NixOS.cs" />
     <Compile Include="Gallery\ImageSourceConverter.cs" />
@@ -205,7 +206,7 @@
     <Compile Include="Gallery\distributions\LoadParrotSecurity.cs" />
     <Compile Include="Gallery\other\LoadFromGSN3GitHub.cs" />
     <Compile Include="Gallery\IGalleryLoader.cs" />
-    <Compile Include="Gallery\distributions\LoadBlackArchCurrent.cs" />
+    <Compile Include="Gallery\distributions\BlackArch.cs" />
     <Compile Include="Gallery\LoadFromMicrosoftURI.cs" />
     <Compile Include="Gallery\LoadFromRegistry.cs" />
     <Compile Include="Gallery\distributions\LoadFromUbuntuGitHub.cs" />
@@ -220,6 +221,7 @@
     <Compile Include="MediaHandlers\IMediaHandler.cs" />
     <Compile Include="MediaHandlers\MediaHandler.cs" />
     <Compile Include="MediaHandlers\VhdxMediaHandler.cs" />
+    <Compile Include="MediaHandlers\Qcow2MediaHandler.cs" />
     <Compile Include="MediaHandlers\VmdkMediaHandler.cs" />
     <Compile Include="MediaHandlers\IsoMediaHandler.cs" />
     <Compile Include="MediaHandlers\PartitionSchemeDetector.cs" />
@@ -283,9 +285,6 @@
     <None Include="App.config" />
   </ItemGroup>
   <ItemGroup>
-    <Content Include="Gallery\distributions\PwnCloudOS\pwncloudos.svg">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
     <Content Include="liblzma.dll">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>

@@ -77,6 +77,9 @@ namespace VMCreateVM
             }
         }
 
+        public string InitialUsername { get; set; }
+        public string InitialPassword { get; set; }
+
         public static async Task<List<GalleryItem>> LoadJsonFromUrl(string url)
         {
             try

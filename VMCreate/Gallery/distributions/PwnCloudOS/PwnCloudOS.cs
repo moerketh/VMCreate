@@ -27,7 +27,9 @@ namespace VMCreate.Gallery
                 ArchiveRelativePath = "amd64_pwncloudosv1.2-disk1.vmdk",
                 SecureBoot = "false",
                 EnhancedSessionTransportType = "HvSocket",
-                LastUpdated = lastModified.ToString("o")
+                LastUpdated = lastModified.ToString("o"),
+                InitialUsername = "pwnedlabs",
+                InitialPassword = "pwnedlabs"
             };
             return new List<GalleryItem> { galleryItem };
         }

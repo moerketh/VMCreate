@@ -52,8 +52,9 @@ namespace VMCreateVM
             services.AddTransient<LoadFromRegistry>();
             services.AddTransient<LoadFromLocalJsonFile>();
             services.AddTransient<FedoraSilverblue>();
+            services.AddTransient<Arch>();
             services.AddTransient<PwnCloudOS>();
-            services.AddTransient<LoadBlackArchCurrent>();
+            services.AddTransient<BlackArch>();
             services.AddTransient<NixOS>();
             services.AddTransient<LoadFromUbuntuGitHub>();
             services.AddTransient<LoadClearLinuxCurrent>();

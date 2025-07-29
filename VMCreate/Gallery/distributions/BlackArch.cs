@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Net.Http;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
@@ -8,13 +7,13 @@ using VMCreateVM;
 
 namespace VMCreate.Gallery
 {
-    public class LoadBlackArchCurrent : IGalleryLoader
+    public class BlackArch : IGalleryLoader
     {
         private const string DownloadsUrl = "https://www.blackarch.org/downloads.html";
         private readonly IHttpClientFactory _clientFactory;
         private const string PinnedVersion = "2023.04.01";
 
-        public LoadBlackArchCurrent(IHttpClientFactory clientFactory)
+        public BlackArch(IHttpClientFactory clientFactory)
         {
             _clientFactory = clientFactory ?? throw new ArgumentNullException(nameof(clientFactory));
         }
@@ -83,7 +82,9 @@ namespace VMCreate.Gallery
                         SecureBoot = "false",
                         EnhancedSessionTransportType = "HvSocket",
                         Version = PinnedVersion,
-                        LastUpdated = DateTime.ParseExact(PinnedVersion, "yyyy.MM.dd", System.Globalization.CultureInfo.InvariantCulture).ToString("o")
+                        LastUpdated = DateTime.ParseExact(PinnedVersion, "yyyy.MM.dd", System.Globalization.CultureInfo.InvariantCulture).ToString("o"),
+                        InitialUsername = "root",
+                        InitialPassword = "blackarch"
                     };
                     galleryItems.Add(ovaItem);
                 }

@@ -81,7 +81,22 @@ namespace VMCreateVM
                         .AddParameter("NoVHD", true);  // No default VHD, we'll attach manually
                     await Task.Run(() => ps.Invoke());
                     _logger.LogInformation("Created Gen 2 VM: {VMName}", vmSettings.VMName);
+                    if (ps.HadErrors) throw new Exception(ps.Streams.Error[0].ToString());
 
+                    //Notes cannot be set on New-VM
+                    ps.Commands.Clear();
+                    ps.AddCommand("Set-VM")
+                        .AddParameter("Name", vmSettings.VMName)
+                        .AddParameter("Notes", $"Initial Username: {item.InitialUsername}\r\nInitial Password: {item.InitialPassword}");
+                    await Task.Run(() => ps.Invoke());
+                    if (ps.HadErrors) throw new Exception(ps.Streams.Error[0].ToString());
+                    
+                    //Disable dynamic memory on creation
+                    ps.Commands.Clear();
+                    ps.AddCommand("Set-VMMemory")
+                        .AddParameter("VMName",  vmSettings.VMName)
+                        .AddParameter("DynamicMemoryEnabled", false);
+                    await Task.Run(() => ps.Invoke());
                     if (ps.HadErrors) throw new Exception(ps.Streams.Error[0].ToString());
 
                     ps.Commands.Clear();
@@ -180,6 +195,7 @@ namespace VMCreateVM
                             .AddParameter("VMName", vmSettings.VMName)
                             .AddParameter("FirstBootDevice", dvdDrive);
                         await Task.Run(() => ps.Invoke());
+
                     }
                     else
                     {
@@ -202,7 +218,8 @@ namespace VMCreateVM
                     ps.Commands.Clear();
                     ps.AddCommand("Set-VMFirmware")
                         .AddParameter("VMName", vmSettings.VMName)
-                        .AddParameter("EnableSecureBoot", item.SecureBoot == "true" ? "On" : "Off");
+                        .AddParameter("EnableSecureBoot", item.SecureBoot == "true" ? "True" : "False")
+                        .AddParameter("SecureBootTemplate", "Microsoft UEFI Certificate Authority");
                     await Task.Run(() => ps.Invoke());
 
                     // Enable nested virt if checked
@@ -219,6 +236,12 @@ namespace VMCreateVM
                     {
                         _logger.LogInformation("Virtualization extensions not enabled for VM: {VMName}", vmSettings.VMName);
                     }
+
+                    //Boot VM
+                    ps.Commands.Clear();
+                    ps.AddCommand("Start-VM")
+                        .AddParameter("VMName", vmSettings.VMName);
+                    await Task.Run(() => ps.Invoke());
 
                     _logger.LogInformation("Launching VMConnect for VM: {VMName}", vmSettings.VMName);
                     ps.Commands.Clear();

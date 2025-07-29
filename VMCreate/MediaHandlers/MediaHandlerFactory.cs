@@ -24,8 +24,10 @@ namespace VMCreateVM.MediaHandlers
                     return new IsoMediaHandler(_loggerFactory.CreateLogger<IsoMediaHandler>());
                 case "VMDK":
                     return new VmdkMediaHandler(_loggerFactory.CreateLogger<VmdkMediaHandler>(), _diskConverter, _partitionSchemeDetector);
+                case "QCOW2":
+                    return new Qcow2MediaHandler(_loggerFactory.CreateLogger<Qcow2MediaHandler>(), _diskConverter, _partitionSchemeDetector);
                 case "VHDX":
-                    return new VhdxMediaHandler(_loggerFactory.CreateLogger<VhdxMediaHandler>(), _partitionSchemeDetector);
+                    return new VhdxMediaHandler(_loggerFactory.CreateLogger<VhdxMediaHandler>(), _partitionSchemeDetector);                
                 default:
                     throw new NotSupportedException($"Unsupported file type: {fileType}");
             }
