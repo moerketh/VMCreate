@@ -1,15 +1,14 @@
 ﻿using Microsoft.Extensions.Logging;
 using System;
 using System.IO;
-using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
-using VMCreateVM;
 
 namespace VMCreate
 {
     public class CreateVM
     {
+        private const string QemuFileLocation = "C:\\Program Files\\qemu\\qemu-img.exe";
         private readonly string _extractPath = Path.Combine(Path.GetTempPath(), "VMExtracted");
         private readonly IDownloader _downloader;
         private readonly IExtractor _extractor;
@@ -30,7 +29,7 @@ namespace VMCreate
             string filename = string.Empty;
             try
             {
-                if(!galleryItem.FileType.StartsWith("vhd") && !File.Exists("C:\\Program Files\\qemu\\qemu-img.exe"))
+                if(!galleryItem.FileType.StartsWith("vhd") && !File.Exists(QemuFileLocation))
                 {
                     throw new Exception("Please install QEMU to support disk image conversion.");
                 }

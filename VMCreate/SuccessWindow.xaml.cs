@@ -1,6 +1,6 @@
 ﻿using System.Windows;
 
-namespace VMCreateVM
+namespace VMCreate
 {
     public partial class SuccessWindow : Window
     {

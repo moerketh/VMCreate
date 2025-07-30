@@ -8,7 +8,7 @@ using System.Windows.Media.Imaging;
 using SharpVectors.Converters;
 using SharpVectors.Renderers.Wpf;
 
-namespace VMCreateVM
+namespace VMCreate
 {
     public class ImageSourceConverter : IValueConverter
     {

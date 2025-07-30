@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using VMCreate;
 
-namespace VMCreateVM
+namespace VMCreate
 {
     public interface IDownloader
     {

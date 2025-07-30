@@ -1,10 +1,10 @@
-﻿using System;
+﻿using Microsoft.Extensions.Logging;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
 using System.Text.Json;
 using System.Threading.Tasks;
-using VMCreateVM;
 
 namespace VMCreate.Gallery
 {
@@ -12,9 +12,11 @@ namespace VMCreate.Gallery
     {
         private const string GitHubApiUrl = "https://api.github.com/repos/GNS3/gns3-gui/releases/latest";
         private static readonly HttpClient _httpClient = new HttpClient();
+        private readonly ILogger<LoadFromGNS3GitHub> _logger;
 
-        public LoadFromGNS3GitHub()
+        public LoadFromGNS3GitHub(ILogger<LoadFromGNS3GitHub> logger)
         {
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _httpClient.DefaultRequestHeaders.Add("User-Agent", "VMCreate-GalleryLoader/1.0");
         }
 
@@ -40,7 +42,7 @@ namespace VMCreate.Gallery
 
                     if (vmAsset.ValueKind == JsonValueKind.Undefined)
                     {
-                        Console.WriteLine("Warning: No GNS3 VM image for Hyper-V found in the latest release.");
+                        _logger.LogWarning("No GNS3 VM image for Hyper-V found in the latest release.");
                         return items;
                     }
 
@@ -67,7 +69,7 @@ namespace VMCreate.Gallery
                     };
 
                     items.Add(galleryItem);
-                    Console.WriteLine("Successfully loaded GNS3 VM image: " + galleryItem.Name);
+                    _logger.LogDebug("Successfully loaded GNS3 VM image: " + galleryItem.Name);
                 }
                 finally
                 {
@@ -79,7 +81,7 @@ namespace VMCreate.Gallery
             }
             catch (Exception ex)
             {
-                Console.WriteLine("Error loading GNS3 VM image from GitHub: " + ex.Message);
+                _logger.LogError("Error loading GNS3 VM image from GitHub: " + ex.Message);
             }
 
             return items;

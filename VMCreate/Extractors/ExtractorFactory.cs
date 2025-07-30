@@ -5,7 +5,7 @@ using System.Linq;
 using System.Threading;
 using VMCreate;
 
-namespace VMCreateVM
+namespace VMCreate
 {
     /// <summary>
     /// Factory for selecting the appropriate IExtractor based on file extension.

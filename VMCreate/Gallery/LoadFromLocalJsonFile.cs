@@ -1,26 +1,40 @@
-﻿using System;
+﻿using CreateVM;
+using Microsoft.Extensions.Logging;
+using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Management.Automation.Language;
 using System.Threading.Tasks;
-using VMCreateVM;
 
 namespace VMCreate.Gallery
 {
     public class LoadFromLocalJsonFile : IGalleryLoader
     {
+        private readonly ILogger<LoadFromLocalJsonFile> _logger;
+        private readonly IGalleryItemsParser _parser;
+
+        public LoadFromLocalJsonFile(ILogger<LoadFromLocalJsonFile> logger, IGalleryItemsParser parser)
+        {
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _parser = parser ?? throw new ArgumentNullException(nameof(parser));
+        }
+
+        /// <summary>
+        /// Load a local gallery.json file
+        /// </summary>
+        /// <returns></returns>
         public async Task<List<GalleryItem>> LoadGalleryItems()
         {
             var items = new List<GalleryItem>();
-            // Load local JSON file
             string localJsonPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "gallery.json");
             if (File.Exists(localJsonPath))
             {
-                //WriteLog($"Loading local JSON from: {localJsonPath}");
-                items = GalleryItem.LoadJsonFromFile(localJsonPath);
+                _logger.LogDebug($"Loading local JSON from: {localJsonPath}");
+                items = _parser.LoadJsonFromFile(localJsonPath);
             }
             else
             {
-                //WriteLog($"Local JSON file not found: {localJsonPath}");
+                _logger.LogWarning($"Local JSON file not found: {localJsonPath}");
             }
             return items;
         }

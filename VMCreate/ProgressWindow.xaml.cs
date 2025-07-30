@@ -3,7 +3,7 @@ using System.Threading;
 using System.Windows;
 using VMCreate;
 
-namespace VMCreateVM
+namespace VMCreate
 {
     public partial class ProgressWindow : Window
     {

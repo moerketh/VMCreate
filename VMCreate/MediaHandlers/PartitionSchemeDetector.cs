@@ -4,7 +4,7 @@ using System.IO;
 using System.Linq;
 using Microsoft.Extensions.Logging;
 
-namespace VMCreateVM
+namespace VMCreate
 {
     public interface IPartitionSchemeDetector
     {
@@ -12,7 +12,7 @@ namespace VMCreateVM
     }
 }
 
-namespace VMCreateVM
+namespace VMCreate
 {
     public class PartitionSchemeDetector : IPartitionSchemeDetector
     {

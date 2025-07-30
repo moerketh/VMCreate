@@ -6,7 +6,7 @@ using System.Management.Automation;
 using VMCreate;
 using System;
 
-namespace VMCreateVM.MediaHandlers
+namespace VMCreate.MediaHandlers
 {
     public class Qcow2MediaHandler : MediaHandler
     {
@@ -36,29 +36,6 @@ namespace VMCreateVM.MediaHandlers
             string partitionScheme = await _partitionSchemeDetector.DetectPartitionSchemeAsync(convertedFile);
             _vmGeneration = partitionScheme == "GPT" ? 2 : 1;
             _logger.LogInformation("Detected {PartitionScheme} partition scheme, setting VM generation to {Generation}", partitionScheme, _vmGeneration);
-        }
-
-        public override async Task AttachMediaAsync(PowerShell ps, string vmName, string mediaPath, GalleryItem item, ILogger logger)
-        {
-            logger.LogDebug("Checking VHDX destination: {_vhdDestFile}", _vhdDestFile);
-            if (!File.Exists(_vhdDestFile))
-            {
-                logger.LogError("VHDX not found at: {_vhdDestFile}", _vhdDestFile);
-                throw new FileNotFoundException($"VHDX not found at {_vhdDestFile}");
-            }
-
-            ps.Commands.Clear();
-            ps.AddCommand("Add-VMHardDiskDrive")
-                .AddParameter("VMName", vmName)
-                .AddParameter("Path", _vhdDestFile)
-                .AddParameter("ControllerType", "SCSI");
-            await Task.Run(() => ps.Invoke());
-            logger.LogInformation("Attached VHDX: {_vhdDestFile}", _vhdDestFile);
-
-            if (ps.HadErrors)
-            {
-                throw new Exception($"Failed to attach VHDX: {ps.Streams.Error[0]}");
-            }
         }
     }
 }

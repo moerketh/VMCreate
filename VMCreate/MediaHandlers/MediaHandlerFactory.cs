@@ -1,7 +1,7 @@
 ﻿using System;
 using Microsoft.Extensions.Logging;
 
-namespace VMCreateVM.MediaHandlers
+namespace VMCreate.MediaHandlers
 {
     public class MediaHandlerFactory
     {
@@ -20,8 +20,6 @@ namespace VMCreateVM.MediaHandlers
         {
             switch (fileType.ToUpper())
             {
-                case "ISO":
-                    return new IsoMediaHandler(_loggerFactory.CreateLogger<IsoMediaHandler>());
                 case "VMDK":
                     return new VmdkMediaHandler(_loggerFactory.CreateLogger<VmdkMediaHandler>(), _diskConverter, _partitionSchemeDetector);
                 case "QCOW2":

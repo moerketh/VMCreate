@@ -6,7 +6,7 @@ using System.Threading;
 using VMCreate;
 using XZ.NET;
 
-namespace VMCreateVM
+namespace VMCreate
 {
     /// <summary>
     /// Extracts .xz compressed files using XZ.NET.

@@ -4,19 +4,18 @@ using System.IO;
 using System.Net.Http;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
-using VMCreateVM;
 
 namespace VMCreate.Gallery
 {
-    public class LoadClearLinuxCurrent : IGalleryLoader
+    public class ClearLinux : IGalleryLoader
     {
         private const string BaseUrl = "https://cdn.download.clearlinux.org/releases/current/clear/";
         private const string Thumbnail = "https://raw.githubusercontent.com/clearlinux/clearlinux.github.io/refs/heads/main/sites/default/files/clear-desktop.PNG";
         private const string LogoUri = "https://raw.githubusercontent.com/clearlinux/clearlinux.github.io/refs/heads/main/sites/default/files/ClearLinuxProject_logo_primary_dark_1.png";
-        private const string SymbolUri = "https://raw.githubusercontent.com/clearlinux/clearlinux.github.io/refs/heads/main/sites/default/files/ClearLinuxProject_logo_primary_dark_1.png";
+        private const string SymbolUri = "https://www.clearlinux.org/sites/default/files/2017-12/clearlinux-logo.svg";
         private readonly IHttpClientFactory _clientFactory;
 
-        public LoadClearLinuxCurrent(IHttpClientFactory clientFactory)
+        public ClearLinux(IHttpClientFactory clientFactory)
         {
             _clientFactory = clientFactory ?? throw new ArgumentNullException(nameof(clientFactory));
         }

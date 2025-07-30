@@ -6,7 +6,7 @@ using SharpCompress.Common;
 using Microsoft.Extensions.Logging;
 using VMCreate;
 
-namespace VMCreateVM
+namespace VMCreate
 {
     /// <summary>
     /// Extracts multi-file archives (e.g., .zip, .7z, .rar, .gzip, .tar) using SharpCompress's ArchiveFactory.

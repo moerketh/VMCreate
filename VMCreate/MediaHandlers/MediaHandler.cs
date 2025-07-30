@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging;
 using VMCreate;
 
 
-namespace VMCreateVM.MediaHandlers
+namespace VMCreate.MediaHandlers
 {
     public abstract class MediaHandler : IMediaHandler
     {
@@ -40,7 +40,5 @@ namespace VMCreateVM.MediaHandlers
             File.Move(sourceFile, destFile);
             _logger.LogInformation("Moved file to: {DestFile}", destFile);
         }
-
-        public abstract Task AttachMediaAsync(PowerShell ps, string vmName, string mediaPath, GalleryItem item, ILogger logger);
     }
 }
