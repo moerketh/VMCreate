@@ -6,7 +6,6 @@ using System.Linq;
 using System.Net.Http;
 using System.Text.Json;
 using System.Threading.Tasks;
-using System.Xml.Linq;
 using VMCreate;
 
 namespace CreateVM
@@ -16,7 +15,6 @@ namespace CreateVM
         List<GalleryItem> LoadJsonFromFile(string path);
         List<GalleryItem> LoadJsonFromFiles(string path);
         Task<List<GalleryItem>> LoadJsonFromUrl(string url);
-        Task<List<GalleryItem>> LoadXmlFromUrl(string url);
     }
 
     public class GalleryItemsParser : IGalleryItemsParser
@@ -78,79 +76,6 @@ namespace CreateVM
             catch (Exception ex)
             {
                 _logger.LogWarning($"Failed to parse JSON from {path}: {ex.Message}");
-            }
-            return items;
-        }
-
-        public async Task<List<GalleryItem>> LoadXmlFromUrl(string url)
-        {
-            var items = new List<GalleryItem>();
-            try
-            {
-                _logger.LogDebug($"Downloading XML from {url}");
-                using (HttpClient client = new HttpClient())
-                {
-                    string xml = await client.GetStringAsync(url);
-                    var xdoc = XDocument.Parse(xml);
-                    var images = new List<Dictionary<string, object>>();
-
-                    var vhd = xdoc.Element("vhd");
-                    if (vhd == null)
-                    {
-                        _logger.LogWarning("No vhd element found in XML");
-                        return items;
-                    }
-
-                    var details = vhd.Element("details");
-                    if (details == null)
-                    {
-                        _logger.LogWarning("No details element found in XML");
-                        return items;
-                    }
-
-                    var descriptions = vhd.Element("descriptions")?.Elements("description").Select(d => d.Value).ToList() ?? new List<string>();
-                    var image = vhd.Element("image");
-
-                    if (image == null)
-                    {
-                        _logger.LogDebug("No image element found in XML");
-                        return items;
-                    }
-
-                    var imageData = new Dictionary<string, object>
-                    {
-                        { "name", details.Element("name")?.Value ?? "" },
-                        { "publisher", details.Element("publisher")?.Value ?? "" },
-                        { "description", descriptions },
-                        { "version", image.Element("version")?.Value ?? "" },
-                        { "lastUpdated", details.Element("lastUpdated")?.Value ?? "" },
-                        { "thumbnail", new Dictionary<string, string> { { "uri", image.Element("thumbnail")?.Element("uri")?.Value ?? "" } } },
-                        { "logo", new Dictionary<string, string> { { "uri", image.Element("logo")?.Element("uri")?.Value ?? "" } } },
-                        { "symbol", new Dictionary<string, string> { { "uri", image.Element("symbol")?.Element("uri")?.Value ?? "" } } },
-                        { "disk", new Dictionary<string, string>
-                            {
-                                { "uri", image.Element("disk")?.Element("uri")?.Value ?? "" },
-                                { "archiveRelativePath", image.Element("disk")?.Element("archiveRelativePath")?.Value ?? "" }
-                            }
-                        },
-                        { "config", new Dictionary<string, string>
-                            {
-                                { "secureBoot", image.Element("secureBoot")?.Value ?? "" },
-                                { "enhancedSessionTransportType", image.Element("enhancedSessionTransportType")?.Value ?? "" }
-                            }
-                    }
-                    };
-
-                    images.Add(imageData);
-
-                    var json = JsonSerializer.Serialize(new { images }, new JsonSerializerOptions { WriteIndented = true });
-                    items.AddRange(ParseJson(json));
-                    _logger.LogDebug($"Parsed XML as JSON from {url}");
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError($"Failed to download or parse XML from {url}: {ex.Message}");
             }
             return items;
         }

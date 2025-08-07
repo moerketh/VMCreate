@@ -69,6 +69,7 @@ namespace VMCreate
                             ProgressPercentage = Convert.ToInt32(progress)
                         });
                         bytesRead = e.CompressedBytesRead;
+                        cancellationToken.ThrowIfCancellationRequested();
                     };
 
                     foreach (var entry in archive.Entries)
@@ -115,5 +116,7 @@ namespace VMCreate
             logger.LogDebug("Creating directory {ExtractPath}", extractPath);
             Directory.CreateDirectory(extractPath);
         }
+
+        
     }
 }

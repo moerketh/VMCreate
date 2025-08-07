@@ -1,11 +1,8 @@
 ﻿using System;
 using System.IO;
-using System.Management.Automation;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
-using VMCreate;
-
 
 namespace VMCreate.MediaHandlers
 {
@@ -22,7 +19,7 @@ namespace VMCreate.MediaHandlers
 
         public virtual int VmGeneration => 2; // Default to Gen2 (UEFI/GPT)
 
-        public virtual async Task PrepareMediaAsync(string sourceFile, string destinationPath, GalleryItem item, IProgress<CreateVMProgressInfo> progressInfo, CancellationToken cancellationToken)
+        public virtual async Task<string> PrepareMediaAsync(string sourceFile, string destinationPath, GalleryItem item, IProgress<CreateVMProgressInfo> progressInfo, CancellationToken cancellationToken)
         {
             _logger.LogDebug("Checking source file: {SourceFile}", sourceFile);
             if (!File.Exists(sourceFile))
@@ -39,6 +36,7 @@ namespace VMCreate.MediaHandlers
             }
             File.Move(sourceFile, destFile);
             _logger.LogInformation("Moved file to: {DestFile}", destFile);
+            return destFile;
         }
     }
 }

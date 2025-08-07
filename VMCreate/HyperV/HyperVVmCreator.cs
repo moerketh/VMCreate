@@ -1,9 +1,9 @@
-﻿using System;
+﻿using Microsoft.Extensions.Logging;
+using Microsoft.Win32;
+using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Logging;
-using Microsoft.Win32;
 using VMCreate.MediaHandlers;
 
 namespace VMCreate
@@ -15,7 +15,7 @@ namespace VMCreate
 
     public class HyperVVmCreator : IVmCreator
     {
-        private readonly string vmPath;
+        private readonly string _defaultVhdxPath;
         private readonly MediaHandlerFactory _mediaHandlerFactory;
         private readonly IHyperVManager _hyperVManager;
         private readonly ILogger<HyperVVmCreator> _logger;
@@ -25,7 +25,7 @@ namespace VMCreate
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _mediaHandlerFactory = mediaHandlerFactory ?? throw new ArgumentNullException(nameof(mediaHandlerFactory));
             _hyperVManager = hyperVManager ?? throw new ArgumentNullException(nameof(hyperVManager));
-            vmPath = GetDefaultVirtualHardDiskPath();
+            _defaultVhdxPath = GetDefaultVirtualHardDiskPath();
         }
 
         private string GetDefaultVirtualHardDiskPath()
@@ -62,22 +62,22 @@ namespace VMCreate
                 _logger.LogInformation("Starting VM creation for {VMName}", vmSettings.VMName);
                     
                 IMediaHandler mediaHandler = _mediaHandlerFactory.CreateHandler(item.FileType);
-                await mediaHandler.PrepareMediaAsync(sourceFile, vmPath, item, createVMProgressInfo, cancellationToken);
+                string mediaPath = await mediaHandler.PrepareMediaAsync(sourceFile, _defaultVhdxPath, item, createVMProgressInfo, cancellationToken);
 
                 int detectedGeneration = mediaHandler.VmGeneration; // 1 for MBR, 2 for GPT
                 const int targetGeneration = 2; // Always target Gen 2
 
-                string mediaPath = Path.Combine(vmPath, Path.GetFileName(sourceFile));
-                await _hyperVManager.CreateVMAsync(vmSettings, vmPath, targetGeneration, cancellationToken);
+                await _hyperVManager.CreateVMAsync(vmSettings, _defaultVhdxPath, targetGeneration, cancellationToken);
                 await _hyperVManager.SetVMLoginNotes(vmSettings, item.InitialUsername, item.InitialPassword, cancellationToken);
                 await _hyperVManager.AddNetworkAdapter(vmSettings, cancellationToken);
                 await _hyperVManager.ConnectNetworkAdapter(vmSettings, cancellationToken);
 
                 // Common settings: CPU, enhanced session, secure boot
                 await _hyperVManager.SetCpuCount(vmSettings, cancellationToken);
+                await _hyperVManager.DisableDynamicMemory(vmSettings, cancellationToken);
                 await _hyperVManager.SetEnhancedSession(vmSettings, cancellationToken);
                 await _hyperVManager.SetSecureBoot(vmSettings, cancellationToken);
-
+                await _hyperVManager.EnableGuestServices(vmSettings, cancellationToken);
 
                 if (detectedGeneration == 2)
                 {
@@ -87,7 +87,7 @@ namespace VMCreate
                 else if (detectedGeneration == 1)
                 {
                     // Drive is MBR partitioned: Add a new (larger) drive first so that we can copy data from old drive
-                    await _hyperVManager.AddNewHardDrive(vmSettings, vmPath, cancellationToken);
+                    await _hyperVManager.AddNewHardDrive(vmSettings, _defaultVhdxPath, cancellationToken);
 
                     // Attach old disk
                     await _hyperVManager.AddExistingHardDrive(vmSettings, mediaPath, cancellationToken);
@@ -114,7 +114,18 @@ namespace VMCreate
                     _logger.LogInformation("Virtualization extensions not enabled for VM: {VMName}", vmSettings.VMName);
                 }
                 await _hyperVManager.StartVM(vmSettings, cancellationToken);
-                await _hyperVManager.StartVMConnect(vmSettings, cancellationToken);
+                if (detectedGeneration == 1)
+                {
+                    //Monitor conversion process
+                    var poller = new HyperVKVPPoller();
+                    //await poller.SendKVPToGuestAsync(vmSettings.VMName, "DUMMY", "true", cancellationToken); //first KVP is always broken, not sure why...
+#if DEBUG
+                    //await poller.SendKVPToGuestAsync(vmSettings.VMName, "VMCREATE_DEBUG", "true", cancellationToken);
+#endif
+
+                    await poller.PollKVPForProgressAsync(vmSettings.VMName, createVMProgressInfo);
+                }
+                //await _hyperVManager.StartVMConnect(vmSettings, cancellationToken);
             }
             catch (Exception ex)
             {

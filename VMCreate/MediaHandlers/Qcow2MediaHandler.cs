@@ -22,11 +22,11 @@ namespace VMCreate.MediaHandlers
             _partitionSchemeDetector = partitionSchemeDetector ?? throw new ArgumentNullException(nameof(partitionSchemeDetector));
         }
 
-        public override bool RequiresExtraction => true;
+        public override bool RequiresExtraction => false;
 
         public override int VmGeneration => _vmGeneration;
 
-        public override async Task PrepareMediaAsync(string sourceFile, string destinationPath, GalleryItem item, IProgress<CreateVMProgressInfo> progressInfo, CancellationToken cancellationToken)
+        public override async Task<string> PrepareMediaAsync(string sourceFile, string destinationPath, GalleryItem item, IProgress<CreateVMProgressInfo> progressInfo, CancellationToken cancellationToken)
         {
             _vhdDestFile = Path.Combine(destinationPath, Path.GetFileNameWithoutExtension(item.ArchiveRelativePath) + ".vhdx");
             _logger.LogInformation("Converting Qcow2 to VHDX: {VhdDestFile}", _vhdDestFile);
@@ -36,6 +36,7 @@ namespace VMCreate.MediaHandlers
             string partitionScheme = await _partitionSchemeDetector.DetectPartitionSchemeAsync(convertedFile);
             _vmGeneration = partitionScheme == "GPT" ? 2 : 1;
             _logger.LogInformation("Detected {PartitionScheme} partition scheme, setting VM generation to {Generation}", partitionScheme, _vmGeneration);
+            return _vhdDestFile;
         }
     }
 }

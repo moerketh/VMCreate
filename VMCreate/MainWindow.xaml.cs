@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+﻿using CreateVM;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Serilog;
 using System;
@@ -45,7 +46,7 @@ namespace VMCreate
             services.AddTransient<PwnCloudOS>();
             services.AddTransient<BlackArch>();
             services.AddTransient<NixOS>();
-            services.AddTransient<LoadFromUbuntuGitHub>();
+            services.AddTransient<Ubuntu>();
             services.AddTransient<ClearLinux>();
             services.AddTransient<LoadKaliCurrent>();
             services.AddTransient<LoadParrotHome>();
@@ -54,8 +55,6 @@ namespace VMCreate
             services.AddTransient<LoadPentooCurrent>();
             services.AddTransient<LoadFedoraSecurityLab>();
             services.AddTransient<LoadFromGNS3GitHub>();
-            services.AddTransient<IGalleryLoader, AggregateGalleryLoader>();
-            services.AddTransient<IDownloader, HttpFileDownloader>();
             services.AddTransient<XzFileExtractor>();
             services.AddTransient<ArchiveExtractor>();
             services.AddTransient<IExtractor>(provider => new ExtractorFactory(
@@ -63,12 +62,16 @@ namespace VMCreate
                 provider.GetRequiredService<ArchiveExtractor>(),
                 provider.GetRequiredService<ILogger<ExtractorFactory>>()));
             services.AddTransient<CreateVM>();
+            services.AddTransient<IGalleryLoader, AggregateGalleryLoader>();
+            services.AddTransient<IGalleryItemsParser, GalleryItemsParser>();
+            services.AddTransient<IDownloader, HttpFileDownloader>();
             services.AddSingleton<IPartitionSchemeDetector, PartitionSchemeDetector>();
             services.AddSingleton<MediaHandlerFactory>();
             services.AddSingleton<DiskConverter>();
             services.AddTransient<SelectImagePage>();
             services.AddTransient<VmSettingsPage>();
             services.AddTransient<IVmCreator, HyperVVmCreator>();
+            services.AddSingleton<IHyperVManager, PowerShellHyperVManager>();
             services.AddLogging(logging => logging.AddSerilog());
 
             _serviceProvider = services.BuildServiceProvider();
@@ -85,7 +88,12 @@ namespace VMCreate
             {
                 var galleryLoader = _serviceProvider.GetRequiredService<IGalleryLoader>();
                 var items = await galleryLoader.LoadGalleryItems();
+                // Filter, group by the unique key (Name and DiskUri) to remove duplicates, 
+                // select the first item from each group, then order by Name, 
+                // and finally add to the collection.
                 items.Where(i => i.Name != null && i.DiskUri != null)
+                    .GroupBy(i => new { i.Name, i.DiskUri })
+                    .Select(g => g.First())
                     .OrderBy(i => i.Name)
                     .ToList()
                     .ForEach(i => _galleryItems.Add(i));

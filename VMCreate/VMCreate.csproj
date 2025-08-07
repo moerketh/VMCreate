@@ -25,7 +25,7 @@
     <Compile Include="Gallery\distributions\FedoraSilverBlue.cs" />
     <Compile Include="Gallery\distributions\ClearLinux.cs" />
     <Compile Include="Gallery\distributions\LoadFedoraSecurityLab.cs" />
-    <Compile Include="Gallery\distributions\LoadFromUbuntuGitHub.cs" />
+    <Compile Include="Gallery\distributions\Ubuntu.cs" />
     <Compile Include="Gallery\distributions\LoadKaliCurrent.cs" />
     <Compile Include="Gallery\distributions\LoadParrotHome.cs" />
     <Compile Include="Gallery\distributions\LoadParrotHtb.cs" />
@@ -40,9 +40,13 @@
     <Compile Include="Gallery\LoadFromMicrosoftURI.cs" />
     <Compile Include="Gallery\LoadFromRegistry.cs" />
     <Compile Include="Gallery\other\LoadFromGSN3GitHub.cs" />
+    <Compile Include="HyperV\BooleanOnOffAdapter.cs" />
+    <Compile Include="HyperV\HyperVKvpManager.cs" />
+    <Compile Include="HyperV\KvpProgressMonitor.cs" />
     <Compile Include="HyperV\PowerShellHyperVManager.cs" />
     <Compile Include="HyperV\HyperVVmCreator.cs" />
     <Compile Include="MainWindow.xaml.cs" />
+    <Compile Include="MediaHandlers\DeSparcify.cs" />
     <Compile Include="MediaHandlers\DiskConverter.cs" />
     <Compile Include="MediaHandlers\IMediaHandler.cs" />
     <Compile Include="MediaHandlers\MediaHandler.cs" />

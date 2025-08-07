@@ -41,7 +41,7 @@ namespace VMCreate
                 _logger.LogInformation("Downloaded file {FileName}", filename);
 
                 // Extract if not ISO
-                if (galleryItem.FileType != "ISO")
+                if (galleryItem.FileType is not ("ISO" or "QCOW2"))
                 {
                     await Task.Run(() => _extractor.Extract(filename, _extractPath, cancellationToken, createVmProgressInfo));
                     _logger.LogInformation("Extracted file to {ExtractPath}", _extractPath);

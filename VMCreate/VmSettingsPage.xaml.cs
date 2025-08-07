@@ -10,9 +10,11 @@ namespace VMCreate
 {
     public partial class VmSettingsPage : Page
     {
-        public event EventHandler<WizardResultEventArgs> WizardCompleted;
+        private const int DefaultMemoryValue = 4096;
+        private const int DefaultCpuValue = 2;
         private readonly WizardData _wizardData;
         private readonly ILogger<VmSettingsPage> _logger;
+        public event EventHandler<WizardResultEventArgs> WizardCompleted;
 
         public VmSettingsPage(WizardData wizardData, ILogger<VmSettingsPage> logger)
         {
@@ -21,6 +23,9 @@ namespace VMCreate
             InitializeComponent();
             DataContext = _wizardData;
             VMNameTextBox.Text = _wizardData.SelectedItem?.Name ?? "";
+            MemoryTextBox.Text = DefaultMemoryValue.ToString();
+            CPUTextBox.Text = DefaultCpuValue.ToString();
+            VirtualizationEnabledCheckBox.IsChecked = true;
             NewDriveSizeTextBox.Text = _wizardData.Settings.NewDriveSizeInGB.ToString();
             UpdateVisibility(); // Set visibility for banner and new drive field
         }

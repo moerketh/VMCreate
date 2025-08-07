@@ -2,8 +2,6 @@
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
-using System.Management.Automation;
-using VMCreate;
 using System;
 
 namespace VMCreate.MediaHandlers
@@ -23,13 +21,14 @@ namespace VMCreate.MediaHandlers
 
         public override int VmGeneration => _vmGeneration;
 
-        public override async Task PrepareMediaAsync(string sourceFile, string destinationPath, GalleryItem item, IProgress<CreateVMProgressInfo> progressInfo, CancellationToken cancellationToken)
+        public override async Task<string> PrepareMediaAsync(string sourceFile, string destinationPath, GalleryItem item, IProgress<CreateVMProgressInfo> progressInfo, CancellationToken cancellationToken)
         {
-            await base.PrepareMediaAsync(sourceFile, destinationPath, item, progressInfo, cancellationToken);
+            string vhdDestFile = await base.PrepareMediaAsync(sourceFile, destinationPath, item, progressInfo, cancellationToken);
             string mediaPath = Path.Combine(destinationPath, Path.GetFileName(sourceFile));
             string partitionScheme = await _partitionSchemeDetector.DetectPartitionSchemeAsync(mediaPath);
             _vmGeneration = partitionScheme == "GPT" ? 2 : 1;
             _logger.LogInformation("Detected {PartitionScheme} partition scheme, setting VM generation to {Generation}", partitionScheme, _vmGeneration);
+            return vhdDestFile;
         }
     }
 }

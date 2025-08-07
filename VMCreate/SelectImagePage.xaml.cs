@@ -52,6 +52,7 @@ namespace VMCreate
                 DetailPublisher.Text = $"Publisher: {selectedItem.Publisher}";
                 DetailVersion.Text = $"Version: {selectedItem.Version}";
                 DetailLastUpdated.Text = $"Last Updated: {selectedItem.LastUpdated}";
+                DetailDownloadUrl.Text = $"Download URL: {selectedItem.DiskUri}";
                 DetailDescription.Text = $"Description: {selectedItem.Description}";
                 _logger.LogDebug("Updated details panel for: {Name}", selectedItem.Name);
             }

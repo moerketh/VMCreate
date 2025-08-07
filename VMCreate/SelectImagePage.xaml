@@ -50,6 +50,7 @@
                 <TextBlock x:Name="DetailPublisher" Style="{StaticResource ExplanationText}" Margin="0,0,0,-5"/>
                 <TextBlock x:Name="DetailVersion" Style="{StaticResource ExplanationText}" Margin="0,0,0,-5"/>
                 <TextBlock x:Name="DetailLastUpdated" Style="{StaticResource ExplanationText}" Margin="0,0,0,-5"/>
+                <TextBlock x:Name="DetailDownloadUrl" Style="{StaticResource ExplanationText}" Margin="0,0,0,-5"/>
                 <TextBlock x:Name="DetailDescription" Style="{StaticResource ExplanationText}" TextWrapping="Wrap"/>
             </StackPanel>
         </Grid>

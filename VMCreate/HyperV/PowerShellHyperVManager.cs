@@ -1,10 +1,14 @@
-﻿using Microsoft.Extensions.Logging;
+﻿using CreateVM;
+using Microsoft.Extensions.Logging;
 using System;
 using System.IO;
 using System.Linq;
 using System.Management.Automation;
+using System.Runtime;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Windows.Input;
+using System.Xml.Linq;
 
 namespace VMCreate
 {
@@ -17,6 +21,7 @@ namespace VMCreate
         Task ConnectNetworkAdapter(VmSettings vmSettings, CancellationToken cancellationToken);
         Task CreateVMAsync(VmSettings vmSettings, string vmPath, int targetGeneration, CancellationToken cancellationToken);
         Task DisableDynamicMemory(VmSettings vmSettings, CancellationToken cancellationToken);
+        Task EnableGuestServices(VmSettings vmSettings, CancellationToken cancellationToken);
         Task EnableVirtualization(VmSettings vmSettings, CancellationToken cancellationToken);
         Task SetCpuCount(VmSettings vmSettings, CancellationToken cancellationToken);
         Task SetEnhancedSession(VmSettings vmSettings, CancellationToken cancellationToken);
@@ -201,7 +206,7 @@ namespace VMCreate
             _ps.Commands.Clear();
             _ps.AddCommand("Set-VMFirmware")
                 .AddParameter("VMName", vmSettings.VMName)
-                .AddParameter("EnableSecureBoot", vmSettings.SecureBoot)
+                .AddParameter("EnableSecureBoot", vmSettings.SecureBoot.ToOnOff())
                 .AddParameter("SecureBootTemplate", "MicrosoftUEFICertificateAuthority");
             await RunCommand(cancellationToken);
         }
@@ -222,7 +227,7 @@ namespace VMCreate
             _logger.LogDebug("Executing VMConnect command: {Command}", vmConnectCommand);
             _ps.AddScript(vmConnectCommand);
             await RunCommand(cancellationToken);
-            _logger.LogInformation("Successfully launched VMConnect for VM: {VMName}", vmSettings.VMName);
+            _logger.LogInformation($"Successfully launched VMConnect for VM: {vmSettings.VMName}");
         }
 
         public async Task EnableVirtualization(VmSettings vmSettings, CancellationToken cancellationToken)
@@ -232,7 +237,17 @@ namespace VMCreate
                 .AddParameter("VMName", vmSettings.VMName)
                 .AddParameter("ExposeVirtualizationExtensions", true);
             await RunCommand(cancellationToken);
-            _logger.LogInformation("Enabled virtualization extensions for VM: {VMName}", vmSettings.VMName);
+            _logger.LogInformation($"Enabled virtualization extensions for VM: {vmSettings.VMName}");
+        }
+
+        public async Task EnableGuestServices(VmSettings vmSettings, CancellationToken cancellationToken)
+        {
+            _ps.Commands.Clear();
+            _ps.AddCommand("Enable-VMIntegrationService")
+                .AddParameter("VMName", vmSettings.VMName)
+                .AddParameter("Name", "Guest Service Interface");
+            await RunCommand(cancellationToken);
+            _logger.LogInformation($"Enabled Guest services for VM: {vmSettings.VMName}");
         }
 
         private async Task<System.Collections.ObjectModel.Collection<PSObject>> RunCommand(CancellationToken cancellationToken)
@@ -240,6 +255,6 @@ namespace VMCreate
             var result = await Task.Run(_ps.Invoke, cancellationToken);
             if (_ps.HadErrors) throw new Exception(string.Join("; ", _ps.Streams.Error.Select(e => e.ToString())));
             return result;
-        }
+        }        
     }
 }
