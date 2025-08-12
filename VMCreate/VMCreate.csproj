@@ -19,9 +19,11 @@
     <Compile Include="AssemblyInfo.cs" />
     <Compile Include="CreateVM.cs" />
     <Compile Include="CreateVMProgressInfo.cs" />
-    <Compile Include="Downloaders\FileWriter.cs" />
+    <Compile Include="Downloaders\FileStreamProvider.cs" />
     <Compile Include="Downloaders\HttpFileDownloader.cs" />
     <Compile Include="Downloaders\HttpStreamProvider.cs" />
+    <Compile Include="Downloaders\StreamCopierWithProgress .cs" />
+    <Compile Include="Downloaders\StreamCopier.cs" />
     <Compile Include="Extractors\ArchiveExtractor.cs" />
     <Compile Include="Extractors\ExtractorFactory.cs" />
     <Compile Include="Extractors\IExtractor.cs" />

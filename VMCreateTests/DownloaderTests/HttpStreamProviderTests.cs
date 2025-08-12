@@ -2,9 +2,8 @@
 using Moq.Protected;
 using System.Net;
 using Microsoft.Extensions.Logging;
-using VMCreate;
 
-namespace VMCreateTests
+namespace VMCreate.Tests
 {
     [TestClass]
     public class HttpStreamProviderTests

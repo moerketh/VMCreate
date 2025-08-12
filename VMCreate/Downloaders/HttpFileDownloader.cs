@@ -17,13 +17,15 @@ namespace VMCreate
     {
         private readonly ILogger<HttpFileDownloader> _logger;
         private readonly IHttpStreamProvider _streamProvider;
-        private readonly IFileWriter _fileWriter;
+        private readonly IFileStreamProvider _fileStreamProvider;
+        private readonly IStreamCopierWithProgress _streamCopier;
 
-        public HttpFileDownloader(ILogger<HttpFileDownloader> logger, IHttpStreamProvider streamProvider, IFileWriter fileWriter)
+        public HttpFileDownloader(ILogger<HttpFileDownloader> logger, IHttpStreamProvider streamProvider, IFileStreamProvider fileStreamProvider, IStreamCopierWithProgress streamCopier)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _streamProvider = streamProvider ?? throw new ArgumentNullException(nameof(streamProvider));
-            _fileWriter = fileWriter ?? throw new ArgumentNullException(nameof(fileWriter));
+            _fileStreamProvider = fileStreamProvider ?? throw new ArgumentNullException(nameof(fileStreamProvider));
+            _streamCopier = streamCopier ?? throw new ArgumentNullException(nameof(streamCopier));
         }
 
         public async Task<string> DownloadFileAsync(string uri, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo> progressReportInfo, bool useCache)
@@ -45,17 +47,20 @@ namespace VMCreate
 
                     var parsedUri = new Uri(finalUri);
                     var rawFileName = Path.GetFileName(parsedUri.LocalPath);
-                    rawFileName = string.Concat(rawFileName.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c)); // Sanitize
+                    rawFileName = new string(rawFileName.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c).ToArray());
                     filePath = Path.Combine(Path.GetTempPath(), rawFileName);
 
-                    if (useCache && _fileWriter.TryGetCachedFile(filePath, out string cachedFilePath))
+                    var (writeStream, isCached) = await _fileStreamProvider.GetWriteStreamAsync(filePath, useCache);
+
+                    if (isCached)
                     {
-                        return cachedFilePath;
+                        return filePath;
                     }
 
                     using (contentStream)
+                    using (writeStream)
                     {
-                        await _fileWriter.WriteAsync(contentStream, filePath, contentLength, finalUri, progressReportInfo, cancellationToken);
+                        await _streamCopier.CopyAsync(contentStream, writeStream, contentLength, finalUri, progressReportInfo, cancellationToken);
                     }
 
                     double duration = (DateTime.Now - startTime).TotalSeconds;
@@ -70,7 +75,7 @@ namespace VMCreate
                     if (File.Exists(filePath))
                     {
                         File.Delete(filePath);
-                        _logger.LogWarning("Deleted temporary download file: {filePath}", filePath);
+                        _logger.LogWarning("Deleted temporary download file: {FilePath}", filePath);
                     }
                     throw;
                 }
@@ -81,8 +86,7 @@ namespace VMCreate
                     {
                         throw new Exception($"Failed to download after {MaxRetries} attempts: {ex.Message}", ex);
                     }
-                    // Exponential backoff
-                    await Task.Delay(1000 * (int)Math.Pow(2, attempt - 1), cancellationToken); 
+                    await Task.Delay(1000 * (int)Math.Pow(2, attempt - 1), cancellationToken);
                 }
                 catch (Exception ex)
                 {

@@ -1,6 +1,5 @@
 ﻿using Microsoft.Extensions.Logging;
 using Moq;
-using System.Diagnostics;
 
 namespace VMCreate.Tests
 {
@@ -9,7 +8,8 @@ namespace VMCreate.Tests
     {
         private Mock<ILogger<HttpFileDownloader>> _mockLogger;
         private Mock<IHttpStreamProvider> _mockStreamProvider;
-        private Mock<IFileWriter> _mockFileWriter;
+        private Mock<IFileStreamProvider> _mockFileStreamProvider;
+        private Mock<StreamCopierWithProgress> _mockStreamCopier;
         private HttpFileDownloader _downloader;
 
         [TestInitialize]
@@ -17,8 +17,9 @@ namespace VMCreate.Tests
         {
             _mockLogger = new Mock<ILogger<HttpFileDownloader>>();
             _mockStreamProvider = new Mock<IHttpStreamProvider>();
-            _mockFileWriter = new Mock<IFileWriter>();
-            _downloader = new HttpFileDownloader(_mockLogger.Object, _mockStreamProvider.Object, _mockFileWriter.Object);
+            _mockFileStreamProvider = new Mock<IFileStreamProvider>();
+            _mockStreamCopier = new Mock<StreamCopierWithProgress>();
+            _downloader = new HttpFileDownloader(_mockLogger.Object, _mockStreamProvider.Object, _mockFileStreamProvider.Object, _mockStreamCopier.Object);
         }
 
         [TestMethod]
@@ -34,16 +35,17 @@ namespace VMCreate.Tests
             _mockStreamProvider.Setup(p => p.GetStreamAsync(uri, It.IsAny<CancellationToken>()))
                 .ReturnsAsync((contentStream, 1024L, finalUri));
 
-            _mockFileWriter.Setup(w => w.TryGetCachedFile(It.IsAny<string>(), out It.Ref<string>.IsAny)).Returns(false);
+            _mockFileStreamProvider.Setup(p => p.GetWriteStreamAsync(It.IsAny<string>(), false))
+                .ReturnsAsync((new MemoryStream(), false));
 
-            _mockFileWriter.Setup(w => w.WriteAsync(contentStream, filePath, 1024L, finalUri, mockProgress.Object, It.IsAny<CancellationToken>()))
+            _mockStreamCopier.Setup(c => c.CopyAsync(contentStream, It.IsAny<Stream>(), 1024L, finalUri, mockProgress.Object, It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
 
             // Act
             var result = await _downloader.DownloadFileAsync(uri, CancellationToken.None, mockProgress.Object, false);
 
             // Assert
-            Assert.AreEqual(filePath, result);
+            Assert.IsTrue(result.EndsWith("file.zip"));
             _mockLogger.Verify(l => l.Log(
                 LogLevel.Information,
                 It.IsAny<EventId>(),
@@ -57,21 +59,22 @@ namespace VMCreate.Tests
         {
             // Arrange
             var uri = "http://example.com/file.zip";
+            var finalUri = uri;
             var filePath = Path.Combine(Path.GetTempPath(), "file.zip");
             var mockProgress = new Mock<IProgress<CreateVMProgressInfo>>();
-            string cachedPath = filePath;
 
             _mockStreamProvider.Setup(p => p.GetStreamAsync(uri, It.IsAny<CancellationToken>()))
                 .ReturnsAsync((new MemoryStream(), 1024L, uri));
 
-            _mockFileWriter.Setup(w => w.TryGetCachedFile(It.IsAny<string>(), out cachedPath)).Returns(true);
+            _mockFileStreamProvider.Setup(p => p.GetWriteStreamAsync(It.IsAny<string>(), true))
+                .ReturnsAsync((null, true));
 
             // Act
             var result = await _downloader.DownloadFileAsync(uri, CancellationToken.None, mockProgress.Object, true);
 
             // Assert
-            Assert.AreEqual(filePath, result);
-            _mockFileWriter.Verify(w => w.WriteAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<long?>(), It.IsAny<string>(), It.IsAny<IProgress<CreateVMProgressInfo>>(), It.IsAny<CancellationToken>()), Times.Never);
+            Assert.IsTrue(result.EndsWith("file.zip"));
+            _mockStreamCopier.Verify(c => c.CopyAsync(It.IsAny<Stream>(), It.IsAny<Stream>(), It.IsAny<long?>(), It.IsAny<string>(), It.IsAny<IProgress<CreateVMProgressInfo>>(), It.IsAny<CancellationToken>()), Times.Never);
         }
 
         [TestMethod]
@@ -88,16 +91,17 @@ namespace VMCreate.Tests
                 .ThrowsAsync(new HttpRequestException("First failure"))
                 .ReturnsAsync((contentStream, 1024L, finalUri));
 
-            _mockFileWriter.Setup(w => w.TryGetCachedFile(It.IsAny<string>(), out It.Ref<string>.IsAny)).Returns(false);
+            _mockFileStreamProvider.Setup(p => p.GetWriteStreamAsync(It.IsAny<string>(), false))
+                .ReturnsAsync((new MemoryStream(), false));
 
-            _mockFileWriter.Setup(w => w.WriteAsync(contentStream, filePath, 1024L, finalUri, mockProgress.Object, It.IsAny<CancellationToken>()))
+            _mockStreamCopier.Setup(c => c.CopyAsync(contentStream, It.IsAny<Stream>(), 1024L, finalUri, mockProgress.Object, It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
 
             // Act
             var result = await _downloader.DownloadFileAsync(uri, CancellationToken.None, mockProgress.Object, false);
 
             // Assert
-            Assert.AreEqual(filePath, result);
+            Assert.IsTrue(result.EndsWith("file.zip"));
             _mockStreamProvider.Verify(p => p.GetStreamAsync(uri, It.IsAny<CancellationToken>()), Times.Exactly(2)); // One failure, one success
         }
 
@@ -130,9 +134,10 @@ namespace VMCreate.Tests
             _mockStreamProvider.Setup(p => p.GetStreamAsync(uri, It.IsAny<CancellationToken>()))
                 .ReturnsAsync((new MemoryStream(), 1024L, finalUri));
 
-            _mockFileWriter.Setup(w => w.TryGetCachedFile(It.IsAny<string>(), out It.Ref<string>.IsAny)).Returns(false);
+            _mockFileStreamProvider.Setup(p => p.GetWriteStreamAsync(It.IsAny<string>(), false))
+                .ReturnsAsync((new MemoryStream(), false));
 
-            _mockFileWriter.Setup(w => w.WriteAsync(It.IsAny<Stream>(), filePath, 1024L, finalUri, mockProgress.Object, It.IsAny<CancellationToken>()))
+            _mockStreamCopier.Setup(c => c.CopyAsync(It.IsAny<Stream>(), It.IsAny<Stream>(), 1024L, finalUri, mockProgress.Object, It.IsAny<CancellationToken>()))
                 .ThrowsAsync(new OperationCanceledException());
 
             // Act
@@ -142,26 +147,26 @@ namespace VMCreate.Tests
         [TestMethod]
         public async Task DownloadFileAsync_InvalidFileNameFromUri_HandlesSanitization()
         {
-            // Arrange (test the sanitization suggested)
+            // Arrange
             var uri = "http://example.com/file:with<invalid*chars.zip";
             var finalUri = uri;
-            var expectedFilePath = Path.Combine(Path.GetTempPath(), "file_with_invalid_chars.zip");
             var contentStream = new MemoryStream();
             var mockProgress = new Mock<IProgress<CreateVMProgressInfo>>();
 
             _mockStreamProvider.Setup(p => p.GetStreamAsync(uri, It.IsAny<CancellationToken>()))
                 .ReturnsAsync((contentStream, 1024L, finalUri));
 
-            _mockFileWriter.Setup(w => w.TryGetCachedFile(It.IsAny<string>(), out It.Ref<string>.IsAny)).Returns(false);
+            _mockFileStreamProvider.Setup(p => p.GetWriteStreamAsync(It.Is<string>(path => path.Contains("file_with_invalid_chars")), false))
+                .ReturnsAsync((new MemoryStream(), false));
 
-            _mockFileWriter.Setup(w => w.WriteAsync(contentStream, It.Is<string>(path => path.Contains("file_with_invalid_chars")), 1024L, finalUri, mockProgress.Object, It.IsAny<CancellationToken>()))
+            _mockStreamCopier.Setup(c => c.CopyAsync(contentStream, It.IsAny<Stream>(), 1024L, finalUri, mockProgress.Object, It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
 
             // Act
             var result = await _downloader.DownloadFileAsync(uri, CancellationToken.None, mockProgress.Object, false);
 
             // Assert
-            Assert.AreEqual(expectedFilePath, result);
+            Assert.IsTrue(result.Contains("file_with_invalid_chars"));
         }
     }
 }

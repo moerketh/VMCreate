@@ -5,7 +5,7 @@ VisualStudioVersion = 17.14.36127.28
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VMCreate", "VMCreate\VMCreate.csproj", "{0416A041-AFD8-762C-1970-3878BE7AD7F9}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VMCreateTests", "VMCreateTests\VMCreateTests.csproj", "{1B80E8BF-9BB7-4F5C-868B-F71CF74BB3C2}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VMCreate.Tests", "VMCreateTests\VMCreate.Tests.csproj", "{1B80E8BF-9BB7-4F5C-868B-F71CF74BB3C2}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

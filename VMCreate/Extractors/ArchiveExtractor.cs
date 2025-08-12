@@ -4,7 +4,6 @@ using System.Threading;
 using SharpCompress.Archives;
 using SharpCompress.Common;
 using Microsoft.Extensions.Logging;
-using VMCreate;
 
 namespace VMCreate
 {
@@ -16,9 +15,6 @@ namespace VMCreate
     /// The decision to split from XzFileExtractor was made to:
     /// - Isolate .xz-specific logic, as .xz files require ReaderFactory and lack progress events like CompressedBytesRead, unlike ArchiveFactory-supported formats.
     /// - Address format detection issues with .xz files, which caused InvalidOperationException in ArchiveFactory.
-    /// - Simplify maintenance by separating multi-file archive handling (with granular progress reporting) from single-file .xz extraction.
-    /// ArchiveFactory provides robust progress reporting via events like CompressedBytesRead, enabling detailed extraction feedback.
-    /// The class integrates with Serilog for logging and uses dependency injection to ensure compatibility with the application's CreateVM workflow.
     /// </remarks>
     public class ArchiveExtractor : IExtractor
     {
@@ -115,8 +111,6 @@ namespace VMCreate
             }
             logger.LogDebug("Creating directory {ExtractPath}", extractPath);
             Directory.CreateDirectory(extractPath);
-        }
-
-        
+        }        
     }
 }

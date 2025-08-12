@@ -39,7 +39,7 @@ namespace VMCreate
             });
             services.AddHttpClient();
             services.AddTransient<IHttpStreamProvider, HttpStreamProvider>();
-            services.AddTransient<IFileWriter, FileWriter>();
+            services.AddTransient<IStreamCopierWithProgress, StreamCopierWithProgress>();
             services.AddTransient<IDownloader, HttpFileDownloader>();
             services.AddTransient<LoadFromMicrosoftURI>();
             services.AddTransient<LoadFromRegistry>();
