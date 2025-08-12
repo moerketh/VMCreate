@@ -8,13 +8,20 @@
     <AssemblyName>CreateVM</AssemblyName>
     <WarningLevel>4</WarningLevel>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+	<PublishSingleFile>true</PublishSingleFile>
+	<SelfContained>true</SelfContained>
+	<IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+	<EnableCompressionInSingleFile>false</EnableCompressionInSingleFile>
+	<PublishReadyToRun>true</PublishReadyToRun>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="App.xaml.cs" />
     <Compile Include="AssemblyInfo.cs" />
     <Compile Include="CreateVM.cs" />
     <Compile Include="CreateVMProgressInfo.cs" />
+    <Compile Include="Downloaders\FileWriter.cs" />
     <Compile Include="Downloaders\HttpFileDownloader.cs" />
+    <Compile Include="Downloaders\HttpStreamProvider.cs" />
     <Compile Include="Extractors\ArchiveExtractor.cs" />
     <Compile Include="Extractors\ExtractorFactory.cs" />
     <Compile Include="Extractors\IExtractor.cs" />

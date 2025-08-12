@@ -38,6 +38,9 @@ namespace VMCreate
                 loggingBuilder.AddSerilog(dispose: true);
             });
             services.AddHttpClient();
+            services.AddTransient<IHttpStreamProvider, HttpStreamProvider>();
+            services.AddTransient<IFileWriter, FileWriter>();
+            services.AddTransient<IDownloader, HttpFileDownloader>();
             services.AddTransient<LoadFromMicrosoftURI>();
             services.AddTransient<LoadFromRegistry>();
             services.AddTransient<LoadFromLocalJsonFile>();
@@ -64,7 +67,6 @@ namespace VMCreate
             services.AddTransient<CreateVM>();
             services.AddTransient<IGalleryLoader, AggregateGalleryLoader>();
             services.AddTransient<IGalleryItemsParser, GalleryItemsParser>();
-            services.AddTransient<IDownloader, HttpFileDownloader>();
             services.AddSingleton<IPartitionSchemeDetector, PartitionSchemeDetector>();
             services.AddSingleton<MediaHandlerFactory>();
             services.AddSingleton<DiskConverter>();
