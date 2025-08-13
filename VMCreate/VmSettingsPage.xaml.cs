@@ -14,12 +14,15 @@ namespace VMCreate
         private const int DefaultCpuValue = 2;
         private readonly WizardData _wizardData;
         private readonly ILogger<VmSettingsPage> _logger;
+        private readonly ILoggerFactory _loggerFactory;
+
         public event EventHandler<WizardResultEventArgs> WizardCompleted;
 
-        public VmSettingsPage(WizardData wizardData, ILogger<VmSettingsPage> logger)
+        public VmSettingsPage(WizardData wizardData, ILogger<VmSettingsPage> logger, ILoggerFactory loggerFactory)
         {
             _wizardData = wizardData ?? throw new ArgumentNullException(nameof(wizardData));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
             InitializeComponent();
             DataContext = _wizardData;
             VMNameTextBox.Text = _wizardData.SelectedItem?.Name ?? "";
@@ -38,7 +41,7 @@ namespace VMCreate
             NewDriveSizeTextBox.Visibility = isNotVhdX ? Visibility.Visible : Visibility.Collapsed;
         }
 
-        private void finishButton_Click(object sender, RoutedEventArgs e)
+        private void nextButton_Click(object sender, RoutedEventArgs e)
         {
             try
             {
@@ -74,7 +77,9 @@ namespace VMCreate
                 _logger.LogDebug("Validated VM settings: VMName={VMName}, Memory={Memory}MB, CPU={CPU}, VirtualizationEnabled={VirtualizationEnabled}, NewDriveSizeGB={NewDriveSizeGB}",
                     _wizardData.Settings.VMName, _wizardData.Settings.MemoryInMB, _wizardData.Settings.CPUCount, _wizardData.Settings.VirtualizationEnabled, _wizardData.Settings.NewDriveSizeInGB);
 
-                WizardCompleted?.Invoke(this, new WizardResultEventArgs(WizardResult.Finished));
+                var nextPage = new VmCustomizationPage(_wizardData, _loggerFactory.CreateLogger<VmCustomizationPage>());
+                nextPage.WizardCompleted += (s, args) => WizardCompleted?.Invoke(s, args);
+                NavigationService.Navigate(nextPage);
             }
             catch (Exception ex)
             {

@@ -20,7 +20,7 @@ namespace VMCreate
         private readonly MediaHandlerFactory _mediaHandlerFactory;
         private readonly IHyperVManager _hyperVManager;
         private readonly ILogger<HyperVVmCreator> _logger;
-
+        private const int OriginalDiskScsiControllerLocation = 1;
         public HyperVVmCreator(ILogger<HyperVVmCreator> logger, MediaHandlerFactory mediaHandlerFactory, IHyperVManager hyperVManager)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -64,7 +64,7 @@ namespace VMCreate
                     
                 IMediaHandler mediaHandler = _mediaHandlerFactory.CreateHandler(item.FileType);
                 string mediaPath = await mediaHandler.PrepareMediaAsync(sourceFile, _defaultVhdxPath, item, createVMProgressInfo, cancellationToken);
-
+                string cloningIsoPath = "C:\\Users\\Thomas\\Desktop\\custom-autorun.iso"; // Update path as needed
                 int detectedGeneration = mediaHandler.VmGeneration; // 1 for MBR, 2 for GPT
                 const int targetGeneration = 2; // Always target Gen 2
 
@@ -95,7 +95,6 @@ namespace VMCreate
                     _logger.LogInformation("Attached MBR disk as secondary for cloning: {MediaPath}", mediaPath);
 
                     // Attach cloning ISO and set as first boot device
-                    string cloningIsoPath = "C:\\Users\\Thomas\\Desktop\\custom-autorun.iso"; // Update path as needed
                     await _hyperVManager.AddBootDvd(vmSettings, cloningIsoPath, cancellationToken);
 
                     // Set ISO as first boot (for one-time clone)
@@ -125,8 +124,19 @@ namespace VMCreate
                     //Monitor conversion process
                     var poller = new HyperVKVPPoller();
                     await poller.PollKVPForProgressAsync(vmSettings.VMName, createVMProgressInfo);
+
+                    //Wait for customizations
+                    var kvpbase = new KvpBase();
+                    createVMProgressInfo.Report(new CreateVMProgressInfo() { Phase = "Waiting for customizations and the VM to shutdown..."});
+                    await kvpbase.WaitForVMShutdownAsync(vmSettings.VMName, cancellationToken);
+
+                    // Remove original disk
+                    await _hyperVManager.RemoveHardDrive(vmSettings, OriginalDiskScsiControllerLocation, cancellationToken);
+                    // Remove ISO
+                    await _hyperVManager.RemoveBootDvd(vmSettings, cloningIsoPath, cancellationToken);
                 }
-                //await _hyperVManager.StartVMConnect(vmSettings, cancellationToken);
+                                
+                await _hyperVManager.StartVMConnect(vmSettings, cancellationToken);
             }
             catch (Exception ex)
             {

@@ -4,11 +4,8 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Management.Automation;
-using System.Runtime;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Windows.Input;
-using System.Xml.Linq;
 
 namespace VMCreate
 {
@@ -23,6 +20,8 @@ namespace VMCreate
         Task DisableDynamicMemory(VmSettings vmSettings, CancellationToken cancellationToken);
         Task EnableGuestServices(VmSettings vmSettings, CancellationToken cancellationToken);
         Task EnableVirtualization(VmSettings vmSettings, CancellationToken cancellationToken);
+        Task RemoveBootDvd(VmSettings vmSettings, string mediaPath, CancellationToken cancellationToken);
+        Task RemoveHardDrive(VmSettings vmSettings, int location, CancellationToken cancellationToken);
         Task SetCpuCount(VmSettings vmSettings, CancellationToken cancellationToken);
         Task SetEnhancedSession(VmSettings vmSettings, CancellationToken cancellationToken);
         Task SetFirstBootToDvd(VmSettings vmSettings, CancellationToken cancellationToken);
@@ -135,6 +134,18 @@ namespace VMCreate
             _logger.LogInformation($"Attached VHDX: {mediaPath}");
         }
 
+        public async Task RemoveHardDrive(VmSettings vmSettings, int location, CancellationToken cancellationToken)
+        {
+            _ps.Commands.Clear();
+            _ps.AddCommand("Get-VMHardDiskDrive")
+                .AddParameter("VMName", vmSettings.VMName)
+                .AddParameter("ControllerType", "SCSI")
+                .AddParameter("ControllerNumber", "0")
+                .AddParameter("ControllerLocation", location);
+            await RunCommand(cancellationToken);
+            _logger.LogInformation($"Detached disk at location: {location}");
+        }
+
         public async Task AddBootDvd(VmSettings vmSettings, string mediaPath, CancellationToken cancellationToken)
         {
             _logger.LogInformation($"Checking for DVD drive on VM: {vmSettings.VMName}");
@@ -164,6 +175,17 @@ namespace VMCreate
                 .AddParameter("Path", mediaPath);
             await RunCommand(cancellationToken);
             _logger.LogInformation("Attached ISO to DVD drive: {MediaPath}", mediaPath);
+        }
+
+        public async Task RemoveBootDvd(VmSettings vmSettings, string mediaPath, CancellationToken cancellationToken)
+        {
+            _logger.LogInformation("Detaching ISO from DVD drive: {MediaPath}", mediaPath);
+            _ps.Commands.Clear();
+            _ps.AddCommand("Set-VMDvdDrive")
+                .AddParameter("VMName", vmSettings.VMName)
+                .AddParameter("Path", null);
+            await RunCommand(cancellationToken);
+            _logger.LogInformation("Detached ISO from DVD drive: {MediaPath}", mediaPath);
         }
 
         public async Task SetFirstBootToDvd(VmSettings vmSettings, CancellationToken cancellationToken)

@@ -15,7 +15,7 @@ namespace CreateVM.HyperV.vmbus
         /// <param name="timeoutSeconds"></param>
         /// <param name="pollIntervalMs"></param>
         /// <returns></returns>
-        public async Task<string> WaitForVMRunningAsync(string vmName, CancellationToken cancellationToken, int timeoutSeconds = 300, int pollIntervalMs = 5000)
+        public async Task<string> WaitForVMRunningAsync(string vmName, CancellationToken cancellationToken, int timeoutSeconds = 300, int pollIntervalMs = 1000)
         {
             DateTime startTime = DateTime.UtcNow;
             while (!cancellationToken.IsCancellationRequested)
@@ -34,6 +34,25 @@ namespace CreateVM.HyperV.vmbus
                 await Task.Delay(pollIntervalMs, cancellationToken);
             }
             return null;
+        }
+
+        public async Task<bool> WaitForVMShutdownAsync(string vmName, CancellationToken cancellationToken, int timeoutSeconds = 300, int pollIntervalMs = 1000)
+        {
+            DateTime startTime = DateTime.UtcNow;
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                string guid = GetVMGuid(vmName);
+                if (string.IsNullOrEmpty(guid))
+                {
+                    return true;
+                }
+                if ((DateTime.UtcNow - startTime).TotalSeconds > timeoutSeconds)
+                {
+                    return false; // Timeout
+                }
+                await Task.Delay(pollIntervalMs, cancellationToken);
+            }
+            return false;
         }
 
         /// <summary>

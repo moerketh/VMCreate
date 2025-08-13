@@ -50,8 +50,9 @@
     <Compile Include="Gallery\LoadFromRegistry.cs" />
     <Compile Include="Gallery\other\LoadFromGSN3GitHub.cs" />
     <Compile Include="HyperV\BooleanOnOffAdapter.cs" />
-    <Compile Include="HyperV\HyperVKvpManager.cs" />
-    <Compile Include="HyperV\KvpProgressMonitor.cs" />
+    <Compile Include="HyperV\vmbus\KvpBase.cs" />
+    <Compile Include="HyperV\vmbus\KvpHostToGuest.cs" />
+    <Compile Include="HyperV\vmbus\KvpProgressMonitor.cs" />
     <Compile Include="HyperV\PowerShellHyperVManager.cs" />
     <Compile Include="HyperV\HyperVVmCreator.cs" />
     <Compile Include="MainWindow.xaml.cs" />
@@ -73,11 +74,16 @@
   	  <SubType>Code</SubType>
     </Compile>
     <Compile Include="SuccessWindow.xaml.cs" />
+    <Compile Include="VmCustomizations.cs" />
     <Compile Include="VmSettings.cs" />
     <Compile Include="VmSettingsPage.xaml.cs">
-    <DependentUpon>VmSettingsPage.xaml</DependentUpon>
+      <DependentUpon>VmSettingsPage.xaml</DependentUpon>
   	  <SubType>Code</SubType>
     </Compile>
+	<Compile Include="VmCustomizationPage.xaml.cs">
+		<DependentUpon>VmCustomizationPage.xaml</DependentUpon>
+		<SubType>Code</SubType>
+	</Compile>
     <Compile Include="WizardData.cs" />
   </ItemGroup>
   <ItemGroup>
@@ -116,6 +122,10 @@
       <Generator>MSBuild:Compile</Generator>
     </Page>
     <Page Include="SuccessWindow.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="VmCustomizationPage.xaml">
+      <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
     <Page Include="VmSettingsPage.xaml">

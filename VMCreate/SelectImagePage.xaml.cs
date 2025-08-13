@@ -77,7 +77,7 @@ namespace VMCreate
             }
 
             _wizardData.SelectedItem = selectedItem;
-            var nextPage = new VmSettingsPage(_wizardData, _loggerFactory.CreateLogger<VmSettingsPage>());
+            var nextPage = new VmSettingsPage(_wizardData, _loggerFactory.CreateLogger<VmSettingsPage>(), _loggerFactory);
             nextPage.WizardCompleted += (s, args) => WizardCompleted?.Invoke(s, args);
             NavigationService.Navigate(nextPage);
         }

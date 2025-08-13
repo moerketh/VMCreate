@@ -1,5 +1,4 @@
-﻿// WizardData.cs (new file)
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 
 namespace VMCreate
 {
@@ -14,6 +13,6 @@ namespace VMCreate
         public ObservableCollection<GalleryItem> GalleryItems { get; set; }
         public GalleryItem SelectedItem { get; set; }
         public VmSettings Settings { get; set; } = new VmSettings();
-        public VmCustomizations Customizations { get; set; }
+        public VmCustomizations Customizations { get; set; } = new VmCustomizations();
     }
 }
