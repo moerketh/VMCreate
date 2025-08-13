@@ -38,6 +38,7 @@ namespace VMCreate
                 loggingBuilder.AddSerilog(dispose: true);
             });
             services.AddHttpClient();
+            services.AddTransient<IFileStreamProvider, FileStreamProvider>();
             services.AddTransient<IHttpStreamProvider, HttpStreamProvider>();
             services.AddTransient<IStreamCopierWithProgress, StreamCopierWithProgress>();
             services.AddTransient<IDownloader, HttpFileDownloader>();

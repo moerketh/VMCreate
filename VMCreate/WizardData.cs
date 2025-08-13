@@ -14,5 +14,6 @@ namespace VMCreate
         public ObservableCollection<GalleryItem> GalleryItems { get; set; }
         public GalleryItem SelectedItem { get; set; }
         public VmSettings Settings { get; set; } = new VmSettings();
+        public VmCustomizations Customizations { get; set; }
     }
 }

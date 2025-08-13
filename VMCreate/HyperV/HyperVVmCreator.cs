@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Logging;
+﻿using CreateVM.HyperV.vmbus;
+using Microsoft.Extensions.Logging;
 using Microsoft.Win32;
 using System;
 using System.IO;
@@ -116,13 +117,13 @@ namespace VMCreate
                 await _hyperVManager.StartVM(vmSettings, cancellationToken);
                 if (detectedGeneration == 1)
                 {
+                    var kvp = new KvpHostToGuest();
+                    await kvp.SendKVPToGuestAsync(vmSettings.VMName, "DUMMY", "true", cancellationToken); //first KVP is always broken and mixed with network data, not sure why...
+#if DEBUG
+                    await kvp.SendKVPToGuestAsync(vmSettings.VMName, "VMCREATE_DEBUG", "true", cancellationToken);
+#endif
                     //Monitor conversion process
                     var poller = new HyperVKVPPoller();
-                    //await poller.SendKVPToGuestAsync(vmSettings.VMName, "DUMMY", "true", cancellationToken); //first KVP is always broken, not sure why...
-#if DEBUG
-                    //await poller.SendKVPToGuestAsync(vmSettings.VMName, "VMCREATE_DEBUG", "true", cancellationToken);
-#endif
-
                     await poller.PollKVPForProgressAsync(vmSettings.VMName, createVMProgressInfo);
                 }
                 //await _hyperVManager.StartVMConnect(vmSettings, cancellationToken);
