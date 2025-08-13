@@ -75,7 +75,6 @@ namespace VMCreate
             services.AddTransient<VmSettingsPage>();
             services.AddTransient<IVmCreator, HyperVVmCreator>();
             services.AddSingleton<IHyperVManager, PowerShellHyperVManager>();
-            services.AddLogging(logging => logging.AddSerilog());
 
             _serviceProvider = services.BuildServiceProvider();
             _logger = _serviceProvider.GetRequiredService<ILogger<MainWindow>>();
