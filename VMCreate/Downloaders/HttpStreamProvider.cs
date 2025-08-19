@@ -9,7 +9,7 @@ namespace VMCreate
 {
     public interface IHttpStreamProvider
     {
-        Task<(Stream ContentStream, long? ContentLength, string FinalUri)> GetStreamAsync(string uri, CancellationToken cancellationToken);
+        Task<HttpResponseMessage> GetResponseAsync(string uri, CancellationToken cancellationToken);
     }
 
     public class HttpStreamProvider : IHttpStreamProvider
@@ -23,12 +23,12 @@ namespace VMCreate
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
-        public async Task<(Stream ContentStream, long? ContentLength, string FinalUri)> GetStreamAsync(string uri, CancellationToken cancellationToken)
+        public async Task<HttpResponseMessage> GetResponseAsync(string uri, CancellationToken cancellationToken)
         {
             HttpClient client = _clientFactory.CreateClient();
             client.DefaultRequestHeaders.Add("User-Agent", "VMCreate");
 
-            using var response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            var response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             response.EnsureSuccessStatusCode();
 
             string finalUri = response.RequestMessage.RequestUri.ToString();
@@ -37,8 +37,7 @@ namespace VMCreate
             long? contentLength = response.Content.Headers.ContentLength;
             _logger.LogInformation("Content-Length: {ContentLength} bytes", contentLength);
 
-            var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken);
-            return (contentStream, contentLength, finalUri);
+            return response;
         }
     }
 }

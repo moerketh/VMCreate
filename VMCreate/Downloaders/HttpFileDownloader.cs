@@ -43,7 +43,10 @@ namespace VMCreate
 
                     DateTime startTime = DateTime.Now;
 
-                    var (contentStream, contentLength, finalUri) = await _streamProvider.GetStreamAsync(uri, cancellationToken);
+                    using var response = await _streamProvider.GetResponseAsync(uri, cancellationToken);
+
+                    string finalUri = response.RequestMessage.RequestUri.ToString();
+                    long? contentLength = response.Content.Headers.ContentLength;
 
                     var parsedUri = new Uri(finalUri);
                     var rawFileName = Path.GetFileName(parsedUri.LocalPath);
@@ -57,7 +60,8 @@ namespace VMCreate
                         return filePath;
                     }
 
-                    using (contentStream)
+                    var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+
                     using (writeStream)
                     {
                         await _streamCopier.CopyAsync(contentStream, writeStream, contentLength, finalUri, progressReportInfo, cancellationToken);

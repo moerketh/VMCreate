@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Logging;
 using Moq;
+using System.Net;
 
 namespace VMCreate.Tests
 {
@@ -29,16 +30,20 @@ namespace VMCreate.Tests
             var uri = "http://example.com/file.zip";
             var finalUri = "http://example.com/file.zip";
             var filePath = Path.Combine(Path.GetTempPath(), "file.zip");
-            var contentStream = new MemoryStream();
+            var mockResponse = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(new byte[0]) { Headers = { ContentLength = 1024 } },
+                RequestMessage = new HttpRequestMessage { RequestUri = new Uri(finalUri) }
+            };
             var mockProgress = new Mock<IProgress<CreateVMProgressInfo>>();
 
-            _mockStreamProvider.Setup(p => p.GetStreamAsync(uri, It.IsAny<CancellationToken>()))
-                .ReturnsAsync((contentStream, 1024L, finalUri));
+            _mockStreamProvider.Setup(p => p.GetResponseAsync(uri, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(mockResponse);
 
             _mockFileStreamProvider.Setup(p => p.GetWriteStreamAsync(It.IsAny<string>(), false))
                 .ReturnsAsync((new MemoryStream(), false));
 
-            _mockStreamCopier.Setup(c => c.CopyAsync(contentStream, It.IsAny<Stream>(), 1024L, finalUri, mockProgress.Object, It.IsAny<CancellationToken>()))
+            _mockStreamCopier.Setup(c => c.CopyAsync(It.IsAny<Stream>(), It.IsAny<Stream>(), 1024L, finalUri, mockProgress.Object, It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
 
             // Act
@@ -61,10 +66,15 @@ namespace VMCreate.Tests
             var uri = "http://example.com/file.zip";
             var finalUri = uri;
             var filePath = Path.Combine(Path.GetTempPath(), "file.zip");
+            var mockResponse = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(new byte[0]) { Headers = { ContentLength = 1024 } },
+                RequestMessage = new HttpRequestMessage { RequestUri = new Uri(finalUri) }
+            };
             var mockProgress = new Mock<IProgress<CreateVMProgressInfo>>();
 
-            _mockStreamProvider.Setup(p => p.GetStreamAsync(uri, It.IsAny<CancellationToken>()))
-                .ReturnsAsync((new MemoryStream(), 1024L, uri));
+            _mockStreamProvider.Setup(p => p.GetResponseAsync(uri, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(mockResponse);
 
             _mockFileStreamProvider.Setup(p => p.GetWriteStreamAsync(It.IsAny<string>(), true))
                 .ReturnsAsync((null, true));
@@ -84,17 +94,22 @@ namespace VMCreate.Tests
             var uri = "http://example.com/file.zip";
             var finalUri = "http://example.com/file.zip";
             var filePath = Path.Combine(Path.GetTempPath(), "file.zip");
-            var contentStream = new MemoryStream();
+            var mockResponse1 = new HttpResponseMessage(HttpStatusCode.InternalServerError); // Failure
+            var mockResponse2 = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(new byte[0]) { Headers = { ContentLength = 1024 } },
+                RequestMessage = new HttpRequestMessage { RequestUri = new Uri(finalUri) }
+            };
             var mockProgress = new Mock<IProgress<CreateVMProgressInfo>>();
 
-            _mockStreamProvider.SetupSequence(p => p.GetStreamAsync(uri, It.IsAny<CancellationToken>()))
-                .ThrowsAsync(new HttpRequestException("First failure"))
-                .ReturnsAsync((contentStream, 1024L, finalUri));
+            _mockStreamProvider.SetupSequence(p => p.GetResponseAsync(uri, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(mockResponse1)
+                .ReturnsAsync(mockResponse2);
 
             _mockFileStreamProvider.Setup(p => p.GetWriteStreamAsync(It.IsAny<string>(), false))
                 .ReturnsAsync((new MemoryStream(), false));
 
-            _mockStreamCopier.Setup(c => c.CopyAsync(contentStream, It.IsAny<Stream>(), 1024L, finalUri, mockProgress.Object, It.IsAny<CancellationToken>()))
+            _mockStreamCopier.Setup(c => c.CopyAsync(It.IsAny<Stream>(), It.IsAny<Stream>(), 1024L, finalUri, mockProgress.Object, It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
 
             // Act
@@ -102,7 +117,7 @@ namespace VMCreate.Tests
 
             // Assert
             Assert.IsTrue(result.EndsWith("file.zip"));
-            _mockStreamProvider.Verify(p => p.GetStreamAsync(uri, It.IsAny<CancellationToken>()), Times.Exactly(2)); // One failure, one success
+            _mockStreamProvider.Verify(p => p.GetResponseAsync(uri, It.IsAny<CancellationToken>()), Times.Exactly(2)); // One failure, one success
         }
 
         [TestMethod]
@@ -113,7 +128,7 @@ namespace VMCreate.Tests
             var uri = "http://example.com/file.zip";
             var mockProgress = new Mock<IProgress<CreateVMProgressInfo>>();
 
-            _mockStreamProvider.Setup(p => p.GetStreamAsync(uri, It.IsAny<CancellationToken>()))
+            _mockStreamProvider.Setup(p => p.GetResponseAsync(uri, It.IsAny<CancellationToken>()))
                 .ThrowsAsync(new HttpRequestException("Persistent failure"));
 
             // Act
@@ -130,9 +145,14 @@ namespace VMCreate.Tests
             var filePath = Path.Combine(Path.GetTempPath(), "file.zip");
             var cts = new CancellationTokenSource();
             var mockProgress = new Mock<IProgress<CreateVMProgressInfo>>();
+            var mockResponse = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(new byte[0]) { Headers = { ContentLength = 1024 } },
+                RequestMessage = new HttpRequestMessage { RequestUri = new Uri(finalUri) }
+            };
 
-            _mockStreamProvider.Setup(p => p.GetStreamAsync(uri, It.IsAny<CancellationToken>()))
-                .ReturnsAsync((new MemoryStream(), 1024L, finalUri));
+            _mockStreamProvider.Setup(p => p.GetResponseAsync(uri, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(mockResponse);
 
             _mockFileStreamProvider.Setup(p => p.GetWriteStreamAsync(It.IsAny<string>(), false))
                 .ReturnsAsync((new MemoryStream(), false));
@@ -148,18 +168,22 @@ namespace VMCreate.Tests
         public async Task DownloadFileAsync_InvalidFileNameFromUri_HandlesSanitization()
         {
             // Arrange
-            var uri = "http://example.com/file:with<invalid*chars.zip";
+            var uri = "http://example.com/file:with?invalid=chars.zip";
             var finalUri = uri;
-            var contentStream = new MemoryStream();
+            var mockResponse = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(new byte[0]) { Headers = { ContentLength = 1024 } },
+                RequestMessage = new HttpRequestMessage { RequestUri = new Uri(finalUri) }
+            };
             var mockProgress = new Mock<IProgress<CreateVMProgressInfo>>();
 
-            _mockStreamProvider.Setup(p => p.GetStreamAsync(uri, It.IsAny<CancellationToken>()))
-                .ReturnsAsync((contentStream, 1024L, finalUri));
+            _mockStreamProvider.Setup(p => p.GetResponseAsync(uri, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(mockResponse);
 
             _mockFileStreamProvider.Setup(p => p.GetWriteStreamAsync(It.Is<string>(path => path.Contains("file_with_invalid_chars")), false))
                 .ReturnsAsync((new MemoryStream(), false));
 
-            _mockStreamCopier.Setup(c => c.CopyAsync(contentStream, It.IsAny<Stream>(), 1024L, finalUri, mockProgress.Object, It.IsAny<CancellationToken>()))
+            _mockStreamCopier.Setup(c => c.CopyAsync(It.IsAny<Stream>(), It.IsAny<Stream>(), 1024L, finalUri, mockProgress.Object, It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
 
             // Act
