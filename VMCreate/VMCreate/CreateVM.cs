@@ -24,7 +24,7 @@ namespace VMCreate
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
-        public async Task StartCreateVMAsync(VmSettings vmSettings, GalleryItem galleryItem, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo> createVmProgressInfo)
+        public async Task StartCreateVMAsync(VmSettings vmSettings, VmCustomizations vmCustomizations, GalleryItem galleryItem, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo> createVmProgressInfo)
         {
             string filename = string.Empty;
             try
@@ -40,20 +40,20 @@ namespace VMCreate
                 filename = await _downloader.DownloadFileAsync(galleryItem.DiskUri, cancellationToken, createVmProgressInfo, _useCache);
                 _logger.LogInformation("Downloaded file {FileName}", filename);
 
-                // Extract if not ISO
+                // Extract if needed
                 if (galleryItem.FileType is not ("ISO" or "QCOW2"))
                 {
                     await Task.Run(() => _extractor.Extract(filename, _extractPath, cancellationToken, createVmProgressInfo));
                     _logger.LogInformation("Extracted file to {ExtractPath}", _extractPath);
 
                     // Create VM
-                    await _vmCreator.CreateVMAsync(vmSettings, Path.Combine(_extractPath, galleryItem.ArchiveRelativePath ?? throw new Exception("ArchiveRelativePath is null")), galleryItem, cancellationToken, createVmProgressInfo);
+                    await _vmCreator.CreateVMAsync(vmSettings, vmCustomizations, Path.Combine(_extractPath, galleryItem.ArchiveRelativePath ?? throw new Exception("ArchiveRelativePath is null")), galleryItem, cancellationToken, createVmProgressInfo);
                     _logger.LogInformation("Successfully created VM {VMName}", vmSettings.VMName);
                 }
                 else
                 {
                     // Create VM
-                    await _vmCreator.CreateVMAsync(vmSettings, filename, galleryItem, cancellationToken, createVmProgressInfo);
+                    await _vmCreator.CreateVMAsync(vmSettings, vmCustomizations, filename, galleryItem, cancellationToken, createVmProgressInfo);
                     _logger.LogInformation("Successfully created VM {VMName}", vmSettings.VMName);
                 }
             }

@@ -11,7 +11,7 @@ namespace VMCreate
 {
     public interface IVmCreator
     {
-        Task CreateVMAsync(VmSettings vmSettings, string extractPath, GalleryItem galleryItem, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo> downloadProgressInfo);
+        Task CreateVMAsync(VmSettings vmSettings, VmCustomizations vmCustomizations, string extractPath, GalleryItem galleryItem, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo> downloadProgressInfo);
     }
 
     public class HyperVVmCreator : IVmCreator
@@ -56,7 +56,7 @@ namespace VMCreate
             return defaultPath;
         }
 
-        public async Task CreateVMAsync(VmSettings vmSettings, string sourceFile, GalleryItem item, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo> createVMProgressInfo)
+        public async Task CreateVMAsync(VmSettings vmSettings, VmCustomizations vmCustomizations, string sourceFile, GalleryItem item, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo> createVMProgressInfo)
         {
             try
             {
@@ -121,9 +121,11 @@ namespace VMCreate
 #if DEBUG
                     await kvp.SendKVPToGuestAsync(vmSettings.VMName, "VMCREATE_DEBUG", "true", cancellationToken);
 #endif
+                    if(vmCustomizations.ConfigureXrdp) await kvp.SendKVPToGuestAsync(vmSettings.VMName, "VMCREATE_XRDP", "true", cancellationToken);
+
                     //Monitor conversion process
                     var poller = new HyperVKVPPoller();
-                    await poller.PollKVPForProgressAsync(vmSettings.VMName, createVMProgressInfo);
+                    await poller.PollKVPForProgressAsync(vmSettings.VMName, createVMProgressInfo, cancellationToken);
 
                     //Wait for customizations
                     var kvpbase = new KvpBase();

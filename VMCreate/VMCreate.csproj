@@ -17,8 +17,8 @@
   <ItemGroup>
     <Compile Include="App.xaml.cs" />
     <Compile Include="AssemblyInfo.cs" />
-    <Compile Include="CreateVM.cs" />
-    <Compile Include="CreateVMProgressInfo.cs" />
+    <Compile Include="VMCreate\CreateVM.cs" />
+    <Compile Include="VMCreate\CreateVMProgressInfo.cs" />
     <Compile Include="Downloaders\FileStreamProvider.cs" />
     <Compile Include="Downloaders\HttpFileDownloader.cs" />
     <Compile Include="Downloaders\HttpStreamProvider.cs" />
@@ -55,7 +55,7 @@
     <Compile Include="HyperV\vmbus\KvpProgressMonitor.cs" />
     <Compile Include="HyperV\PowerShellHyperVManager.cs" />
     <Compile Include="HyperV\HyperVVmCreator.cs" />
-    <Compile Include="MainWindow.xaml.cs" />
+    <Compile Include="GUI\MainWindow.xaml.cs" />
     <Compile Include="MediaHandlers\DeSparcify.cs" />
     <Compile Include="MediaHandlers\DiskConverter.cs" />
     <Compile Include="MediaHandlers\IMediaHandler.cs" />
@@ -65,26 +65,26 @@
     <Compile Include="MediaHandlers\Qcow2MediaHandler.cs" />
     <Compile Include="MediaHandlers\VhdxMediaHandler.cs" />
     <Compile Include="MediaHandlers\VmdkMediaHandler.cs" />
-    <Compile Include="ProgressWindow.xaml.cs">
+    <Compile Include="GUI\ProgressWindow.xaml.cs">
       <DependentUpon>ProgressWindow.xaml</DependentUpon>
   	  <SubType>Code</SubType>
     </Compile>
-    <Compile Include="SelectImagePage.xaml.cs">
+    <Compile Include="GUI\SelectImagePage.xaml.cs">
     <DependentUpon>SelectImagePage.xaml</DependentUpon>
   	  <SubType>Code</SubType>
     </Compile>
-    <Compile Include="SuccessWindow.xaml.cs" />
-    <Compile Include="VmCustomizations.cs" />
-    <Compile Include="VmSettings.cs" />
-    <Compile Include="VmSettingsPage.xaml.cs">
+    <Compile Include="GUI\SuccessWindow.xaml.cs" />
+    <Compile Include="VMCreate\VmCustomizations.cs" />
+    <Compile Include="VMCreate\VmSettings.cs" />
+    <Compile Include="GUI\VmSettingsPage.xaml.cs">
       <DependentUpon>VmSettingsPage.xaml</DependentUpon>
   	  <SubType>Code</SubType>
     </Compile>
-	<Compile Include="VmCustomizationPage.xaml.cs">
+	<Compile Include="GUI\VmCustomizationPage.xaml.cs">
 		<DependentUpon>VmCustomizationPage.xaml</DependentUpon>
 		<SubType>Code</SubType>
 	</Compile>
-    <Compile Include="WizardData.cs" />
+    <Compile Include="GUI\WizardData.cs" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="gallery.json" />
@@ -112,23 +112,23 @@
 		  <Generator>MSBuild:Compile</Generator>
 		  <SubType>Designer</SubType>
 	  </ApplicationDefinition>
-    <Page Include="MainWindow.xaml">
+    <Page Include="GUI\MainWindow.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
-    <Page Include="ProgressWindow.xaml">
+    <Page Include="GUI\ProgressWindow.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
-    <Page Include="SelectImagePage.xaml">
+    <Page Include="GUI\SelectImagePage.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
-    <Page Include="SuccessWindow.xaml">
+    <Page Include="GUI\SuccessWindow.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
-    <Page Include="VmCustomizationPage.xaml">
+    <Page Include="GUI\VmCustomizationPage.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
-    <Page Include="VmSettingsPage.xaml">
+    <Page Include="GUI\VmSettingsPage.xaml">
       <Generator>MSBuild:Compile</Generator>
 	  <SubType>Designer</SubType>
 	</Page>

@@ -6,7 +6,9 @@ using System;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
+using System.Management.Automation;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using VMCreate.Gallery;
 using VMCreate.MediaHandlers;
@@ -113,7 +115,7 @@ namespace VMCreate
             }
         }
 
-        private void WizardPage_Completed(object sender, WizardResultEventArgs e)
+        private async void WizardPage_Completed(object sender, WizardResultEventArgs e)
         {
             if (e.Result == WizardResult.Canceled)
             {
@@ -121,15 +123,24 @@ namespace VMCreate
             }
             else if (e.Result == WizardResult.Finished)
             {
-                CreateVM(_wizardData);
+                bool success = await CreateVMAsync(_wizardData);
+                if (success)
+                {
+                    // Reset wizard data and navigate back to the first page
+                    _wizardData = new WizardData { GalleryItems = _galleryItems };
+                    var firstPage = new SelectImagePage(_wizardData, _serviceProvider.GetRequiredService<ILogger<SelectImagePage>>(), _loggerFactory);
+                    firstPage.WizardCompleted += WizardPage_Completed;
+                    _mainFrame.Navigate(firstPage);
+                }
             }
         }
 
-        private async void CreateVM(WizardData wizardData)
+        private async Task<bool> CreateVMAsync(WizardData wizardData)
         {
             bool completed = false;
             var galleryItem = wizardData.SelectedItem;
             var vmSettings = wizardData.Settings;
+            var vmCustomizations = wizardData.Customizations;
 
             try
             {
@@ -161,7 +172,7 @@ namespace VMCreate
 
                 var token = cancellationTokenSource.Token;
                 var createVM = _serviceProvider.GetRequiredService<CreateVM>();
-                await createVM.StartCreateVMAsync(vmSettings, galleryItem, token, progressReport);
+                await createVM.StartCreateVMAsync(vmSettings, vmCustomizations, galleryItem, token, progressReport);
                 completed = true;
             }
             catch (OperationCanceledException)
@@ -180,9 +191,10 @@ namespace VMCreate
             {
                 _progressWindow.Close();
                 _successWindow = new SuccessWindow { Owner = this };
-                _successWindow.Show();
+                _successWindow.ShowDialog();
                 _logger.LogInformation("VM creation completed successfully");
             }
-        }
+            return completed;
+        }        
     }
 }
