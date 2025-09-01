@@ -219,7 +219,7 @@ namespace VMCreate
             _ps.Commands.Clear();
             _ps.AddCommand("Set-VM")
                 .AddParameter("VMName", vmSettings.VMName)
-                .AddParameter("EnhancedSessionTransportType", vmSettings.EnhancedSessionTransportType);
+                .AddParameter("EnhancedSessionTransportType", vmSettings.EnhancedSessionTransportType ?? "HvSocket");
             await RunCommand(cancellationToken);
         }
 

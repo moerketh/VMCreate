@@ -64,6 +64,7 @@ namespace VMCreate
                 _wizardData.Settings.CPUCount = cpuCount;
 
                 _wizardData.Settings.VirtualizationEnabled = VirtualizationEnabledCheckBox.IsChecked ?? false;
+                _wizardData.Settings.EnhancedSessionTransportType = _wizardData.SelectedItem.EnhancedSessionTransportType;
 
                 if (NewDriveSizeTextBox.Visibility == Visibility.Visible)
                 {

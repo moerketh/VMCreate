@@ -64,19 +64,19 @@ namespace VMCreate
                     
                 IMediaHandler mediaHandler = _mediaHandlerFactory.CreateHandler(item.FileType);
                 string mediaPath = await mediaHandler.PrepareMediaAsync(sourceFile, _defaultVhdxPath, item, createVMProgressInfo, cancellationToken);
-                string cloningIsoPath = "C:\\Users\\Thomas\\Desktop\\custom-autorun.iso"; // Update path as needed
+                
+                string cloningIsoPath = "C:\\Users\\Thomas\\Desktop\\custom-autorun.iso";
                 int detectedGeneration = mediaHandler.VmGeneration; // 1 for MBR, 2 for GPT
                 const int targetGeneration = 2; // Always target Gen 2
 
                 await _hyperVManager.CreateVMAsync(vmSettings, _defaultVhdxPath, targetGeneration, cancellationToken);
                 await _hyperVManager.SetVMLoginNotes(vmSettings, item.InitialUsername, item.InitialPassword, cancellationToken);
-                await _hyperVManager.AddNetworkAdapter(vmSettings, cancellationToken);
+                //await _hyperVManager.AddNetworkAdapter(vmSettings, cancellationToken);
                 await _hyperVManager.ConnectNetworkAdapter(vmSettings, cancellationToken);
 
                 // Common settings: CPU, enhanced session, secure boot
                 await _hyperVManager.SetCpuCount(vmSettings, cancellationToken);
                 await _hyperVManager.DisableDynamicMemory(vmSettings, cancellationToken);
-                await _hyperVManager.SetEnhancedSession(vmSettings, cancellationToken);
                 await _hyperVManager.SetSecureBoot(vmSettings, cancellationToken);
                 await _hyperVManager.EnableGuestServices(vmSettings, cancellationToken);
 
@@ -119,7 +119,7 @@ namespace VMCreate
                     var kvp = new KvpHostToGuest();
                     await kvp.SendKVPToGuestAsync(vmSettings.VMName, "DUMMY", "true", cancellationToken); //first KVP is always broken and mixed with network data, not sure why...
 #if DEBUG
-                    await kvp.SendKVPToGuestAsync(vmSettings.VMName, "VMCREATE_DEBUG", "true", cancellationToken);
+                    //await kvp.SendKVPToGuestAsync(vmSettings.VMName, "VMCREATE_DEBUG", "true", cancellationToken);
 #endif
                     if(vmCustomizations.ConfigureXrdp) await kvp.SendKVPToGuestAsync(vmSettings.VMName, "VMCREATE_XRDP", "true", cancellationToken);
 
@@ -137,7 +137,7 @@ namespace VMCreate
                     // Remove ISO
                     await _hyperVManager.RemoveBootDvd(vmSettings, cloningIsoPath, cancellationToken);
                 }
-                                
+                await _hyperVManager.SetEnhancedSession(vmSettings, cancellationToken);
                 await _hyperVManager.StartVMConnect(vmSettings, cancellationToken);
             }
             catch (Exception ex)
