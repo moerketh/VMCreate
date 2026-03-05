@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace VMCreate.Gallery
@@ -20,12 +21,12 @@ namespace VMCreate.Gallery
             _clientFactory = clientFactory ?? throw new ArgumentNullException(nameof(clientFactory));
         }
 
-        public async Task<List<GalleryItem>> LoadGalleryItems()
+        public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
             var client = _clientFactory.CreateClient();
             client.DefaultRequestHeaders.Add("User-Agent", "VMCreate/1.0");
 
-            var response = await client.GetAsync(BaseUrl);
+            var response = await client.GetAsync(BaseUrl, cancellationToken);
             response.EnsureSuccessStatusCode();
             var htmlContent = await response.Content.ReadAsStringAsync();
 

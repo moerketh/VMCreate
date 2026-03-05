@@ -1,5 +1,4 @@
-﻿using CreateVM;
-using Microsoft.Extensions.DependencyInjection;
+﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Serilog;
 using System;
@@ -19,6 +18,7 @@ namespace VMCreate
     {
         private readonly string logPath = Path.Combine(Path.GetTempPath(), "VMCreate.log");
         private readonly ObservableCollection<GalleryItem> _galleryItems = new ObservableCollection<GalleryItem>();
+        private CancellationTokenSource _galleryCts;
         private ProgressWindow _progressWindow;
         private SuccessWindow _successWindow;
         private readonly ILogger<MainWindow> _logger;
@@ -44,23 +44,16 @@ namespace VMCreate
             services.AddTransient<IHttpStreamProvider, HttpStreamProvider>();
             services.AddTransient<IStreamCopierWithProgress, StreamCopierWithProgress>();
             services.AddTransient<IDownloader, HttpFileDownloader>();
-            services.AddTransient<LoadFromMicrosoftURI>();
-            services.AddTransient<LoadFromRegistry>();
-            services.AddTransient<LoadFromLocalJsonFile>();
-            services.AddTransient<FedoraSilverblue>();
-            services.AddTransient<Arch>();
-            services.AddTransient<PwnCloudOS>();
-            services.AddTransient<BlackArch>();
-            services.AddTransient<NixOS>();
-            services.AddTransient<Ubuntu>();
-            services.AddTransient<ClearLinux>();
-            services.AddTransient<LoadKaliCurrent>();
-            services.AddTransient<LoadParrotHome>();
-            services.AddTransient<LoadParrotSecurity>();
-            services.AddTransient<LoadParrotHtb>();
-            services.AddTransient<LoadPentooCurrent>();
-            services.AddTransient<LoadFedoraSecurityLab>();
-            services.AddTransient<LoadFromGNS3GitHub>();
+
+            // Auto-register all IGalleryLoader implementations in this assembly (except the aggregate)
+            var galleryLoaderTypes = typeof(IGalleryLoader).Assembly
+                .GetTypes()
+                .Where(t => typeof(IGalleryLoader).IsAssignableFrom(t)
+                            && !t.IsAbstract
+                            && !t.IsInterface
+                            && t != typeof(AggregateGalleryLoader));
+            foreach (var loaderType in galleryLoaderTypes)
+                services.AddTransient(loaderType);
             services.AddTransient<XzFileExtractor>();
             services.AddTransient<ArchiveExtractor>();
             services.AddTransient<IExtractor>(provider => new ExtractorFactory(
@@ -88,12 +81,13 @@ namespace VMCreate
 
         private async void MyWindow_LoadedAsync(object sender, RoutedEventArgs e)
         {
+            _galleryCts = new CancellationTokenSource();
             try
             {
                 var galleryLoader = _serviceProvider.GetRequiredService<IGalleryLoader>();
-                var items = await galleryLoader.LoadGalleryItems();
-                // Filter, group by the unique key (Name and DiskUri) to remove duplicates, 
-                // select the first item from each group, then order by Name, 
+                var items = await galleryLoader.LoadGalleryItems(_galleryCts.Token);
+                // Filter, group by the unique key (Name and DiskUri) to remove duplicates,
+                // select the first item from each group, then order by Name,
                 // and finally add to the collection.
                 items.Where(i => i.Name != null && i.DiskUri != null)
                     .GroupBy(i => new { i.Name, i.DiskUri })
@@ -109,10 +103,21 @@ namespace VMCreate
                 firstPage.WizardCompleted += WizardPage_Completed;
                 _mainFrame.Navigate(firstPage);
             }
+            catch (OperationCanceledException)
+            {
+                _logger.LogInformation("Gallery loading was cancelled.");
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to load gallery items");
             }
+        }
+
+        protected override void OnClosed(EventArgs e)
+        {
+            _galleryCts?.Cancel();
+            _galleryCts?.Dispose();
+            base.OnClosed(e);
         }
 
         private async void WizardPage_Completed(object sender, WizardResultEventArgs e)

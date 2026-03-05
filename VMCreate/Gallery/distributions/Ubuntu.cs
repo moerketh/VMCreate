@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace VMCreate.Gallery
@@ -26,7 +27,7 @@ namespace VMCreate.Gallery
             _clientFactory = clientFactory ?? throw new ArgumentNullException(nameof(clientFactory));
         }
 
-        public async Task<List<GalleryItem>> LoadGalleryItems()
+        public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
             var galleryItems = new List<GalleryItem>();
             var jammyGalleryItem = new GalleryItem
@@ -41,7 +42,7 @@ namespace VMCreate.Gallery
                 SecureBoot = "false",
                 EnhancedSessionTransportType = "HvSocket",
                 Version = "22.04 LTS",
-                LastUpdated = await ParseBuildInfo(BaseUri + "jammy/current/unpacked/build-info.txt")
+                LastUpdated = await ParseBuildInfo(BaseUri + "jammy/current/unpacked/build-info.txt", cancellationToken)
             };
             galleryItems.Add(jammyGalleryItem);
             var nobleGalleryItem = new GalleryItem
@@ -56,7 +57,7 @@ namespace VMCreate.Gallery
                 SecureBoot = "false",
                 EnhancedSessionTransportType = "HvSocket",
                 Version = "24.04 LTS",
-                LastUpdated = await ParseBuildInfo(BaseUri + "noble/current/unpacked/build-info.txt")
+                LastUpdated = await ParseBuildInfo(BaseUri + "noble/current/unpacked/build-info.txt", cancellationToken)
             };
             galleryItems.Add(nobleGalleryItem);
             var oracularGalleryItem = new GalleryItem
@@ -71,18 +72,18 @@ namespace VMCreate.Gallery
                 SecureBoot = "false",
                 EnhancedSessionTransportType = "HvSocket",
                 Version = "24.10",
-                LastUpdated = await ParseBuildInfo(BaseUri + "oracular/current/unpacked/build-info.txt")
+                LastUpdated = await ParseBuildInfo(BaseUri + "oracular/current/unpacked/build-info.txt", cancellationToken)
             };
             galleryItems.Add(oracularGalleryItem);
             return galleryItems;
         }
 
-        private async Task<string> ParseBuildInfo(string buildInfoUri)
+        private async Task<string> ParseBuildInfo(string buildInfoUri, CancellationToken cancellationToken = default)
         {
             var client = _clientFactory.CreateClient();
             client.DefaultRequestHeaders.Add("User-Agent", "VMCreate/1.0");
 
-            var response = await client.GetAsync(buildInfoUri);
+            var response = await client.GetAsync(buildInfoUri, cancellationToken);
             response.EnsureSuccessStatusCode();
             var content = await response.Content.ReadAsStringAsync();
             var splt = content.Split('=');

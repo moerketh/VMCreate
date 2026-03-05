@@ -1,9 +1,8 @@
-﻿using CreateVM;
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Management.Automation.Language;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace VMCreate.Gallery
@@ -22,8 +21,7 @@ namespace VMCreate.Gallery
         /// <summary>
         /// Load a local gallery.json file
         /// </summary>
-        /// <returns></returns>
-        public async Task<List<GalleryItem>> LoadGalleryItems()
+        public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
             var items = new List<GalleryItem>();
             string localJsonPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "gallery.json");

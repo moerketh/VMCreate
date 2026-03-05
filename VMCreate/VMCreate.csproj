@@ -48,7 +48,7 @@
     <Compile Include="Gallery\LoadFromLocalJsonFile.cs" />
     <Compile Include="Gallery\LoadFromMicrosoftURI.cs" />
     <Compile Include="Gallery\LoadFromRegistry.cs" />
-    <Compile Include="Gallery\other\LoadFromGSN3GitHub.cs" />
+    <Compile Include="Gallery\other\LoadFromGNS3GitHub.cs" />
     <Compile Include="HyperV\BooleanOnOffAdapter.cs" />
     <Compile Include="HyperV\vmbus\KvpBase.cs" />
     <Compile Include="HyperV\vmbus\KvpHostToGuest.cs" />

@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Configuration;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace VMCreate.Gallery
@@ -72,29 +73,35 @@ namespace VMCreate.Gallery
             }
         }
 
-        public async Task<List<GalleryItem>> LoadGalleryItems()
+        public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
-            var allItems = new List<GalleryItem>();
-            foreach (var loader in _loaders)
+            // Run all loaders in parallel; individual failures are isolated and logged
+            var tasks = _loaders.Select(loader => LoadFromSingleLoader(loader, cancellationToken));
+            var results = await Task.WhenAll(tasks);
+            return results.SelectMany(r => r).ToList();
+        }
+
+        private async Task<List<GalleryItem>> LoadFromSingleLoader(IGalleryLoader loader, CancellationToken cancellationToken)
+        {
+            try
             {
-                try
+                var items = await loader.LoadGalleryItems(cancellationToken);
+                if (items == null)
                 {
-                    var items = await loader.LoadGalleryItems();
-                    if (items != null)
-                    {
-                        allItems.AddRange(items);
-                    }
-                    else
-                    {
-                        _logger.LogWarning($"Warning: Loader {loader.GetType().Name} returned null items.");
-                    }
+                    _logger.LogWarning($"Warning: Loader {loader.GetType().Name} returned null items.");
+                    return new List<GalleryItem>();
                 }
-                catch (Exception ex)
-                {
-                    _logger.LogError($"Error loading items from {loader.GetType().Name}: {ex.Message}");
-                }
+                return items;
             }
-            return allItems;
+            catch (OperationCanceledException)
+            {
+                throw; // Let cancellation propagate
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Error loading items from {loader.GetType().Name}: {ex.Message}");
+                return new List<GalleryItem>();
+            }
         }
     }
 }

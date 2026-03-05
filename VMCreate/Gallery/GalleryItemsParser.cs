@@ -1,43 +1,43 @@
-﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
-using VMCreate;
 
-namespace CreateVM
+namespace VMCreate.Gallery
 {
     public interface IGalleryItemsParser
     {
         List<GalleryItem> LoadJsonFromFile(string path);
         List<GalleryItem> LoadJsonFromFiles(string path);
-        Task<List<GalleryItem>> LoadJsonFromUrl(string url);
+        Task<List<GalleryItem>> LoadJsonFromUrl(string url, CancellationToken cancellationToken = default);
     }
 
     public class GalleryItemsParser : IGalleryItemsParser
     {
         private readonly ILogger<GalleryItemsParser> _logger;
+        private readonly IHttpClientFactory _clientFactory;
 
-        public GalleryItemsParser(ILogger<GalleryItemsParser> logger)
+        public GalleryItemsParser(ILogger<GalleryItemsParser> logger, IHttpClientFactory clientFactory)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _clientFactory = clientFactory ?? throw new ArgumentNullException(nameof(clientFactory));
         }
 
-        public async Task<List<GalleryItem>> LoadJsonFromUrl(string url)
+        public async Task<List<GalleryItem>> LoadJsonFromUrl(string url, CancellationToken cancellationToken = default)
         {
             try
             {
                 _logger.LogDebug($"Downloading JSON from {url}");
-                using (HttpClient client = new HttpClient())
-                {
-                    string json = await client.GetStringAsync(url);
-                    var items = ParseJson(json);
-                    _logger.LogDebug($"Parsed JSON from {url}");
-                    return items;
-                }
+                var client = _clientFactory.CreateClient();
+                string json = await client.GetStringAsync(url, cancellationToken);
+                var items = ParseJson(json);
+                _logger.LogDebug($"Parsed JSON from {url}");
+                return items;
             }
             catch (Exception ex)
             {
@@ -153,6 +153,6 @@ namespace CreateVM
             }
             return items;
         }
-
     }
 }
+

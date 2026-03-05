@@ -1,9 +1,9 @@
-﻿using CreateVM;
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 using Microsoft.Win32;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace VMCreate.Gallery
@@ -18,7 +18,8 @@ namespace VMCreate.Gallery
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _parser = parser ?? throw new ArgumentNullException(nameof(parser));
         }
-        public async Task<List<GalleryItem>> LoadGalleryItems()
+
+        public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
             var items = new List<GalleryItem>();
             try
@@ -41,13 +42,14 @@ namespace VMCreate.Gallery
                     _logger.LogDebug($"Found GalleryLocations: {string.Join(", ", locations)}");
                     foreach (string location in locations)
                     {
+                        cancellationToken.ThrowIfCancellationRequested();
                         if (location.StartsWith("http"))
                         {
-                            items = await _parser.LoadJsonFromUrl(location);
+                            items.AddRange(await _parser.LoadJsonFromUrl(location, cancellationToken));
                         }
                         else if (Directory.Exists(location))
                         {
-                            items = _parser.LoadJsonFromFiles(location);
+                            items.AddRange(_parser.LoadJsonFromFiles(location));
                         }
                         else
                         {
@@ -64,4 +66,5 @@ namespace VMCreate.Gallery
         }
     }
 }
+
 

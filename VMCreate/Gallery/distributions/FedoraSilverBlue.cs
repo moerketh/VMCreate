@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace VMCreate.Gallery
@@ -13,7 +14,7 @@ namespace VMCreate.Gallery
         private const string LogoUri = "https://fedoraproject.org/assets/images/fedora-logo.png";
         private const string SymbolUri = "https://fedoraproject.org/assets/images/fedora-logo.png";
 
-        public async Task<List<GalleryItem>> LoadGalleryItems()
+        public Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
             // Construct the ISO URL with hardcoded version
             var isoUrl = string.Format(IsoPathTemplate, $"{BaseUrl}{ReleaseVersion}/", ReleaseVersion);
@@ -37,7 +38,7 @@ namespace VMCreate.Gallery
                 Version = ReleaseVersion,
                 LastUpdated = lastModified.ToString("o")
             };
-            return new List<GalleryItem> { galleryItem };
+            return Task.FromResult(new List<GalleryItem> { galleryItem });
         }
     }
 }

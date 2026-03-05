@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Net.Http;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace VMCreate.Gallery
@@ -17,16 +18,14 @@ namespace VMCreate.Gallery
             _clientFactory = clientFactory ?? throw new ArgumentNullException(nameof(clientFactory));
         }
 
-        public async Task<List<GalleryItem>> LoadGalleryItems()
+        public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
             var galleryItems = new List<GalleryItem>();
-            try
-            {
-                var client = _clientFactory.CreateClient();
-                client.DefaultRequestHeaders.Add("User-Agent", "VMCreate/1.0");
+            var client = _clientFactory.CreateClient();
+            client.DefaultRequestHeaders.Add("User-Agent", "VMCreate/1.0");
 
-                // Fetch the downloads page
-                var response = await client.GetAsync(DownloadsUrl);
+            // Fetch the downloads page
+            var response = await client.GetAsync(DownloadsUrl, cancellationToken);
                 response.EnsureSuccessStatusCode();
                 var htmlContent = await response.Content.ReadAsStringAsync();
 
@@ -91,12 +90,6 @@ namespace VMCreate.Gallery
                 {
                     throw new Exception("Could not find BlackArch OVA Image URL in the downloads page.");
                 }
-            }
-            catch (Exception ex)
-            {
-                throw;
-            }
-
             return galleryItems;
         }
     }

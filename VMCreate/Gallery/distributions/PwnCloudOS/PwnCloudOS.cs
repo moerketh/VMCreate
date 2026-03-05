@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace VMCreate.Gallery
@@ -10,9 +11,8 @@ namespace VMCreate.Gallery
         private const string LogoUri = "https://pwncloudos.pwnedlabs.io/hubfs/pwnedlabs-notagline.svg";
         private const string SymbolUri = "https://pwncloudos.pwnedlabs.io/hubfs/favicon-1.svg";
 
-        public async Task<List<GalleryItem>> LoadGalleryItems()
+        public Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
-            // Use current UTC time as fallback for LastUpdated
             var lastModified = DateTime.UtcNow;
 
             var galleryItem = new GalleryItem
@@ -30,7 +30,7 @@ namespace VMCreate.Gallery
                 InitialUsername = "pwnedlabs",
                 InitialPassword = "pwnedlabs"
             };
-            return new List<GalleryItem> { galleryItem };
+            return Task.FromResult(new List<GalleryItem> { galleryItem });
         }
     }
 }

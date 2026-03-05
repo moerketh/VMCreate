@@ -1,8 +1,7 @@
-﻿using CreateVM;
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
-using System.Management.Automation.Language;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace VMCreate.Gallery
@@ -21,18 +20,15 @@ namespace VMCreate.Gallery
         /// <summary>
         /// Load Microsoft Default Hyper-V Gallery Items from URI
         /// </summary>
-        /// <returns></returns>
-        public async Task<List<GalleryItem>> LoadGalleryItems()
+        public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
             var galleryItems = new List<GalleryItem>();
             try
             {
-                // Load Microsoft Default gallery items
-                galleryItems = await _parser.LoadJsonFromUrl("https://go.microsoft.com/fwlink/?linkid=851584");
+                galleryItems = await _parser.LoadJsonFromUrl("https://go.microsoft.com/fwlink/?linkid=851584", cancellationToken);
             }
             catch (Exception ex)
             {
-                // Handle exceptions, e.g., log the error
                 _logger.LogError($"Error loading gallery items from Microsoft URI: {ex.Message}");
             }
             return galleryItems;

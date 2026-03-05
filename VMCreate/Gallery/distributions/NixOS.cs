@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace VMCreate.Gallery
@@ -14,7 +15,7 @@ namespace VMCreate.Gallery
         private const string LogoUri = "https://nixos.org/logo/nixos-logo.png";
         private const string SymbolUri = "https://nixos.org/logo/nixos-logo.png";
 
-        public async Task<List<GalleryItem>> LoadGalleryItems()
+        public Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
             var galleryItems = new List<GalleryItem>();
             var lastModified = DateTime.UtcNow;
@@ -59,7 +60,7 @@ namespace VMCreate.Gallery
                 LastUpdated = lastModified.ToString("o")
             });
 
-            return galleryItems;
+            return Task.FromResult(galleryItems);
         }
     }
 }

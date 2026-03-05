@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace VMCreate.Gallery
@@ -11,21 +12,23 @@ namespace VMCreate.Gallery
     public class LoadFromGNS3GitHub : IGalleryLoader
     {
         private const string GitHubApiUrl = "https://api.github.com/repos/GNS3/gns3-gui/releases/latest";
-        private static readonly HttpClient _httpClient = new HttpClient();
         private readonly ILogger<LoadFromGNS3GitHub> _logger;
+        private readonly IHttpClientFactory _clientFactory;
 
-        public LoadFromGNS3GitHub(ILogger<LoadFromGNS3GitHub> logger)
+        public LoadFromGNS3GitHub(ILogger<LoadFromGNS3GitHub> logger, IHttpClientFactory clientFactory)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            _httpClient.DefaultRequestHeaders.Add("User-Agent", "VMCreate-GalleryLoader/1.0");
+            _clientFactory = clientFactory ?? throw new ArgumentNullException(nameof(clientFactory));
         }
 
-        public async Task<List<GalleryItem>> LoadGalleryItems()
+        public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
             List<GalleryItem> items = new List<GalleryItem>();
             try
             {
-                string jsonResponse = await _httpClient.GetStringAsync(GitHubApiUrl);
+                var client = _clientFactory.CreateClient();
+                client.DefaultRequestHeaders.Add("User-Agent", "VMCreate-GalleryLoader/1.0");
+                string jsonResponse = await client.GetStringAsync(GitHubApiUrl, cancellationToken);
                 JsonDocument doc = null;
                 try
                 {
@@ -73,10 +76,7 @@ namespace VMCreate.Gallery
                 }
                 finally
                 {
-                    if (doc != null)
-                    {
-                        doc.Dispose();
-                    }
+                    doc?.Dispose();
                 }
             }
             catch (Exception ex)
