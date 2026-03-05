@@ -34,13 +34,17 @@ namespace VMCreate
             services.AddTransient<IStreamCopierWithProgress, StreamCopierWithProgress>();
             services.AddTransient<IDownloader, HttpFileDownloader>();
 
-            // Auto-register all IGalleryLoader implementations in this assembly (except the aggregate)
-            var galleryLoaderTypes = typeof(IGalleryLoader).Assembly
-                .GetTypes()
-                .Where(t => typeof(IGalleryLoader).IsAssignableFrom(t)
-                            && !t.IsAbstract
-                            && !t.IsInterface
-                            && t != typeof(AggregateGalleryLoader));
+            // Auto-register all IGalleryLoader implementations across main and security assemblies
+            var galleryLoaderTypes = new[]
+            {
+                System.Reflection.Assembly.GetExecutingAssembly(), // VMCreate (main)
+                typeof(BlackArch).Assembly                         // VMCreate.Gallery.Security
+            }
+            .SelectMany(a => a.GetTypes())
+            .Where(t => typeof(IGalleryLoader).IsAssignableFrom(t)
+                        && !t.IsAbstract
+                        && !t.IsInterface
+                        && t != typeof(AggregateGalleryLoader));
             foreach (var loaderType in galleryLoaderTypes)
                 services.AddTransient(loaderType);
 

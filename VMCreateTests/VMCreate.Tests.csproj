@@ -15,6 +15,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\VMCreate\VMCreate.csproj" />
+    <ProjectReference Include="..\VMCreate.Gallery.Contracts\VMCreate.Gallery.Contracts.csproj" />
+    <ProjectReference Include="..\VMCreate.Gallery.Security\VMCreate.Gallery.Security.csproj" />
   </ItemGroup>
 
 </Project>

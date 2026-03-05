@@ -30,19 +30,10 @@
     <Compile Include="Extractors\XzFileExtractor.cs" />
     <Compile Include="Gallery\AggregateGalleryLoader.cs" />
     <Compile Include="Gallery\distributions\Arch.cs" />
-    <Compile Include="Gallery\distributions\BlackArch.cs" />
-    <Compile Include="Gallery\distributions\FedoraSilverBlue.cs" />
+    <Compile Include="Gallery\distributions\FedoraSilverblue.cs" />
     <Compile Include="Gallery\distributions\ClearLinux.cs" />
-    <Compile Include="Gallery\distributions\LoadFedoraSecurityLab.cs" />
     <Compile Include="Gallery\distributions\Ubuntu.cs" />
-    <Compile Include="Gallery\distributions\LoadKaliCurrent.cs" />
-    <Compile Include="Gallery\distributions\LoadParrotHome.cs" />
-    <Compile Include="Gallery\distributions\LoadParrotSecurity.cs" />
-    <Compile Include="Gallery\distributions\LoadPentooCurrent.cs" />
     <Compile Include="Gallery\distributions\NixOS.cs" />
-    <Compile Include="Gallery\distributions\PwnCloudOS\PwnCloudOS.cs" />
-    <Compile Include="Gallery\GalleryItem.cs" />
-    <Compile Include="Gallery\IGalleryLoader.cs" />
     <Compile Include="Gallery\ImageSourceConverter.cs" />
     <Compile Include="Gallery\LoadFromLocalJsonFile.cs" />
     <Compile Include="Gallery\LoadFromMicrosoftURI.cs" />
@@ -94,6 +85,11 @@
   <ItemGroup>
     <None Include="App.config" />
     <None Include="app.manifest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VMCreate.Gallery.Contracts\VMCreate.Gallery.Contracts.csproj" />
+    <ProjectReference Include="..\VMCreate.Gallery.Security\VMCreate.Gallery.Security.csproj" />
   </ItemGroup>
 
   <ItemGroup>

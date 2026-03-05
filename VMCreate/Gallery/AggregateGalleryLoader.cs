@@ -47,7 +47,9 @@ namespace VMCreate.Gallery
             {
                 try
                 {
-                    var type = Type.GetType(typeName);
+                    var type = AppDomain.CurrentDomain.GetAssemblies()
+                        .Select(a => a.GetType(typeName))
+                        .FirstOrDefault(t => t != null);
                     if (type == null)
                     {
                         _logger.LogError("Could not find type '{TypeName}'. Verify the namespace and assembly.", typeName);
