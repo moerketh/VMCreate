@@ -37,7 +37,6 @@
     <Compile Include="Gallery\distributions\Ubuntu.cs" />
     <Compile Include="Gallery\distributions\LoadKaliCurrent.cs" />
     <Compile Include="Gallery\distributions\LoadParrotHome.cs" />
-    <Compile Include="Gallery\distributions\LoadParrotHtb.cs" />
     <Compile Include="Gallery\distributions\LoadParrotSecurity.cs" />
     <Compile Include="Gallery\distributions\LoadPentooCurrent.cs" />
     <Compile Include="Gallery\distributions\NixOS.cs" />
