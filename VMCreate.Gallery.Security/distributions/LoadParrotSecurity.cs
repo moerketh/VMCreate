@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Net.Http;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -30,51 +29,81 @@ namespace VMCreate.Gallery
             response.EnsureSuccessStatusCode();
             var htmlContent = await response.Content.ReadAsStringAsync();
 
-            var preferredPattern = @"<a href=""(Parrot-security-[\d\.]+_amd64\.vmdk\.xz)"">.*?</a>\s+(\d{2}-[A-Za-z]{3}-\d{4} \d{2}:\d{2})\s+(\d+)";
-            var match = Regex.Match(htmlContent, preferredPattern, RegexOptions.Singleline);
+            var items = new List<GalleryItem>();
 
-            if (!match.Success)
-            {
-                var fallbackPattern = @"<a href=""(Parrot-security-[\d\.]+_amd64\.iso)"">.*?</a>\s+(\d{2}-[A-Za-z]{3}-\d{4} \d{2}:\d{2})\s+(\d+)";
-                match = Regex.Match(htmlContent, fallbackPattern, RegexOptions.Singleline);
-            }
+            // Look for ISO (live installer)
+            var isoPattern = @"<a href=""(Parrot-security-[\d\.]+_amd64\.iso)"">.*?</a>\s+(\d{2}-[A-Za-z]{3}-\d{4} \d{2}:\d{2})\s+(\d+)";
+            var isoMatch = Regex.Match(htmlContent, isoPattern, RegexOptions.Singleline);
 
-            if (!match.Success)
+            // Look for QCOW2 (pre-installed disk image, converts directly to VHDX for Hyper-V)
+            var qcow2Pattern = @"<a href=""(Parrot-security-[\d\.]+_amd64\.qcow2)"">.*?</a>\s+(\d{2}-[A-Za-z]{3}-\d{4} \d{2}:\d{2})\s+(\d+)";
+            var qcow2Match = Regex.Match(htmlContent, qcow2Pattern, RegexOptions.Singleline);
+
+            if (!isoMatch.Success && !qcow2Match.Success)
             {
                 throw new Exception("Could not find Security Edition file.");
             }
 
-            var filename = match.Groups[1].Value;
-            var dateStr = match.Groups[2].Value;
-
-            var versionPattern = @"Parrot-security-([\d\.]+)_amd64\.(vmdk\.xz|iso)";
-            var versionMatch = Regex.Match(filename, versionPattern);
-            if (!versionMatch.Success)
+            if (isoMatch.Success)
             {
-                throw new Exception($"Could not extract version from filename: {filename}");
+                var filename = isoMatch.Groups[1].Value;
+                var version = ExtractVersion(filename);
+                var lastUpdated = ParseDate(isoMatch.Groups[2].Value);
+
+                items.Add(new GalleryItem
+                {
+                    Name = "Parrot Security OS",
+                    Publisher = "Parrot Project",
+                    Description = $"Parrot Security OS ISO installer, includes a full set of penetration testing tools (version {version})",
+                    ThumbnailUri = logoUri,
+                    LogoUri = logoUri,
+                    SymbolUri = SymbolUri,
+                    DiskUri = BaseUrl + filename,
+                    ArchiveRelativePath = filename,
+                    SecureBoot = "false",
+                    EnhancedSessionTransportType = "HvSocket",
+                    Version = version,
+                    LastUpdated = lastUpdated.ToString("o")
+                });
             }
-            var version = versionMatch.Groups[1].Value;
 
-            var lastUpdated = DateTime.ParseExact(dateStr, "dd-MMM-yyyy HH:mm", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal);
-
-            var downloadUrl = BaseUrl + filename;
-
-            var galleryItem =  new GalleryItem
+            if (qcow2Match.Success)
             {
-                Name = "Parrot Security OS",
-                Publisher = "Parrot Project",
-                Description = $"Parrot Security OS, includes a full set of penetration testing tools (version {version})",
-                ThumbnailUri = logoUri,
-                LogoUri = logoUri,
-                SymbolUri = SymbolUri,
-                DiskUri = downloadUrl,
-                ArchiveRelativePath = filename.EndsWith(".xz", StringComparison.InvariantCultureIgnoreCase) ? Path.GetFileNameWithoutExtension(filename) : filename,
-                SecureBoot = "false",
-                EnhancedSessionTransportType = "HvSocket",
-                Version = version,
-                LastUpdated = lastUpdated.ToString("o")
-            };
-            return new List<GalleryItem> { galleryItem };
+                var filename = qcow2Match.Groups[1].Value;
+                var version = ExtractVersion(filename);
+                var lastUpdated = ParseDate(qcow2Match.Groups[2].Value);
+
+                items.Add(new GalleryItem
+                {
+                    Name = "Parrot Security OS (Pre-installed)",
+                    Publisher = "Parrot Project",
+                    Description = $"Parrot Security OS pre-installed disk image, includes a full set of penetration testing tools (version {version})",
+                    ThumbnailUri = logoUri,
+                    LogoUri = logoUri,
+                    SymbolUri = SymbolUri,
+                    DiskUri = BaseUrl + filename,
+                    ArchiveRelativePath = "",
+                    SecureBoot = "false",
+                    EnhancedSessionTransportType = "HvSocket",
+                    Version = version,
+                    LastUpdated = lastUpdated.ToString("o")
+                });
+            }
+
+            return items;
+        }
+
+        private static string ExtractVersion(string filename)
+        {
+            var versionMatch = Regex.Match(filename, @"Parrot-security-([\d\.]+)_amd64\.");
+            if (!versionMatch.Success)
+                throw new Exception($"Could not extract version from filename: {filename}");
+            return versionMatch.Groups[1].Value;
+        }
+
+        private static DateTime ParseDate(string dateStr)
+        {
+            return DateTime.ParseExact(dateStr, "dd-MMM-yyyy HH:mm", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal);
         }
     }
 }
