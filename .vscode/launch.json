@@ -1,0 +1,16 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Launch VMCreate",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "build",
+            "program": "${workspaceFolder}/VMCreate/bin/Debug/net8.0-windows/CreateVM.exe",
+            "args": [],
+            "cwd": "${workspaceFolder}/VMCreate",
+            "console": "internalConsole",
+            "stopAtEntry": false
+        }
+    ]
+}

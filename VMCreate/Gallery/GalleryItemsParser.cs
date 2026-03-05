@@ -105,13 +105,35 @@ namespace VMCreate.Gallery
                             continue;
                         }
 
+                        // Extract "config" properties up-front to avoid calling
+                        // TryGetProperty on a default (Undefined) JsonElement,
+                        // which would throw InvalidOperationException.
+                        string secureBoot = "";
+                        string enhancedSessionTransportType = "";
+                        if (image.TryGetProperty("config", out var configProp))
+                        {
+                            if (configProp.TryGetProperty("secureBoot", out var secureBootProp))
+                                secureBoot = secureBootProp.GetString() ?? "";
+                            if (configProp.TryGetProperty("enhancedSessionTransportType", out var enhancedProp))
+                                enhancedSessionTransportType = enhancedProp.GetString() ?? "";
+                        }
+
+                        // Extract "description" — may be a string or an array of strings.
+                        string description = "";
+                        if (image.TryGetProperty("description", out var descProp))
+                        {
+                            description = descProp.ValueKind == JsonValueKind.Array
+                                ? string.Join(" ", descProp.EnumerateArray().Select(e => e.GetString())).Trim()
+                                : descProp.ValueKind == JsonValueKind.String
+                                    ? descProp.GetString() ?? ""
+                                    : "";
+                        }
+
                         var item = new GalleryItem
                         {
                             Name = name,
                             Publisher = image.TryGetProperty("publisher", out var publisherProp) ? publisherProp.GetString() ?? "" : "",
-                            Description = image.TryGetProperty("description", out var descProp) && descProp.ValueKind == JsonValueKind.Array
-                                ? string.Join(" ", descProp.EnumerateArray().Select(e => e.GetString())).Trim()
-                                : (descProp.ValueKind == JsonValueKind.String ? descProp.GetString() : ""),
+                            Description = description,
                             ThumbnailUri = image.TryGetProperty("thumbnail", out var thumbProp) && thumbProp.TryGetProperty("uri", out var thumbUriProp)
                                 ? thumbUriProp.GetString() ?? ""
                                 : "",
@@ -125,12 +147,8 @@ namespace VMCreate.Gallery
                             ArchiveRelativePath = diskProp.TryGetProperty("archiveRelativePath", out var archivePathProp)
                                 ? archivePathProp.GetString() ?? ""
                                 : "",
-                            SecureBoot = image.TryGetProperty("config", out var configProp) && configProp.TryGetProperty("secureBoot", out var secureBootProp)
-                                ? secureBootProp.GetString() ?? ""
-                                : "",
-                            EnhancedSessionTransportType = configProp.TryGetProperty("enhancedSessionTransportType", out var enhancedProp)
-                                ? enhancedProp.GetString() ?? ""
-                                : "",
+                            SecureBoot = secureBoot,
+                            EnhancedSessionTransportType = enhancedSessionTransportType,
                             Version = image.TryGetProperty("version", out var versionProp) ? versionProp.GetString() ?? "" : "",
                             LastUpdated = image.TryGetProperty("lastUpdated", out var lastUpdatedProp) ? lastUpdatedProp.GetString() ?? "" : ""
                         };

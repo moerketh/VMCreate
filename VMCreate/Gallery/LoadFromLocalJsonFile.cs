@@ -21,7 +21,7 @@ namespace VMCreate.Gallery
         /// <summary>
         /// Load a local gallery.json file
         /// </summary>
-        public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
+        public Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
             var items = new List<GalleryItem>();
             string localJsonPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "gallery.json");
@@ -34,7 +34,7 @@ namespace VMCreate.Gallery
             {
                 _logger.LogWarning($"Local JSON file not found: {localJsonPath}");
             }
-            return items;
+            return Task.FromResult(items);
         }
     }
 }

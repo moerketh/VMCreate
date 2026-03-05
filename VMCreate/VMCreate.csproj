@@ -4,7 +4,7 @@
     <UseWPF>true</UseWPF>
 	<EnableDefaultItems>false</EnableDefaultItems>
     <OutputType>WinExe</OutputType>
-    <RootNamespace>CreateVM</RootNamespace>
+    <RootNamespace>VMCreate</RootNamespace>
     <AssemblyName>CreateVM</AssemblyName>
     <WarningLevel>4</WarningLevel>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>

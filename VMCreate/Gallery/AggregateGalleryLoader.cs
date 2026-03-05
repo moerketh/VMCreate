@@ -14,6 +14,15 @@ namespace VMCreate.Gallery
         private readonly ILogger<AggregateGalleryLoader> _logger;
         private readonly IServiceProvider _serviceProvider;
 
+        /// <summary>
+        /// Testable constructor — supply the loaders directly without App.config or DI.
+        /// </summary>
+        public AggregateGalleryLoader(ILogger<AggregateGalleryLoader> logger, IEnumerable<IGalleryLoader> loaders)
+        {
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _loaders = (loaders ?? throw new ArgumentNullException(nameof(loaders))).ToList();
+        }
+
         public AggregateGalleryLoader(ILogger<AggregateGalleryLoader> logger, IServiceProvider serviceProvider)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
