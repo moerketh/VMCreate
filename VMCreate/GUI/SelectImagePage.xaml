@@ -35,7 +35,7 @@
                  AutomationProperties.Name="Search gallery images"/>
         <Grid Grid.Row="3">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="2*"/>
+                <ColumnDefinition Width="Auto" MinWidth="350" MaxWidth="500"/>
                 <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
             <!-- Gallery list -->
@@ -45,15 +45,11 @@
                          SelectionMode="Single" ScrollViewer.VerticalScrollBarVisibility="Auto" 
                          ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                          ItemContainerStyle="{StaticResource GalleryItemStyle}"
+                         HorizontalContentAlignment="Stretch"
                          AutomationProperties.Name="Gallery images">
-                    <ListBox.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <WrapPanel Width="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=ListBox}}" Orientation="Horizontal"/>
-                        </ItemsPanelTemplate>
-                    </ListBox.ItemsPanel>
                     <ListBox.ItemTemplate>
                         <DataTemplate>
-                            <Grid Width="450" Margin="1">
+                            <Grid Margin="1">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="Auto"/>
@@ -84,9 +80,10 @@
                 </Border>
             </Grid>
             <!-- Detail panel — bound directly to SelectedItem properties -->
-            <StackPanel Grid.Column="1" Margin="10,0,10,0">
+            <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="10,0,10,0">
+            <StackPanel>
                 <Image Source="{Binding SelectedItem.ThumbnailUri, Converter={StaticResource ImageConverter}}"
-                       Width="400" Height="199" Margin="0,0,0,10"/>
+                       Stretch="Uniform" Margin="0,0,0,10"/>
                 <TextBlock Text="{Binding SelectedItem.Name, StringFormat='Name: {0}'}"
                            Style="{StaticResource ExplanationText}" FontWeight="Bold" Margin="0,0,0,-5"/>
                 <TextBlock Text="{Binding SelectedItem.Publisher, StringFormat='Publisher: {0}'}"
@@ -100,6 +97,7 @@
                 <TextBlock Text="{Binding SelectedItem.Description, StringFormat='Description: {0}'}"
                            Style="{StaticResource ExplanationText}" TextWrapping="Wrap"/>
             </StackPanel>
+            </ScrollViewer>
         </Grid>
         <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
             <Button Content="Cancel" Command="{Binding CancelCommand}" Style="{StaticResource CommonButton}"
