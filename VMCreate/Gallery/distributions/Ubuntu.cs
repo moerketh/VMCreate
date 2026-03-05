@@ -29,53 +29,57 @@ namespace VMCreate.Gallery
 
         public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
-            var galleryItems = new List<GalleryItem>();
-            var jammyGalleryItem = new GalleryItem
+            // Fetch all three build-info files in parallel instead of sequentially.
+            var jammyBuildInfo  = ParseBuildInfo(BaseUri + "jammy/current/unpacked/build-info.txt",    cancellationToken);
+            var nobleBuildInfo  = ParseBuildInfo(BaseUri + "noble/current/unpacked/build-info.txt",    cancellationToken);
+            var oracularBuildInfo = ParseBuildInfo(BaseUri + "oracular/current/unpacked/build-info.txt", cancellationToken);
+            await Task.WhenAll(jammyBuildInfo, nobleBuildInfo, oracularBuildInfo).ConfigureAwait(false);
+
+            return new List<GalleryItem>
             {
-                Name = "Ubuntu 22.04 LTS",
-                Publisher = "Canonical Group Ltd",
-                Description = $"The open source desktop operating system that powers millions of PCs and laptops around the world.",
-                ThumbnailUri = ThumbnailUri,
-                SymbolUri = SymbolUri,
-                LogoUri = LogoUri,
-                DiskUri = JammyCurrent,
-                SecureBoot = "false",
-                EnhancedSessionTransportType = "HvSocket",
-                Version = "22.04 LTS",
-                LastUpdated = await ParseBuildInfo(BaseUri + "jammy/current/unpacked/build-info.txt", cancellationToken)
+                new GalleryItem
+                {
+                    Name = "Ubuntu 22.04 LTS",
+                    Publisher = "Canonical Group Ltd",
+                    Description = "The open source desktop operating system that powers millions of PCs and laptops around the world.",
+                    ThumbnailUri = ThumbnailUri,
+                    SymbolUri = SymbolUri,
+                    LogoUri = LogoUri,
+                    DiskUri = JammyCurrent,
+                    SecureBoot = "false",
+                    EnhancedSessionTransportType = "HvSocket",
+                    Version = "22.04 LTS",
+                    LastUpdated = jammyBuildInfo.Result
+                },
+                new GalleryItem
+                {
+                    Name = "Ubuntu 24.04 LTS",
+                    Publisher = "Canonical Group Ltd",
+                    Description = "The open source desktop operating system that powers millions of PCs and laptops around the world.",
+                    ThumbnailUri = ThumbnailUri,
+                    SymbolUri = SymbolUri,
+                    LogoUri = LogoUri,
+                    DiskUri = NobleCurrent,
+                    SecureBoot = "false",
+                    EnhancedSessionTransportType = "HvSocket",
+                    Version = "24.04 LTS",
+                    LastUpdated = nobleBuildInfo.Result
+                },
+                new GalleryItem
+                {
+                    Name = "Ubuntu 24.10",
+                    Publisher = "Canonical Group Ltd",
+                    Description = "The open source desktop operating system that powers millions of PCs and laptops around the world.",
+                    ThumbnailUri = ThumbnailUri,
+                    SymbolUri = SymbolUri,
+                    LogoUri = LogoUri,
+                    DiskUri = OracularCurrent,
+                    SecureBoot = "false",
+                    EnhancedSessionTransportType = "HvSocket",
+                    Version = "24.10",
+                    LastUpdated = oracularBuildInfo.Result
+                }
             };
-            galleryItems.Add(jammyGalleryItem);
-            var nobleGalleryItem = new GalleryItem
-            {
-                Name = "Ubuntu 24.04 LTS",
-                Publisher = "Canonical Group Ltd",
-                Description = $"The open source desktop operating system that powers millions of PCs and laptops around the world.",
-                ThumbnailUri = ThumbnailUri,
-                SymbolUri = SymbolUri,
-                LogoUri = LogoUri,
-                DiskUri = NobleCurrent,
-                SecureBoot = "false",
-                EnhancedSessionTransportType = "HvSocket",
-                Version = "24.04 LTS",
-                LastUpdated = await ParseBuildInfo(BaseUri + "noble/current/unpacked/build-info.txt", cancellationToken)
-            };
-            galleryItems.Add(nobleGalleryItem);
-            var oracularGalleryItem = new GalleryItem
-            {
-                Name = "Ubuntu 24.10",
-                Publisher = "Canonical Group Ltd",
-                Description = $"The open source desktop operating system that powers millions of PCs and laptops around the world.",
-                ThumbnailUri = ThumbnailUri,
-                SymbolUri = SymbolUri,
-                LogoUri = LogoUri,
-                DiskUri = OracularCurrent,
-                SecureBoot = "false",
-                EnhancedSessionTransportType = "HvSocket",
-                Version = "24.10",
-                LastUpdated = await ParseBuildInfo(BaseUri + "oracular/current/unpacked/build-info.txt", cancellationToken)
-            };
-            galleryItems.Add(oracularGalleryItem);
-            return galleryItems;
         }
 
         private async Task<string> ParseBuildInfo(string buildInfoUri, CancellationToken cancellationToken = default)

@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading;
@@ -13,6 +14,8 @@ namespace VMCreate
     public partial class MainWindow : Window
     {
         private readonly ObservableCollection<GalleryItem> _galleryItems = new ObservableCollection<GalleryItem>();
+        // Tracks (Name, DiskUri) pairs already in _galleryItems to deduplicate streamed batches.
+        private readonly HashSet<(string Name, string DiskUri)> _seenItems = new HashSet<(string, string)>();
         private CancellationTokenSource _galleryCts;
         private ProgressWindow _progressWindow;
         private SuccessWindow _successWindow;
@@ -34,26 +37,55 @@ namespace VMCreate
         private async void MyWindow_LoadedAsync(object sender, RoutedEventArgs e)
         {
             _galleryCts = new CancellationTokenSource();
+
+            // Navigate to the first page IMMEDIATELY so the UI is visible straight away.
+            // Gallery items will stream into _galleryItems in the background below.
+            _wizardData = new WizardData { GalleryItems = _galleryItems };
+            var firstPage = new SelectImagePage(
+                _wizardData,
+                _serviceProvider.GetRequiredService<ILogger<SelectImagePage>>(),
+                _loggerFactory);
+            firstPage.WizardCompleted += WizardPage_Completed;
+            _mainFrame.Navigate(firstPage);
+
             try
             {
                 var galleryLoader = _serviceProvider.GetRequiredService<IGalleryLoader>();
-                var items = await galleryLoader.LoadGalleryItems(_galleryCts.Token);
-                // Filter, group by the unique key (Name and DiskUri) to remove duplicates,
-                // select the first item from each group, then order by Name,
-                // and finally add to the collection.
-                items.Where(i => i.Name != null && i.DiskUri != null)
-                    .GroupBy(i => new { i.Name, i.DiskUri })
-                    .Select(g => g.First())
-                    .OrderBy(i => i.Name)
-                    .ToList()
-                    .ForEach(i => _galleryItems.Add(i));
+
+                if (galleryLoader is AggregateGalleryLoader aggregate)
+                {
+                    // Stream items into the ObservableCollection as each loader finishes.
+                    // The ListBox sees every change immediately because ObservableCollection
+                    // fires CollectionChanged on the UI thread via Dispatcher.BeginInvoke.
+                    await aggregate.LoadGalleryItemsStreaming(batch =>
+                    {
+                        Application.Current.Dispatcher.BeginInvoke(() =>
+                        {
+                            foreach (var item in batch)
+                            {
+                                if (item.Name == null || item.DiskUri == null) continue;
+                                if (_seenItems.Add((item.Name, item.DiskUri)))
+                                    _galleryItems.Add(item);
+                            }
+                        });
+                    }, _galleryCts.Token);
+                }
+                else
+                {
+                    // Fallback for any non-aggregate IGalleryLoader (e.g. in tests).
+                    var items = await galleryLoader.LoadGalleryItems(_galleryCts.Token);
+                    foreach (var item in items
+                        .Where(i => i.Name != null && i.DiskUri != null)
+                        .GroupBy(i => new { i.Name, i.DiskUri })
+                        .Select(g => g.First()))
+                    {
+                        if (_seenItems.Add((item.Name, item.DiskUri)))
+                            _galleryItems.Add(item);
+                    }
+                }
 
                 _logger.LogDebug("Successfully loaded gallery items");
-
-                _wizardData = new WizardData { GalleryItems = _galleryItems };
-                var firstPage = new SelectImagePage(_wizardData, _serviceProvider.GetRequiredService<ILogger<SelectImagePage>>(), _loggerFactory);
-                firstPage.WizardCompleted += WizardPage_Completed;
-                _mainFrame.Navigate(firstPage);
+                firstPage.SetLoadingComplete();
             }
             catch (OperationCanceledException)
             {
@@ -62,6 +94,7 @@ namespace VMCreate
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to load gallery items");
+                firstPage.SetLoadingComplete();
             }
         }
 

@@ -1,7 +1,9 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.IO;
 using System.Net.Http;
+using System.Threading.Tasks;
 using System.Windows.Data;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -13,6 +15,10 @@ namespace VMCreate
     public class ImageSourceConverter : IValueConverter
     {
         private static readonly HttpClient _httpClient = new HttpClient();
+
+        // Cache HTTP SVG results so each remote URL is only downloaded once per session.
+        // Lazy<T> ensures only a single download races for each key even under concurrent bindings.
+        private static readonly ConcurrentDictionary<string, Lazy<ImageSource>> _httpSvgCache = new();
 
         public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
         {
@@ -63,18 +69,13 @@ namespace VMCreate
                     }
                     else if (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
                     {
-                        try
-                        {
-                            using (var stream = _httpClient.GetStreamAsync(uri).Result)
-                            using (var reader = new FileSvgReader(settings))
-                            {
-                                drawing = reader.Read(stream);
-                            }
-                        }
-                        catch
-                        {
-                            return null;
-                        }
+                        // Use the cache to avoid downloading the same SVG more than once.
+                        // Task.Run escapes the WPF SynchronizationContext, preventing the
+                        // classic async-over-sync deadlock when called on the UI thread.
+                        var lazy = _httpSvgCache.GetOrAdd(
+                            uri.OriginalString,
+                            key => new Lazy<ImageSource>(() => LoadHttpSvgSync(uri)));
+                        return lazy.Value;
                     }
 
                     if (drawing != null)
@@ -95,6 +96,36 @@ namespace VMCreate
                 }
             }
             return null;
+        }
+
+        private static ImageSource LoadHttpSvgSync(Uri uri)
+        {
+            try
+            {
+                return Task.Run(async () =>
+                {
+                    using var stream = await _httpClient.GetStreamAsync(uri).ConfigureAwait(false);
+                    var settings = new WpfDrawingSettings
+                    {
+                        IncludeRuntime = true,
+                        TextAsGeometry = false,
+                        OptimizePath = true
+                    };
+                    using var reader = new FileSvgReader(settings);
+                    var drawing = reader.Read(stream);
+                    if (drawing != null)
+                    {
+                        var image = new DrawingImage(drawing);
+                        image.Freeze(); // required for cross-thread access
+                        return (ImageSource)image;
+                    }
+                    return null;
+                }).GetAwaiter().GetResult();
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)

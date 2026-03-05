@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Net.Http;
 using System.Reflection;
 using System.Threading.Tasks;
 
@@ -20,33 +19,16 @@ namespace VMCreate.Gallery
 
         private static readonly object _lock = new object();
 
-        private static readonly HttpClient _logoClient = new HttpClient
-        {
-            Timeout = TimeSpan.FromSeconds(5)
-        };
-
         /// <summary>
-        /// Checks whether <paramref name="publicUrl"/> returns a successful HTTP response.
-        /// If it does, that URL is returned directly. Otherwise falls back to the embedded
-        /// resource via <see cref="TryGetLocalUri"/>, and finally to <paramref name="publicUrl"/>
-        /// (or empty string) if no embedded resource exists.
+        /// Returns a local <c>file:///</c> URI for the embedded resource icon if one exists,
+        /// otherwise falls back to <paramref name="publicUrl"/>.
+        /// The previous HTTP HEAD reachability check has been removed — it fired ~18 network
+        /// round-trips on startup (each with a 5-second timeout) and was the primary cause of
+        /// the 13-second startup delay.
         /// </summary>
-        public static async Task<string> ResolveLogoUriAsync(string? publicUrl, Assembly assembly, string fileName)
+        public static Task<string> ResolveLogoUriAsync(string? publicUrl, Assembly assembly, string fileName)
         {
-            if (!string.IsNullOrEmpty(publicUrl))
-            {
-                try
-                {
-                    using var request = new HttpRequestMessage(HttpMethod.Head, publicUrl);
-                    var response = await _logoClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead)
-                                                    .ConfigureAwait(false);
-                    if (response.IsSuccessStatusCode)
-                        return publicUrl;
-                }
-                catch { }
-            }
-
-            return TryGetLocalUri(assembly, fileName) ?? publicUrl ?? "";
+            return Task.FromResult(TryGetLocalUri(assembly, fileName) ?? publicUrl ?? "");
         }
 
         /// <summary>

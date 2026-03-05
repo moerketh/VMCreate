@@ -29,6 +29,29 @@ namespace VMCreate.Gallery
             return results.SelectMany(r => r).ToList();
         }
 
+        /// <summary>
+        /// Like <see cref="LoadGalleryItems"/> but invokes <paramref name="onBatch"/> each time
+        /// any individual loader finishes, allowing the caller to stream results into the UI
+        /// progressively instead of waiting for all loaders to complete.
+        /// </summary>
+        public async Task LoadGalleryItemsStreaming(
+            Action<List<GalleryItem>> onBatch,
+            CancellationToken cancellationToken = default)
+        {
+            var pending = _loaders
+                .Select(loader => LoadFromSingleLoader(loader, cancellationToken))
+                .ToList();
+
+            while (pending.Count > 0)
+            {
+                var completed = await Task.WhenAny(pending).ConfigureAwait(false);
+                pending.Remove(completed);
+                var items = await completed;
+                if (items.Count > 0)
+                    onBatch(items);
+            }
+        }
+
         private async Task<List<GalleryItem>> LoadFromSingleLoader(IGalleryLoader loader, CancellationToken cancellationToken)
         {
             try
