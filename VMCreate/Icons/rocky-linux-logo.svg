@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Rocky Linux: green circle, jagged white mountain range -->
+  <circle cx="50" cy="50" r="50" fill="#10B981"/>
+  <!-- Multi-peak rocky silhouette -->
+  <path d="M8,74
+            L22,50 L32,62 L42,38 L50,50
+            L58,32 L68,48 L76,40 L92,74 Z"
+        fill="white"/>
+  <!-- Snow highlights on tallest peaks -->
+  <polygon points="58,32 64,44 52,44" fill="#10B981" opacity="0.6"/>
+  <polygon points="42,38 47,48 37,48" fill="#10B981" opacity="0.4"/>
+</svg>

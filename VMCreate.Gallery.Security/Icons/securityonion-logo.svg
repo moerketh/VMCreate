@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Security Onion: dark navy with layered onion shape and stem -->
+  <circle cx="50" cy="50" r="50" fill="#1A3554"/>
+  <!-- Outer onion body -->
+  <ellipse cx="50" cy="57" rx="32" ry="35" fill="none" stroke="white" stroke-width="5"/>
+  <!-- Middle layer -->
+  <ellipse cx="50" cy="57" rx="22" ry="25" fill="none" stroke="white" stroke-width="4" opacity="0.80"/>
+  <!-- Inner layer -->
+  <ellipse cx="50" cy="57" rx="11" ry="13" fill="none" stroke="white" stroke-width="3" opacity="0.65"/>
+  <!-- Stem -->
+  <line x1="50" y1="22" x2="50" y2="10" stroke="white" stroke-width="5" stroke-linecap="round"/>
+  <!-- Leaf sprouting left -->
+  <path d="M50,14 C40,8 36,0 44,6" fill="none" stroke="white" stroke-width="4" stroke-linecap="round"/>
+  <!-- Leaf sprouting right -->
+  <path d="M50,14 C60,8 64,0 56,6" fill="none" stroke="white" stroke-width="4" stroke-linecap="round"/>
+</svg>

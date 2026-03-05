@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Whonix: dark green with concentric onion rings (Tor anonymity layers) -->
+  <circle cx="50" cy="50" r="50" fill="#2D6A00"/>
+  <!-- Onion rings (outermost to innermost) -->
+  <circle cx="50" cy="50" r="40" fill="none" stroke="white" stroke-width="5" opacity="0.90"/>
+  <circle cx="50" cy="50" r="29" fill="none" stroke="white" stroke-width="4" opacity="0.80"/>
+  <circle cx="50" cy="50" r="18" fill="none" stroke="white" stroke-width="3" opacity="0.70"/>
+  <!-- Lock icon at centre (privacy/security) -->
+  <rect x="42" y="50" width="16" height="13" rx="2" fill="white"/>
+  <path d="M44,50 C44,44 56,44 56,50" fill="none" stroke="white" stroke-width="4"/>
+  <circle cx="50" cy="57" r="2.5" fill="#2D6A00"/>
+</svg>

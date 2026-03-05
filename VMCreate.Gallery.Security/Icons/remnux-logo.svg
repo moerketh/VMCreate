@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- REMnux: orange hexagon with magnifying glass (reverse-engineering motif) -->
+  <polygon points="50,4 92,27 92,73 50,96 8,73 8,27" fill="#FF5200"/>
+  <!-- Magnifying glass lens -->
+  <circle cx="44" cy="44" r="21" fill="none" stroke="white" stroke-width="8"/>
+  <!-- Magnifying handle -->
+  <line x1="59" y1="59" x2="76" y2="76" stroke="white" stroke-width="8" stroke-linecap="round"/>
+</svg>

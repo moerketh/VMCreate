@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Linux Mint: green circle with white ring and stylised lm -->
+  <circle cx="50" cy="50" r="50" fill="#87CF3E"/>
+  <!-- White outer ring -->
+  <circle cx="50" cy="50" r="41" fill="none" stroke="white" stroke-width="5"/>
+  <!-- Inner circle (darker green) -->
+  <circle cx="50" cy="50" r="33" fill="#5da829"/>
+  <!-- Stylised L -->
+  <path d="M28,66 L28,34 M28,66 L46,66"
+        fill="none" stroke="white" stroke-width="6"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Stylised M (two bumps) -->
+  <path d="M50,66 L50,34 Q50,26 58,26 Q66,26 66,34 L66,50 Q66,58 74,58 Q82,58 82,50 L82,34"
+        fill="none" stroke="white" stroke-width="6"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

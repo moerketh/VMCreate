@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- openSUSE: green circle with simplified Geeko (chameleon) silhouette -->
+  <circle cx="50" cy="50" r="50" fill="#73BA25"/>
+  <!-- Body -->
+  <ellipse cx="52" cy="58" rx="26" ry="17" fill="white"/>
+  <!-- Head -->
+  <circle cx="24" cy="50" r="13" fill="white"/>
+  <!-- Eye pupil -->
+  <circle cx="19" cy="46" r="5" fill="#73BA25"/>
+  <circle cx="18" cy="45" r="2" fill="white"/>
+  <!-- Curly tail -->
+  <path d="M78,58 Q94,52 90,40 Q86,30 78,37"
+        fill="none" stroke="white" stroke-width="6" stroke-linecap="round"/>
+  <!-- Legs -->
+  <line x1="38" y1="73" x2="36" y2="85" stroke="white" stroke-width="5" stroke-linecap="round"/>
+  <line x1="54" y1="74" x2="52" y2="86" stroke="white" stroke-width="5" stroke-linecap="round"/>
+  <line x1="68" y1="72" x2="70" y2="84" stroke="white" stroke-width="4" stroke-linecap="round"/>
+</svg>

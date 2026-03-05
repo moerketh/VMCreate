@@ -12,8 +12,19 @@
     <PackageReference Include="Microsoft.Extensions.Http" Version="9.0.7" />
   </ItemGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\VMCreate.Gallery.Contracts\VMCreate.Gallery.Contracts.csproj" />
+  <ItemGroup>    <EmbeddedResource Include="Icons\parrot-logo.svg" />
+    <EmbeddedResource Include="Icons\pentoo-logo.svg" />
+    <EmbeddedResource Include="Icons\tails-logo.svg" />
+    <EmbeddedResource Include="Icons\fedora-logo.svg" />
+    <EmbeddedResource Include="Icons\blackarch-logo.png" />
+    <EmbeddedResource Include="Icons\remnux-logo.svg" />
+    <EmbeddedResource Include="Icons\caine-logo.svg" />
+    <EmbeddedResource Include="Icons\whonix-logo.svg" />
+    <EmbeddedResource Include="Icons\securityonion-logo.svg" />
+    <EmbeddedResource Include="Icons\tsurugi-logo.svg" />
+  </ItemGroup>
+
+  <ItemGroup>    <ProjectReference Include="..\VMCreate.Gallery.Contracts\VMCreate.Gallery.Contracts.csproj" />
   </ItemGroup>
 
 </Project>

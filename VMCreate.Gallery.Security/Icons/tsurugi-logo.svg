@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Tsurugi Linux: dark red with a straight Japanese double-edged sword held vertically -->
+  <circle cx="50" cy="50" r="50" fill="#B31B1B"/>
+  <!-- Blade (narrow diamond, blade tip at top) -->
+  <polygon points="50,6 55,52 50,70 45,52" fill="white"/>
+  <!-- Cross-guard (tsuba) -->
+  <rect x="33" y="68" width="34" height="7" rx="3.5" fill="white"/>
+  <!-- Handle (tsuka) - slightly narrower than guard -->
+  <rect x="43" y="75" width="14" height="22" rx="3" fill="#E0C0A0"/>
+  <!-- Wrapping lines on handle -->
+  <line x1="43" y1="80" x2="57" y2="80" stroke="#B31B1B" stroke-width="1.5"/>
+  <line x1="43" y1="85" x2="57" y2="85" stroke="#B31B1B" stroke-width="1.5"/>
+  <line x1="43" y1="90" x2="57" y2="90" stroke="#B31B1B" stroke-width="1.5"/>
+  <!-- Pommel (kashira) -->
+  <ellipse cx="50" cy="97" rx="8" ry="3" fill="white"/>
+</svg>

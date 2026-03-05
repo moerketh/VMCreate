@@ -1,15 +1,24 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Net.Http;
-using System.Text.RegularExpressions;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace VMCreate.Gallery
 {
+    /// <summary>
+    /// Loads the latest Pentoo Full amd64 hardened daily build from the OSU mirror.
+    /// Version metadata is fetched from versions.json; the download URL is the
+    /// stable symlink kept current by the mirror.
+    /// </summary>
     public class LoadPentooCurrent : IGalleryLoader
     {
-        private const string BaseUrl = "[invalid url, do not cite]";
+        private const string MirrorBaseUrl  = "https://pentoo.osuosl.org/";
+        private const string VersionsUrl    = MirrorBaseUrl + "latest-iso-symlinks/versions.json";
+        private const string SymlinkUrl     = MirrorBaseUrl + "latest-iso-symlinks/pentoo-full-daily-amd64-hardened-latest.iso";
+        private const string? PublicLogoUrl = "https://www.pentoo.org/icon.png";
+
         private readonly IHttpClientFactory _clientFactory;
 
         public LoadPentooCurrent(IHttpClientFactory clientFactory)
@@ -19,49 +28,48 @@ namespace VMCreate.Gallery
 
         public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
+            var logoUri = await GalleryIcons.ResolveLogoUriAsync(PublicLogoUrl, typeof(LoadPentooCurrent).Assembly, "pentoo-logo.svg");
             var client = _clientFactory.CreateClient();
             client.DefaultRequestHeaders.Add("User-Agent", "VMCreate/1.0");
 
-            // Fetch the directory listing
-            var response = await client.GetAsync(BaseUrl, cancellationToken);
+            var response = await client.GetAsync(VersionsUrl, cancellationToken);
             response.EnsureSuccessStatusCode();
-            var htmlContent = await response.Content.ReadAsStringAsync();
 
-            // Regular expression to match the row for pentoo-full-daily-amd64-hardened-latest.iso
-            var pattern = @"<tr>\s*<td><a href=""pentoo-full-daily-amd64-hardened-latest\.iso"">pentoo-full-daily-amd64-hardened-latest\.iso</a></td>\s*<td>\s*(\d+\.\d+G)\s*</td>\s*<td align=""right"">\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\s*</td>\s*</tr>";
-            var match = Regex.Match(htmlContent, pattern, RegexOptions.Singleline);
+            var json = await response.Content.ReadAsStringAsync(cancellationToken);
 
-            if (!match.Success)
+            using var doc = JsonDocument.Parse(json);
+
+            string? version = null;
+            foreach (var entry in doc.RootElement.EnumerateArray())
             {
-                throw new Exception("Could not find Pentoo full ISO in the directory listing.");
+                if (entry.TryGetProperty("name",    out var nameProp)    &&
+                    entry.TryGetProperty("type",    out var typeProp)    &&
+                    entry.TryGetProperty("version", out var versionProp) &&
+                    nameProp.GetString()  == "Pentoo Full amd64 hardened" &&
+                    typeProp.GetString()  == "Daily" &&
+                    versionProp.ValueKind != JsonValueKind.Null)
+                {
+                    version = versionProp.GetString();
+                    break;
+                }
             }
 
-            var size = match.Groups[1].Value;
-            var dateStr = match.Groups[2].Value;
+            if (string.IsNullOrWhiteSpace(version))
+                throw new Exception(
+                    "Could not find 'Pentoo Full amd64 hardened' Daily entry in versions.json.");
 
-            // Parse the last modified date, assuming UTC
-            if (!DateTime.TryParseExact(dateStr, "yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out var lastUpdated))
-            {
-                throw new Exception("Could not parse last updated date.");
-            }
-
-            // Construct the full download URL
-            var downloadUrl = BaseUrl + "pentoo-full-daily-amd64-hardened-latest.iso";
-
-            // Create GalleryItem
             var galleryItem = new GalleryItem
             {
-                Name = "Pentoo Linux",
-                Publisher = "Pentoo Project",
-                Description = "Pentoo is a Live CD and Live USB designed for penetration testing and security assessment. Based off Gentoo Linux, Pentoo is provided both as 32 and 64 bit installable livecd.",
-                ThumbnailUri = null, // No thumbnail URL found
-                LogoUri = null, // No logo URL found
-                DiskUri = downloadUrl,
-                ArchiveRelativePath = null, // Not applicable for ISO
-                SecureBoot = "false",
+                Name        = "Pentoo Linux",
+                Publisher   = "Pentoo Project",
+                Description = "Pentoo is a Live CD and Live USB designed for penetration testing and " +
+                              "security assessment. Based off Gentoo Linux.",
+                LogoUri                     = logoUri,
+                DiskUri                     = SymlinkUrl,
+                SecureBoot                  = "false",
                 EnhancedSessionTransportType = "HvSocket",
-                Version = "latest",
-                LastUpdated = lastUpdated.ToString("o") // ISO 8601 format
+                Version                     = version,
+                LastUpdated                 = DateTime.UtcNow.ToString("o")
             };
 
             return new List<GalleryItem> { galleryItem };

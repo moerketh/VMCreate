@@ -55,7 +55,12 @@ namespace VMCreate
                 provider.GetRequiredService<ArchiveExtractor>(),
                 provider.GetRequiredService<ILogger<ExtractorFactory>>()));
             services.AddTransient<CreateVM>();
-            services.AddTransient<IGalleryLoader, AggregateGalleryLoader>();
+            services.AddTransient<IGalleryLoader>(provider =>
+            {
+                var logger = provider.GetRequiredService<ILogger<AggregateGalleryLoader>>();
+                var loaders = galleryLoaderTypes.Select(t => (IGalleryLoader)provider.GetRequiredService(t));
+                return new AggregateGalleryLoader(logger, loaders);
+            });
             services.AddTransient<IGalleryItemsParser, GalleryItemsParser>();
             services.AddSingleton<IPartitionSchemeDetector, PartitionSchemeDetector>();
             services.AddSingleton<MediaHandlerFactory>();

@@ -29,9 +29,15 @@
     <Compile Include="Extractors\IExtractor.cs" />
     <Compile Include="Extractors\XzFileExtractor.cs" />
     <Compile Include="Gallery\AggregateGalleryLoader.cs" />
+    <Compile Include="Gallery\distributions\AlpineLinux.cs" />
     <Compile Include="Gallery\distributions\Arch.cs" />
+    <Compile Include="Gallery\distributions\Debian.cs" />
     <Compile Include="Gallery\distributions\FedoraSilverblue.cs" />
+    <Compile Include="Gallery\distributions\FedoraWorkstation.cs" />
     <Compile Include="Gallery\distributions\ClearLinux.cs" />
+    <Compile Include="Gallery\distributions\LinuxMint.cs" />
+    <Compile Include="Gallery\distributions\OpenSuseTumbleweed.cs" />
+    <Compile Include="Gallery\distributions\RockyLinux.cs" />
     <Compile Include="Gallery\distributions\Ubuntu.cs" />
     <Compile Include="Gallery\distributions\NixOS.cs" />
     <Compile Include="Gallery\ImageSourceConverter.cs" />
@@ -85,6 +91,16 @@
   <ItemGroup>
     <None Include="App.config" />
     <None Include="app.manifest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Icons\nixos.svg" />
+    <EmbeddedResource Include="Icons\fedora-logo.svg" />
+    <EmbeddedResource Include="Icons\alpine-logo.svg" />
+    <EmbeddedResource Include="Icons\debian-logo.svg" />
+    <EmbeddedResource Include="Icons\linuxmint-logo.svg" />
+    <EmbeddedResource Include="Icons\opensuse-logo.svg" />
+    <EmbeddedResource Include="Icons\rocky-linux-logo.svg" />
   </ItemGroup>
 
   <ItemGroup>

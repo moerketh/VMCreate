@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- CAINE: dark-blue shield badge with forensic magnifying glass -->
+  <path d="M50,4 L90,20 L90,56 C90,76 65,91 50,96 C35,91 10,76 10,56 L10,20 Z"
+        fill="#1C4E8A"/>
+  <!-- Magnifying glass (lens) -->
+  <circle cx="44" cy="46" r="19" fill="none" stroke="white" stroke-width="7"/>
+  <!-- Handle -->
+  <line x1="58" y1="60" x2="74" y2="76" stroke="white" stroke-width="7" stroke-linecap="round"/>
+</svg>

@@ -12,6 +12,7 @@ namespace VMCreate.Gallery
         private const string DownloadsUrl = "https://www.blackarch.org/downloads.html";
         private readonly IHttpClientFactory _clientFactory;
         private const string PinnedVersion = "2023.04.01";
+        private const string? PublicLogoUrl = "https://blackarch.org/img/logo.png";
 
         public BlackArch(IHttpClientFactory clientFactory)
         {
@@ -20,6 +21,7 @@ namespace VMCreate.Gallery
 
         public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
+            var logoUri = await GalleryIcons.ResolveLogoUriAsync(PublicLogoUrl, typeof(BlackArch).Assembly, "blackarch-logo.png");
             var galleryItems = new List<GalleryItem>();
             var client = _clientFactory.CreateClient();
             client.DefaultRequestHeaders.Add("User-Agent", "VMCreate/1.0");
@@ -45,8 +47,8 @@ namespace VMCreate.Gallery
                         Publisher = "BlackArch Project",
                         Description = $"BlackArch Linux is an Arch Linux-based penetration testing distribution for penetration testers and security researchers. This is the Slim ISO (version {PinnedVersion}), which contains a functional BlackArch Linux system with a selected set of common/well-known tools and system utilities for pentesting.",
                         ThumbnailUri = "https://blackarch.org/images/screenshots/menu_slim.png",
-                        SymbolUri = "https://www.blackarch.org/images/logo/ba-logo.png",
-                        LogoUri = "https://blackarch.org/img/logo.png",
+                        SymbolUri = logoUri,
+                        LogoUri = logoUri,
                         DiskUri = slimUrl,
                         ArchiveRelativePath = null,
                         SecureBoot = "false",
@@ -73,8 +75,8 @@ namespace VMCreate.Gallery
                         Publisher = "BlackArch Project",
                         Description = $"BlackArch Linux is an Arch Linux-based penetration testing distribution for penetration testers and security researchers. This is the OVA Image (version {PinnedVersion}), suitable for running in VirtualBox, VMware, and QEMU.",
                         ThumbnailUri = "https://blackarch.org/images/screenshots/menu_slim.png",
-                        SymbolUri = "https://www.blackarch.org/images/logo/ba-logo.png",
-                        LogoUri = "https://www.blackarch.org/images/logo/ba-logo.png",
+                        SymbolUri = logoUri,
+                        LogoUri = logoUri,
                         DiskUri = ovaUrl,
                         ArchiveRelativePath = "blackarch-disk001.vmdk",
                         SecureBoot = "false",

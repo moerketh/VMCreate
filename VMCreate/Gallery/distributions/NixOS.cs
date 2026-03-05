@@ -11,12 +11,12 @@ namespace VMCreate.Gallery
         private const string GraphicalIsoPath = "latest-nixos-graphical-x86_64-linux.iso";
         private const string MinimalIsoPath = "latest-nixos-minimal-x86_64-linux.iso";
         private const string ChannelVersion = "25.05";
-        private const string Thumbnail = "https://nixos.org/logo/nixos-logo.png";
-        private const string LogoUri = "https://nixos.org/logo/nixos-logo.png";
-        private const string SymbolUri = "https://nixos.org/logo/nixos-logo.png";
 
-        public Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
+        private const string? PublicLogoUrl = "https://nixos.org/logo/nixos-logo.png";
+
+        public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
+            var logoUri = await GalleryIcons.ResolveLogoUriAsync(PublicLogoUrl, typeof(NixOS).Assembly, "nixos.svg");
             var galleryItems = new List<GalleryItem>();
             var lastModified = DateTime.UtcNow;
 
@@ -29,9 +29,9 @@ namespace VMCreate.Gallery
                 Name = "NixOS Graphical",
                 Publisher = "NixOS Foundation",
                 Description = $"NixOS with a graphical desktop environment (GNOME) for a reproducible and declarative system configuration (version {ChannelVersion})",
-                ThumbnailUri = Thumbnail,
-                LogoUri = LogoUri,
-                SymbolUri = SymbolUri,
+                ThumbnailUri = logoUri,
+                LogoUri = logoUri,
+                SymbolUri = logoUri,
                 DiskUri = graphicalIsoUrl,
                 ArchiveRelativePath = graphicalFilename,
                 SecureBoot = "false",
@@ -49,9 +49,9 @@ namespace VMCreate.Gallery
                 Name = "NixOS Minimal",
                 Publisher = "NixOS Foundation",
                 Description = $"NixOS minimal installation for a lightweight, reproducible, and declarative system configuration (version {ChannelVersion})",
-                ThumbnailUri = Thumbnail,
-                LogoUri = LogoUri,
-                SymbolUri = SymbolUri,
+                ThumbnailUri = logoUri,
+                LogoUri = logoUri,
+                SymbolUri = logoUri,
                 DiskUri = minimalIsoUrl,
                 ArchiveRelativePath = minimalFilename,
                 SecureBoot = "false",
@@ -60,7 +60,7 @@ namespace VMCreate.Gallery
                 LastUpdated = lastModified.ToString("o")
             });
 
-            return Task.FromResult(galleryItems);
+            return galleryItems;
         }
     }
 }

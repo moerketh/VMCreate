@@ -11,8 +11,7 @@ namespace VMCreate.Gallery
     public class LoadParrotSecurity : IGalleryLoader
     {
         private const string BaseUrl = "https://deb.parrot.sh/parrot/iso/7.1/";
-        private const string Thumbnail = "https://parrotsec.org/_next/static/media/parrot-security-1.c044d5dd.png";
-        private const string LogoUri = "https://www.parrotsec.org/images/parrot-logo.png";
+        private const string? PublicLogoUrl = "https://www.parrotsec.org/images/parrot-logo.png";
         private const string SymbolUri = "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTWb4XCIcMpF6J3-37LaMWassk71PPNVWU7Qw&s";
         private readonly IHttpClientFactory _clientFactory;
 
@@ -23,6 +22,7 @@ namespace VMCreate.Gallery
 
         public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
+            var logoUri = await GalleryIcons.ResolveLogoUriAsync(PublicLogoUrl, typeof(LoadParrotSecurity).Assembly, "parrot-logo.svg");
             var client = _clientFactory.CreateClient();
             client.DefaultRequestHeaders.Add("User-Agent", "VMCreate/1.0");
 
@@ -64,8 +64,8 @@ namespace VMCreate.Gallery
                 Name = "Parrot Security OS",
                 Publisher = "Parrot Project",
                 Description = $"Parrot Security OS, includes a full set of penetration testing tools (version {version})",
-                ThumbnailUri = Thumbnail,
-                LogoUri = LogoUri,
+                ThumbnailUri = logoUri,
+                LogoUri = logoUri,
                 SymbolUri = SymbolUri,
                 DiskUri = downloadUrl,
                 ArchiveRelativePath = filename.EndsWith(".xz", StringComparison.InvariantCultureIgnoreCase) ? Path.GetFileNameWithoutExtension(filename) : filename,
