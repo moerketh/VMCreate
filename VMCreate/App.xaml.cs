@@ -12,7 +12,7 @@ namespace VMCreate
 {
     public partial class App : Application
     {
-        public static IServiceProvider ServiceProvider { get; private set; }
+        private IServiceProvider _serviceProvider;
 
         private void App_OnStartup(object sender, StartupEventArgs e)
         {
@@ -65,20 +65,21 @@ namespace VMCreate
             services.AddSingleton<IPartitionSchemeDetector, PartitionSchemeDetector>();
             services.AddSingleton<MediaHandlerFactory>();
             services.AddSingleton<DiskConverter>();
-            services.AddTransient<SelectImagePage>();
-            services.AddTransient<VmSettingsPage>();
             services.AddTransient<IVmCreator, HyperVVmCreator>();
             services.AddSingleton<IHyperVManager, PowerShellHyperVManager>();
 
-            ServiceProvider = services.BuildServiceProvider();
+            _serviceProvider = services.BuildServiceProvider();
 
-            var mainWindow = new MainWindow();
+            var mainWindow = new MainWindow(
+                _serviceProvider,
+                _serviceProvider.GetRequiredService<ILogger<MainWindow>>(),
+                _serviceProvider.GetRequiredService<ILoggerFactory>());
             mainWindow.Show();
         }
 
         protected override void OnExit(ExitEventArgs e)
         {
-            (ServiceProvider as IDisposable)?.Dispose();
+            (_serviceProvider as IDisposable)?.Dispose();
             base.OnExit(e);
         }
     }

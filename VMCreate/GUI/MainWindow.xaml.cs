@@ -24,14 +24,35 @@ namespace VMCreate
         private readonly IServiceProvider _serviceProvider;
         private WizardData _wizardData;
 
-        public MainWindow()
+        public MainWindow(IServiceProvider serviceProvider, ILogger<MainWindow> logger, ILoggerFactory loggerFactory)
         {
-            _serviceProvider = App.ServiceProvider;
-            _logger = _serviceProvider.GetRequiredService<ILogger<MainWindow>>();
-            _loggerFactory = _serviceProvider.GetRequiredService<ILoggerFactory>();
+            _serviceProvider = serviceProvider;
+            _logger = logger;
+            _loggerFactory = loggerFactory;
 
             InitializeComponent();
             Loaded += MyWindow_LoadedAsync;
+        }
+
+        private void ShowBanner(string message, bool isError)
+        {
+            NotificationBanner.Background = isError
+                ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xF2, 0xDE, 0xDE))
+                : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xDE, 0xF2, 0xDE));
+            NotificationBanner.BorderBrush = isError
+                ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xE8, 0x70, 0x70))
+                : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x70, 0xC0, 0x70));
+            NotificationBanner.BorderThickness = new Thickness(1);
+            NotificationText.Text = message;
+            NotificationText.Foreground = isError
+                ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xB3, 0x3A, 0x3A))
+                : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x2A, 0x7A, 0x2A));
+            NotificationBanner.Visibility = Visibility.Visible;
+        }
+
+        private void DismissBanner_Click(object sender, RoutedEventArgs e)
+        {
+            NotificationBanner.Visibility = Visibility.Collapsed;
         }
 
         private async void MyWindow_LoadedAsync(object sender, RoutedEventArgs e)
@@ -41,10 +62,7 @@ namespace VMCreate
             // Navigate to the first page IMMEDIATELY so the UI is visible straight away.
             // Gallery items will stream into _galleryItems in the background below.
             _wizardData = new WizardData { GalleryItems = _galleryItems };
-            var firstPage = new SelectImagePage(
-                _wizardData,
-                _serviceProvider.GetRequiredService<ILogger<SelectImagePage>>(),
-                _loggerFactory);
+            var firstPage = new SelectImagePage(_wizardData, _loggerFactory);
             firstPage.WizardCompleted += WizardPage_Completed;
             _mainFrame.Navigate(firstPage);
 
@@ -95,6 +113,8 @@ namespace VMCreate
             {
                 _logger.LogError(ex, "Failed to load gallery items");
                 firstPage.SetLoadingComplete();
+                firstPage.ShowError(
+                    $"Failed to load the VM gallery: {ex.Message}. Check your internet connection and restart the application.");
             }
         }
 
@@ -118,7 +138,7 @@ namespace VMCreate
                 {
                     // Reset wizard data and navigate back to the first page
                     _wizardData = new WizardData { GalleryItems = _galleryItems };
-                    var firstPage = new SelectImagePage(_wizardData, _serviceProvider.GetRequiredService<ILogger<SelectImagePage>>(), _loggerFactory);
+                    var firstPage = new SelectImagePage(_wizardData, _loggerFactory);
                     firstPage.WizardCompleted += WizardPage_Completed;
                     _mainFrame.Navigate(firstPage);
                 }
@@ -127,36 +147,40 @@ namespace VMCreate
 
         private async Task<bool> CreateVMAsync(WizardData wizardData)
         {
-            bool completed = false;
             var galleryItem = wizardData.SelectedItem;
             var vmSettings = wizardData.Settings;
             var vmCustomizations = wizardData.Customizations;
 
+            // Guard clauses — validate before showing the progress window
+            if (galleryItem == null)
+            {
+                _logger.LogDebug("No gallery item selected");
+                ShowBanner("Please select a gallery item.", isError: true);
+                return false;
+            }
+            if (string.IsNullOrEmpty(vmSettings.VMName))
+            {
+                _logger.LogDebug("VM name is empty");
+                ShowBanner("VM Name is required.", isError: true);
+                return false;
+            }
+            if (string.IsNullOrEmpty(galleryItem.DiskUri) || !galleryItem.DiskUri.StartsWith("http"))
+            {
+                _logger.LogDebug("Invalid Disk URI: {Uri}", galleryItem.DiskUri);
+                ShowBanner($"Invalid disk URI: {galleryItem.DiskUri}", isError: true);
+                return false;
+            }
+
+            _logger.LogDebug("Validated inputs: VMName={VMName}, Memory={Memory}MB, CPU={CPU}, DiskUri={DiskUri}, VirtualizationEnabled={VirtualizationEnabled}",
+                vmSettings.VMName, vmSettings.MemoryInMB, vmSettings.CPUCount, galleryItem.DiskUri, vmSettings.VirtualizationEnabled);
+
+            var cancellationTokenSource = new CancellationTokenSource();
+            _progressWindow = new ProgressWindow(cancellationTokenSource) { Owner = this };
+            _progressWindow.Show();
+
+            bool completed = false;
             try
             {
-                if (galleryItem == null)
-                {
-                    _logger.LogDebug("No gallery item selected");
-                    throw new Exception("Please select a gallery item!");
-                }
-                if (string.IsNullOrEmpty(vmSettings.VMName))
-                {
-                    _logger.LogDebug("VM name is empty");
-                    throw new Exception("VM Name is required!");
-                }
-                if (string.IsNullOrEmpty(galleryItem.DiskUri) || !galleryItem.DiskUri.StartsWith("http"))
-                {
-                    _logger.LogDebug("Invalid Disk URI: {Uri}", galleryItem.DiskUri);
-                    throw new Exception($"Invalid disk URI: {galleryItem.DiskUri}");
-                }
-
-                _logger.LogDebug("Validated inputs: VMName={VMName}, Memory={Memory}MB, CPU={CPU}, DiskUri={DiskUri}, VirtualizationEnabled={VirtualizationEnabled}",
-                    vmSettings.VMName, vmSettings.MemoryInMB, vmSettings.CPUCount, galleryItem.DiskUri, vmSettings.VirtualizationEnabled);
-
-                var cancellationTokenSource = new CancellationTokenSource();
-                _progressWindow = new ProgressWindow(cancellationTokenSource) { Owner = this };
-                _progressWindow.Show();
-
                 var progressReport = new Progress<CreateVMProgressInfo>(i =>
                     _progressWindow.UpdateProgress(i));
 
@@ -167,19 +191,20 @@ namespace VMCreate
             }
             catch (OperationCanceledException)
             {
-                _progressWindow.Close();
                 _logger.LogInformation("Operation cancelled by user");
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error in Create VM setup");
-                MessageBox.Show($"Error: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
-                if (_progressWindow != null) _progressWindow.Close();
+                ShowBanner($"VM creation failed: {ex.Message}", isError: true);
+            }
+            finally
+            {
+                _progressWindow.Close();
             }
 
             if (completed)
             {
-                _progressWindow.Close();
                 _successWindow = new SuccessWindow { Owner = this };
                 _successWindow.ShowDialog();
                 _logger.LogInformation("VM creation completed successfully");

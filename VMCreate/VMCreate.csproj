@@ -81,6 +81,11 @@
 		<SubType>Code</SubType>
 	</Compile>
     <Compile Include="GUI\WizardData.cs" />
+    <Compile Include="GUI\ViewModels\ViewModelBase.cs" />
+    <Compile Include="GUI\ViewModels\RelayCommand.cs" />
+    <Compile Include="GUI\ViewModels\SelectImagePageViewModel.cs" />
+    <Compile Include="GUI\ViewModels\VmSettingsPageViewModel.cs" />
+    <Compile Include="GUI\ViewModels\VmCustomizationPageViewModel.cs" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="gallery.json">

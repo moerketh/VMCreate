@@ -1,55 +1,27 @@
 ﻿using Microsoft.Extensions.Logging;
 using System;
-using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Navigation;
 
 namespace VMCreate
 {
     public partial class VmCustomizationPage : Page
     {
-        private readonly WizardData _wizardData;
-        private readonly ILogger<VmCustomizationPage> _logger;
         public event EventHandler<WizardResultEventArgs> WizardCompleted;
 
-        public VmCustomizationPage(WizardData wizardData, ILogger<VmCustomizationPage> logger)
+        public VmCustomizationPage(WizardData wizardData, ILoggerFactory loggerFactory)
         {
-            _wizardData = wizardData ?? throw new ArgumentNullException(nameof(wizardData));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            if (wizardData == null) throw new ArgumentNullException(nameof(wizardData));
+            if (loggerFactory == null) throw new ArgumentNullException(nameof(loggerFactory));
+
+            var viewModel = new VmCustomizationPageViewModel(
+                wizardData, loggerFactory.CreateLogger<VmCustomizationPageViewModel>());
+
             InitializeComponent();
-            DataContext = _wizardData;
-            XrdpCheckbox.IsChecked = true;
-            UpdateVisibility(); // Set visibility for banner and new drive field
-        }
+            DataContext = viewModel;
 
-        private void UpdateVisibility()
-        {
-            bool isNotVhdX = string.Equals(_wizardData.SelectedItem?.FileType, "VHDX", StringComparison.OrdinalIgnoreCase) == false;
-            ConversionBanner.Visibility = isNotVhdX ? Visibility.Visible : Visibility.Collapsed;
-        }
-
-        private void finishButton_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                _wizardData.Customizations.ConfigureXrdp = XrdpCheckbox.IsChecked ?? false;
-                WizardCompleted?.Invoke(this, new WizardResultEventArgs(WizardResult.Finished));
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error in VM customization");
-                MessageBox.Show($"Error: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
-
-        private void backButton_Click(object sender, RoutedEventArgs e)
-        {
-            NavigationService.GoBack();
-        }
-
-        private void cancelButton_Click(object sender, RoutedEventArgs e)
-        {
-            WizardCompleted?.Invoke(this, new WizardResultEventArgs(WizardResult.Canceled));
+            viewModel.RequestNavigateBack += () => NavigationService.GoBack();
+            viewModel.RequestWizardComplete += result =>
+                WizardCompleted?.Invoke(this, new WizardResultEventArgs(result));
         }
     }
 }

@@ -5,6 +5,27 @@
         Title="New Virtual Machine Wizard" Height="652" Width="1000">
     <!-- All styles and resources are defined in App.xaml and inherited here. -->
     <Grid>
-        <Frame x:Name="_mainFrame" NavigationUIVisibility="Hidden" />
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- Notification banner (error/success), overlays the top of the window -->
+        <Border x:Name="NotificationBanner" Grid.Row="0" Padding="12,8" Visibility="Collapsed">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="NotificationText" Grid.Column="0" TextWrapping="Wrap"
+                           FontFamily="Segoe UI" FontSize="12" VerticalAlignment="Center"/>
+                <Button Grid.Column="1" Content="&#xE711;" FontFamily="Segoe MDL2 Assets" FontSize="10"
+                        Click="DismissBanner_Click" Background="Transparent" BorderThickness="0"
+                        Cursor="Hand" Padding="6,2" VerticalAlignment="Center"
+                        ToolTip="Dismiss" AutomationProperties.Name="Dismiss notification"/>
+            </Grid>
+        </Border>
+
+        <Frame x:Name="_mainFrame" Grid.Row="1" NavigationUIVisibility="Hidden" />
     </Grid>
 </Window>

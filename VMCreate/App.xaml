@@ -4,7 +4,18 @@
              xmlns:local="clr-namespace:VMCreate"
              Startup="App_OnStartup">
     <Application.Resources>
+        <!-- Converters -->
         <local:ImageSourceConverter x:Key="ImageConverter" />
+        <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+
+        <!-- Color palette: change these to retheme the entire app -->
+        <SolidColorBrush x:Key="AccentBrush" Color="#FF0078D7"/>
+        <SolidColorBrush x:Key="AccentForegroundBrush" Color="White"/>
+        <SolidColorBrush x:Key="SubtleTextBrush" Color="#FF808080"/>
+        <SolidColorBrush x:Key="ItemBorderBrush" Color="#FFE0E0E0"/>
+        <SolidColorBrush x:Key="SelectedBackgroundBrush" Color="#FFF0F0F0"/>
+
+        <!-- Typography -->
         <Style x:Key="TitleText" TargetType="{x:Type TextBlock}">
             <Setter Property="FontFamily" Value="Segoe UI"/>
             <Setter Property="FontSize" Value="24"/>
@@ -14,7 +25,7 @@
         <Style x:Key="PublisherText" TargetType="{x:Type TextBlock}">
             <Setter Property="FontFamily" Value="Segoe UI"/>
             <Setter Property="FontSize" Value="12"/>
-            <Setter Property="Foreground" Value="#FF808080"/>
+            <Setter Property="Foreground" Value="{StaticResource SubtleTextBrush}"/>
             <Setter Property="TextWrapping" Value="Wrap"/>
             <Setter Property="Padding" Value="5"/>
         </Style>
@@ -29,24 +40,26 @@
             <Setter Property="FontSize" Value="12"/>
             <Setter Property="Padding" Value="5"/>
         </Style>
+
+        <!-- Controls -->
         <Style x:Key="CommonButton" TargetType="{x:Type Button}">
             <Setter Property="FontFamily" Value="Segoe UI"/>
             <Setter Property="FontSize" Value="14"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
             <Setter Property="Margin" Value="4"/>
             <Setter Property="Padding" Value="8"/>
-            <Setter Property="Background" Value="#FF0078D7"/>
-            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource AccentForegroundBrush}"/>
         </Style>
         <Style x:Key="GalleryItemStyle" TargetType="{x:Type ListBoxItem}">
             <Setter Property="Margin" Value="2"/>
             <Setter Property="Padding" Value="6"/>
             <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="BorderBrush" Value="#FFE0E0E0"/>
+            <Setter Property="BorderBrush" Value="{StaticResource ItemBorderBrush}"/>
             <Style.Triggers>
                 <Trigger Property="IsSelected" Value="True">
-                    <Setter Property="Background" Value="#FFF0F0F0"/>
-                    <Setter Property="BorderBrush" Value="#FF0078D7"/>
+                    <Setter Property="Background" Value="{StaticResource SelectedBackgroundBrush}"/>
+                    <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
                 </Trigger>
             </Style.Triggers>
         </Style>
@@ -59,8 +72,8 @@
         <Style x:Key="PillLabelStyle" TargetType="{x:Type TextBlock}">
             <Setter Property="FontFamily" Value="Segoe UI"/>
             <Setter Property="FontSize" Value="10"/>
-            <Setter Property="Foreground" Value="White"/>
-            <Setter Property="Background" Value="#FF0078D7"/>
+            <Setter Property="Foreground" Value="{StaticResource AccentForegroundBrush}"/>
+            <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
             <Setter Property="Padding" Value="6,2"/>
             <Setter Property="Margin" Value="5,0,0,0"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
