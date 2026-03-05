@@ -29,7 +29,7 @@ namespace VMCreate.Gallery
             }
             catch (Exception ex)
             {
-                _logger.LogError($"Error loading gallery items from Microsoft URI: {ex.Message}");
+                _logger.LogError(ex, "Error loading gallery items from Microsoft URI: {ErrorMessage}", ex.Message);
             }
             return galleryItems;
         }

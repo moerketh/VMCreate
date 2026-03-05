@@ -384,7 +384,7 @@ namespace VMCreate.Tests.GalleryTests
         }
 
         [TestMethod]
-        public async Task LoadJsonFromUrl_CancellationRequested_ThrowsOrReturnsEmpty()
+        public async Task LoadJsonFromUrl_CancellationRequested_PropagatesCancellation()
         {
             using var cts = new CancellationTokenSource();
             cts.Cancel();
@@ -395,17 +395,24 @@ namespace VMCreate.Tests.GalleryTests
                     "SendAsync",
                     ItExpr.IsAny<HttpRequestMessage>(),
                     ItExpr.IsAny<CancellationToken>())
-                .ThrowsAsync(new OperationCanceledException());
+                .ThrowsAsync(new TaskCanceledException());
 
             _mockClientFactory.Setup(f => f.CreateClient(It.IsAny<string>()))
                 .Returns(new HttpClient(handler.Object));
 
             var parser = new GalleryItemsParser(_mockLogger.Object, _mockClientFactory.Object);
 
-            // Parser swallows exceptions and returns empty list (by design)
-            var result = await parser.LoadJsonFromUrl("https://example.com/g.json", cts.Token);
-
-            Assert.AreEqual(0, result.Count);
+            // OperationCanceledException (or its subclass TaskCanceledException) must propagate;
+            // it must not be swallowed and returned as an empty list.
+            try
+            {
+                await parser.LoadJsonFromUrl("https://example.com/g.json", cts.Token);
+                Assert.Fail("Expected OperationCanceledException was not thrown.");
+            }
+            catch (OperationCanceledException)
+            {
+                // Correct — test passes.
+            }
         }
     }
 }

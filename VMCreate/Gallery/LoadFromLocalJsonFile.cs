@@ -27,12 +27,12 @@ namespace VMCreate.Gallery
             string localJsonPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "gallery.json");
             if (File.Exists(localJsonPath))
             {
-                _logger.LogDebug($"Loading local JSON from: {localJsonPath}");
+                _logger.LogDebug("Loading local JSON from: {Path}", localJsonPath);
                 items = _parser.LoadJsonFromFile(localJsonPath);
             }
             else
             {
-                _logger.LogWarning($"Local JSON file not found: {localJsonPath}");
+                _logger.LogWarning("Local JSON file not found: {Path}", localJsonPath);
             }
             return Task.FromResult(items);
         }

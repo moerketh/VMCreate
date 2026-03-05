@@ -39,7 +39,7 @@ namespace VMCreate.Gallery
                 }
                 else
                 {
-                    _logger.LogDebug($"Found GalleryLocations: {string.Join(", ", locations)}");
+                    _logger.LogDebug("Found GalleryLocations: {Locations}", string.Join(", ", locations));
                     foreach (string location in locations)
                     {
                         cancellationToken.ThrowIfCancellationRequested();
@@ -53,14 +53,14 @@ namespace VMCreate.Gallery
                         }
                         else
                         {
-                            _logger.LogError($"Invalid local path: {location}");
+                            _logger.LogError("Invalid local path: {Location}", location);
                         }
                     }
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError($"Error loading gallery items from registry: {ex.Message}");
+                _logger.LogError(ex, "Error loading gallery items from registry: {ErrorMessage}", ex.Message);
             }
             return items;
         }

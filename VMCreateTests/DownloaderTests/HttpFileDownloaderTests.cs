@@ -94,7 +94,6 @@ namespace VMCreate.Tests
             var uri = "http://example.com/file.zip";
             var finalUri = "http://example.com/file.zip";
             var filePath = Path.Combine(Path.GetTempPath(), "file.zip");
-            var mockResponse1 = new HttpResponseMessage(HttpStatusCode.InternalServerError); // Failure
             var mockResponse2 = new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new ByteArrayContent(new byte[0]) { Headers = { ContentLength = 1024 } },
@@ -102,8 +101,11 @@ namespace VMCreate.Tests
             };
             var mockProgress = new Mock<IProgress<CreateVMProgressInfo>>();
 
+            // First call throws an HttpRequestException (the only exception the downloader retries on);
+            // second call succeeds. Returning a 500 response directly would cause a NullReferenceException
+            // because the mock response has no RequestMessage set.
             _mockStreamProvider.SetupSequence(p => p.GetResponseAsync(uri, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(mockResponse1)
+                .ThrowsAsync(new HttpRequestException("Simulated server error on attempt 1"))
                 .ReturnsAsync(mockResponse2);
 
             _mockFileStreamProvider.Setup(p => p.GetWriteStreamAsync(It.IsAny<string>(), false))
@@ -168,7 +170,10 @@ namespace VMCreate.Tests
         public async Task DownloadFileAsync_InvalidFileNameFromUri_HandlesSanitization()
         {
             // Arrange
-            var uri = "http://example.com/file:with?invalid=chars.zip";
+            // Use percent-encoded pipe characters (%7C) in the URI path. The downloader derives the
+            // filename from Uri.LocalPath which decodes %7C → '|', an invalid Windows filename char.
+            // Those chars are then replaced with '_', yielding "file_with_invalid_chars.zip".
+            var uri = "http://example.com/file%7Cwith%7Cinvalid%7Cchars.zip";
             var finalUri = uri;
             var mockResponse = new HttpResponseMessage(HttpStatusCode.OK)
             {
@@ -183,14 +188,15 @@ namespace VMCreate.Tests
             _mockFileStreamProvider.Setup(p => p.GetWriteStreamAsync(It.Is<string>(path => path.Contains("file_with_invalid_chars")), false))
                 .ReturnsAsync((new MemoryStream(), false));
 
-            _mockStreamCopier.Setup(c => c.CopyAsync(It.IsAny<Stream>(), It.IsAny<Stream>(), 1024L, finalUri, mockProgress.Object, It.IsAny<CancellationToken>()))
+            _mockStreamCopier.Setup(c => c.CopyAsync(It.IsAny<Stream>(), It.IsAny<Stream>(), It.IsAny<long?>(), It.IsAny<string>(), mockProgress.Object, It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
 
             // Act
             var result = await _downloader.DownloadFileAsync(uri, CancellationToken.None, mockProgress.Object, false);
 
             // Assert
-            Assert.IsTrue(result.Contains("file_with_invalid_chars"));
+            Assert.IsTrue(result.Contains("file_with_invalid_chars"),
+                $"Expected path to contain 'file_with_invalid_chars' but was: {result}");
         }
     }
 }

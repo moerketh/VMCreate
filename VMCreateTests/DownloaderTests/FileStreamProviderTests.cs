@@ -19,8 +19,8 @@ namespace VMCreate.Tests
         [TestMethod]
         public async Task GetWriteStreamAsync_FileExistsAndUseCache_ReturnsCachedTrueNoStream()
         {
-            // Arrange
-            var filePath = Path.Combine(Path.GetTempPath(), "testfile.zip");
+            // Arrange — use a unique filename to prevent collisions when tests run in parallel.
+            var filePath = Path.Combine(Path.GetTempPath(), $"testfile_{Guid.NewGuid():N}.zip");
             File.WriteAllBytes(filePath, new byte[0]); // Create temp file
             try
             {

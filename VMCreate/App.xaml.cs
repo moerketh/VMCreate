@@ -66,5 +66,11 @@ namespace VMCreate
             var mainWindow = new MainWindow();
             mainWindow.Show();
         }
+
+        protected override void OnExit(ExitEventArgs e)
+        {
+            (ServiceProvider as IDisposable)?.Dispose();
+            base.OnExit(e);
+        }
     }
 }

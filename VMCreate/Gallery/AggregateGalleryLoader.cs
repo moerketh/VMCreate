@@ -50,29 +50,29 @@ namespace VMCreate.Gallery
                     var type = Type.GetType(typeName);
                     if (type == null)
                     {
-                        _logger.LogError($"Error: Could not find type '{typeName}'. Verify the namespace and assembly.");
+                        _logger.LogError("Could not find type '{TypeName}'. Verify the namespace and assembly.", typeName);
                         continue;
                     }
 
                     if (!typeof(IGalleryLoader).IsAssignableFrom(type))
                     {
-                        _logger.LogError($"Error: Type '{typeName}' does not implement IGalleryLoader.");
+                        _logger.LogError("Type '{TypeName}' does not implement IGalleryLoader.", typeName);
                         continue;
                     }
 
                     var loader = _serviceProvider.GetService(type) as IGalleryLoader;
                     if (loader == null)
                     {
-                        _logger.LogError($"Error: Could not resolve loader for type '{typeName}'. Ensure it is registered in the DI container.");
+                        _logger.LogError("Could not resolve loader for type '{TypeName}'. Ensure it is registered in the DI container.", typeName);
                         continue;
                     }
 
                     _loaders.Add(loader);
-                    _logger.LogDebug($"Successfully loaded loader: {typeName}");
+                    _logger.LogDebug("Successfully loaded loader: {TypeName}", typeName);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError($"Error resolving loader '{typeName}': {ex.Message}");
+                    _logger.LogError(ex, "Error resolving loader '{TypeName}': {ErrorMessage}", typeName, ex.Message);
                 }
             }
 
@@ -97,7 +97,7 @@ namespace VMCreate.Gallery
                 var items = await loader.LoadGalleryItems(cancellationToken);
                 if (items == null)
                 {
-                    _logger.LogWarning($"Warning: Loader {loader.GetType().Name} returned null items.");
+                    _logger.LogWarning("Loader {LoaderType} returned null items.", loader.GetType().Name);
                     return new List<GalleryItem>();
                 }
                 return items;
@@ -108,7 +108,7 @@ namespace VMCreate.Gallery
             }
             catch (Exception ex)
             {
-                _logger.LogError($"Error loading items from {loader.GetType().Name}: {ex.Message}");
+                _logger.LogError(ex, "Error loading items from {LoaderType}: {ErrorMessage}", loader.GetType().Name, ex.Message);
                 return new List<GalleryItem>();
             }
         }

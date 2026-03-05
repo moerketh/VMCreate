@@ -32,16 +32,20 @@ namespace VMCreate.Gallery
         {
             try
             {
-                _logger.LogDebug($"Downloading JSON from {url}");
+                _logger.LogDebug("Downloading JSON from {Url}", url);
                 var client = _clientFactory.CreateClient();
                 string json = await client.GetStringAsync(url, cancellationToken);
                 var items = ParseJson(json);
-                _logger.LogDebug($"Parsed JSON from {url}");
+                _logger.LogDebug("Parsed JSON from {Url}", url);
                 return items;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
-                _logger.LogWarning($"Failed to download or parse JSON from {url}: {ex.Message}");
+                _logger.LogWarning("Failed to download or parse JSON from {Url}: {ErrorMessage}", url, ex.Message);
                 return new List<GalleryItem>();
             }
         }
@@ -58,7 +62,7 @@ namespace VMCreate.Gallery
             }
             catch (Exception ex)
             {
-                _logger.LogWarning($"Failed to parse JSON from {path}: {ex.Message}");
+                _logger.LogWarning("Failed to parse JSON from {Path}: {ErrorMessage}", path, ex.Message);
             }
             return items;
         }
@@ -68,14 +72,14 @@ namespace VMCreate.Gallery
             var items = new List<GalleryItem>();
             try
             {
-                _logger.LogDebug($"Parsing local JSON file: {path}");
+                _logger.LogDebug("Parsing local JSON file: {Path}", path);
                 string json = File.ReadAllText(path);
                 items.AddRange(ParseJson(json));
-                _logger.LogDebug($"Parsed JSON from {path}");
+                _logger.LogDebug("Parsed JSON from {Path}", path);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning($"Failed to parse JSON from {path}: {ex.Message}");
+                _logger.LogWarning("Failed to parse JSON from {Path}: {ErrorMessage}", path, ex.Message);
             }
             return items;
         }
@@ -157,17 +161,17 @@ namespace VMCreate.Gallery
                     }
                     catch (KeyNotFoundException ex)
                     {
-                        _logger.LogError($"Error parsing image: Missing key '{ex.Message}'");
+                        _logger.LogError("Error parsing image: Missing key '{MissingKey}'", ex.Message);
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError($"Error parsing image: {ex.Message}");
+                        _logger.LogError(ex, "Error parsing image: {ErrorMessage}", ex.Message);
                     }
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError($"Error parsing JSON: {ex.Message}");
+                _logger.LogError(ex, "Error parsing JSON: {ErrorMessage}", ex.Message);
             }
             return items;
         }
