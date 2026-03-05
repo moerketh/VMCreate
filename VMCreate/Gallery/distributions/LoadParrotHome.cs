@@ -9,7 +9,7 @@ namespace VMCreate.Gallery
 {
     public class LoadParrotHome : IGalleryLoader
     {
-        private const string BaseUrl = "https://deb.parrot.sh/parrot/iso/6.3.2/";
+        private const string BaseUrl = "https://deb.parrot.sh/parrot/iso/7.1/";
         private const string Thumbnail = "https://parrotsec.org/_next/static/media/parrot-security-1.c044d5dd.png";
         private const string LogoUri = "https://www.parrotsec.org/images/parrot-logo.png";
         private const string SymbolUri = "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTWb4XCIcMpF6J3-37LaMWassk71PPNVWU7Qw&s";
