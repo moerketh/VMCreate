@@ -8,10 +8,13 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using VMCreate.Gallery;
+using Wpf.Ui;
+using Wpf.Ui.Appearance;
+using Wpf.Ui.Controls;
 
 namespace VMCreate
 {
-    public partial class MainWindow : Window
+    public partial class MainWindow : FluentWindow
     {
         private readonly ObservableCollection<GalleryItem> _galleryItems = new ObservableCollection<GalleryItem>();
         // Tracks (Name, DiskUri) pairs already in _galleryItems to deduplicate streamed batches.
@@ -31,28 +34,35 @@ namespace VMCreate
             _loggerFactory = loggerFactory;
 
             InitializeComponent();
+
+            // Follow the Windows system theme by default
+            SystemThemeWatcher.Watch(this);
+
             Loaded += MyWindow_LoadedAsync;
         }
 
         private void ShowBanner(string message, bool isError)
         {
-            NotificationBanner.Background = isError
-                ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xF2, 0xDE, 0xDE))
-                : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xDE, 0xF2, 0xDE));
-            NotificationBanner.BorderBrush = isError
-                ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xE8, 0x70, 0x70))
-                : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x70, 0xC0, 0x70));
-            NotificationBanner.BorderThickness = new Thickness(1);
-            NotificationText.Text = message;
-            NotificationText.Foreground = isError
-                ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xB3, 0x3A, 0x3A))
-                : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x2A, 0x7A, 0x2A));
-            NotificationBanner.Visibility = Visibility.Visible;
+            NotificationBar.Title = isError ? "Error" : "Success";
+            NotificationBar.Message = message;
+            NotificationBar.Severity = isError
+                ? InfoBarSeverity.Error
+                : InfoBarSeverity.Success;
+            NotificationBar.IsOpen = true;
         }
 
-        private void DismissBanner_Click(object sender, RoutedEventArgs e)
+        private void ToggleTheme_Click(object sender, RoutedEventArgs e)
         {
-            NotificationBanner.Visibility = Visibility.Collapsed;
+            var current = ApplicationThemeManager.GetAppTheme();
+            var next = current == ApplicationTheme.Dark
+                ? ApplicationTheme.Light
+                : ApplicationTheme.Dark;
+            ApplicationThemeManager.Apply(next, WindowBackdropType.Mica, true);
+
+            // Update the toggle icon
+            ThemeToggleButton.Icon = next == ApplicationTheme.Dark
+                ? new SymbolIcon(SymbolRegular.WeatherMoon24)
+                : new SymbolIcon(SymbolRegular.WeatherSunny24);
         }
 
         private async void MyWindow_LoadedAsync(object sender, RoutedEventArgs e)

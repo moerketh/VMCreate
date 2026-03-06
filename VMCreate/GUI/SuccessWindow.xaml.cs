@@ -1,8 +1,9 @@
 ﻿using System.Windows;
+using Wpf.Ui.Controls;
 
 namespace VMCreate
 {
-    public partial class SuccessWindow : Window
+    public partial class SuccessWindow : FluentWindow
     {
         public SuccessWindow()
         {

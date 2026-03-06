@@ -2,6 +2,7 @@
 <Page x:Class="VMCreate.SelectImagePage"
       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
       xmlns:local="clr-namespace:VMCreate"
       Title="Select Virtual Machine Image">
     <Grid Margin="10">
@@ -13,25 +14,15 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
         <TextBlock Grid.Row="0" Text="Select a Virtual Machine Image" Style="{StaticResource TitleText}"/>
-        <!-- Dismissible error banner -->
-        <Border Grid.Row="1" Background="#FFF2DEDE" BorderBrush="#FFE87070" BorderThickness="1"
-                Padding="10,8" Margin="0,0,0,6" CornerRadius="4"
-                Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="0" Text="{Binding ErrorMessage}" Foreground="#FFB33A3A"
-                           FontFamily="Segoe UI" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center"/>
-                <Button Grid.Column="1" Content="&#xE711;" FontFamily="Segoe MDL2 Assets" FontSize="10"
-                        Command="{Binding DismissErrorCommand}" Background="Transparent" BorderThickness="0"
-                        Foreground="#FFB33A3A" Cursor="Hand" Padding="6,2" VerticalAlignment="Center"
-                        ToolTip="Dismiss" AutomationProperties.Name="Dismiss error"/>
-            </Grid>
-        </Border>
-        <TextBox Grid.Row="2" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
-                 Margin="0,10,0,10" FontFamily="Segoe UI" FontSize="14"
+        <!-- Dismissible error banner (theme-aware via InfoBar) -->
+        <ui:InfoBar Grid.Row="1" Title="Error" Severity="Error"
+                    Message="{Binding ErrorMessage}"
+                    IsOpen="{Binding HasError, Mode=OneWay}"
+                    IsClosable="True" Margin="0,0,0,6"/>
+        <ui:TextBox Grid.Row="2" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                 PlaceholderText="Search images…"
+                 Margin="0,10,0,10" FontSize="14"
+                 Icon="{ui:SymbolIcon Search24}"
                  AutomationProperties.Name="Search gallery images"/>
         <Grid Grid.Row="3">
             <Grid.ColumnDefinitions>
@@ -67,14 +58,15 @@
                     </ListBox.ItemTemplate>
                 </ListBox>
                 <!-- Loading overlay shown until all gallery loaders have completed -->
-                <Border Background="#CC1E1E2E"
+                <Border Background="{DynamicResource SmokeFillColorDefaultBrush}"
                         Visibility="{Binding IsLoading, Converter={StaticResource BoolToVis}}">
                     <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                        <ui:ProgressRing IsIndeterminate="True" Width="40" Height="40"/>
                         <TextBlock Text="Loading gallery&#x2026;"
-                                   Foreground="White" FontFamily="Segoe UI" FontSize="18"
-                                   HorizontalAlignment="Center"/>
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" FontSize="18"
+                                   HorizontalAlignment="Center" Margin="0,12,0,0"/>
                         <TextBlock Text="Fetching available images from the internet"
-                                   Foreground="#FFAAAAAA" FontFamily="Segoe UI" FontSize="12"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="12"
                                    HorizontalAlignment="Center" Margin="0,6,0,0"/>
                     </StackPanel>
                 </Border>
@@ -83,14 +75,14 @@
             <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="10,0,10,0">
             <StackPanel>
                 <Image Source="{Binding SelectedItem.ThumbnailUri, Converter={StaticResource ImageConverter}}"
-                       Stretch="Uniform" Margin="0,0,0,10"/>
+                       Stretch="Uniform" MaxHeight="300" Margin="0,0,0,10"/>
                 <TextBlock Text="{Binding SelectedItem.Name, StringFormat='Name: {0}'}"
                            Style="{StaticResource ExplanationText}" FontWeight="Bold" Margin="0,0,0,-5"/>
                 <TextBlock Text="{Binding SelectedItem.Publisher, StringFormat='Publisher: {0}'}"
                            Style="{StaticResource ExplanationText}" Margin="0,0,0,-5"/>
                 <TextBlock Text="{Binding SelectedItem.Version, StringFormat='Version: {0}'}"
                            Style="{StaticResource ExplanationText}" Margin="0,0,0,-5"/>
-                <TextBlock Text="{Binding SelectedItem.LastUpdated, StringFormat='Last Updated: {0}'}"
+                <TextBlock Text="{Binding SelectedItem.LastUpdated, Converter={StaticResource DateConverter}, StringFormat='Last Updated: {0}'}"
                            Style="{StaticResource ExplanationText}" Margin="0,0,0,-5"/>
                 <TextBlock Text="{Binding SelectedItem.DiskUri, StringFormat='Download URL: {0}'}"
                            Style="{StaticResource ExplanationText}" Margin="0,0,0,-5"/>

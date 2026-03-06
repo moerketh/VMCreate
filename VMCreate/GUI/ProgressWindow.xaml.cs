@@ -1,11 +1,11 @@
 ﻿using System;
 using System.Threading;
 using System.Windows;
-using VMCreate;
+using Wpf.Ui.Controls;
 
 namespace VMCreate
 {
-    public partial class ProgressWindow : Window
+    public partial class ProgressWindow : FluentWindow
     {
         private readonly CancellationTokenSource _cancellationTokenSource;
 

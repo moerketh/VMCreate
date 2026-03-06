@@ -1,6 +1,7 @@
 ﻿<Page x:Class="VMCreate.VmCustomizationPage"
       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
       xmlns:local="clr-namespace:VMCreate"
       Title="Configure Virtual Machine">
     <Grid Margin="10">
@@ -10,7 +11,7 @@
             <RowDefinition Height="Auto"/>
             <!-- Selected VM info -->
             <RowDefinition Height="Auto"/>
-            <!-- Yellow banner -->
+            <!-- Warning banner -->
             <RowDefinition Height="*"/>
             <!-- Settings -->
             <RowDefinition Height="Auto"/>
@@ -23,13 +24,9 @@
             <TextBlock Text="{Binding SelectedItem.Name, FallbackValue='No VM selected'}" 
                        Style="{StaticResource ExplanationText}" FontWeight="Bold" VerticalAlignment="Center"/>
         </StackPanel>
-        <StackPanel Grid.Row="2" Margin="0,0,0,10">
-            <Border Background="Yellow" Padding="10"
-                    Visibility="{Binding IsNotVhdx, Converter={StaticResource BoolToVis}}">
-                <TextBlock Text="The selected VM is not in VHDX format. It will be converted to VHDX using QEMU. If the disk is MBR partitioned it will be cloned to a new GPT partitioned disk using a converter DVD on first VM boot." 
-                           Style="{StaticResource ExplanationText}" TextWrapping="Wrap"/>
-            </Border>
-        </StackPanel>
+        <ui:InfoBar Grid.Row="2" Title="Conversion required" Severity="Warning"
+                    Message="The selected VM is not in VHDX format. It will be converted to VHDX using QEMU. If the disk is MBR partitioned it will be cloned to a new GPT partitioned disk using a converter DVD on first VM boot."
+                    IsOpen="{Binding IsNotVhdx, Mode=OneWay}" IsClosable="False" Margin="0,0,0,10"/>
         <Grid Grid.Row="3" Margin="0,10,0,0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>

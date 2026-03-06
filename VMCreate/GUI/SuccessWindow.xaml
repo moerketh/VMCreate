@@ -1,14 +1,21 @@
-﻿<Window x:Class="VMCreate.SuccessWindow"
+﻿<ui:FluentWindow x:Class="VMCreate.SuccessWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Success" Height="150" Width="300" WindowStartupLocation="CenterOwner">
-    <!-- Styles inherited from App.xaml -->
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        Title="Success" Height="200" Width="350" WindowStartupLocation="CenterOwner"
+        ExtendsContentIntoTitleBar="True" WindowBackdropType="Mica">
     <Grid Margin="10">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
-        <TextBlock Grid.Row="0" Style="{StaticResource ExplanationText}" Text="VM created successfully!"/>
-        <Button x:Name="OKButton" Grid.Row="1" Content="OK" Style="{StaticResource CommonButton}" HorizontalAlignment="Right" Click="OKButton_Click"/>
+        <ui:TitleBar Grid.Row="0" Title="Success"/>
+        <StackPanel Grid.Row="1" VerticalAlignment="Center" HorizontalAlignment="Center">
+            <ui:SymbolIcon Symbol="CheckmarkCircle24" FontSize="36" Foreground="{DynamicResource SystemFillColorSuccessBrush}" HorizontalAlignment="Center"/>
+            <TextBlock Style="{StaticResource ExplanationText}" Text="VM created successfully!" FontSize="14"
+                       HorizontalAlignment="Center" Margin="0,8,0,0"/>
+        </StackPanel>
+        <Button x:Name="OKButton" Grid.Row="2" Content="OK" Style="{StaticResource CommonButton}" HorizontalAlignment="Right" Click="OKButton_Click"/>
     </Grid>
-</Window>
+</ui:FluentWindow>
