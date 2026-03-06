@@ -65,7 +65,7 @@ namespace VMCreate
                 IMediaHandler mediaHandler = _mediaHandlerFactory.CreateHandler(item.FileType);
                 string mediaPath = await mediaHandler.PrepareMediaAsync(sourceFile, _defaultVhdxPath, item, createVMProgressInfo, cancellationToken);
                 
-                string cloningIsoPath = "C:\\Users\\Thomas\\Desktop\\custom-autorun.iso";
+                string cloningIsoPath = vmSettings.CloningIsoPath;
                 int detectedGeneration = mediaHandler.VmGeneration; // 1 for MBR, 2 for GPT
                 const int targetGeneration = 2; // Always target Gen 2
 
@@ -87,6 +87,7 @@ namespace VMCreate
                 {
                     // Drive is GPT partitioned: Attach media directly as primary boot disk
                     await _hyperVManager.AddExistingHardDrive(vmSettings, mediaPath, cancellationToken);
+                    await _hyperVManager.SetFirstBootToHardDrive(vmSettings, cancellationToken);
                 }
                 else if (detectedGeneration == 1)
                 {
@@ -141,6 +142,9 @@ namespace VMCreate
                     await _hyperVManager.RemoveHardDrive(vmSettings, OriginalDiskScsiControllerLocation, cancellationToken);
                     // Remove ISO
                     await _hyperVManager.RemoveBootDvd(vmSettings, cloningIsoPath, cancellationToken);
+
+                    // Set hard drive as first boot device now that DVD and old disk are removed
+                    await _hyperVManager.SetFirstBootToHardDrive(vmSettings, cancellationToken);
                 }
                 await _hyperVManager.SetEnhancedSession(vmSettings, cancellationToken);
             }

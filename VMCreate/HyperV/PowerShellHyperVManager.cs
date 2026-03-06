@@ -25,6 +25,7 @@ namespace VMCreate
         Task SetCpuCount(VmSettings vmSettings, CancellationToken cancellationToken);
         Task SetEnhancedSession(VmSettings vmSettings, CancellationToken cancellationToken);
         Task SetFirstBootToDvd(VmSettings vmSettings, CancellationToken cancellationToken);
+        Task SetFirstBootToHardDrive(VmSettings vmSettings, CancellationToken cancellationToken);
         Task SetSecureBoot(VmSettings vmSettings, CancellationToken cancellationToken);
         Task SetVMLoginNotes(VmSettings vmSettings, string initialUsername, string initialPassword, CancellationToken cancellationToken);
         Task StartVM(VmSettings vmSettings, CancellationToken cancellationToken);
@@ -203,6 +204,25 @@ namespace VMCreate
                 .AddParameter("VMName", vmSettings.VMName)
                 .AddParameter("FirstBootDevice", dvdDrive);
             await RunCommand(cancellationToken);
+        }
+
+        public async Task SetFirstBootToHardDrive(VmSettings vmSettings, CancellationToken cancellationToken)
+        {
+            _ps.Commands.Clear();
+            _ps.AddCommand("Get-VMHardDiskDrive")
+                .AddParameter("VMName", vmSettings.VMName);
+            var hardDrives = await RunCommand(cancellationToken);
+            var firstDrive = hardDrives.FirstOrDefault();
+            if (firstDrive == null)
+            {
+                throw new Exception("No hard disk drive found for VM. Ensure a VHDX is attached.");
+            }
+            _ps.Commands.Clear();
+            _ps.AddCommand("Set-VMFirmware")
+                .AddParameter("VMName", vmSettings.VMName)
+                .AddParameter("FirstBootDevice", firstDrive);
+            await RunCommand(cancellationToken);
+            _logger.LogInformation("Set first boot device to hard drive for VM: {VMName}", vmSettings.VMName);
         }
 
         public async Task SetCpuCount(VmSettings vmSettings, CancellationToken cancellationToken)
