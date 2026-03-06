@@ -61,6 +61,7 @@ namespace VMCreate
                 var loaders = galleryLoaderTypes.Select(t => (IGalleryLoader)provider.GetRequiredService(t));
                 return new AggregateGalleryLoader(logger, loaders);
             });
+            services.AddSingleton<GalleryCache>();
             services.AddTransient<IGalleryItemsParser, GalleryItemsParser>();
             services.AddSingleton<IPartitionSchemeDetector, PartitionSchemeDetector>();
             services.AddSingleton<MediaHandlerFactory>();

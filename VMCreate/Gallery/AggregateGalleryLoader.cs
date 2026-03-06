@@ -52,11 +52,17 @@ namespace VMCreate.Gallery
             }
         }
 
+        /// <summary>Maximum time any single loader is allowed before it is abandoned.</summary>
+        private static readonly TimeSpan LoaderTimeout = TimeSpan.FromSeconds(10);
+
         private async Task<List<GalleryItem>> LoadFromSingleLoader(IGalleryLoader loader, CancellationToken cancellationToken)
         {
             try
             {
-                var items = await loader.LoadGalleryItems(cancellationToken);
+                using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                linkedCts.CancelAfter(LoaderTimeout);
+
+                var items = await loader.LoadGalleryItems(linkedCts.Token);
                 if (items == null)
                 {
                     _logger.LogWarning("Loader {LoaderType} returned null items.", loader.GetType().Name);
@@ -64,9 +70,16 @@ namespace VMCreate.Gallery
                 }
                 return items;
             }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                // The per-loader timeout fired, not the caller's token — treat as a soft failure.
+                _logger.LogWarning("Loader {LoaderType} timed out after {Timeout}s and was skipped.",
+                    loader.GetType().Name, LoaderTimeout.TotalSeconds);
+                return new List<GalleryItem>();
+            }
             catch (OperationCanceledException)
             {
-                throw; // Let cancellation propagate
+                throw; // Caller requested cancellation — propagate.
             }
             catch (Exception ex)
             {

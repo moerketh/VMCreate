@@ -29,6 +29,7 @@
     <Compile Include="Extractors\IExtractor.cs" />
     <Compile Include="Extractors\XzFileExtractor.cs" />
     <Compile Include="Gallery\AggregateGalleryLoader.cs" />
+    <Compile Include="Gallery\GalleryCache.cs" />
     <Compile Include="Gallery\distributions\AlpineLinux.cs" />
     <Compile Include="Gallery\distributions\Arch.cs" />
     <Compile Include="Gallery\distributions\Debian.cs" />

@@ -31,7 +31,11 @@
             </Grid.ColumnDefinitions>
             <!-- Gallery list -->
             <Grid Grid.Column="0">
-                <ListBox ItemsSource="{Binding GalleryView}"
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <ListBox Grid.Row="0" ItemsSource="{Binding GalleryView}"
                          SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
                          SelectionMode="Single" ScrollViewer.VerticalScrollBarVisibility="Auto" 
                          ScrollViewer.HorizontalScrollBarVisibility="Disabled"
@@ -57,17 +61,16 @@
                         </DataTemplate>
                     </ListBox.ItemTemplate>
                 </ListBox>
-                <!-- Loading overlay shown until all gallery loaders have completed -->
-                <Border Background="{DynamicResource SmokeFillColorDefaultBrush}"
-                        Visibility="{Binding IsLoading, Converter={StaticResource BoolToVis}}">
-                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                        <ui:ProgressRing IsIndeterminate="True" Width="40" Height="40"/>
-                        <TextBlock Text="Loading gallery&#x2026;"
-                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" FontSize="18"
-                                   HorizontalAlignment="Center" Margin="0,12,0,0"/>
-                        <TextBlock Text="Fetching available images from the internet"
+                <!-- Inline loading indicator (non-blocking) — shown while loaders are still running -->
+                <Border Grid.Row="1"
+                        Visibility="{Binding IsLoading, Converter={StaticResource BoolToVis}}"
+                        Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                        CornerRadius="4" Padding="10,8" Margin="0,4,0,0">
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                        <ui:ProgressRing IsIndeterminate="True" Width="16" Height="16"/>
+                        <TextBlock Text="Loading more images&#x2026;"
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="12"
-                                   HorizontalAlignment="Center" Margin="0,6,0,0"/>
+                                   VerticalAlignment="Center" Margin="8,0,0,0"/>
                     </StackPanel>
                 </Border>
             </Grid>

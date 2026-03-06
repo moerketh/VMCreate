@@ -134,13 +134,25 @@ namespace VMCreate
 
             try
             {
+                var cache = _serviceProvider.GetRequiredService<GalleryCache>();
+
+                // ── 1. Populate from cache instantly (warm startup) ──────────
+                if (cache.TryLoadCache(out var cachedItems))
+                {
+                    foreach (var item in cachedItems)
+                    {
+                        if (item.Name == null || item.DiskUri == null) continue;
+                        if (_seenItems.Add((item.Name, item.DiskUri)))
+                            _galleryItems.Add(item);
+                    }
+                    _logger.LogDebug("Populated {Count} items from cache.", _galleryItems.Count);
+                }
+
+                // ── 2. Background refresh via streaming ──────────────────────
                 var galleryLoader = _serviceProvider.GetRequiredService<IGalleryLoader>();
 
                 if (galleryLoader is AggregateGalleryLoader aggregate)
                 {
-                    // Stream items into the ObservableCollection as each loader finishes.
-                    // The ListBox sees every change immediately because ObservableCollection
-                    // fires CollectionChanged on the UI thread via Dispatcher.BeginInvoke.
                     await aggregate.LoadGalleryItemsStreaming(batch =>
                     {
                         Application.Current.Dispatcher.BeginInvoke(() =>
@@ -167,6 +179,9 @@ namespace VMCreate
                             _galleryItems.Add(item);
                     }
                 }
+
+                // ── 3. Persist fresh results to disk cache ───────────────────
+                cache.SaveCache(_galleryItems.ToList());
 
                 _logger.LogDebug("Successfully loaded gallery items");
                 firstPage.SetLoadingComplete();

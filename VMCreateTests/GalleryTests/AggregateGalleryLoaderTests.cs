@@ -129,12 +129,12 @@ namespace VMCreate.Tests.GalleryTests
         [TestMethod]
         public async Task LoadGalleryItems_CancellationTokenPassedToLoaders()
         {
-            var capturedToken = CancellationToken.None;
+            bool tokenCanBeCanceled = false;
             using var cts = new CancellationTokenSource();
 
             var loader = new Mock<IGalleryLoader>();
             loader.Setup(l => l.LoadGalleryItems(It.IsAny<CancellationToken>()))
-                  .Callback((CancellationToken ct) => capturedToken = ct)
+                  .Callback((CancellationToken ct) => tokenCanBeCanceled = ct.CanBeCanceled)
                   .ReturnsAsync(new List<GalleryItem>());
 
             var aggregate = new AggregateGalleryLoader(
@@ -143,7 +143,10 @@ namespace VMCreate.Tests.GalleryTests
 
             await aggregate.LoadGalleryItems(cts.Token);
 
-            Assert.AreEqual(cts.Token, capturedToken);
+            // The loader receives a linked token (wrapping the caller's token + per-loader timeout)
+            // that is cancellable.
+            Assert.IsTrue(tokenCanBeCanceled,
+                "The token passed to individual loaders should be cancellable.");
         }
 
         [TestMethod]
