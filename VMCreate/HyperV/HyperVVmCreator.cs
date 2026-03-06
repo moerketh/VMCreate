@@ -69,6 +69,9 @@ namespace VMCreate
                 int detectedGeneration = mediaHandler.VmGeneration; // 1 for MBR, 2 for GPT
                 const int targetGeneration = 2; // Always target Gen 2
 
+                // Report detected generation so the UI can insert MBR-specific cards
+                createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", DetectedGeneration = detectedGeneration.ToString() });
+
                 await _hyperVManager.CreateVMAsync(vmSettings, _defaultVhdxPath, targetGeneration, cancellationToken);
                 await _hyperVManager.SetVMLoginNotes(vmSettings, item.InitialUsername, item.InitialPassword, cancellationToken);
                 //await _hyperVManager.AddNetworkAdapter(vmSettings, cancellationToken);
@@ -113,6 +116,8 @@ namespace VMCreate
                 {
                     _logger.LogInformation("Virtualization extensions not enabled for VM: {VMName}", vmSettings.VMName);
                 }
+
+                createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "StartVM" });
                 await _hyperVManager.StartVM(vmSettings, cancellationToken);
                 if (detectedGeneration == 1)
                 {
@@ -129,7 +134,7 @@ namespace VMCreate
 
                     //Wait for customizations
                     var kvpbase = new KvpBase();
-                    createVMProgressInfo.Report(new CreateVMProgressInfo() { Phase = "Waiting for customizations and the VM to shutdown..."});
+                    createVMProgressInfo.Report(new CreateVMProgressInfo() { Phase = "Customize"});
                     await kvpbase.WaitForVMShutdownAsync(vmSettings.VMName, cancellationToken);
 
                     // Remove original disk
@@ -138,7 +143,6 @@ namespace VMCreate
                     await _hyperVManager.RemoveBootDvd(vmSettings, cloningIsoPath, cancellationToken);
                 }
                 await _hyperVManager.SetEnhancedSession(vmSettings, cancellationToken);
-                await _hyperVManager.StartVMConnect(vmSettings, cancellationToken);
             }
             catch (Exception ex)
             {

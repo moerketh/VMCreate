@@ -65,10 +65,10 @@
                     AutomationProperties.Name="Cancel wizard"/>
             <ui:Button Command="{Binding FinishCommand}" Appearance="Primary"
                     FontSize="14" Margin="9,4,4,4" Padding="12,8"
-                    AutomationProperties.Name="Finish and create VM">
+                    AutomationProperties.Name="Deploy virtual machine">
                 <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="Finish" VerticalAlignment="Center"/>
-                    <ui:SymbolIcon Symbol="Checkmark24" Margin="6,0,0,0"/>
+                    <TextBlock Text="Deploy" VerticalAlignment="Center"/>
+                    <ui:SymbolIcon Symbol="Rocket24" Margin="6,0,0,0"/>
                 </StackPanel>
             </ui:Button>
         </StackPanel>

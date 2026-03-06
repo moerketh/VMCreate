@@ -20,8 +20,6 @@ namespace VMCreate
         // Tracks (Name, DiskUri) pairs already in _galleryItems to deduplicate streamed batches.
         private readonly HashSet<(string Name, string DiskUri)> _seenItems = new HashSet<(string, string)>();
         private CancellationTokenSource _galleryCts;
-        private ProgressWindow _progressWindow;
-        private SuccessWindow _successWindow;
         private readonly ILogger<MainWindow> _logger;
         private readonly ILoggerFactory _loggerFactory;
         private readonly IServiceProvider _serviceProvider;
@@ -82,6 +80,7 @@ namespace VMCreate
                 SelectImagePage => 1,
                 VmSettingsPage => 2,
                 VmCustomizationPage => 3,
+                DeployPage => 4,
                 _ => 0
             };
 
@@ -90,7 +89,8 @@ namespace VMCreate
 
             SetStepStyle(Step1Icon, Step1Text, SymbolRegular.Image24, activeStep == 1, activeStep > 1, accentBrush, secondaryBrush);
             SetStepStyle(Step2Icon, Step2Text, SymbolRegular.Settings24, activeStep == 2, activeStep > 2, accentBrush, secondaryBrush);
-            SetStepStyle(Step3Icon, Step3Text, SymbolRegular.Wrench24, activeStep == 3, false, accentBrush, secondaryBrush);
+            SetStepStyle(Step3Icon, Step3Text, SymbolRegular.Wrench24, activeStep == 3, activeStep > 3, accentBrush, secondaryBrush);
+            SetStepStyle(Step4Icon, Step4Text, SymbolRegular.Rocket24, activeStep == 4, false, accentBrush, secondaryBrush);
         }
 
         private static void SetStepStyle(
@@ -214,88 +214,44 @@ namespace VMCreate
             }
             else if (e.Result == WizardResult.Finished)
             {
-                bool success = await CreateVMAsync(_wizardData);
-                if (success)
+                // If we're on the Deploy page, "Finished" means "New VM" — reset the wizard.
+                if (sender is DeployPage)
                 {
-                    // Reset wizard data and navigate back to the first page
                     _wizardData = new WizardData { GalleryItems = _galleryItems };
                     var firstPage = new SelectImagePage(_wizardData, _loggerFactory);
                     firstPage.WizardCompleted += WizardPage_Completed;
                     _mainFrame.Navigate(firstPage);
+                    return;
                 }
+
+                // Otherwise we're on the Customize page — validate & navigate to Deploy.
+                var galleryItem = _wizardData.SelectedItem;
+                var vmSettings = _wizardData.Settings;
+
+                if (galleryItem == null)
+                {
+                    ShowBanner("Please select a gallery item.", isError: true);
+                    return;
+                }
+                if (string.IsNullOrEmpty(vmSettings.VMName))
+                {
+                    ShowBanner("VM Name is required.", isError: true);
+                    return;
+                }
+                if (string.IsNullOrEmpty(galleryItem.DiskUri) || !galleryItem.DiskUri.StartsWith("http"))
+                {
+                    ShowBanner($"Invalid disk URI: {galleryItem.DiskUri}", isError: true);
+                    return;
+                }
+
+                var deployPage = new DeployPage(_wizardData, _serviceProvider, _loggerFactory);
+                deployPage.WizardCompleted += WizardPage_Completed;
+                _mainFrame.Navigate(deployPage);
+
+                // Remove back-stack entries so the user can't navigate back during deployment.
+                while (_mainFrame.CanGoBack)
+                    _mainFrame.RemoveBackEntry();
             }
         }
-
-        private async Task<bool> CreateVMAsync(WizardData wizardData)
-        {
-            var galleryItem = wizardData.SelectedItem;
-            var vmSettings = wizardData.Settings;
-            var vmCustomizations = wizardData.Customizations;
-
-            // Guard clauses — validate before showing the progress window
-            if (galleryItem == null)
-            {
-                _logger.LogDebug("No gallery item selected");
-                ShowBanner("Please select a gallery item.", isError: true);
-                return false;
-            }
-            if (string.IsNullOrEmpty(vmSettings.VMName))
-            {
-                _logger.LogDebug("VM name is empty");
-                ShowBanner("VM Name is required.", isError: true);
-                return false;
-            }
-            if (string.IsNullOrEmpty(galleryItem.DiskUri) || !galleryItem.DiskUri.StartsWith("http"))
-            {
-                _logger.LogDebug("Invalid Disk URI: {Uri}", galleryItem.DiskUri);
-                ShowBanner($"Invalid disk URI: {galleryItem.DiskUri}", isError: true);
-                return false;
-            }
-
-            _logger.LogDebug("Validated inputs: VMName={VMName}, Memory={Memory}MB, CPU={CPU}, DiskUri={DiskUri}, VirtualizationEnabled={VirtualizationEnabled}",
-                vmSettings.VMName, vmSettings.MemoryInMB, vmSettings.CPUCount, galleryItem.DiskUri, vmSettings.VirtualizationEnabled);
-
-            // Append timestamp once, just before creation, so Back/Next doesn't re-append.
-            vmSettings.VMName = $"{vmSettings.VMName}_{DateTime.Now:yyyyMMddHHmmss}";
-
-            var cancellationTokenSource = new CancellationTokenSource();
-            _progressWindow = new ProgressWindow(cancellationTokenSource) { Owner = this };
-            _progressWindow.Show();
-            IsEnabled = false;
-
-            bool completed = false;
-            try
-            {
-                var progressReport = new Progress<CreateVMProgressInfo>(i =>
-                    _progressWindow.UpdateProgress(i));
-
-                var token = cancellationTokenSource.Token;
-                var createVM = _serviceProvider.GetRequiredService<CreateVM>();
-                await createVM.StartCreateVMAsync(vmSettings, vmCustomizations, galleryItem, token, progressReport);
-                completed = true;
-            }
-            catch (OperationCanceledException)
-            {
-                _logger.LogInformation("Operation cancelled by user");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error in Create VM setup");
-                ShowBanner($"VM creation failed: {ex.Message}", isError: true);
-            }
-            finally
-            {
-                IsEnabled = true;
-                _progressWindow.Close();
-            }
-
-            if (completed)
-            {
-                _successWindow = new SuccessWindow(vmSettings.VMName) { Owner = this };
-                _successWindow.ShowDialog();
-                _logger.LogInformation("VM creation completed successfully");
-            }
-            return completed;
-        }        
     }
 }

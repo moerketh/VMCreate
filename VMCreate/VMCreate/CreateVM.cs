@@ -37,12 +37,14 @@ namespace VMCreate
                 _logger.LogInformation("Starting VM creation for {VMName}", vmSettings.VMName);
 
                 // Download file
+                createVmProgressInfo.Report(new CreateVMProgressInfo { Phase = "Download" });
                 filename = await _downloader.DownloadFileAsync(galleryItem.DiskUri, cancellationToken, createVmProgressInfo, _useCache);
                 _logger.LogInformation("Downloaded file {FileName}", filename);
 
                 // Extract if needed
                 if (galleryItem.FileType is not ("ISO" or "QCOW2"))
                 {
+                    createVmProgressInfo.Report(new CreateVMProgressInfo { Phase = "Extract" });
                     await Task.Run(() => _extractor.Extract(filename, _extractPath, cancellationToken, createVmProgressInfo));
                     _logger.LogInformation("Extracted file to {ExtractPath}", _extractPath);
 

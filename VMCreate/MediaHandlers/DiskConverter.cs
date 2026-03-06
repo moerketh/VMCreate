@@ -46,7 +46,20 @@ namespace VMCreate
             if (File.Exists(destinationPath))
             {
                 _logger.LogInformation("Destination file already exists, deleting: {DestinationPath}", destinationPath);
-                File.Delete(destinationPath);
+                for (int attempt = 1; attempt <= 5; attempt++)
+                {
+                    try
+                    {
+                        File.Delete(destinationPath);
+                        break;
+                    }
+                    catch (IOException) when (attempt < 5)
+                    {
+                        _logger.LogWarning("File is locked, retrying delete in {Delay}s (attempt {Attempt}/5): {Path}",
+                            attempt, attempt, destinationPath);
+                        await Task.Delay(attempt * 1000);
+                    }
+                }
             }
 
             //string tmpDestinationPath = destinationPath + ".tmp";

@@ -43,9 +43,15 @@
                 </StackPanel>
                 <TextBlock Text="―" VerticalAlignment="Center" Margin="6,0"
                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
-                <StackPanel x:Name="Step3Panel" Orientation="Horizontal" Margin="6,0,0,0">
+                <StackPanel x:Name="Step3Panel" Orientation="Horizontal" Margin="6,0">
                     <ui:SymbolIcon x:Name="Step3Icon" Symbol="Wrench24" FontSize="16" Margin="0,0,4,0"/>
                     <TextBlock x:Name="Step3Text" Text="Customize" VerticalAlignment="Center" FontSize="13"/>
+                </StackPanel>
+                <TextBlock Text="―" VerticalAlignment="Center" Margin="6,0"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="13"/>
+                <StackPanel x:Name="Step4Panel" Orientation="Horizontal" Margin="6,0,0,0">
+                    <ui:SymbolIcon x:Name="Step4Icon" Symbol="Rocket24" FontSize="16" Margin="0,0,4,0"/>
+                    <TextBlock x:Name="Step4Text" Text="Deploy" VerticalAlignment="Center" FontSize="13"/>
                 </StackPanel>
             </StackPanel>
         </Border>

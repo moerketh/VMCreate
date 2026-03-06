@@ -28,7 +28,10 @@ namespace VMCreate.MediaHandlers
 
         public override async Task<string> PrepareMediaAsync(string sourceFile, string destinationPath, GalleryItem item, IProgress<CreateVMProgressInfo> progressInfo, CancellationToken cancellationToken)
         {
-            _vhdDestFile = Path.Combine(destinationPath, Path.GetFileNameWithoutExtension(item.ArchiveRelativePath) + ".vhdx");
+            progressInfo.Report(new CreateVMProgressInfo { Phase = "Convert" });
+            string baseName = Path.GetFileNameWithoutExtension(
+                string.IsNullOrEmpty(item.ArchiveRelativePath) ? sourceFile : item.ArchiveRelativePath);
+            _vhdDestFile = Path.Combine(destinationPath, baseName + ".vhdx");
             _logger.LogInformation("Converting Qcow2 to VHDX: {VhdDestFile}", _vhdDestFile);
             string convertedFile = await _diskConverter.ConvertToVhdxAsync(sourceFile, _vhdDestFile, progressInfo);
             _logger.LogInformation("Converted Qcow2 to VHDX: {ConvertedFile}", convertedFile);
