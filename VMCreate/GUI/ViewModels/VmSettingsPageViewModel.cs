@@ -14,8 +14,8 @@ namespace VMCreate
         private readonly ILogger _logger;
 
         private string _vmName;
-        private string _memoryText = "4096";
-        private string _cpuText = "2";
+        private int _memoryMB = 4096;
+        private int _cpuCount = 2;
         private bool _virtualizationEnabled = true;
         private string _newDriveSizeText;
         private string _validationError;
@@ -50,17 +50,39 @@ namespace VMCreate
             set { if (SetProperty(ref _vmName, value)) ClearValidationError(); }
         }
 
-        public string MemoryText
+        public int MemoryMB
         {
-            get => _memoryText;
-            set { if (SetProperty(ref _memoryText, value)) ClearValidationError(); }
+            get => _memoryMB;
+            set
+            {
+                if (SetProperty(ref _memoryMB, value))
+                {
+                    OnPropertyChanged(nameof(MemoryDisplay));
+                    ClearValidationError();
+                }
+            }
         }
 
-        public string CpuText
+        /// <summary>Human-readable memory label shown next to the slider.</summary>
+        public string MemoryDisplay => _memoryMB >= 1024
+            ? $"{_memoryMB / 1024.0:0.#} GB"
+            : $"{_memoryMB} MB";
+
+        public int CpuCount
         {
-            get => _cpuText;
-            set { if (SetProperty(ref _cpuText, value)) ClearValidationError(); }
+            get => _cpuCount;
+            set
+            {
+                if (SetProperty(ref _cpuCount, value))
+                {
+                    OnPropertyChanged(nameof(CpuDisplay));
+                    ClearValidationError();
+                }
+            }
         }
+
+        /// <summary>Human-readable CPU label shown next to the slider.</summary>
+        public string CpuDisplay => _cpuCount == 1 ? "1 core" : $"{_cpuCount} cores";
 
         public bool VirtualizationEnabled
         {
@@ -108,13 +130,14 @@ namespace VMCreate
                 return;
             }
 
-            if (!int.TryParse(_memoryText, out int memoryMB) || memoryMB < 512)
+            // Sliders enforce range, but guard just in case
+            if (_memoryMB < 512)
             {
                 ValidationError = "Memory must be at least 512 MB!";
                 return;
             }
 
-            if (!int.TryParse(_cpuText, out int cpuCount) || cpuCount < 1)
+            if (_cpuCount < 1)
             {
                 ValidationError = "CPU count must be at least 1!";
                 return;
@@ -132,8 +155,8 @@ namespace VMCreate
 
             // Apply validated values to WizardData (timestamp is appended in CreateVMAsync)
             _wizardData.Settings.VMName = _vmName.Trim();
-            _wizardData.Settings.MemoryInMB = memoryMB;
-            _wizardData.Settings.CPUCount = cpuCount;
+            _wizardData.Settings.MemoryInMB = _memoryMB;
+            _wizardData.Settings.CPUCount = _cpuCount;
             _wizardData.Settings.VirtualizationEnabled = _virtualizationEnabled;
             _wizardData.Settings.EnhancedSessionTransportType = _wizardData.SelectedItem.EnhancedSessionTransportType;
 

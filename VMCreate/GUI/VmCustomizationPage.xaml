@@ -4,42 +4,61 @@
       xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
       xmlns:local="clr-namespace:VMCreate"
       Title="Configure Virtual Machine">
-    <Grid Margin="10" FocusManager.FocusedElement="{Binding ElementName=XrdpCheckbox}">
+    <Grid Margin="20,10,20,10">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <!-- Title -->
-            <RowDefinition Height="Auto"/>
-            <!-- Selected VM info -->
-            <RowDefinition Height="Auto"/>
-            <!-- Warning banner -->
             <RowDefinition Height="*"/>
-            <!-- Settings -->
             <RowDefinition Height="Auto"/>
-            <!-- Navigation buttons -->
         </Grid.RowDefinitions>
-        <TextBlock Grid.Row="0" Text="Configure Virtual Machine Customizations" Style="{StaticResource TitleText}"/>
-        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,10,0,10">
-            <Image Source="{Binding SelectedItem.SymbolUri, Converter={StaticResource ImageConverter}}" 
-                   Width="80" Height="50" Margin="0,0,10,0" VerticalAlignment="Center"/>
-            <TextBlock Text="{Binding SelectedItem.Name, FallbackValue='No VM selected'}" 
-                       Style="{StaticResource ExplanationText}" FontWeight="Bold" VerticalAlignment="Center"/>
+
+        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" Padding="0,0,0,4">
+        <StackPanel FocusManager.FocusedElement="{Binding ElementName=XrdpCheckbox}">
+
+            <TextBlock Text="Customize Virtual Machine" Style="{StaticResource TitleText}" Margin="0,0,0,12"/>
+
+            <!-- Selected image summary card -->
+            <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
+                    CornerRadius="8" Padding="16,12" Margin="0,0,0,12"
+                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
+                <StackPanel Orientation="Horizontal">
+                    <Image Source="{Binding SelectedItem.SymbolUri, Converter={StaticResource ImageConverter}}" 
+                           Width="48" Height="48" Margin="0,0,14,0" VerticalAlignment="Center"
+                           RenderOptions.BitmapScalingMode="HighQuality"/>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="{Binding SelectedItem.Name, FallbackValue='No VM selected'}" 
+                                   FontSize="14" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
+                        <TextBlock Text="{Binding SelectedItem.Publisher}" FontSize="12"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,2,0,0"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <ui:InfoBar Title="Conversion required" Severity="Warning"
+                        Message="The selected VM is not in VHDX format. It will be converted to VHDX using QEMU. If the disk is MBR partitioned it will be cloned to a new GPT partitioned disk using a converter DVD on first VM boot."
+                        IsOpen="{Binding IsNotVhdx, Mode=OneWay}" IsClosable="False" Margin="0,0,0,8"/>
+
+            <!-- Customizations card -->
+            <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
+                    CornerRadius="8" Padding="20,16" Margin="0,0,0,12"
+                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
+                <StackPanel>
+                    <TextBlock Text="Remote Access" FontSize="14" FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,0,4"/>
+                    <TextBlock Text="Configure remote desktop access for the virtual machine."
+                               FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,10"/>
+                    <CheckBox x:Name="XrdpCheckbox"
+                              Content="Enable xrdp for Hyper-V Enhanced Session support"
+                              IsChecked="{Binding ConfigureXrdp}"
+                              FontSize="14"
+                              ToolTip="Installs and configures xrdp so Enhanced Session mode works with this Linux VM."
+                              AutomationProperties.Name="Configure xrdp for enhanced session"/>
+                </StackPanel>
+            </Border>
+
         </StackPanel>
-        <ui:InfoBar Grid.Row="2" Title="Conversion required" Severity="Warning"
-                    Message="The selected VM is not in VHDX format. It will be converted to VHDX using QEMU. If the disk is MBR partitioned it will be cloned to a new GPT partitioned disk using a converter DVD on first VM boot."
-                    IsOpen="{Binding IsNotVhdx, Mode=OneWay}" IsClosable="False" Margin="0,0,0,10"/>
-        <Grid Grid.Row="3" Margin="0,10,0,0">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto"/>
-                <ColumnDefinition Width="*"/>
-            </Grid.ColumnDefinitions>
-            <Label Grid.Column="0" Content="Configure xrdp for Hyper-V Enhanced Session support"
-                   Target="{Binding ElementName=XrdpCheckbox}" Style="{StaticResource LabelStyle}"/>
-            <CheckBox x:Name="XrdpCheckbox" Grid.Column="1"
-                      IsChecked="{Binding ConfigureXrdp}"
-                      ToolTip="Configure xrdp"
-                      AutomationProperties.Name="Configure xrdp for enhanced session"/>
-        </Grid>
-        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+        </ScrollViewer>
+
+        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
             <Button Content="&lt; Back" Command="{Binding BackCommand}" Style="{StaticResource CommonButton}"
                     AutomationProperties.Name="Go back"/>
             <Button Content="Cancel" Command="{Binding CancelCommand}" Style="{StaticResource CommonButton}" Margin="5,0,0,0"
