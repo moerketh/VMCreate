@@ -4,7 +4,7 @@
       xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
       xmlns:local="clr-namespace:VMCreate"
       Title="Configure Virtual Machine">
-    <Grid Margin="10">
+    <Grid Margin="10" FocusManager.FocusedElement="{Binding ElementName=VMNameTextBox}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <!-- Title -->
@@ -52,16 +52,16 @@
                      ToolTip="Enter a unique name for the VM."
                      AutomationProperties.Name="VM Name"/>
             <Label Grid.Row="1" Grid.Column="0" Content="Memory (MB):" Target="{Binding ElementName=MemoryTextBox}" Style="{StaticResource LabelStyle}"/>
-            <TextBox x:Name="MemoryTextBox" Grid.Row="1" Grid.Column="1"
+            <ui:TextBox x:Name="MemoryTextBox" Grid.Row="1" Grid.Column="1"
                      Text="{Binding MemoryText, UpdateSourceTrigger=PropertyChanged}"
-                     FontSize="14"
+                     FontSize="14" PlaceholderText="512"
                      PreviewTextInput="NumberValidationTextBox" DataObject.Pasting="TextBoxPasting"
                      ToolTip="Enter memory in MB (at least 512)."
                      AutomationProperties.Name="Memory in megabytes"/>
             <Label Grid.Row="2" Grid.Column="0" Content="CPU Count:" Target="{Binding ElementName=CPUTextBox}" Style="{StaticResource LabelStyle}"/>
-            <TextBox x:Name="CPUTextBox" Grid.Row="2" Grid.Column="1"
+            <ui:TextBox x:Name="CPUTextBox" Grid.Row="2" Grid.Column="1"
                      Text="{Binding CpuText, UpdateSourceTrigger=PropertyChanged}"
-                     FontSize="14"
+                     FontSize="14" PlaceholderText="1"
                      PreviewTextInput="NumberValidationTextBox" DataObject.Pasting="TextBoxPasting"
                      ToolTip="Enter CPU count (at least 1)."
                      AutomationProperties.Name="CPU count"/>
@@ -74,9 +74,9 @@
             <Label Grid.Row="4" Grid.Column="0" Content="New Drive Size (GB):"
                    Target="{Binding ElementName=NewDriveSizeTextBox}" Style="{StaticResource LabelStyle}"
                    Visibility="{Binding IsNotVhdx, Converter={StaticResource BoolToVis}}"/>
-            <TextBox x:Name="NewDriveSizeTextBox" Grid.Row="4" Grid.Column="1"
+            <ui:TextBox x:Name="NewDriveSizeTextBox" Grid.Row="4" Grid.Column="1"
                      Text="{Binding NewDriveSizeText, UpdateSourceTrigger=PropertyChanged}"
-                     FontSize="14"
+                     FontSize="14" PlaceholderText="40"
                      PreviewTextInput="NumberValidationTextBox" DataObject.Pasting="TextBoxPasting"
                      ToolTip="Enter new drive size in GB (at least 10, must be larger than the original disk size)."
                      Visibility="{Binding IsNotVhdx, Converter={StaticResource BoolToVis}}"
@@ -87,8 +87,14 @@
                     AutomationProperties.Name="Go back"/>
             <Button Content="Cancel" Command="{Binding CancelCommand}" Style="{StaticResource CommonButton}" Margin="5,0,0,0"
                     AutomationProperties.Name="Cancel wizard"/>
-            <Button Content="Next &gt;" Command="{Binding NextCommand}" Style="{StaticResource CommonButton}" Margin="5,0,0,0"
-                    AutomationProperties.Name="Next step"/>
+            <ui:Button Command="{Binding NextCommand}" Appearance="Primary"
+                    FontSize="14" Margin="9,4,4,4" Padding="12,8"
+                    AutomationProperties.Name="Next step">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="Next" VerticalAlignment="Center"/>
+                    <ui:SymbolIcon Symbol="ArrowRight24" Margin="6,0,0,0"/>
+                </StackPanel>
+            </ui:Button>
         </StackPanel>
     </Grid>
 </Page>

@@ -39,6 +39,11 @@ namespace VMCreate
             SystemThemeWatcher.Watch(this);
 
             Loaded += MyWindow_LoadedAsync;
+
+            // Sync the theme toggle icon with the current theme at startup
+            SyncThemeIcon();
+
+            _mainFrame.Navigated += (_, __) => UpdateStepIndicator();
         }
 
         private void ShowBanner(string message, bool isError)
@@ -58,11 +63,62 @@ namespace VMCreate
                 ? ApplicationTheme.Light
                 : ApplicationTheme.Dark;
             ApplicationThemeManager.Apply(next, WindowBackdropType.Mica, true);
+            SyncThemeIcon();
+        }
 
-            // Update the toggle icon
-            ThemeToggleButton.Icon = next == ApplicationTheme.Dark
+        private void SyncThemeIcon()
+        {
+            var theme = ApplicationThemeManager.GetAppTheme();
+            ThemeToggleButton.Icon = theme == ApplicationTheme.Dark
                 ? new SymbolIcon(SymbolRegular.WeatherMoon24)
                 : new SymbolIcon(SymbolRegular.WeatherSunny24);
+        }
+
+        private void UpdateStepIndicator()
+        {
+            var page = _mainFrame.Content;
+            int activeStep = page switch
+            {
+                SelectImagePage => 1,
+                VmSettingsPage => 2,
+                VmCustomizationPage => 3,
+                _ => 0
+            };
+
+            var accentBrush = (System.Windows.Media.Brush)FindResource("AccentBrush");
+            var secondaryBrush = (System.Windows.Media.Brush)FindResource("TextFillColorSecondaryBrush");
+
+            SetStepStyle(Step1Icon, Step1Text, SymbolRegular.Image24, activeStep == 1, activeStep > 1, accentBrush, secondaryBrush);
+            SetStepStyle(Step2Icon, Step2Text, SymbolRegular.Settings24, activeStep == 2, activeStep > 2, accentBrush, secondaryBrush);
+            SetStepStyle(Step3Icon, Step3Text, SymbolRegular.Wrench24, activeStep == 3, false, accentBrush, secondaryBrush);
+        }
+
+        private static void SetStepStyle(
+            SymbolIcon icon, System.Windows.Controls.TextBlock text,
+            SymbolRegular defaultSymbol, bool active, bool completed,
+            System.Windows.Media.Brush accentBrush, System.Windows.Media.Brush secondaryBrush)
+        {
+            if (completed)
+            {
+                icon.Symbol = SymbolRegular.CheckmarkCircle24;
+                icon.Foreground = accentBrush;
+                text.Foreground = accentBrush;
+                text.FontWeight = FontWeights.Normal;
+            }
+            else if (active)
+            {
+                icon.Symbol = defaultSymbol;
+                icon.Foreground = accentBrush;
+                text.Foreground = accentBrush;
+                text.FontWeight = FontWeights.SemiBold;
+            }
+            else
+            {
+                icon.Symbol = defaultSymbol;
+                text.Foreground = secondaryBrush;
+                icon.Foreground = secondaryBrush;
+                text.FontWeight = FontWeights.Normal;
+            }
         }
 
         private async void MyWindow_LoadedAsync(object sender, RoutedEventArgs e)
@@ -184,9 +240,13 @@ namespace VMCreate
             _logger.LogDebug("Validated inputs: VMName={VMName}, Memory={Memory}MB, CPU={CPU}, DiskUri={DiskUri}, VirtualizationEnabled={VirtualizationEnabled}",
                 vmSettings.VMName, vmSettings.MemoryInMB, vmSettings.CPUCount, galleryItem.DiskUri, vmSettings.VirtualizationEnabled);
 
+            // Append timestamp once, just before creation, so Back/Next doesn't re-append.
+            vmSettings.VMName = $"{vmSettings.VMName}_{DateTime.Now:yyyyMMddHHmmss}";
+
             var cancellationTokenSource = new CancellationTokenSource();
             _progressWindow = new ProgressWindow(cancellationTokenSource) { Owner = this };
             _progressWindow.Show();
+            IsEnabled = false;
 
             bool completed = false;
             try
@@ -210,12 +270,13 @@ namespace VMCreate
             }
             finally
             {
+                IsEnabled = true;
                 _progressWindow.Close();
             }
 
             if (completed)
             {
-                _successWindow = new SuccessWindow { Owner = this };
+                _successWindow = new SuccessWindow(vmSettings.VMName) { Owner = this };
                 _successWindow.ShowDialog();
                 _logger.LogInformation("VM creation completed successfully");
             }

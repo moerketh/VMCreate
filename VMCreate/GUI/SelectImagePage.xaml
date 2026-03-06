@@ -5,7 +5,7 @@
       xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
       xmlns:local="clr-namespace:VMCreate"
       Title="Select Virtual Machine Image">
-    <Grid Margin="10">
+    <Grid Margin="10" FocusManager.FocusedElement="{Binding ElementName=SearchBox}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -19,7 +19,7 @@
                     Message="{Binding ErrorMessage}"
                     IsOpen="{Binding HasError, Mode=OneWay}"
                     IsClosable="True" Margin="0,0,0,6"/>
-        <ui:TextBox Grid.Row="2" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+        <ui:TextBox x:Name="SearchBox" Grid.Row="2" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
                  PlaceholderText="Search images…"
                  Margin="0,10,0,10" FontSize="14"
                  Icon="{ui:SymbolIcon Search24}"
@@ -77,15 +77,15 @@
                 <Image Source="{Binding SelectedItem.ThumbnailUri, Converter={StaticResource ImageConverter}}"
                        Stretch="Uniform" MaxHeight="300" Margin="0,0,0,10"/>
                 <TextBlock Text="{Binding SelectedItem.Name, StringFormat='Name: {0}'}"
-                           Style="{StaticResource ExplanationText}" FontWeight="Bold" Margin="0,0,0,-5"/>
+                           Style="{StaticResource ExplanationText}" FontWeight="Bold" Margin="0,0,0,2"/>
                 <TextBlock Text="{Binding SelectedItem.Publisher, StringFormat='Publisher: {0}'}"
-                           Style="{StaticResource ExplanationText}" Margin="0,0,0,-5"/>
+                           Style="{StaticResource ExplanationText}" Margin="0,0,0,2"/>
                 <TextBlock Text="{Binding SelectedItem.Version, StringFormat='Version: {0}'}"
-                           Style="{StaticResource ExplanationText}" Margin="0,0,0,-5"/>
+                           Style="{StaticResource ExplanationText}" Margin="0,0,0,2"/>
                 <TextBlock Text="{Binding SelectedItem.LastUpdated, Converter={StaticResource DateConverter}, StringFormat='Last Updated: {0}'}"
-                           Style="{StaticResource ExplanationText}" Margin="0,0,0,-5"/>
+                           Style="{StaticResource ExplanationText}" Margin="0,0,0,2"/>
                 <TextBlock Text="{Binding SelectedItem.DiskUri, StringFormat='Download URL: {0}'}"
-                           Style="{StaticResource ExplanationText}" Margin="0,0,0,-5"/>
+                           Style="{StaticResource ExplanationText}" Margin="0,0,0,2"/>
                 <TextBlock Text="{Binding SelectedItem.Description, StringFormat='Description: {0}'}"
                            Style="{StaticResource ExplanationText}" TextWrapping="Wrap"/>
             </StackPanel>
@@ -94,8 +94,14 @@
         <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
             <Button Content="Cancel" Command="{Binding CancelCommand}" Style="{StaticResource CommonButton}"
                     AutomationProperties.Name="Cancel wizard"/>
-            <Button Content="Next &gt;" Command="{Binding NextCommand}" Style="{StaticResource CommonButton}" Margin="5,0,0,0"
-                    AutomationProperties.Name="Next step"/>
+            <ui:Button Command="{Binding NextCommand}" Appearance="Primary"
+                    FontSize="14" Margin="9,4,4,4" Padding="12,8"
+                    AutomationProperties.Name="Next step">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="Next" VerticalAlignment="Center"/>
+                    <ui:SymbolIcon Symbol="ArrowRight24" Margin="6,0,0,0"/>
+                </StackPanel>
+            </ui:Button>
         </StackPanel>
     </Grid>
 </Page>

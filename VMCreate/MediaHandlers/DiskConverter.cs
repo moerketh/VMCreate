@@ -89,7 +89,7 @@ namespace VMCreate
                             {
                                 if (progress != null)
                                 {
-                                    progress.Report(new CreateVMProgressInfo() { ProgressPercentage = Convert.ToInt32(percentage), Phase = "Converting to VHDX...", URI = $"Converting from {sourcePath} to {destinationPath}" });
+                                    progress.Report(new CreateVMProgressInfo() { ProgressPercentage = Convert.ToInt32(percentage), Phase = "Converting to VHDX...", URI = $"Converting from {sourcePath} to {destinationPath}", DownloadSpeed = -1 });
                                 }
                                 _logger.LogDebug("qemu-img progress: {Percentage}%", Convert.ToInt32(percentage));
                             }
@@ -109,7 +109,7 @@ namespace VMCreate
 
                     if (progress != null)
                     {
-                        progress.Report(new CreateVMProgressInfo() { ProgressPercentage = 100, Phase = "Converting to VHDX...", URI = $"Completed conversion of {sourcePath}" });
+                        progress.Report(new CreateVMProgressInfo() { ProgressPercentage = 100, Phase = "Converting to VHDX...", URI = $"Completed conversion of {sourcePath}", DownloadSpeed = -1 });
                     }
                     _logger.LogInformation("Successfully converted {SourcePath} to {DestinationPath}", sourcePath, destinationPath);
                 }

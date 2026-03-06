@@ -130,8 +130,8 @@ namespace VMCreate
                 _wizardData.Settings.NewDriveSizeInGB = sizeGB;
             }
 
-            // Apply validated values to WizardData
-            _wizardData.Settings.VMName = $"{_vmName.Trim()}_{DateTime.Now:yyyyMMddHHmmss}";
+            // Apply validated values to WizardData (timestamp is appended in CreateVMAsync)
+            _wizardData.Settings.VMName = _vmName.Trim();
             _wizardData.Settings.MemoryInMB = memoryMB;
             _wizardData.Settings.CPUCount = cpuCount;
             _wizardData.Settings.VirtualizationEnabled = _virtualizationEnabled;
