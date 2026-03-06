@@ -21,9 +21,9 @@ namespace VMCreate.MediaHandlers
 
         public override int VmGeneration => _vmGeneration;
 
-        public override async Task<string> PrepareMediaAsync(string sourceFile, string destinationPath, GalleryItem item, IProgress<CreateVMProgressInfo> progressInfo, CancellationToken cancellationToken)
+        public override async Task<string> PrepareMediaAsync(string sourceFile, string destinationPath, VmSettings vmSettings, GalleryItem item, IProgress<CreateVMProgressInfo> progressInfo, CancellationToken cancellationToken)
         {
-            string vhdDestFile = await base.PrepareMediaAsync(sourceFile, destinationPath, item, progressInfo, cancellationToken);
+            string vhdDestFile = await base.PrepareMediaAsync(sourceFile, destinationPath, vmSettings, item, progressInfo, cancellationToken);
             string mediaPath = Path.Combine(destinationPath, Path.GetFileName(sourceFile));
             string partitionScheme = await _partitionSchemeDetector.DetectPartitionSchemeAsync(mediaPath);
             _vmGeneration = partitionScheme == "GPT" ? 2 : 1;

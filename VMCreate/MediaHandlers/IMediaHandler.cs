@@ -8,6 +8,6 @@ namespace VMCreate.MediaHandlers
     {
         bool RequiresExtraction { get; }
         int VmGeneration { get; }
-        Task<string> PrepareMediaAsync(string sourceFile, string destinationPath, GalleryItem item, IProgress<CreateVMProgressInfo> progressInfo, CancellationToken cancellationToken);
+        Task<string> PrepareMediaAsync(string sourceFile, string destinationPath, VmSettings vmSettings, GalleryItem item, IProgress<CreateVMProgressInfo> progressInfo, CancellationToken cancellationToken);
     }
 }

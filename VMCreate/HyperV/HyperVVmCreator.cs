@@ -63,7 +63,7 @@ namespace VMCreate
                 _logger.LogInformation("Starting VM creation for {VMName}", vmSettings.VMName);
                     
                 IMediaHandler mediaHandler = _mediaHandlerFactory.CreateHandler(item.FileType);
-                string mediaPath = await mediaHandler.PrepareMediaAsync(sourceFile, _defaultVhdxPath, item, createVMProgressInfo, cancellationToken);
+                string mediaPath = await mediaHandler.PrepareMediaAsync(sourceFile, _defaultVhdxPath, vmSettings, item, createVMProgressInfo, cancellationToken);
                 
                 string cloningIsoPath = vmSettings.CloningIsoPath;
                 int detectedGeneration = mediaHandler.VmGeneration; // 1 for MBR, 2 for GPT

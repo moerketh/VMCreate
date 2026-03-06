@@ -19,7 +19,7 @@ namespace VMCreate.MediaHandlers
 
         public virtual int VmGeneration => 2; // Default to Gen2 (UEFI/GPT)
 
-        public virtual async Task<string> PrepareMediaAsync(string sourceFile, string destinationPath, GalleryItem item, IProgress<CreateVMProgressInfo> progressInfo, CancellationToken cancellationToken)
+        public virtual async Task<string> PrepareMediaAsync(string sourceFile, string destinationPath, VmSettings vmSettings, GalleryItem item, IProgress<CreateVMProgressInfo> progressInfo, CancellationToken cancellationToken)
         {
             _logger.LogDebug("Checking source file: {SourceFile}", sourceFile);
             if (!File.Exists(sourceFile))
