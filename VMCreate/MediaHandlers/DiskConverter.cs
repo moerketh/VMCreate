@@ -62,6 +62,28 @@ namespace VMCreate
                 }
             }
 
+            // Pre-flight: check available disk space on the destination drive.
+            // The converted VHDX can be up to ~1.5× the source size; use that as a safety margin.
+            var sourceSize = new FileInfo(sourcePath).Length;
+            long requiredBytes = (long)(sourceSize * 1.5);
+            string destRoot = Path.GetPathRoot(destinationPath);
+            if (!string.IsNullOrEmpty(destRoot))
+            {
+                var driveInfo = new DriveInfo(destRoot);
+                if (driveInfo.IsReady && driveInfo.AvailableFreeSpace < requiredBytes)
+                {
+                    long availableMB = driveInfo.AvailableFreeSpace / (1024 * 1024);
+                    long requiredMB  = requiredBytes / (1024 * 1024);
+                    string msg = $"Not enough disk space on {destRoot.TrimEnd('\\')} to convert the disk image. " +
+                                 $"Available: {availableMB:N0} MB, estimated required: {requiredMB:N0} MB. " +
+                                 $"Free up space or change the Hyper-V virtual hard disk path.";
+                    _logger.LogError(msg);
+                    throw new IOException(msg);
+                }
+                _logger.LogDebug("Disk space check OK on {Drive}: {Available} MB available, ~{Required} MB needed",
+                    destRoot, driveInfo.AvailableFreeSpace / (1024 * 1024), requiredBytes / (1024 * 1024));
+            }
+
             //string tmpDestinationPath = destinationPath + ".tmp";
             try
             {
@@ -81,9 +103,8 @@ namespace VMCreate
                 var processInfo = new ProcessStartInfo
                 {
                     FileName = _qemuImgPath,
-                    // -S 0 does not prevent a sparse file in latest QEMU, but keeping it for now
-                    // -p for progress
-                    Arguments = $"convert -S 0 -p -f {GetQemuSourceFormat(sourceExtension)} -O vhdx \"{sourcePath}\" \"{destinationPath}\"",
+                    // -p for progress output on stdout
+                    Arguments = $"convert -p -f {GetQemuSourceFormat(sourceExtension)} -O vhdx \"{sourcePath}\" \"{destinationPath}\"",
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     UseShellExecute = false,
@@ -117,6 +138,16 @@ namespace VMCreate
                     if (process.ExitCode != 0)
                     {
                         _logger.LogError("Conversion failed. Error: {Error}", error);
+
+                        // Detect disk-full / write-error from qemu-img output
+                        if (error != null && (error.Contains("error while writing") || error.Contains("No space left on device")))
+                        {
+                            string drive = Path.GetPathRoot(destinationPath)?.TrimEnd('\\') ?? "destination drive";
+                            throw new IOException(
+                                $"Disk conversion failed: ran out of disk space on {drive}. " +
+                                $"Free up space and try again.\n\nOriginal error: {error}");
+                        }
+
                         throw new Exception($"Disk conversion failed: {error}");
                     }
 
@@ -133,34 +164,22 @@ namespace VMCreate
                     throw new FileNotFoundException($"Converted VHDX file not found: {destinationPath}");
                 }
 
-                // Step 2: Create non-sparse copy
-                //_logger.LogInformation("Creating non-sparse copy of file {tmpDestinationPath} to {destinationPath}", destinationPath, destinationPath);
+                // Step 2: De-sparsify the VHDX so Hyper-V can read every sector correctly.
+                // qemu-img may produce a sparse file on NTFS; if the sparse regions are
+                // not physically allocated, Hyper-V reads zeros and compressed (e.g. zstd)
+                // filesystem data becomes corrupted.
+                _logger.LogInformation("De-sparsifying VHDX: {Path}", destinationPath);
                 if (progress != null)
                 {
                     progress.Report(new CreateVMProgressInfo() { ProgressPercentage = 0, Phase = "Making file non-sparse...", URI = $"{destinationPath}" });
                 }
 
-                //using (var sourceStream = new FileStream(tmpDestinationPath, FileMode.Open, FileAccess.Read, FileShare.Read))
-                //using (var destStream = new FileStream(destinationPath, FileMode.Create, FileAccess.Write))
-                //{
-                //    long totalBytes = sourceStream.Length;
-                //    long bytesCopied = 0;
-                //    byte[] buffer = new byte[BufferSize];
-                //    int bytesRead;
-
-                //    while ((bytesRead = await sourceStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
-                //    {
-                //        await destStream.WriteAsync(buffer, 0, bytesRead);
-                //        bytesCopied += bytesRead;
-                //        double copyPercentage = ((double)bytesCopied / (double)totalBytes);
-                //        int percentage = Convert.ToInt32(Math.Round(copyPercentage * 100)); // Scale to 0-100 and round
-                //        if (progress != null)
-                //        {
-                //            progress.Report(new CreateVMProgressInfo() { ProgressPercentage = percentage, Phase = "Copy to non-sparse file...", URI = $"Copying to {destinationPath}" });
-                //        }
-                //    }
-                //}
-                SparseFileUtility.MakeNonSparse(destinationPath);
+                if (!SparseFileUtility.MakeNonSparse(destinationPath))
+                {
+                    throw new IOException(
+                        $"Failed to de-sparsify the VHDX file '{destinationPath}'. " +
+                        $"This can cause data corruption. Check disk space and permissions on {Path.GetPathRoot(destinationPath)?.TrimEnd('\\') ?? "the destination drive"}.");
+                }
 
                 if (progress != null)
                 {
