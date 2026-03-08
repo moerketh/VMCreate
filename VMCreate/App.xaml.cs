@@ -19,6 +19,7 @@ namespace VMCreate
             var logPath = Path.Combine(Path.GetTempPath(), "VMCreate.log");
             Log.Logger = new LoggerConfiguration()
                 .MinimumLevel.Debug()
+                .MinimumLevel.Override("Microsoft.Extensions.Http", Serilog.Events.LogEventLevel.Warning)
                 .WriteTo.File(logPath, rollingInterval: RollingInterval.Day)
                 .CreateLogger();
 
