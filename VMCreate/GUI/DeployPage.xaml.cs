@@ -144,6 +144,16 @@ namespace VMCreate
         {
             if (info == null) return;
 
+            // Error reports from guest diagnostics — fail the current phase immediately
+            if (!string.IsNullOrEmpty(info.ErrorMessage))
+            {
+                FailCurrentPhase(info.ErrorMessage);
+                _logger.LogError("Deployment error reported: {Error}", info.ErrorMessage);
+                if (!string.IsNullOrEmpty(info.DiagnosticsLog))
+                    _logger.LogError("Full diagnostics:\n{Log}", info.DiagnosticsLog);
+                return;
+            }
+
             // Phase transitions
             if (!string.IsNullOrEmpty(info.Phase) && info.Phase != _activePhaseId)
             {
@@ -151,10 +161,17 @@ namespace VMCreate
 
                 if (targetPhase != _activePhaseId)
                 {
-                    // Check if MBR phases need to be inserted
-                    if (!string.IsNullOrEmpty(info.DetectedGeneration) && info.DetectedGeneration == "1")
+                    // Dynamically insert phase cards based on detected generation
+                    if (!string.IsNullOrEmpty(info.DetectedGeneration))
                     {
-                        Application.Current.Dispatcher.Invoke(() => _viewModel.InsertMbrPhases());
+                        if (info.DetectedGeneration == "1")
+                        {
+                            Application.Current.Dispatcher.Invoke(() => _viewModel.InsertMbrPhases());
+                        }
+                        else if (info.DetectedGeneration == "2")
+                        {
+                            Application.Current.Dispatcher.Invoke(() => _viewModel.InsertCustomizePhase());
+                        }
                     }
 
                     CompleteCurrentPhase();

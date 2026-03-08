@@ -54,7 +54,8 @@ namespace VMCreate.Gallery
                         SecureBoot = "false",
                         EnhancedSessionTransportType = "HvSocket",
                         Version = PinnedVersion,
-                        LastUpdated = DateTime.ParseExact(PinnedVersion, "yyyy.MM.dd", System.Globalization.CultureInfo.InvariantCulture).ToString("o")
+                        LastUpdated = DateTime.ParseExact(PinnedVersion, "yyyy.MM.dd", System.Globalization.CultureInfo.InvariantCulture).ToString("o"),
+                        Category = "Security"
                     };
                     galleryItems.Add(slimItem);
                 }
@@ -84,7 +85,8 @@ namespace VMCreate.Gallery
                         Version = PinnedVersion,
                         LastUpdated = DateTime.ParseExact(PinnedVersion, "yyyy.MM.dd", System.Globalization.CultureInfo.InvariantCulture).ToString("o"),
                         InitialUsername = "root",
-                        InitialPassword = "blackarch"
+                        InitialPassword = "blackarch",
+                        Category = "Security"
                     };
                     galleryItems.Add(ovaItem);
                 }

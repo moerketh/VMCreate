@@ -38,6 +38,17 @@ namespace CreateVM.HyperV.vmbus
 
         public async Task<bool> WaitForVMShutdownAsync(string vmName, CancellationToken cancellationToken, int pollIntervalMs = 1000)
         {
+            return await WaitForVMShutdownAsync(vmName, cancellationToken, timeoutSeconds: 0, pollIntervalMs);
+        }
+
+        /// <summary>
+        /// Wait for VM to shut down. Returns true if the VM shut down, false if
+        /// the timeout expired while the VM was still running.
+        /// Set timeoutSeconds=0 for no timeout (waits indefinitely until cancelled).
+        /// </summary>
+        public async Task<bool> WaitForVMShutdownAsync(string vmName, CancellationToken cancellationToken, int timeoutSeconds, int pollIntervalMs = 1000)
+        {
+            DateTime startTime = DateTime.UtcNow;
             while (!cancellationToken.IsCancellationRequested)
             {
                 string guid = GetVMGuid(vmName);
@@ -45,6 +56,12 @@ namespace CreateVM.HyperV.vmbus
                 {
                     return true;
                 }
+
+                if (timeoutSeconds > 0 && (DateTime.UtcNow - startTime).TotalSeconds > timeoutSeconds)
+                {
+                    return false; // Timeout — VM still running
+                }
+
                 await Task.Delay(pollIntervalMs, cancellationToken);
             }
             return false;
@@ -55,7 +72,7 @@ namespace CreateVM.HyperV.vmbus
         /// </summary>
         /// <param name="vmName"></param>
         /// <returns></returns>
-        private string GetVMGuid(string vmName)
+        protected string GetVMGuid(string vmName)
         {
             ManagementScope scope = new ManagementScope(@"root\virtualization\v2");
             ObjectQuery query = new ObjectQuery($"SELECT * FROM Msvm_ComputerSystem WHERE ElementName = '{vmName}' AND EnabledState = 2");  // Use ElementName for friendly name; 2 = running

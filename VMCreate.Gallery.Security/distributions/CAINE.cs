@@ -31,7 +31,8 @@ namespace VMCreate.Gallery
                 SecureBoot   = "false",
                 EnhancedSessionTransportType = "HvSocket",
                 Version      = PinnedVersion,
-                LastUpdated  = DateTime.UtcNow.ToString("o")
+                LastUpdated  = DateTime.UtcNow.ToString("o"),
+                Category     = "Security"
             };
             return new List<GalleryItem> { item };
         }

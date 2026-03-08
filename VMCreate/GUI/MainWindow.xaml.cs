@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -161,7 +162,23 @@ namespace VMCreate
                             {
                                 if (item.Name == null || item.DiskUri == null) continue;
                                 if (_seenItems.Add((item.Name, item.DiskUri)))
+                                {
                                     _galleryItems.Add(item);
+                                }
+                                else
+                                {
+                                    // Replace stale cached item with fresh data (preserves new metadata
+                                    // such as Category/IsRecommended that may be missing from older caches).
+                                    for (int i = 0; i < _galleryItems.Count; i++)
+                                    {
+                                        if (_galleryItems[i].Name == item.Name &&
+                                            _galleryItems[i].DiskUri == item.DiskUri)
+                                        {
+                                            _galleryItems[i] = item;
+                                            break;
+                                        }
+                                    }
+                                }
                             }
                         });
                     }, _galleryCts.Token);
@@ -185,6 +202,9 @@ namespace VMCreate
 
                 _logger.LogDebug("Successfully loaded gallery items");
                 firstPage.SetLoadingComplete();
+
+                // ── 4. Resolve X profile photos in the background ────────────
+                _ = ResolveXProfilePhotosAsync();
             }
             catch (OperationCanceledException)
             {
@@ -196,6 +216,68 @@ namespace VMCreate
                 firstPage.SetLoadingComplete();
                 firstPage.ShowError(
                     $"Failed to load the VM gallery: {ex.Message}. Check your internet connection and restart the application.");
+            }
+        }
+
+        /// <summary>
+        /// For every <see cref="GalleryItem"/> that has <see cref="GalleryItem.XHandle"/> set,
+        /// resolves the current profile photo from X and updates <see cref="GalleryItem.SymbolUri"/>.
+        /// Runs as a fire-and-forget task after the gallery finishes loading so the list is
+        /// usable immediately (items already carry a fallback icon).
+        /// </summary>
+        private async Task ResolveXProfilePhotosAsync()
+        {
+            try
+            {
+                var factory = _serviceProvider.GetService<IHttpClientFactory>();
+                if (factory == null) return;
+                var client = factory.CreateClient();
+
+                // Snapshot unique X handles to resolve
+                var handles = _galleryItems
+                    .Where(i => !string.IsNullOrEmpty(i.XHandle))
+                    .Select(i => i.XHandle)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                foreach (var handle in handles)
+                {
+                    if (_galleryCts?.IsCancellationRequested == true) break;
+
+                    _logger.LogDebug("Resolving X profile photo for @{Handle}", handle);
+
+                    var resolved = await XProfilePhoto.ResolveAsync(
+                        client, handle,
+                        _galleryCts?.Token ?? CancellationToken.None);
+
+                    _logger.LogDebug("Resolved @{Handle} → {Resolved}", handle, resolved ?? "(null)");
+
+                    if (string.IsNullOrEmpty(resolved))
+                        continue;
+
+                    // Update SymbolUri on matching items. We remove + re-insert rather than
+                    // self-replacing (items[i] = items[i]) because ListCollectionView with
+                    // CustomSort can swallow Replace events for the same object reference.
+                    await Application.Current.Dispatcher.InvokeAsync(() =>
+                    {
+                        for (int i = _galleryItems.Count - 1; i >= 0; i--)
+                        {
+                            if (string.Equals(_galleryItems[i].XHandle, handle,
+                                    StringComparison.OrdinalIgnoreCase))
+                            {
+                                var item = _galleryItems[i];
+                                item.SymbolUri = resolved;
+                                _galleryItems.RemoveAt(i);
+                                _galleryItems.Insert(i, item);
+                            }
+                        }
+                    });
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to resolve one or more X profile photos.");
             }
         }
 

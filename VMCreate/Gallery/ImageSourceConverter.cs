@@ -16,9 +16,9 @@ namespace VMCreate
     {
         private static readonly HttpClient _httpClient = new HttpClient();
 
-        // Cache HTTP SVG results so each remote URL is only downloaded once per session.
+        // Cache HTTP image results so each remote URL is only downloaded once per session.
         // Lazy<T> ensures only a single download races for each key even under concurrent bindings.
-        private static readonly ConcurrentDictionary<string, Lazy<ImageSource>> _httpSvgCache = new();
+        private static readonly ConcurrentDictionary<string, Lazy<ImageSource>> _httpImageCache = new();
 
         public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
         {
@@ -69,10 +69,7 @@ namespace VMCreate
                     }
                     else if (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
                     {
-                        // Use the cache to avoid downloading the same SVG more than once.
-                        // Task.Run escapes the WPF SynchronizationContext, preventing the
-                        // classic async-over-sync deadlock when called on the UI thread.
-                        var lazy = _httpSvgCache.GetOrAdd(
+                        var lazy = _httpImageCache.GetOrAdd(
                             uri.OriginalString,
                             key => new Lazy<ImageSource>(() => LoadHttpSvgSync(uri)));
                         return lazy.Value;
@@ -82,6 +79,26 @@ namespace VMCreate
                     {
                         return new DrawingImage(drawing);
                     }
+                }
+                else if (uri.IsFile || uri.Scheme == "pack")
+                {
+                    try
+                    {
+                        return new BitmapImage(uri);
+                    }
+                    catch
+                    {
+                        return null;
+                    }
+                }
+                else if (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
+                {
+                    // Download HTTP bitmap images with HttpClient (WPF's built-in
+                    // BitmapImage(uri) silently fails for many HTTPS URLs).
+                    var lazy = _httpImageCache.GetOrAdd(
+                        uri.OriginalString,
+                        key => new Lazy<ImageSource>(() => LoadHttpBitmapSync(uri)));
+                    return lazy.Value;
                 }
                 else
                 {
@@ -120,6 +137,29 @@ namespace VMCreate
                         return (ImageSource)image;
                     }
                     return null;
+                }).GetAwaiter().GetResult();
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static ImageSource LoadHttpBitmapSync(Uri uri)
+        {
+            try
+            {
+                return Task.Run(async () =>
+                {
+                    var bytes = await _httpClient.GetByteArrayAsync(uri).ConfigureAwait(false);
+                    using var ms = new MemoryStream(bytes);
+                    var bitmap = new BitmapImage();
+                    bitmap.BeginInit();
+                    bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                    bitmap.StreamSource = ms;
+                    bitmap.EndInit();
+                    bitmap.Freeze(); // required for cross-thread access
+                    return (ImageSource)bitmap;
                 }).GetAwaiter().GetResult();
             }
             catch

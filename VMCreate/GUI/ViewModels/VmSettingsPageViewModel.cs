@@ -17,6 +17,7 @@ namespace VMCreate
         private int _memoryMB = 4096;
         private int _cpuCount = 2;
         private bool _virtualizationEnabled = true;
+        private bool _replacePreviousVm;
         private string _newDriveSizeText;
         private string _validationError;
 
@@ -90,6 +91,12 @@ namespace VMCreate
             set => SetProperty(ref _virtualizationEnabled, value);
         }
 
+        public bool ReplacePreviousVm
+        {
+            get => _replacePreviousVm;
+            set => SetProperty(ref _replacePreviousVm, value);
+        }
+
         public string NewDriveSizeText
         {
             get => _newDriveSizeText;
@@ -158,6 +165,7 @@ namespace VMCreate
             _wizardData.Settings.MemoryInMB = _memoryMB;
             _wizardData.Settings.CPUCount = _cpuCount;
             _wizardData.Settings.VirtualizationEnabled = _virtualizationEnabled;
+            _wizardData.Settings.ReplacePreviousVm = _replacePreviousVm;
             _wizardData.Settings.EnhancedSessionTransportType = _wizardData.SelectedItem.EnhancedSessionTransportType;
 
             ValidationError = null;

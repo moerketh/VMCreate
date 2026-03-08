@@ -74,6 +74,40 @@
                 <Setter Property="Margin" Value="0,5,0,5"/>
                 <Setter Property="Padding" Value="5"/>
             </Style>
+            <!-- Pre-installed disk image badge pill (green) -->
+            <Style x:Key="PreInstalledPillStyle" TargetType="{x:Type TextBlock}">
+                <Setter Property="FontSize" Value="10"/>
+                <Setter Property="Foreground" Value="White"/>
+                <Setter Property="Background" Value="#0F7B0F"/>
+                <Setter Property="Padding" Value="6,2"/>
+                <Setter Property="Margin" Value="5,2,0,0"/>
+                <Setter Property="VerticalAlignment" Value="Center"/>
+                <Setter Property="HorizontalAlignment" Value="Right"/>
+                <Setter Property="TextAlignment" Value="Center"/>
+                <Setter Property="MinWidth" Value="40"/>
+                <Setter Property="Effect">
+                    <Setter.Value>
+                        <DropShadowEffect ShadowDepth="1" BlurRadius="2" Opacity="0.3"/>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+            <!-- Security-specific badge pill (red accent) -->
+            <Style x:Key="SecurityPillStyle" TargetType="{x:Type TextBlock}">
+                <Setter Property="FontSize" Value="10"/>
+                <Setter Property="Foreground" Value="White"/>
+                <Setter Property="Background" Value="#C42B1C"/>
+                <Setter Property="Padding" Value="6,2"/>
+                <Setter Property="Margin" Value="5,2,0,0"/>
+                <Setter Property="VerticalAlignment" Value="Center"/>
+                <Setter Property="HorizontalAlignment" Value="Right"/>
+                <Setter Property="TextAlignment" Value="Center"/>
+                <Setter Property="MinWidth" Value="40"/>
+                <Setter Property="Effect">
+                    <Setter.Value>
+                        <DropShadowEffect ShadowDepth="1" BlurRadius="2" Opacity="0.3"/>
+                    </Setter.Value>
+                </Setter>
+            </Style>
             <Style x:Key="PillLabelStyle" TargetType="{x:Type TextBlock}">
                 <Setter Property="FontSize" Value="10"/>
                 <Setter Property="Foreground" Value="{DynamicResource TextOnAccentFillColorPrimaryBrush}"/>

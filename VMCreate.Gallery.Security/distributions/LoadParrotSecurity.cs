@@ -10,8 +10,7 @@ namespace VMCreate.Gallery
     public class LoadParrotSecurity : IGalleryLoader
     {
         private const string BaseUrl = "https://deb.parrot.sh/parrot/iso/7.1/";
-        private const string? PublicLogoUrl = "https://www.parrotsec.org/images/parrot-logo.png";
-        private const string SymbolUri = "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTWb4XCIcMpF6J3-37LaMWassk71PPNVWU7Qw&s";
+        private const string? PublicLogoUrl = "https://pbs.twimg.com/profile_images/2021571912527388672/rUotHYoR_400x400.jpg";
         private readonly IHttpClientFactory _clientFactory;
 
         public LoadParrotSecurity(IHttpClientFactory clientFactory)
@@ -57,13 +56,17 @@ namespace VMCreate.Gallery
                     Description = $"Parrot Security OS ISO installer, includes a full set of penetration testing tools (version {version})",
                     ThumbnailUri = logoUri,
                     LogoUri = logoUri,
-                    SymbolUri = SymbolUri,
+                    SymbolUri = logoUri,
                     DiskUri = BaseUrl + filename,
                     ArchiveRelativePath = filename,
                     SecureBoot = "false",
                     EnhancedSessionTransportType = "HvSocket",
                     Version = version,
-                    LastUpdated = lastUpdated.ToString("o")
+                    LastUpdated = lastUpdated.ToString("o"),
+                    InitialUsername = "user",
+                    InitialPassword = "parrot",
+                    Category = "Security",
+                    XHandle = "parrotsec"
                 });
             }
 
@@ -80,13 +83,18 @@ namespace VMCreate.Gallery
                     Description = $"Parrot Security OS pre-installed disk image, includes a full set of penetration testing tools (version {version})",
                     ThumbnailUri = logoUri,
                     LogoUri = logoUri,
-                    SymbolUri = SymbolUri,
+                    SymbolUri = logoUri,
                     DiskUri = BaseUrl + filename,
                     ArchiveRelativePath = "",
                     SecureBoot = "false",
                     EnhancedSessionTransportType = "HvSocket",
                     Version = version,
-                    LastUpdated = lastUpdated.ToString("o")
+                    LastUpdated = lastUpdated.ToString("o"),
+                    InitialUsername = "user",
+                    InitialPassword = "parrot",
+                    Category = "Security",
+                    IsRecommended = true,
+                    XHandle = "parrotsec"
                 });
             }
 

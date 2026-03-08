@@ -52,11 +52,27 @@
                                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
                                     <Image Source="{Binding SymbolUri, Converter={StaticResource ImageConverter}}" Width="80" Height="50" VerticalAlignment="Center" />
                                     <StackPanel Orientation="Vertical" VerticalAlignment="Center">
-                                        <TextBlock Text="{Binding Name}" Style="{StaticResource ExplanationText}" FontWeight="Bold" TextAlignment="Left"/>
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <!-- Gold star for recommended items -->
+                                            <TextBlock Text="★" FontSize="13" Foreground="#FFD700"
+                                                       VerticalAlignment="Center" Margin="5,0,3,0"
+                                                       ToolTip="Recommended"
+                                                       Visibility="{Binding IsRecommended, Converter={StaticResource BoolToVis}}"/>
+                                            <TextBlock Text="{Binding Name}" Style="{StaticResource ExplanationText}" FontWeight="Bold" TextAlignment="Left"/>
+                                        </StackPanel>
                                         <TextBlock Text="{Binding Publisher}" Style="{StaticResource PublisherText}" TextAlignment="Left"/>
                                     </StackPanel>
                                 </StackPanel>
-                                <TextBlock Grid.Column="1" Text="{Binding FileType}" Style="{StaticResource PillLabelStyle}"/>
+                                <!-- Right-side badges stacked vertically -->
+                                <StackPanel Grid.Column="1" Orientation="Vertical" VerticalAlignment="Center" HorizontalAlignment="Right">
+                                    <TextBlock Text="{Binding FileType}" Style="{StaticResource PillLabelStyle}"/>
+                                    <TextBlock Text="Security" Style="{StaticResource SecurityPillStyle}"
+                                               Visibility="{Binding IsSecurity, Converter={StaticResource BoolToVis}}"
+                                               ToolTip="Security / penetration-testing distribution"/>
+                                    <TextBlock Text="Pre-installed" Style="{StaticResource PreInstalledPillStyle}"
+                                               Visibility="{Binding IsPreInstalled, Converter={StaticResource BoolToVis}}"
+                                               ToolTip="Ready-to-run disk image — no manual OS installation required"/>
+                                </StackPanel>
                             </Grid>
                         </DataTemplate>
                     </ListBox.ItemTemplate>
@@ -79,6 +95,15 @@
             <StackPanel>
                 <Image Source="{Binding SelectedItem.ThumbnailUri, Converter={StaticResource ImageConverter}}"
                        Stretch="Uniform" MaxHeight="300" Margin="0,0,0,10"/>
+                <!-- Recommended / Security badges in detail panel -->
+                <StackPanel Orientation="Horizontal" Margin="5,0,0,6"
+                            Visibility="{Binding SelectedItem.IsSecurity, Converter={StaticResource BoolToVis}}">
+                    <TextBlock Text="★ Recommended" Style="{StaticResource ExplanationText}" Foreground="#FFD700" FontWeight="SemiBold"
+                               Visibility="{Binding SelectedItem.IsRecommended, Converter={StaticResource BoolToVis}}"
+                               Margin="0,0,8,0"/>
+                    <TextBlock Text="Security Distribution" Style="{StaticResource SecurityPillStyle}" VerticalAlignment="Center"
+                               Margin="0"/>
+                </StackPanel>
                 <TextBlock Text="{Binding SelectedItem.Name, StringFormat='Name: {0}'}"
                            Style="{StaticResource ExplanationText}" FontWeight="Bold" Margin="0,0,0,2"/>
                 <TextBlock Text="{Binding SelectedItem.Publisher, StringFormat='Publisher: {0}'}"

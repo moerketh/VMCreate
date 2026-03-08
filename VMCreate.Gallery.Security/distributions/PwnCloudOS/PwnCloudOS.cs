@@ -28,7 +28,8 @@ namespace VMCreate.Gallery
                 EnhancedSessionTransportType = "HvSocket",
                 LastUpdated = lastModified.ToString("o"),
                 InitialUsername = "pwnedlabs",
-                InitialPassword = "pwnedlabs"
+                InitialPassword = "pwnedlabs",
+                Category = "Security"
             };
             return Task.FromResult(new List<GalleryItem> { galleryItem });
         }

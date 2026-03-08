@@ -30,6 +30,10 @@ namespace VMCreate
         Task SetVMLoginNotes(VmSettings vmSettings, string initialUsername, string initialPassword, CancellationToken cancellationToken);
         Task StartVM(VmSettings vmSettings, CancellationToken cancellationToken);
         Task StartVMConnect(VmSettings vmSettings, CancellationToken cancellationToken);
+        Task<string[]> FindExistingVmsByBaseNameAsync(string baseName, CancellationToken cancellationToken);
+        Task<string[]> GetVmHardDiskPathsAsync(string vmName, CancellationToken cancellationToken);
+        Task StopVMAsync(string vmName, CancellationToken cancellationToken);
+        Task RemoveVMAsync(string vmName, CancellationToken cancellationToken);
     }
 
     internal class PowerShellHyperVManager : IHyperVManager
@@ -297,6 +301,64 @@ namespace VMCreate
             var result = await Task.Run(_ps.Invoke, cancellationToken);
             if (_ps.HadErrors) throw new Exception(string.Join("; ", _ps.Streams.Error.Select(e => e.ToString())));
             return result;
-        }        
+        }
+
+        public async Task<string[]> FindExistingVmsByBaseNameAsync(string baseName, CancellationToken cancellationToken)
+        {
+            _ps.Commands.Clear();
+            _ps.AddCommand("Get-VM");
+            var vms = await RunCommand(cancellationToken);
+            var matches = vms
+                .Where(vm =>
+                {
+                    string name = vm.Properties["Name"]?.Value?.ToString() ?? "";
+                    // Match exact base name or base name followed by _timestamp
+                    return string.Equals(name, baseName, StringComparison.OrdinalIgnoreCase)
+                        || name.StartsWith(baseName + "_", StringComparison.OrdinalIgnoreCase);
+                })
+                .Select(vm => vm.Properties["Name"]?.Value?.ToString())
+                .Where(n => n != null)
+                .ToArray();
+            return matches;
+        }
+
+        public async Task<string[]> GetVmHardDiskPathsAsync(string vmName, CancellationToken cancellationToken)
+        {
+            _ps.Commands.Clear();
+            _ps.AddCommand("Get-VMHardDiskDrive")
+                .AddParameter("VMName", vmName);
+            var drives = await RunCommand(cancellationToken);
+            return drives
+                .Select(d => d.Properties["Path"]?.Value?.ToString())
+                .Where(p => !string.IsNullOrEmpty(p))
+                .ToArray();
+        }
+
+        public async Task StopVMAsync(string vmName, CancellationToken cancellationToken)
+        {
+            _ps.Commands.Clear();
+            _ps.AddCommand("Stop-VM")
+                .AddParameter("Name", vmName)
+                .AddParameter("Force", true)
+                .AddParameter("TurnOff", true);
+            await Task.Run(_ps.Invoke, cancellationToken);
+            // Ignore errors (VM may already be off)
+            if (_ps.HadErrors)
+            {
+                _logger.LogWarning("Stop-VM had errors (VM may already be off): {Errors}",
+                    string.Join("; ", _ps.Streams.Error.Select(e => e.ToString())));
+                _ps.Streams.Error.Clear();
+            }
+        }
+
+        public async Task RemoveVMAsync(string vmName, CancellationToken cancellationToken)
+        {
+            _ps.Commands.Clear();
+            _ps.AddCommand("Remove-VM")
+                .AddParameter("Name", vmName)
+                .AddParameter("Force", true);
+            await RunCommand(cancellationToken);
+            _logger.LogInformation("Removed VM: {VMName}", vmName);
+        }
     }
 }

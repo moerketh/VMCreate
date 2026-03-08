@@ -50,7 +50,7 @@
                               Content="Enable xrdp for Hyper-V Enhanced Session support"
                               IsChecked="{Binding ConfigureXrdp}"
                               FontSize="14"
-                              ToolTip="Installs and configures xrdp so Enhanced Session mode works with this Linux VM."
+                              ToolTip="Installs and configures xrdp so Enhanced Session mode works with this Linux VM. A helper DVD will boot once to install xrdp, then the VM restarts normally."
                               AutomationProperties.Name="Configure xrdp for enhanced session"/>
                 </StackPanel>
             </Border>

@@ -70,6 +70,62 @@ namespace VMCreate
         }
 
         /// <summary>
+        /// Polls WorkflowProgress KVP while waiting for VM shutdown.
+        /// Used for Gen2 customize-only flows where there is no partclone step.
+        /// Reports progress text updates to the UI via the Customize phase card.
+        /// Returns true if the VM shut down cleanly, false on timeout.
+        /// </summary>
+        public async Task<bool> WaitForShutdownWithProgressAsync(
+            string vmName,
+            IProgress<CreateVMProgressInfo> progressReporter,
+            CancellationToken cancellationToken,
+            int timeoutSeconds = 600)
+        {
+            string vmGuid = await WaitForVMRunningAsync(vmName, cancellationToken);
+            if (string.IsNullOrEmpty(vmGuid))
+                return true; // VM already off
+
+            DateTime startTime = DateTime.UtcNow;
+            string lastProgress = null;
+
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                // Check if VM is still running
+                string currentGuid = GetVMGuid(vmName);
+                if (string.IsNullOrEmpty(currentGuid))
+                    return true; // VM shut down successfully
+
+                // Check timeout
+                if (timeoutSeconds > 0 && (DateTime.UtcNow - startTime).TotalSeconds > timeoutSeconds)
+                    return false; // Timeout — VM still running
+
+                // Poll WorkflowProgress KVP and report to UI
+                try
+                {
+                    var kvps = GetCustomKVPs(vmGuid);
+                    if (kvps.TryGetValue("WorkflowProgress", out string progress)
+                        && !string.IsNullOrEmpty(progress)
+                        && progress != lastProgress)
+                    {
+                        lastProgress = progress;
+                        progressReporter.Report(new CreateVMProgressInfo
+                        {
+                            Phase = "Customize",
+                            URI = progress
+                        });
+                    }
+                }
+                catch
+                {
+                    // KVP read may fail transiently while VM is shutting down
+                }
+
+                await Task.Delay(2000, cancellationToken);
+            }
+            return false;
+        }
+
+        /// <summary>
         /// Get custom KVPs from GuestExchangeItems
         /// </summary>
         /// <param name="vmGuid"></param>

@@ -34,7 +34,8 @@ namespace VMCreate.Gallery
                 Version      = PinnedVersion,
                 LastUpdated  = DateTime.UtcNow.ToString("o"),
                 InitialUsername = "user",
-                InitialPassword = "changeme"
+                InitialPassword = "changeme",
+                Category     = "Security"
             };
 
             return new List<GalleryItem> { item };

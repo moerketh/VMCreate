@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using System;
+using System.Collections;
 using System.ComponentModel;
 using System.Windows.Data;
 using System.Windows.Input;
@@ -33,8 +34,11 @@ namespace VMCreate
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
             _galleryView = CollectionViewSource.GetDefaultView(_wizardData.GalleryItems);
-            _galleryView.SortDescriptions.Add(
-                new SortDescription(nameof(GalleryItem.Name), ListSortDirection.Ascending));
+            if (_galleryView is ListCollectionView listView)
+                listView.CustomSort = new GalleryItemComparer();
+            else
+                _galleryView.SortDescriptions.Add(
+                    new SortDescription(nameof(GalleryItem.Name), ListSortDirection.Ascending));
 
             // If items are already loaded (e.g. wizard reset after VM creation),
             // don't show the loading overlay.
@@ -114,6 +118,37 @@ namespace VMCreate
             if (_selectedItem == null) return;
             _wizardData.SelectedItem = _selectedItem;
             RequestNavigateNext?.Invoke();
+        }
+
+        /// <summary>
+        /// Sorts gallery items: recommended first, then security distros, then
+        /// everything else — all tiers sorted alphabetically within themselves.
+        /// </summary>
+        private sealed class GalleryItemComparer : IComparer
+        {
+            public int Compare(object? x, object? y)
+            {
+                var a = x as GalleryItem;
+                var b = y as GalleryItem;
+                if (a == null && b == null) return 0;
+                if (a == null) return 1;
+                if (b == null) return -1;
+
+                // Tier 1: Recommended (true sorts before false)
+                int rec = b.IsRecommended.CompareTo(a.IsRecommended);
+                if (rec != 0) return rec;
+
+                // Tier 2: Security distros before general
+                int sec = b.IsSecurity.CompareTo(a.IsSecurity);
+                if (sec != 0) return sec;
+
+                // Tier 3: Pre-installed images before ISO installers
+                int pre = b.IsPreInstalled.CompareTo(a.IsPreInstalled);
+                if (pre != 0) return pre;
+
+                // Tier 4: Alphabetical by name
+                return string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
+            }
         }
     }
 }

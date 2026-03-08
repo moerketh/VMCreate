@@ -185,6 +185,27 @@ namespace VMCreate
                 SymbolRegular.Wrench24));
         }
 
+        /// <summary>
+        /// Called at runtime for Gen2 pre-installed images that need customization
+        /// (e.g. xRDP install). Inserts a Customize card before Done.
+        /// </summary>
+        public void InsertCustomizePhase()
+        {
+            int doneIndex = -1;
+            for (int i = 0; i < Phases.Count; i++)
+            {
+                if (Phases[i].Id == PhaseDone) { doneIndex = i; break; }
+            }
+            if (doneIndex < 0) return;
+
+            // Only insert once
+            if (Phases.Any(p => p.Id == PhaseCustomize)) return;
+
+            Phases.Insert(doneIndex, new DeploymentPhase(PhaseCustomize, "Customize VM",
+                "Installing Hyper-V enhancements and waiting for the VM to restart",
+                SymbolRegular.Wrench24));
+        }
+
         // ── Phase status updates ─────────────────────────────────────────
 
         public DeploymentPhase FindPhase(string id) =>

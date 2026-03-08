@@ -65,7 +65,8 @@ namespace VMCreate.Gallery
                 SecureBoot   = "false",
                 EnhancedSessionTransportType = "HvSocket",
                 Version      = tagName,
-                LastUpdated  = DateTime.UtcNow.ToString("o")
+                LastUpdated  = DateTime.UtcNow.ToString("o"),
+                Category     = "Security"
             };
 
             return new List<GalleryItem> { item };

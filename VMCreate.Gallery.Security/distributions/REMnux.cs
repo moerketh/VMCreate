@@ -33,7 +33,8 @@ namespace VMCreate.Gallery
                 Version      = PinnedVersion,
                 LastUpdated  = DateTime.UtcNow.ToString("o"),
                 InitialUsername = "remnux",
-                InitialPassword = "malware"
+                InitialPassword = "malware",
+                Category     = "Security"
             };
             return new List<GalleryItem> { item };
         }

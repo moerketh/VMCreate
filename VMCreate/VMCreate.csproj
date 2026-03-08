@@ -51,6 +51,7 @@
     <Compile Include="HyperV\vmbus\KvpBase.cs" />
     <Compile Include="HyperV\vmbus\KvpHostToGuest.cs" />
     <Compile Include="HyperV\vmbus\KvpProgressMonitor.cs" />
+    <Compile Include="HyperV\vmbus\GuestDiagnosticsCollector.cs" />
     <Compile Include="HyperV\PowerShellHyperVManager.cs" />
     <Compile Include="HyperV\HyperVVmCreator.cs" />
     <Compile Include="GUI\MainWindow.xaml.cs" />
@@ -101,6 +102,7 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Compile Include="Gallery\GalleryItemsParser.cs" />
+    <Compile Include="Gallery\XProfilePhoto.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />

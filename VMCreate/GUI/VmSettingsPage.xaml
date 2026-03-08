@@ -142,6 +142,11 @@
                               FontSize="14"
                               ToolTip="Allows running Hyper-V or other hypervisors inside this VM."
                               AutomationProperties.Name="Enable nested virtualization"/>
+                    <CheckBox Content="Replace existing VM with the same name"
+                              IsChecked="{Binding ReplacePreviousVm}"
+                              FontSize="14" Margin="0,8,0,0"
+                              ToolTip="If a VM with the same base name already exists, stop and remove it (including its VHDX) before creating the new one."
+                              AutomationProperties.Name="Replace existing VM"/>
                 </StackPanel>
             </Border>
 

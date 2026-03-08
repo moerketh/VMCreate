@@ -10,7 +10,6 @@ namespace VMCreate.Gallery
     public class LoadKaliCurrent : IGalleryLoader
     {
         private const string BaseUrl = "https://cdimage.kali.org/current/";
-        private const string SymbolUri = "https://www.kali.org/blog/kali-linux-2022-4-release/images/kali-logo-dragon-blue-transparent.png";
         private const string LogoUrl = "https://pkg.kali.org/static/img/kali-logo.png";
         private readonly IHttpClientFactory _clientFactory;
 
@@ -61,9 +60,12 @@ namespace VMCreate.Gallery
                 Publisher = "OffSec Services Limited",
                 DiskUri = downloadUrl,
                 LogoUri = LogoUrl,
-                SymbolUri = SymbolUri,
+                SymbolUri = LogoUrl,
                 LastUpdated = (DateTime.TryParse(date, out var parsedDate) ? parsedDate : DateTime.Now).ToLongDateString(),
-                Version = version
+                Version = version,
+                Category = "Security",
+                IsRecommended = true,
+                XHandle = "kalilinux"
             };
 
             return new List<GalleryItem> { galleryItem };
