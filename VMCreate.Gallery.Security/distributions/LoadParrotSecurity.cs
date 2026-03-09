@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Net.Http;
 using System.Text.RegularExpressions;
@@ -10,7 +10,6 @@ namespace VMCreate.Gallery
     public class LoadParrotSecurity : IGalleryLoader
     {
         private const string BaseUrl = "https://deb.parrot.sh/parrot/iso/7.1/";
-        private const string? PublicLogoUrl = "https://pbs.twimg.com/profile_images/2021571912527388672/rUotHYoR_400x400.jpg";
         private readonly IHttpClientFactory _clientFactory;
 
         public LoadParrotSecurity(IHttpClientFactory clientFactory)
@@ -20,7 +19,7 @@ namespace VMCreate.Gallery
 
         public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
-            var logoUri = await GalleryIcons.ResolveLogoUriAsync(PublicLogoUrl, typeof(LoadParrotSecurity).Assembly, "parrot-logo.svg");
+            var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(LoadParrotSecurity).Assembly, "parrot-logo.svg");
             var client = _clientFactory.CreateClient();
             client.DefaultRequestHeaders.Add("User-Agent", "VMCreate/1.0");
 
@@ -65,8 +64,7 @@ namespace VMCreate.Gallery
                     LastUpdated = lastUpdated.ToString("o"),
                     InitialUsername = "user",
                     InitialPassword = "parrot",
-                    Category = "Security",
-                    XHandle = "parrotsec"
+                    Category = "Security"
                 });
             }
 
@@ -93,8 +91,7 @@ namespace VMCreate.Gallery
                     InitialUsername = "user",
                     InitialPassword = "parrot",
                     Category = "Security",
-                    IsRecommended = true,
-                    XHandle = "parrotsec"
+                    IsRecommended = true
                 });
             }
 

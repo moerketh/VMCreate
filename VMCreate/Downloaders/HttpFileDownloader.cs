@@ -57,24 +57,13 @@ namespace VMCreate
                     if (contentLength.HasValue)
                         _logger.LogInformation("Content-Length: {ContentLength} bytes", contentLength.Value);
 
-                    // Validate cached file size against Content-Length before reusing
-                    if (useCache && File.Exists(filePath))
-                    {
-                        long cachedSize = new FileInfo(filePath).Length;
-                        if (contentLength.HasValue && cachedSize == contentLength.Value)
-                        {
-                            _logger.LogInformation("Using cached file: {FilePath} ({Size} bytes, matches server)", filePath, cachedSize);
-                            return filePath;
-                        }
-                        else
-                        {
-                            _logger.LogWarning("Cached file size mismatch for {FilePath}: cached={CachedSize}, expected={Expected}. Re-downloading.",
-                                filePath, cachedSize, contentLength?.ToString() ?? "unknown");
-                            File.Delete(filePath);
-                        }
-                    }
+                    var (writeStream, isCached) = await _fileStreamProvider.GetWriteStreamAsync(filePath, useCache);
 
-                    var writeStream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None, 65536, true);
+                    if (isCached)
+                    {
+                        _logger.LogInformation("Using cached file: {FilePath}", filePath);
+                        return filePath;
+                    }
 
                     var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken);
 
@@ -83,8 +72,8 @@ namespace VMCreate
                         await _streamCopier.CopyAsync(contentStream, writeStream, contentLength, finalUri, progressReportInfo, cancellationToken);
                     }
 
-                    // Post-download size verification
-                    if (contentLength.HasValue)
+                    // Post-download size verification (only when writing to a real file)
+                    if (contentLength.HasValue && File.Exists(filePath))
                     {
                         long actualSize = new FileInfo(filePath).Length;
                         if (actualSize != contentLength.Value)

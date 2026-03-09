@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Net.Http;
 using System.Text.RegularExpressions;
@@ -12,7 +12,6 @@ namespace VMCreate.Gallery
         private const string DownloadsUrl = "https://www.blackarch.org/downloads.html";
         private readonly IHttpClientFactory _clientFactory;
         private const string PinnedVersion = "2023.04.01";
-        private const string? PublicLogoUrl = "https://blackarch.org/img/logo.png";
 
         public BlackArch(IHttpClientFactory clientFactory)
         {
@@ -21,7 +20,7 @@ namespace VMCreate.Gallery
 
         public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
-            var logoUri = await GalleryIcons.ResolveLogoUriAsync(PublicLogoUrl, typeof(BlackArch).Assembly, "blackarch-logo.png");
+            var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(BlackArch).Assembly, "blackarch-logo.png");
             var galleryItems = new List<GalleryItem>();
             var client = _clientFactory.CreateClient();
             client.DefaultRequestHeaders.Add("User-Agent", "VMCreate/1.0");

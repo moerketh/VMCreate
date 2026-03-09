@@ -10,12 +10,12 @@ namespace VMCreate.MediaHandlers
 {
     public class Qcow2MediaHandler : MediaHandler
     {
-        private readonly DiskConverter _diskConverter;
+        private readonly IDiskConverter _diskConverter;
         private readonly IPartitionSchemeDetector _partitionSchemeDetector;
         private int _vmGeneration;
         private string _vhdDestFile = null;
 
-        public Qcow2MediaHandler(ILogger<Qcow2MediaHandler> logger, DiskConverter diskConverter, IPartitionSchemeDetector partitionSchemeDetector)
+        public Qcow2MediaHandler(ILogger<Qcow2MediaHandler> logger, IDiskConverter diskConverter, IPartitionSchemeDetector partitionSchemeDetector)
             : base(logger)
         {
             _diskConverter = diskConverter ?? throw new ArgumentNullException(nameof(diskConverter));

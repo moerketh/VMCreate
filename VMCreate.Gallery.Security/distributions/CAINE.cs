@@ -14,10 +14,9 @@ namespace VMCreate.Gallery
     {
         private const string PinnedVersion = "14.0";
         private const string IsoUrl = "https://www.caine-live.net/Downloads/caine14.0.iso";
-        private const string? PublicLogoUrl = "https://www.caine-live.net/resources/images/caine.png";
         public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
-            var logoUri = await GalleryIcons.ResolveLogoUriAsync(PublicLogoUrl, typeof(CAINE).Assembly, "caine-logo.svg");
+            var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(CAINE).Assembly, "caine-logo.svg");
             var item = new GalleryItem
             {
                 Name        = "CAINE",

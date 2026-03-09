@@ -8,7 +8,7 @@ using VMCreate;
 
 namespace VMCreate
 {
-    public class DiskConverter
+    public class DiskConverter : IDiskConverter
     {
         private readonly string _qemuImgPath;
         private readonly ILogger<DiskConverter> _logger;

@@ -1,4 +1,3 @@
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Linq;
@@ -15,15 +14,15 @@ namespace VMCreate
 
         private readonly DeployPageViewModel _viewModel;
         private readonly WizardData _wizardData;
-        private readonly IServiceProvider _serviceProvider;
+        private readonly CreateVM _createVM;
         private readonly ILogger _logger;
         private CancellationTokenSource _cts;
         private string _activePhaseId;
 
-        public DeployPage(WizardData wizardData, IServiceProvider serviceProvider, ILoggerFactory loggerFactory)
+        public DeployPage(WizardData wizardData, CreateVM createVM, ILoggerFactory loggerFactory)
         {
             _wizardData = wizardData ?? throw new ArgumentNullException(nameof(wizardData));
-            _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+            _createVM = createVM ?? throw new ArgumentNullException(nameof(createVM));
             if (loggerFactory == null) throw new ArgumentNullException(nameof(loggerFactory));
 
             _logger = loggerFactory.CreateLogger<DeployPage>();
@@ -102,8 +101,7 @@ namespace VMCreate
             try
             {
                 var progressReport = new Progress<CreateVMProgressInfo>(OnProgressReport);
-                var createVM = _serviceProvider.GetRequiredService<CreateVM>();
-                await createVM.StartCreateVMAsync(vmSettings, vmCustomizations, galleryItem, _cts.Token, progressReport);
+                await _createVM.StartCreateVMAsync(vmSettings, vmCustomizations, galleryItem, _cts.Token, progressReport);
 
                 // Mark any remaining Active phase as Completed
                 CompleteCurrentPhase();
@@ -174,6 +172,12 @@ namespace VMCreate
                         }
                     }
 
+                    // Insert PostBoot phase card when transitioning to it
+                    if (targetPhase == DeployPageViewModel.PhasePostBoot)
+                    {
+                        Application.Current.Dispatcher.Invoke(() => _viewModel.InsertPostBootPhase());
+                    }
+
                     CompleteCurrentPhase();
                     ActivateNextPhase(targetPhase);
                 }
@@ -186,6 +190,8 @@ namespace VMCreate
 
                 if (info.DownloadSpeed > 0)
                     progressText = $"{info.DownloadSpeed:F2} MB/s";
+                else if (!string.IsNullOrEmpty(info.StepName))
+                    progressText = info.StepName;
                 else if (!string.IsNullOrEmpty(info.URI))
                     progressText = info.URI;
 
@@ -217,6 +223,7 @@ namespace VMCreate
                 DeployPageViewModel.PhaseStartVM   => DeployPageViewModel.PhaseStartVM,
                 DeployPageViewModel.PhaseCloneDisk => DeployPageViewModel.PhaseCloneDisk,
                 DeployPageViewModel.PhaseCustomize => DeployPageViewModel.PhaseCustomize,
+                DeployPageViewModel.PhasePostBoot  => DeployPageViewModel.PhasePostBoot,
                 _ => phase switch
                 {
                     // Legacy / descriptive phase strings from existing code

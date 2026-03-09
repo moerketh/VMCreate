@@ -15,10 +15,9 @@ namespace VMCreate.Gallery
         private const string BaseUrl         = "https://download.fedoraproject.org/pub/fedora/linux/releases/";
         private const string IsoPathTemplate = "{0}Workstation/x86_64/iso/Fedora-Workstation-Live-{1}-1.1.x86_64.iso";
         private const string ReleaseVersion  = "42";
-        private const string? PublicLogoUrl = "https://fedoraproject.org/assets/images/fedora-logo.png";
         public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
-            var logoUri = await GalleryIcons.ResolveLogoUriAsync(PublicLogoUrl, typeof(FedoraWorkstation).Assembly, "fedora-logo.svg");
+            var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(FedoraWorkstation).Assembly, "fedora-logo.svg");
             var isoUrl   = string.Format(IsoPathTemplate, $"{BaseUrl}{ReleaseVersion}/", ReleaseVersion);
             var filename = $"Fedora-Workstation-Live-{ReleaseVersion}-1.1.x86_64.iso";
 

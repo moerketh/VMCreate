@@ -10,13 +10,15 @@ namespace VMCreate
     public partial class VmSettingsPage : Page
     {
         private readonly WizardData _wizardData;
+        private readonly IHtbApiClient _htbApiClient;
         private readonly ILoggerFactory _loggerFactory;
 
         public event EventHandler<WizardResultEventArgs> WizardCompleted;
 
-        public VmSettingsPage(WizardData wizardData, ILoggerFactory loggerFactory)
+        public VmSettingsPage(WizardData wizardData, IHtbApiClient htbApiClient, ILoggerFactory loggerFactory)
         {
             _wizardData = wizardData ?? throw new ArgumentNullException(nameof(wizardData));
+            _htbApiClient = htbApiClient ?? throw new ArgumentNullException(nameof(htbApiClient));
             _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
 
             var viewModel = new VmSettingsPageViewModel(
@@ -33,7 +35,7 @@ namespace VMCreate
 
         private void OnNavigateNext()
         {
-            var nextPage = new VmCustomizationPage(_wizardData, _loggerFactory);
+            var nextPage = new VmCustomizationPage(_wizardData, _htbApiClient, _loggerFactory);
             nextPage.WizardCompleted += (s, args) => WizardCompleted?.Invoke(s, args);
             NavigationService.Navigate(nextPage);
         }

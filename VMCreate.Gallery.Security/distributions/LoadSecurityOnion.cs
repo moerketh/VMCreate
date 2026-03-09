@@ -13,7 +13,6 @@ namespace VMCreate.Gallery
     public class LoadSecurityOnion : IGalleryLoader
     {
         private const string ReleasesApiUrl = "https://api.github.com/repos/Security-Onion-Solutions/securityonion/releases/latest";
-        private const string? PublicLogoUrl = "https://securityonionsolutions.com/images/so-logo.png";
 
         private readonly IHttpClientFactory _clientFactory;
 
@@ -24,7 +23,7 @@ namespace VMCreate.Gallery
 
         public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
-            var logoUri = await GalleryIcons.ResolveLogoUriAsync(PublicLogoUrl, typeof(LoadSecurityOnion).Assembly, "securityonion-logo.svg");
+            var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(LoadSecurityOnion).Assembly, "securityonion-logo.svg");
             var client = _clientFactory.CreateClient();
             client.DefaultRequestHeaders.Add("User-Agent", "VMCreate/1.0");
             client.DefaultRequestHeaders.TryAddWithoutValidation("Accept", "application/vnd.github.v3+json");

@@ -12,12 +12,11 @@ namespace VMCreate.Gallery
     /// </summary>
     public class Tsurugi : IGalleryLoader
     {
-        private const string PinnedVersion = "2024.1";
-        private const string IsoUrl = "https://tsurugi-linux.org/downloads/tsurugi_2024.1_amd64.iso";
-        private const string? PublicLogoUrl = "https://tsurugi-linux.org/images/logo.png";
+        private const string PinnedVersion = "25.11";
+        private const string IsoUrl = "https://ftp.nluug.nl/os/Linux/distr/tsurugi/01.Tsurugi_Linux_%5bLAB%5d/tsurugi_linux_25.11.iso";
         public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
-            var logoUri = await GalleryIcons.ResolveLogoUriAsync(PublicLogoUrl, typeof(Tsurugi).Assembly, "tsurugi-logo.svg");
+            var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(Tsurugi).Assembly, "tsurugi-logo.svg");
             var item = new GalleryItem
             {
                 Name        = "Tsurugi Linux",
@@ -32,8 +31,7 @@ namespace VMCreate.Gallery
                 EnhancedSessionTransportType = "HvSocket",
                 Version      = PinnedVersion,
                 LastUpdated  = DateTime.UtcNow.ToString("o"),
-                Category     = "Security",
-                XHandle      = "tsurugi_linux"
+                Category     = "Security"
             };
             return new List<GalleryItem> { item };
         }

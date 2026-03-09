@@ -60,12 +60,11 @@ namespace VMCreate.Gallery
                 Publisher = "OffSec Services Limited",
                 DiskUri = downloadUrl,
                 LogoUri = LogoUrl,
-                SymbolUri = LogoUrl,
+                SymbolUri = "",
                 LastUpdated = (DateTime.TryParse(date, out var parsedDate) ? parsedDate : DateTime.Now).ToLongDateString(),
                 Version = version,
                 Category = "Security",
-                IsRecommended = true,
-                XHandle = "kalilinux"
+                IsRecommended = true
             };
 
             return new List<GalleryItem> { galleryItem };

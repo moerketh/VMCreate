@@ -126,7 +126,7 @@ namespace VMCreate
         /// </summary>
         private sealed class GalleryItemComparer : IComparer
         {
-            public int Compare(object? x, object? y)
+            public int Compare(object x, object y)
             {
                 var a = x as GalleryItem;
                 var b = y as GalleryItem;

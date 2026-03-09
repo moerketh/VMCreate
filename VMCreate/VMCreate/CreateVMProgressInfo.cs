@@ -24,5 +24,11 @@
         /// Only populated when an error is detected and diagnostics are collected.
         /// </summary>
         public string DiagnosticsLog { get; set; }
+
+        /// <summary>
+        /// Name of the current customization step being executed (e.g. "Sync Timezone").
+        /// Used by the Deploy page to show per-step progress text.
+        /// </summary>
+        public string StepName { get; set; }
     }
 }

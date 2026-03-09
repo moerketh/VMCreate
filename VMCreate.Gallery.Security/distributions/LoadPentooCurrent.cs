@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Net.Http;
 using System.Text.Json;
@@ -17,7 +17,6 @@ namespace VMCreate.Gallery
         private const string MirrorBaseUrl  = "https://pentoo.osuosl.org/";
         private const string VersionsUrl    = MirrorBaseUrl + "latest-iso-symlinks/versions.json";
         private const string SymlinkUrl     = MirrorBaseUrl + "latest-iso-symlinks/pentoo-full-daily-amd64-hardened-latest.iso";
-        private const string? PublicLogoUrl = "https://www.pentoo.org/icon.png";
 
         private readonly IHttpClientFactory _clientFactory;
 
@@ -28,7 +27,7 @@ namespace VMCreate.Gallery
 
         public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
-            var logoUri = await GalleryIcons.ResolveLogoUriAsync(PublicLogoUrl, typeof(LoadPentooCurrent).Assembly, "pentoo-logo.svg");
+            var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(LoadPentooCurrent).Assembly, "pentoo-logo.svg");
             var client = _clientFactory.CreateClient();
             client.DefaultRequestHeaders.Add("User-Agent", "VMCreate/1.0");
 
@@ -39,7 +38,7 @@ namespace VMCreate.Gallery
 
             using var doc = JsonDocument.Parse(json);
 
-            string? version = null;
+            string version = null;
             foreach (var entry in doc.RootElement.EnumerateArray())
             {
                 if (entry.TryGetProperty("name",    out var nameProp)    &&

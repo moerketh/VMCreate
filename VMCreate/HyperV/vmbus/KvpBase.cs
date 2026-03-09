@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 
 namespace CreateVM.HyperV.vmbus
 {
-    public class KvpBase
+    public class KvpBase : IVmShutdownWatcher
     {
         /// <summary>
         /// Poll until VM is running (EnabledState = 2) and return GUID

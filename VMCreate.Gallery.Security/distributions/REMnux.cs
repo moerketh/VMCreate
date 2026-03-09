@@ -14,10 +14,9 @@ namespace VMCreate.Gallery
     {
         private const string PinnedVersion = "noble-202602";
         private const string OvaUrl = "https://download.remnux.org/202602/remnux-noble-amd64.ova";
-        private const string? PublicLogoUrl = "https://remnux.org/assets/remnux-logo.png";
         public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
-            var logoUri = await GalleryIcons.ResolveLogoUriAsync(PublicLogoUrl, typeof(REMnux).Assembly, "remnux-logo.svg");
+            var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(REMnux).Assembly, "remnux-logo.svg");
             var item = new GalleryItem
             {
                 Name        = "REMnux",

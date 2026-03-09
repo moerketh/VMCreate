@@ -15,10 +15,9 @@ namespace VMCreate.Gallery
     {
         private const string PinnedVersion = "18.1.4.2";
         private const string OvaUrl        = "https://www.whonix.org/download/ova/18.1.4.2/Whonix-LXQt-18.1.4.2.Intel_AMD64.ova";
-        private const string? PublicLogoUrl = "https://www.whonix.org/w/images/3/32/Whonix-logo-rectangle.png";
         public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
-            var logoUri = await GalleryIcons.ResolveLogoUriAsync(PublicLogoUrl, typeof(Whonix).Assembly, "whonix-logo.svg");
+            var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(Whonix).Assembly, "whonix-logo.svg");
             var item = new GalleryItem
             {
                 Name        = $"Whonix {PinnedVersion} LXQt",

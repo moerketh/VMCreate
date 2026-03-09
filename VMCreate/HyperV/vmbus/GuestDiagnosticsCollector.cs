@@ -2,7 +2,6 @@ using Microsoft.Extensions.Logging;
 using System;
 using System.Linq;
 using System.Management.Automation;
-using System.Security;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -19,16 +18,15 @@ namespace CreateVM.HyperV.vmbus
     ///   - openssh-server running
     ///   - PowerShell (pwsh) installed with SSH subsystem configured
     ///   - hv_sock kernel module (built into linux-azure)
-    ///   - Password auth enabled for ubuntu/ubuntu credentials
+    ///   - SSH public key injected via KVP (key-only auth)
     /// </summary>
-    public class GuestDiagnosticsCollector
+    public class GuestDiagnosticsCollector : IGuestDiagnosticsCollector
     {
-        private readonly ILogger _logger;
+        private readonly ILogger<GuestDiagnosticsCollector> _logger;
         private const string GuestUsername = "ubuntu";
-        private const string GuestPassword = "ubuntu";
         private static readonly TimeSpan InvokeTimeout = TimeSpan.FromSeconds(30);
 
-        public GuestDiagnosticsCollector(ILogger logger)
+        public GuestDiagnosticsCollector(ILogger<GuestDiagnosticsCollector> logger)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
@@ -39,7 +37,7 @@ namespace CreateVM.HyperV.vmbus
         /// Returns a structured diagnostics string, or an error message if the
         /// connection itself fails.
         /// </summary>
-        public async Task<GuestDiagnostics> CollectAsync(string vmName, CancellationToken ct)
+        public async Task<GuestDiagnostics> CollectAsync(string vmName, CancellationToken ct, string privateKeyPath = null)
         {
             _logger.LogInformation("Collecting diagnostics from ISO guest via PowerShell Direct for VM: {VMName}", vmName);
 
@@ -56,7 +54,7 @@ namespace CreateVM.HyperV.vmbus
                     mount | grep /mnt 2>&1
                     echo '=== dmesg (last 20 lines) ==='
                     sudo dmesg | tail -20 2>&1
-                ", ct);
+                ", ct, privateKeyPath);
 
                 var diag = new GuestDiagnostics
                 {
@@ -86,22 +84,19 @@ namespace CreateVM.HyperV.vmbus
 
         /// <summary>
         /// Executes a command inside the guest VM via Invoke-Command -VMName.
-        /// Uses PowerShell SDK to run the cmdlet, which connects over VMBus (hv_sock).
+        /// Uses SSH key-based authentication with the private key path.
         /// </summary>
-        private async Task<string> RunGuestCommandAsync(string vmName, string linuxCommand, CancellationToken ct)
+        private async Task<string> RunGuestCommandAsync(string vmName, string linuxCommand, CancellationToken ct, string privateKeyPath = null)
         {
+            if (string.IsNullOrEmpty(privateKeyPath) || !System.IO.File.Exists(privateKeyPath))
+                throw new InvalidOperationException("SSH private key path is required for guest diagnostics collection.");
+
             using var ps = PowerShell.Create();
 
-            var securePassword = new SecureString();
-            foreach (char c in GuestPassword) securePassword.AppendChar(c);
-            securePassword.MakeReadOnly();
-
-            var credential = new PSCredential(GuestUsername, securePassword);
-
-            // Build: Invoke-Command -VMName $vmName -Credential $cred -ScriptBlock { ... }
             ps.AddCommand("Invoke-Command")
               .AddParameter("VMName", vmName)
-              .AddParameter("Credential", credential)
+              .AddParameter("UserName", GuestUsername)
+              .AddParameter("KeyFilePath", privateKeyPath)
               .AddParameter("ScriptBlock", ScriptBlock.Create(linuxCommand))
               .AddParameter("ErrorAction", "Stop");
 

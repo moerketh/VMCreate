@@ -3,13 +3,13 @@ using Microsoft.Extensions.Logging;
 
 namespace VMCreate.MediaHandlers
 {
-    public class MediaHandlerFactory
+    public class MediaHandlerFactory : IMediaHandlerFactory
     {
         private readonly ILoggerFactory _loggerFactory;
-        private readonly DiskConverter _diskConverter;
+        private readonly IDiskConverter _diskConverter;
         private readonly IPartitionSchemeDetector _partitionSchemeDetector;
 
-        public MediaHandlerFactory(ILoggerFactory loggerFactory, DiskConverter diskConverter, IPartitionSchemeDetector partitionSchemeDetector)
+        public MediaHandlerFactory(ILoggerFactory loggerFactory, IDiskConverter diskConverter, IPartitionSchemeDetector partitionSchemeDetector)
         {
             _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
             _diskConverter = diskConverter ?? throw new ArgumentNullException(nameof(diskConverter));

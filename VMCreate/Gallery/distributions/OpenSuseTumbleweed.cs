@@ -14,10 +14,9 @@ namespace VMCreate.Gallery
     {
         // This URL 302-redirects to the latest Tumbleweed NET installer ISO.
         private const string IsoUrl = "https://download.opensuse.org/tumbleweed/iso/openSUSE-Tumbleweed-NET-x86_64-Current.iso";
-        private const string? PublicLogoUrl = "https://www.opensuse.org/assets/images/logo.svg";
         public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
-            var logoUri = await GalleryIcons.ResolveLogoUriAsync(PublicLogoUrl, typeof(OpenSuseTumbleweed).Assembly, "opensuse-logo.svg");
+            var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(OpenSuseTumbleweed).Assembly, "opensuse-logo.svg");
             var item = new GalleryItem
             {
                 Name        = "openSUSE Tumbleweed",

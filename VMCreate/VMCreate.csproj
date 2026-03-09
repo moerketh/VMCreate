@@ -16,6 +16,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="App.xaml.cs" />
+    <Compile Include="AppSettings.cs" />
     <Compile Include="AssemblyInfo.cs" />
     <Compile Include="VMCreate\CreateVM.cs" />
     <Compile Include="VMCreate\CreateVMProgressInfo.cs" />
@@ -47,11 +48,31 @@
     <Compile Include="Gallery\LoadFromMicrosoftURI.cs" />
     <Compile Include="Gallery\LoadFromRegistry.cs" />
     <Compile Include="Gallery\other\LoadFromGNS3GitHub.cs" />
+    <Compile Include="HyperV\ISshKeyManager.cs" />
+    <Compile Include="HyperV\IHtbApiClient.cs" />
+    <Compile Include="HyperV\IGuestShellFactory.cs" />
+    <Compile Include="HyperV\SshGuestShellFactory.cs" />
+    <Compile Include="HyperV\vmbus\IKvpSender.cs" />
+    <Compile Include="HyperV\vmbus\IKvpPoller.cs" />
+    <Compile Include="HyperV\vmbus\IVmShutdownWatcher.cs" />
+    <Compile Include="HyperV\vmbus\IGuestDiagnosticsCollector.cs" />
+    <Compile Include="MediaHandlers\IDiskConverter.cs" />
+    <Compile Include="MediaHandlers\IMediaHandlerFactory.cs" />
+    <Compile Include="Gallery\IGalleryCache.cs" />
+    <Compile Include="Gallery\IGalleryService.cs" />
+    <Compile Include="Gallery\GalleryService.cs" />
     <Compile Include="HyperV\BooleanOnOffAdapter.cs" />
     <Compile Include="HyperV\vmbus\KvpBase.cs" />
     <Compile Include="HyperV\vmbus\KvpHostToGuest.cs" />
     <Compile Include="HyperV\vmbus\KvpProgressMonitor.cs" />
     <Compile Include="HyperV\vmbus\GuestDiagnosticsCollector.cs" />
+    <Compile Include="HyperV\SshKeyManager.cs" />
+    <Compile Include="HyperV\HtbApiClient.cs" />
+    <Compile Include="HyperV\SshGuestShell.cs" />
+    <Compile Include="HyperV\Steps\SyncTimezoneStep.cs" />
+    <Compile Include="HyperV\Steps\InstallOpenVpnStep.cs" />
+    <Compile Include="HyperV\Steps\DeployVpnConfigsStep.cs" />
+    <Compile Include="HyperV\IHyperVManagerRoles.cs" />
     <Compile Include="HyperV\PowerShellHyperVManager.cs" />
     <Compile Include="HyperV\HyperVVmCreator.cs" />
     <Compile Include="GUI\MainWindow.xaml.cs" />
@@ -73,7 +94,7 @@
   	  <SubType>Code</SubType>
     </Compile>
     <Compile Include="GUI\SuccessWindow.xaml.cs" />
-    <Compile Include="VMCreate\VmCustomizations.cs" />
+
     <Compile Include="VMCreate\VmSettings.cs" />
     <Compile Include="GUI\VmSettingsPage.xaml.cs">
       <DependentUpon>VmSettingsPage.xaml</DependentUpon>
@@ -102,7 +123,7 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Compile Include="Gallery\GalleryItemsParser.cs" />
-    <Compile Include="Gallery\XProfilePhoto.cs" />
+
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />

@@ -14,10 +14,9 @@ namespace VMCreate.Gallery
     {
         private const string PinnedVersion = "22.1";
         private const string IsoUrl = "https://mirrors.edge.kernel.org/linuxmint/stable/22.1/linuxmint-22.1-cinnamon-64bit.iso";
-        private const string? PublicLogoUrl = "https://www.linuxmint.com/pictures/logo.png";
         public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
-            var logoUri = await GalleryIcons.ResolveLogoUriAsync(PublicLogoUrl, typeof(LinuxMint).Assembly, "linuxmint-logo.svg");
+            var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(LinuxMint).Assembly, "linuxmint-logo.svg");
             var item = new GalleryItem
             {
                 Name        = $"Linux Mint {PinnedVersion}",

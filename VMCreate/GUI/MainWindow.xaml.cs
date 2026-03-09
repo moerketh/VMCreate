@@ -1,10 +1,8 @@
-﻿using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
-using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -23,12 +21,21 @@ namespace VMCreate
         private CancellationTokenSource _galleryCts;
         private readonly ILogger<MainWindow> _logger;
         private readonly ILoggerFactory _loggerFactory;
-        private readonly IServiceProvider _serviceProvider;
+        private readonly IGalleryService _galleryService;
+        private readonly Func<WizardData, DeployPage> _deployPageFactory;
+        private readonly IHtbApiClient _htbApiClient;
         private WizardData _wizardData;
 
-        public MainWindow(IServiceProvider serviceProvider, ILogger<MainWindow> logger, ILoggerFactory loggerFactory)
+        public MainWindow(
+            IGalleryService galleryService,
+            Func<WizardData, DeployPage> deployPageFactory,
+            IHtbApiClient htbApiClient,
+            ILogger<MainWindow> logger,
+            ILoggerFactory loggerFactory)
         {
-            _serviceProvider = serviceProvider;
+            _galleryService = galleryService ?? throw new ArgumentNullException(nameof(galleryService));
+            _deployPageFactory = deployPageFactory ?? throw new ArgumentNullException(nameof(deployPageFactory));
+            _htbApiClient = htbApiClient ?? throw new ArgumentNullException(nameof(htbApiClient));
             _logger = logger;
             _loggerFactory = loggerFactory;
 
@@ -129,82 +136,58 @@ namespace VMCreate
             // Navigate to the first page IMMEDIATELY so the UI is visible straight away.
             // Gallery items will stream into _galleryItems in the background below.
             _wizardData = new WizardData { GalleryItems = _galleryItems };
-            var firstPage = new SelectImagePage(_wizardData, _loggerFactory);
+            var firstPage = new SelectImagePage(_wizardData, _htbApiClient, _loggerFactory);
             firstPage.WizardCompleted += WizardPage_Completed;
             _mainFrame.Navigate(firstPage);
 
             try
             {
-                var cache = _serviceProvider.GetRequiredService<GalleryCache>();
-
                 // ── 1. Populate from cache instantly (warm startup) ──────────
-                if (cache.TryLoadCache(out var cachedItems))
+                var cachedItems = _galleryService.LoadFromCache();
+                foreach (var item in cachedItems)
                 {
-                    foreach (var item in cachedItems)
-                    {
-                        if (item.Name == null || item.DiskUri == null) continue;
-                        if (_seenItems.Add((item.Name, item.DiskUri)))
-                            _galleryItems.Add(item);
-                    }
-                    _logger.LogDebug("Populated {Count} items from cache.", _galleryItems.Count);
+                    if (item.Name == null || item.DiskUri == null) continue;
+                    if (_seenItems.Add((item.Name, item.DiskUri)))
+                        _galleryItems.Add(item);
                 }
+                if (cachedItems.Count > 0)
+                    _logger.LogDebug("Populated {Count} items from cache.", _galleryItems.Count);
 
                 // ── 2. Background refresh via streaming ──────────────────────
-                var galleryLoader = _serviceProvider.GetRequiredService<IGalleryLoader>();
-
-                if (galleryLoader is AggregateGalleryLoader aggregate)
+                await _galleryService.LoadFromSourcesStreamingAsync(_seenItems, batch =>
                 {
-                    await aggregate.LoadGalleryItemsStreaming(batch =>
+                    Application.Current.Dispatcher.BeginInvoke(() =>
                     {
-                        Application.Current.Dispatcher.BeginInvoke(() =>
+                        foreach (var item in batch)
                         {
-                            foreach (var item in batch)
+                            if (item.Name == null || item.DiskUri == null) continue;
+                            if (_seenItems.Add((item.Name, item.DiskUri)))
                             {
-                                if (item.Name == null || item.DiskUri == null) continue;
-                                if (_seenItems.Add((item.Name, item.DiskUri)))
+                                _galleryItems.Add(item);
+                            }
+                            else
+                            {
+                                // Replace stale cached item with fresh data (preserves new metadata
+                                // such as Category/IsRecommended that may be missing from older caches).
+                                for (int i = 0; i < _galleryItems.Count; i++)
                                 {
-                                    _galleryItems.Add(item);
-                                }
-                                else
-                                {
-                                    // Replace stale cached item with fresh data (preserves new metadata
-                                    // such as Category/IsRecommended that may be missing from older caches).
-                                    for (int i = 0; i < _galleryItems.Count; i++)
+                                    if (_galleryItems[i].Name == item.Name &&
+                                        _galleryItems[i].DiskUri == item.DiskUri)
                                     {
-                                        if (_galleryItems[i].Name == item.Name &&
-                                            _galleryItems[i].DiskUri == item.DiskUri)
-                                        {
-                                            _galleryItems[i] = item;
-                                            break;
-                                        }
+                                        _galleryItems[i] = item;
+                                        break;
                                     }
                                 }
                             }
-                        });
-                    }, _galleryCts.Token);
-                }
-                else
-                {
-                    // Fallback for any non-aggregate IGalleryLoader (e.g. in tests).
-                    var items = await galleryLoader.LoadGalleryItems(_galleryCts.Token);
-                    foreach (var item in items
-                        .Where(i => i.Name != null && i.DiskUri != null)
-                        .GroupBy(i => new { i.Name, i.DiskUri })
-                        .Select(g => g.First()))
-                    {
-                        if (_seenItems.Add((item.Name, item.DiskUri)))
-                            _galleryItems.Add(item);
-                    }
-                }
+                        }
+                    });
+                }, _galleryCts.Token);
 
                 // ── 3. Persist fresh results to disk cache ───────────────────
-                cache.SaveCache(_galleryItems.ToList());
+                _galleryService.SaveCache(_galleryItems.ToList());
 
                 _logger.LogDebug("Successfully loaded gallery items");
                 firstPage.SetLoadingComplete();
-
-                // ── 4. Resolve X profile photos in the background ────────────
-                _ = ResolveXProfilePhotosAsync();
             }
             catch (OperationCanceledException)
             {
@@ -216,68 +199,6 @@ namespace VMCreate
                 firstPage.SetLoadingComplete();
                 firstPage.ShowError(
                     $"Failed to load the VM gallery: {ex.Message}. Check your internet connection and restart the application.");
-            }
-        }
-
-        /// <summary>
-        /// For every <see cref="GalleryItem"/> that has <see cref="GalleryItem.XHandle"/> set,
-        /// resolves the current profile photo from X and updates <see cref="GalleryItem.SymbolUri"/>.
-        /// Runs as a fire-and-forget task after the gallery finishes loading so the list is
-        /// usable immediately (items already carry a fallback icon).
-        /// </summary>
-        private async Task ResolveXProfilePhotosAsync()
-        {
-            try
-            {
-                var factory = _serviceProvider.GetService<IHttpClientFactory>();
-                if (factory == null) return;
-                var client = factory.CreateClient();
-
-                // Snapshot unique X handles to resolve
-                var handles = _galleryItems
-                    .Where(i => !string.IsNullOrEmpty(i.XHandle))
-                    .Select(i => i.XHandle)
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-
-                foreach (var handle in handles)
-                {
-                    if (_galleryCts?.IsCancellationRequested == true) break;
-
-                    _logger.LogDebug("Resolving X profile photo for @{Handle}", handle);
-
-                    var resolved = await XProfilePhoto.ResolveAsync(
-                        client, handle,
-                        _galleryCts?.Token ?? CancellationToken.None);
-
-                    _logger.LogDebug("Resolved @{Handle} → {Resolved}", handle, resolved ?? "(null)");
-
-                    if (string.IsNullOrEmpty(resolved))
-                        continue;
-
-                    // Update SymbolUri on matching items. We remove + re-insert rather than
-                    // self-replacing (items[i] = items[i]) because ListCollectionView with
-                    // CustomSort can swallow Replace events for the same object reference.
-                    await Application.Current.Dispatcher.InvokeAsync(() =>
-                    {
-                        for (int i = _galleryItems.Count - 1; i >= 0; i--)
-                        {
-                            if (string.Equals(_galleryItems[i].XHandle, handle,
-                                    StringComparison.OrdinalIgnoreCase))
-                            {
-                                var item = _galleryItems[i];
-                                item.SymbolUri = resolved;
-                                _galleryItems.RemoveAt(i);
-                                _galleryItems.Insert(i, item);
-                            }
-                        }
-                    });
-                }
-            }
-            catch (OperationCanceledException) { }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to resolve one or more X profile photos.");
             }
         }
 
@@ -300,7 +221,7 @@ namespace VMCreate
                 if (sender is DeployPage)
                 {
                     _wizardData = new WizardData { GalleryItems = _galleryItems };
-                    var firstPage = new SelectImagePage(_wizardData, _loggerFactory);
+                    var firstPage = new SelectImagePage(_wizardData, _htbApiClient, _loggerFactory);
                     firstPage.WizardCompleted += WizardPage_Completed;
                     _mainFrame.Navigate(firstPage);
                     return;
@@ -326,7 +247,7 @@ namespace VMCreate
                     return;
                 }
 
-                var deployPage = new DeployPage(_wizardData, _serviceProvider, _loggerFactory);
+                var deployPage = _deployPageFactory(_wizardData);
                 deployPage.WizardCompleted += WizardPage_Completed;
                 _mainFrame.Navigate(deployPage);
 

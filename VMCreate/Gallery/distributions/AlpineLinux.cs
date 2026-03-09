@@ -15,10 +15,9 @@ namespace VMCreate.Gallery
     {
         private const string PinnedVersion = "3.21.3";
         private const string IsoUrl = "https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/x86_64/alpine-virt-3.21.3-x86_64.iso";
-        private const string? PublicLogoUrl = "https://alpinelinux.org/alpine-logo.ico";
         public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
-            var logoUri = await GalleryIcons.ResolveLogoUriAsync(PublicLogoUrl, typeof(AlpineLinux).Assembly, "alpine-logo.svg");
+            var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(AlpineLinux).Assembly, "alpine-logo.svg");
             var item = new GalleryItem
             {
                 Name        = $"Alpine Linux {PinnedVersion}",

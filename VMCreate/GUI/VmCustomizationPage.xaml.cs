@@ -8,13 +8,14 @@ namespace VMCreate
     {
         public event EventHandler<WizardResultEventArgs> WizardCompleted;
 
-        public VmCustomizationPage(WizardData wizardData, ILoggerFactory loggerFactory)
+        public VmCustomizationPage(WizardData wizardData, IHtbApiClient htbApiClient, ILoggerFactory loggerFactory)
         {
             if (wizardData == null) throw new ArgumentNullException(nameof(wizardData));
+            if (htbApiClient == null) throw new ArgumentNullException(nameof(htbApiClient));
             if (loggerFactory == null) throw new ArgumentNullException(nameof(loggerFactory));
 
             var viewModel = new VmCustomizationPageViewModel(
-                wizardData, loggerFactory.CreateLogger<VmCustomizationPageViewModel>());
+                wizardData, htbApiClient, loggerFactory.CreateLogger<VmCustomizationPageViewModel>());
 
             InitializeComponent();
             DataContext = viewModel;

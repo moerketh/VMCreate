@@ -171,7 +171,7 @@ namespace VMCreate.Tests.GalleryTests
         public async Task LoadParrotHome_MeetsContract()
         {
             const string html =
-                @"<a href=""Parrot-home-6.1_amd64.vmdk.xz"">Parrot-home-6.1_amd64.vmdk.xz</a> 15-Jan-2024 10:30  1234567890";
+                @"<a href=""Parrot-home-6.1_amd64.iso"">Parrot-home-6.1_amd64.iso</a> 15-Jan-2024 10:30  1234567890";
 
             var items = await new LoadParrotHome(FactoryFor(html)).LoadGalleryItems();
 
@@ -183,7 +183,7 @@ namespace VMCreate.Tests.GalleryTests
         public async Task LoadParrotSecurity_MeetsContract()
         {
             const string html =
-                @"<a href=""Parrot-security-6.1_amd64.vmdk.xz"">Parrot-security-6.1_amd64.vmdk.xz</a> 15-Jan-2024 10:30  1234567890";
+                @"<a href=""Parrot-security-6.1_amd64.iso"">Parrot-security-6.1_amd64.iso</a> 15-Jan-2024 10:30  1234567890";
 
             var items = await new LoadParrotSecurity(FactoryFor(html)).LoadGalleryItems();
 
@@ -223,13 +223,13 @@ namespace VMCreate.Tests.GalleryTests
         [TestMethod]
         public async Task Ubuntu_MeetsContract()
         {
-            // All three build-info.txt fetches receive the same canned response.
+            // All build-info.txt fetches receive the same canned response.
             var items = await new Ubuntu(
                 new Mock<ILogger<Ubuntu>>().Object,
                 FactoryFor("serial=20240301")).LoadGalleryItems();
 
             AssertContractInvariants(items, nameof(Ubuntu));
-            Assert.AreEqual(3, items.Count);
+            Assert.AreEqual(2, items.Count);
         }
 
         [TestMethod]
@@ -357,7 +357,7 @@ namespace VMCreate.Tests.GalleryTests
 
             // Use try/catch (polymorphic) because MSTest ThrowsExceptionAsync uses exact-type matching
             // and HttpClient wraps cancellation as TaskCanceledException : OperationCanceledException.
-            OperationCanceledException? caught = null;
+            OperationCanceledException caught = null;
             try
             {
                 await create(FactoryFor("anything")).LoadGalleryItems(cts.Token);

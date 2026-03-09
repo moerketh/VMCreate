@@ -13,10 +13,9 @@ namespace VMCreate.Gallery
     public class RockyLinux : IGalleryLoader
     {
         private const string IsoUrl = "https://download.rockylinux.org/pub/rocky/9/isos/x86_64/Rocky-9-latest-x86_64-minimal.iso";
-        private const string? PublicLogoUrl = "https://rockylinux.org/images/logo-text.png";
         public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
-            var logoUri = await GalleryIcons.ResolveLogoUriAsync(PublicLogoUrl, typeof(RockyLinux).Assembly, "rocky-linux-logo.svg");
+            var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(RockyLinux).Assembly, "rocky-linux-logo.svg");
             var item = new GalleryItem
             {
                 Name        = "Rocky Linux 9 (latest)",

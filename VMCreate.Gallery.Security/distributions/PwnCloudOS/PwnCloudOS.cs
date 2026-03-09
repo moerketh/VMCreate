@@ -9,7 +9,7 @@ namespace VMCreate.Gallery
     {
         private const string TemplateUrl = "https://download.pwncloudos.pwnedlabs.io/images/pwncloudos-amd64.ova";
         private const string LogoUri = "https://pwncloudos.pwnedlabs.io/hubfs/pwnedlabs-notagline.svg";
-        private const string SymbolUri = "https://pwncloudos.pwnedlabs.io/hubfs/favicon-1.svg";
+        private const string SymbolUri = "";
 
         public Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {

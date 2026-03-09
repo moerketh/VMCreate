@@ -2,7 +2,9 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Win32;
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using VMCreate.MediaHandlers;
@@ -17,15 +19,39 @@ namespace VMCreate
     public class HyperVVmCreator : IVmCreator
     {
         private readonly string _defaultVhdxPath;
-        private readonly MediaHandlerFactory _mediaHandlerFactory;
+        private readonly IMediaHandlerFactory _mediaHandlerFactory;
         private readonly IHyperVManager _hyperVManager;
         private readonly ILogger<HyperVVmCreator> _logger;
+        private readonly ISshKeyManager _sshKeyManager;
+        private readonly IKvpSender _kvpSender;
+        private readonly IKvpPoller _kvpPoller;
+        private readonly IVmShutdownWatcher _shutdownWatcher;
+        private readonly IGuestDiagnosticsCollector _diagnosticsCollector;
+        private readonly IGuestShellFactory _guestShellFactory;
+        private readonly IEnumerable<ICustomizationStep> _customizationSteps;
         private const int OriginalDiskScsiControllerLocation = 1;
-        public HyperVVmCreator(ILogger<HyperVVmCreator> logger, MediaHandlerFactory mediaHandlerFactory, IHyperVManager hyperVManager)
+        public HyperVVmCreator(
+            ILogger<HyperVVmCreator> logger,
+            IMediaHandlerFactory mediaHandlerFactory,
+            IHyperVManager hyperVManager,
+            IEnumerable<ICustomizationStep> customizationSteps,
+            ISshKeyManager sshKeyManager,
+            IKvpSender kvpSender,
+            IKvpPoller kvpPoller,
+            IVmShutdownWatcher shutdownWatcher,
+            IGuestDiagnosticsCollector diagnosticsCollector,
+            IGuestShellFactory guestShellFactory)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _mediaHandlerFactory = mediaHandlerFactory ?? throw new ArgumentNullException(nameof(mediaHandlerFactory));
             _hyperVManager = hyperVManager ?? throw new ArgumentNullException(nameof(hyperVManager));
+            _customizationSteps = customizationSteps ?? Array.Empty<ICustomizationStep>();
+            _sshKeyManager = sshKeyManager ?? throw new ArgumentNullException(nameof(sshKeyManager));
+            _kvpSender = kvpSender ?? throw new ArgumentNullException(nameof(kvpSender));
+            _kvpPoller = kvpPoller ?? throw new ArgumentNullException(nameof(kvpPoller));
+            _shutdownWatcher = shutdownWatcher ?? throw new ArgumentNullException(nameof(shutdownWatcher));
+            _diagnosticsCollector = diagnosticsCollector ?? throw new ArgumentNullException(nameof(diagnosticsCollector));
+            _guestShellFactory = guestShellFactory ?? throw new ArgumentNullException(nameof(guestShellFactory));
             _defaultVhdxPath = GetDefaultVirtualHardDiskPath();
         }
 
@@ -94,9 +120,13 @@ namespace VMCreate
                     // Drive is GPT partitioned: Attach media directly as primary boot disk
                     await _hyperVManager.AddExistingHardDrive(vmSettings, mediaPath, cancellationToken);
 
-                    if (vmCustomizations.ConfigureXrdp)
+                    bool needsIsoBoot = vmCustomizations.ConfigureXrdp
+                        || vmCustomizations.ConfigureHtbVpn
+                        || vmCustomizations.SyncTimezone;
+
+                    if (needsIsoBoot)
                     {
-                        // GPT + xrdp: boot from customization ISO to chroot-install xrdp
+                        // GPT + customization: boot from customization ISO to chroot-install packages
                         await _hyperVManager.AddBootDvd(vmSettings, cloningIsoPath, cancellationToken);
                         await _hyperVManager.SetFirstBootToDvd(vmSettings, cancellationToken);
                     }
@@ -137,7 +167,10 @@ namespace VMCreate
                 createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "StartVM" });
                 await _hyperVManager.StartVM(vmSettings, cancellationToken);
 
-                bool needsIsoBootCycle = detectedGeneration == 1 || (detectedGeneration == 2 && vmCustomizations.ConfigureXrdp);
+                bool needsPostBoot = _customizationSteps
+                    .Any(s => s.Phase == CustomizationPhase.PostBoot && s.IsApplicable(item, vmCustomizations));
+                bool needsIsoBootCycle = detectedGeneration == 1
+                    || (detectedGeneration == 2 && (vmCustomizations.ConfigureXrdp || needsPostBoot));
 
                 if (needsIsoBootCycle)
                 {
@@ -174,43 +207,55 @@ namespace VMCreate
                     // ────────────────────────────────────────────────────────────
                     await Task.Delay(TimeSpan.FromSeconds(10), cancellationToken);
 
-                    var kvp = new KvpHostToGuest();
-                    await kvp.SendKVPToGuestAsync(vmSettings.VMName, "PADDING_1", "true", cancellationToken);
-                    await kvp.SendKVPToGuestAsync(vmSettings.VMName, "PADDING_2", "true", cancellationToken);
+                    await _kvpSender.SendKVPToGuestAsync(vmSettings.VMName, "PADDING_1", "true", cancellationToken);
+                    await _kvpSender.SendKVPToGuestAsync(vmSettings.VMName, "PADDING_2", "true", cancellationToken);
 #if DEBUG
-                    //await kvp.SendKVPToGuestAsync(vmSettings.VMName, "VMCREATE_DEBUG", "true", cancellationToken);
+                    //await _kvpSender.SendKVPToGuestAsync(vmSettings.VMName, "VMCREATE_DEBUG", "true", cancellationToken);
 #endif
                     if (detectedGeneration == 2)
                     {
                         // Tell the ISO to run customize-only mode (skip disk cloning)
-                        await kvp.SendKVPToGuestAsync(vmSettings.VMName, "VMCREATE_MODE", "customize", cancellationToken);
+                        await _kvpSender.SendKVPToGuestAsync(vmSettings.VMName, "VMCREATE_MODE", "customize", cancellationToken);
                     }
 
                     if (vmCustomizations.ConfigureXrdp)
-                        await kvp.SendKVPToGuestAsync(vmSettings.VMName, "VMCREATE_XRDP", "true", cancellationToken);
+                        await _kvpSender.SendKVPToGuestAsync(vmSettings.VMName, "VMCREATE_XRDP", "true", cancellationToken);
+
+                    // Send SSH public key for secure key-based auth (replaces ubuntu/ubuntu password)
+                    // Extra padding before the SSH key — the key value is ~750 bytes and
+                    // more susceptible to KVP record corruption than short flag values.
+                    await _kvpSender.SendKVPToGuestAsync(vmSettings.VMName, "PADDING_3", "true", cancellationToken);
+
+                    string sshPublicKey;
+                    if (!string.IsNullOrEmpty(vmCustomizations.CustomSshPublicKeyPath))
+                        sshPublicKey = await _sshKeyManager.ReadPublicKeyAsync(vmCustomizations.CustomSshPublicKeyPath, cancellationToken);
+                    else
+                        sshPublicKey = await _sshKeyManager.EnsureKeyPairAsync(cancellationToken);
+
+                    _logger.LogInformation("Sending SSH public key ({Length} chars) via KVP to VM {VMName}",
+                        sshPublicKey?.Length ?? 0, vmSettings.VMName);
+                    await _kvpSender.SendKVPToGuestAsync(vmSettings.VMName, "VMCREATE_SSH_PUBKEY", sshPublicKey, cancellationToken);
 
                     // ── Monitor ISO progress and wait for shutdown ─────────────
                     const int shutdownTimeoutSeconds = 600;
                     bool shutDown;
-                    var poller = new HyperVKVPPoller();
 
                     if (detectedGeneration == 1)
                     {
                         // Gen1: Monitor partclone disk clone progress, then wait for shutdown
-                        await poller.PollKVPForProgressAsync(vmSettings.VMName, createVMProgressInfo, cancellationToken);
+                        await _kvpPoller.PollKVPForProgressAsync(vmSettings.VMName, createVMProgressInfo, cancellationToken);
 
                         // Partclone done — transition from CloneDisk to Customize phase
                         createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "Customize" });
 
-                        var kvpbase = new KvpBase();
-                        shutDown = await kvpbase.WaitForVMShutdownAsync(vmSettings.VMName, cancellationToken, shutdownTimeoutSeconds);
+                        shutDown = await _shutdownWatcher.WaitForVMShutdownAsync(vmSettings.VMName, cancellationToken, shutdownTimeoutSeconds);
                     }
                     else
                     {
                         // Gen2 customize-only: no partclone step.
                         // Poll WorkflowProgress KVP while waiting for the VM to shut
                         // itself down via OnSuccess=poweroff.target.
-                        shutDown = await poller.WaitForShutdownWithProgressAsync(
+                        shutDown = await _kvpPoller.WaitForShutdownWithProgressAsync(
                             vmSettings.VMName, createVMProgressInfo, cancellationToken, shutdownTimeoutSeconds);
                     }
 
@@ -219,8 +264,9 @@ namespace VMCreate
                         _logger.LogWarning("VM {VMName} did not shut down within {Timeout}s — collecting diagnostics.", vmSettings.VMName, shutdownTimeoutSeconds);
 
                         // Collect diagnostics from the ISO guest via PowerShell Direct
-                        var diagnostics = await new GuestDiagnosticsCollector(_logger)
-                            .CollectAsync(vmSettings.VMName, cancellationToken);
+                        var diagnostics = await _diagnosticsCollector
+                            .CollectAsync(vmSettings.VMName, cancellationToken,
+                                _sshKeyManager.GetPrivateKeyPath(vmCustomizations.CustomSshPublicKeyPath));
 
                         _logger.LogError("Guest diagnostics for {VMName}: {Summary}\n{RawOutput}",
                             vmSettings.VMName, diagnostics.Summary, diagnostics.RawOutput);
@@ -253,6 +299,46 @@ namespace VMCreate
                     await _hyperVManager.SetFirstBootToHardDrive(vmSettings, cancellationToken);
                 }
                 await _hyperVManager.SetEnhancedSession(vmSettings, cancellationToken);
+
+                // ── Post-boot customization via SSH step pipeline ─────────
+                var postBootSteps = _customizationSteps
+                    .Where(s => s.Phase == CustomizationPhase.PostBoot && s.IsApplicable(item, vmCustomizations))
+                    .OrderBy(s => s.Order)
+                    .ToList();
+
+                if (postBootSteps.Count > 0)
+                {
+                    createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "PostBoot" });
+
+                    // Start the target VM (it's been shut down after ISO phase, or never started if no ISO was needed)
+                    await _hyperVManager.StartVM(vmSettings, cancellationToken);
+
+                    string privateKeyPath = _sshKeyManager.GetPrivateKeyPath(vmCustomizations.CustomSshPublicKeyPath);
+                    var shell = _guestShellFactory.Create(vmSettings.VMName, privateKeyPath);
+
+                    await shell.WaitForReadyAsync(cancellationToken);
+
+                    int completed = 0;
+                    foreach (var step in postBootSteps)
+                    {
+                        _logger.LogInformation("Running post-boot step: {StepName} (order {Order})", step.Name, step.Order);
+                        createVMProgressInfo.Report(new CreateVMProgressInfo
+                        {
+                            Phase = "PostBoot",
+                            ProgressPercentage = (int)((double)completed / postBootSteps.Count * 100),
+                            StepName = step.Name
+                        });
+
+                        await step.ExecuteAsync(shell, item, vmCustomizations, _logger, cancellationToken);
+
+                        completed++;
+                        _logger.LogInformation("Completed post-boot step: {StepName}", step.Name);
+                    }
+
+                    createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "PostBoot", ProgressPercentage = 100 });
+
+                    // VM is already running with all customizations applied — no need to restart.
+                }
             }
             catch (Exception ex)
             {

@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using System;
 using System.IO;
 using System.Threading;
@@ -8,20 +9,23 @@ namespace VMCreate
 {
     public class CreateVM
     {
-        private const string QemuFileLocation = "C:\\Program Files\\qemu\\qemu-img.exe";
-        private readonly string _extractPath = Path.Combine(Path.GetTempPath(), "VMExtracted");
+        private readonly string _qemuFileLocation;
+        private readonly string _extractPath;
         private readonly IDownloader _downloader;
         private readonly IExtractor _extractor;
         private readonly IVmCreator _vmCreator;
         private readonly ILogger<CreateVM> _logger;
         private bool _useCache = true;
 
-        public CreateVM(IDownloader downloader, IExtractor extractor, IVmCreator vmCreator, ILogger<CreateVM> logger)
+        public CreateVM(IDownloader downloader, IExtractor extractor, IVmCreator vmCreator, ILogger<CreateVM> logger, IOptions<AppSettings> options)
         {
             _downloader = downloader ?? throw new ArgumentNullException(nameof(downloader));
             _extractor = extractor ?? throw new ArgumentNullException(nameof(extractor));
             _vmCreator = vmCreator ?? throw new ArgumentNullException(nameof(vmCreator));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            var settings = options?.Value ?? new AppSettings();
+            _qemuFileLocation = settings.QemuImgPath;
+            _extractPath = settings.ExtractPath;
         }
 
         public async Task StartCreateVMAsync(VmSettings vmSettings, VmCustomizations vmCustomizations, GalleryItem galleryItem, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo> createVmProgressInfo)
@@ -29,7 +33,7 @@ namespace VMCreate
             string filename = string.Empty;
             try
             {
-                if(!galleryItem.FileType.StartsWith("vhd") && !File.Exists(QemuFileLocation))
+                if(!galleryItem.FileType.StartsWith("vhd") && !File.Exists(_qemuFileLocation))
                 {
                     throw new Exception("Please install QEMU to support disk image conversion.");
                 }

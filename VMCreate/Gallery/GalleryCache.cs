@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -11,7 +12,7 @@ namespace VMCreate.Gallery
     /// Persists gallery items to a local JSON file so that subsequent app launches
     /// can display results instantly while a background refresh runs.
     /// </summary>
-    public class GalleryCache
+    public class GalleryCache : IGalleryCache
     {
         private static readonly TimeSpan CacheTtl = TimeSpan.FromHours(1);
 
@@ -25,12 +26,12 @@ namespace VMCreate.Gallery
         private readonly string _cacheFilePath;
         private readonly ILogger<GalleryCache> _logger;
 
-        public GalleryCache(ILogger<GalleryCache> logger)
+        public GalleryCache(ILogger<GalleryCache> logger, IOptions<AppSettings> options)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-            var appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            _cacheFilePath = Path.Combine(appData, "VMCreate", "gallery-cache.json");
+            var settings = options?.Value ?? new AppSettings();
+            _cacheFilePath = settings.GalleryCachePath;
         }
 
         /// <summary>

@@ -14,7 +14,6 @@ namespace VMCreate.Gallery
     public class Debian : IGalleryLoader
     {
         private const string BaseUrl = "https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/";
-        private const string? PublicLogoUrl = "https://www.debian.org/logos/openlogo-nd.svg";
 
         private readonly IHttpClientFactory _clientFactory;
 
@@ -25,7 +24,7 @@ namespace VMCreate.Gallery
 
         public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
-            var logoUri = await GalleryIcons.ResolveLogoUriAsync(PublicLogoUrl, typeof(Debian).Assembly, "debian-logo.svg");
+            var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(Debian).Assembly, "debian-logo.svg");
             var client = _clientFactory.CreateClient();
             client.DefaultRequestHeaders.Add("User-Agent", "VMCreate/1.0");
 

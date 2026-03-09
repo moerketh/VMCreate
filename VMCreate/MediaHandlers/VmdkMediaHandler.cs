@@ -10,12 +10,12 @@ namespace VMCreate.MediaHandlers
 {
     public class VmdkMediaHandler : MediaHandler
     {
-        private readonly DiskConverter _diskConverter;
+        private readonly IDiskConverter _diskConverter;
         private readonly IPartitionSchemeDetector _partitionSchemeDetector;
         private int _vmGeneration;
         private string _vhdDestFile = null;
 
-        public VmdkMediaHandler(ILogger<VmdkMediaHandler> logger, DiskConverter diskConverter, IPartitionSchemeDetector partitionSchemeDetector)
+        public VmdkMediaHandler(ILogger<VmdkMediaHandler> logger, IDiskConverter diskConverter, IPartitionSchemeDetector partitionSchemeDetector)
             : base(logger)
         {
             _diskConverter = diskConverter ?? throw new ArgumentNullException(nameof(diskConverter));

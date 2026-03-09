@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace CreateVM.HyperV.vmbus
 {
-    public class KvpHostToGuest : KvpBase
+    public class KvpHostToGuest : KvpBase, IKvpSender
     {
         /// <summary>
         /// Async method to send a KVP from host to guest, waits for VM to be in a running state

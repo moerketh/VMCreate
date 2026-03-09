@@ -58,7 +58,7 @@ namespace VMCreate.Tests.GalleryTests
         /// status (< 400). Empty / null URIs are silently skipped.
         /// For file:// URIs, checks that the local file exists instead.
         /// </summary>
-        private static async Task AssertUriRespondsAsync(string? uri, string context)
+        private static async Task AssertUriRespondsAsync(string uri, string context)
         {
             if (string.IsNullOrWhiteSpace(uri)) return;
 
@@ -153,7 +153,7 @@ namespace VMCreate.Tests.GalleryTests
                 await new LoadParrotSecurity(_factory).LoadGalleryItems(),
                 nameof(LoadParrotSecurity));
 
-        [TestMethod, Timeout(120_000)]
+        [TestMethod, Timeout(120_000), Ignore("ClearLinux infrastructure (clearlinux.org/cdn.download.clearlinux.org) has been discontinued by Intel")]
         public async Task ClearLinux_AllUrisResolve()
             => await VerifyAllUrisAsync(
                 await new ClearLinux(_factory).LoadGalleryItems(),

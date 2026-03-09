@@ -37,7 +37,7 @@
                         Message="The selected VM is not in VHDX format. It will be converted to VHDX using QEMU. If the disk is MBR partitioned it will be cloned to a new GPT partitioned disk using a converter DVD on first VM boot."
                         IsOpen="{Binding IsNotVhdx, Mode=OneWay}" IsClosable="False" Margin="0,0,0,8"/>
 
-            <!-- Customizations card -->
+            <!-- Remote Access card -->
             <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
                     CornerRadius="8" Padding="20,16" Margin="0,0,0,12"
                     BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
@@ -52,6 +52,113 @@
                               FontSize="14"
                               ToolTip="Installs and configures xrdp so Enhanced Session mode works with this Linux VM. A helper DVD will boot once to install xrdp, then the VM restarts normally."
                               AutomationProperties.Name="Configure xrdp for enhanced session"/>
+                </StackPanel>
+            </Border>
+
+            <!-- HTB VPN card -->
+            <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
+                    CornerRadius="8" Padding="20,16" Margin="0,0,0,12"
+                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
+                <StackPanel>
+                    <TextBlock Text="Hack The Box VPN" FontSize="14" FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,0,4"/>
+                    <TextBlock Text="Enter your HTB App Token to download VPN keys for all platforms, or browse for a .ovpn file."
+                               FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,10"
+                               TextWrapping="Wrap"/>
+
+                    <!-- API Token input -->
+                    <TextBlock Text="App Token  (from app.hackthebox.com/profile/settings)" FontSize="12"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,4"/>
+                    <Grid Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <ui:TextBox Grid.Column="0" PlaceholderText="Paste your HTB App Token..."
+                                    Text="{Binding HtbApiToken, UpdateSourceTrigger=PropertyChanged}"
+                                    AutomationProperties.Name="HTB API Token"/>
+                        <Button Grid.Column="1" Content="Download VPN Keys"
+                                Command="{Binding DownloadVpnKeysCommand}"
+                                Margin="8,0,0,0" Padding="12,6"
+                                AutomationProperties.Name="Download VPN keys from HTB"/>
+                    </Grid>
+
+                    <!-- Download status list -->
+                    <ItemsControl ItemsSource="{Binding VpnKeyStatuses}" Margin="0,0,0,4">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal" Margin="4,2">
+                                    <TextBlock Text="{Binding StatusIcon}" FontSize="14" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                                    <TextBlock Text="{Binding Name}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,6,0"
+                                               Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
+                                    <TextBlock Text="{Binding StatusText}" FontSize="12" VerticalAlignment="Center"
+                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <!-- Manual fallback -->
+                    <TextBlock Text="Or select a .ovpn file manually:" FontSize="12"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,6,0,4"/>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <ui:TextBox Grid.Column="0" PlaceholderText="Path to .ovpn file..."
+                                    Text="{Binding OvpnFilePath, UpdateSourceTrigger=PropertyChanged}"
+                                    AutomationProperties.Name="OpenVPN configuration file path"/>
+                        <Button Grid.Column="1" Content="Browse..." Command="{Binding BrowseOvpnCommand}"
+                                Margin="8,0,0,0" Padding="12,6"
+                                AutomationProperties.Name="Browse for OVPN file"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- System Configuration card -->
+            <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
+                    CornerRadius="8" Padding="20,16" Margin="0,0,0,12"
+                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
+                <StackPanel>
+                    <TextBlock Text="System Configuration" FontSize="14" FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,0,4"/>
+                    <TextBlock Text="Synchronize system settings between host and guest."
+                               FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,10"/>
+                    <CheckBox Content="Sync timezone to host"
+                              IsChecked="{Binding SyncTimezone}"
+                              FontSize="14"
+                              ToolTip="Reads the host machine's timezone and configures the VM to use the same timezone via timedatectl."
+                              AutomationProperties.Name="Sync timezone to host"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Advanced: SSH Key card -->
+            <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
+                    CornerRadius="8" Padding="20,16" Margin="0,0,0,12"
+                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
+                <StackPanel>
+                    <TextBlock Text="Advanced" FontSize="14" FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,0,4"/>
+                    <TextBlock Text="Override the auto-generated SSH key used for post-boot VM configuration."
+                               FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,10"/>
+                    <CheckBox Content="Use custom SSH public key"
+                              IsChecked="{Binding UseCustomSshKey}"
+                              FontSize="14"
+                              ToolTip="By default, VMCreate generates a per-user Ed25519 keypair. Enable this to provide your own SSH public key instead."
+                              AutomationProperties.Name="Use custom SSH key"/>
+                    <Grid Margin="24,8,0,0" IsEnabled="{Binding IsSshKeyPathEnabled}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <ui:TextBox Grid.Column="0" PlaceholderText="Path to .pub file..."
+                                    Text="{Binding CustomSshPublicKeyPath, UpdateSourceTrigger=PropertyChanged}"
+                                    AutomationProperties.Name="SSH public key file path"/>
+                        <Button Grid.Column="1" Content="Browse..." Command="{Binding BrowseSshKeyCommand}"
+                                Margin="8,0,0,0" Padding="12,6"
+                                AutomationProperties.Name="Browse for SSH public key"/>
+                    </Grid>
                 </StackPanel>
             </Border>
 

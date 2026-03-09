@@ -14,7 +14,6 @@ namespace VMCreate.Gallery
     public class LoadTails : IGalleryLoader
     {
         private const string ApiUrl = "https://tails.net/install/v2/Tails/amd64/stable/latest.json";
-        private const string? PublicLogoUrl = "https://tails.net/lib/tails-logo-square.svg";
         private readonly IHttpClientFactory _clientFactory;
 
         public LoadTails(IHttpClientFactory clientFactory)
@@ -24,7 +23,7 @@ namespace VMCreate.Gallery
 
         public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
-            var logoUri = await GalleryIcons.ResolveLogoUriAsync(PublicLogoUrl, typeof(LoadTails).Assembly, "tails-logo.svg");
+            var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(LoadTails).Assembly, "tails-logo.svg");
             var client = _clientFactory.CreateClient();
             client.DefaultRequestHeaders.Add("User-Agent", "VMCreate/1.0");
 
@@ -44,7 +43,7 @@ namespace VMCreate.Gallery
                 ?? throw new Exception("Tails API: version field is missing.");
 
             // Find the .img installation path
-            string? imgUrl = null;
+            string imgUrl = null;
             foreach (var path in first.GetProperty("installation-paths").EnumerateArray())
             {
                 if (path.GetProperty("type").GetString() == "img")

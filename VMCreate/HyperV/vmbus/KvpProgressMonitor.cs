@@ -10,7 +10,7 @@ using System.Xml.Linq;
 
 namespace VMCreate
 {
-    public class HyperVKVPPoller : KvpBase
+    public class HyperVKVPPoller : KvpBase, IKvpPoller
     {
         /// <summary>
         /// Async method to poll KVP and report progress

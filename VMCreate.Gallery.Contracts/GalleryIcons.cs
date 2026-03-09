@@ -21,14 +21,12 @@ namespace VMCreate.Gallery
 
         /// <summary>
         /// Returns a local <c>file:///</c> URI for the embedded resource icon if one exists,
-        /// otherwise falls back to <paramref name="publicUrl"/>.
-        /// The previous HTTP HEAD reachability check has been removed — it fired ~18 network
-        /// round-trips on startup (each with a 5-second timeout) and was the primary cause of
-        /// the 13-second startup delay.
+        /// otherwise returns an empty string. Only built-in (embedded) icons are used;
+        /// no network requests are made.
         /// </summary>
-        public static Task<string> ResolveLogoUriAsync(string? publicUrl, Assembly assembly, string fileName)
+        public static Task<string> ResolveLogoUriAsync(Assembly assembly, string fileName)
         {
-            return Task.FromResult(TryGetLocalUri(assembly, fileName) ?? publicUrl ?? "");
+            return Task.FromResult(TryGetLocalUri(assembly, fileName) ?? "");
         }
 
         /// <summary>
@@ -82,7 +80,7 @@ namespace VMCreate.Gallery
         /// Loaders can use <c>?? fallbackHttpUrl</c> to keep an external URL as
         /// a secondary option.
         /// </summary>
-        public static string? TryGetLocalUri(Assembly assembly, string fileName)
+        public static string TryGetLocalUri(Assembly assembly, string fileName)
         {
             try
             {

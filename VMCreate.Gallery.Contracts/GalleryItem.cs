@@ -80,12 +80,7 @@ namespace VMCreate
         /// <summary>When true, this item is surfaced at the very top of the list as officially recommended.</summary>
         public bool IsRecommended { get; set; }
 
-        /// <summary>
-        /// X (Twitter) handle for the project, e.g. "kalilinux".
-        /// When set, the gallery will resolve the profile photo at runtime
-        /// and use it as the list icon (SymbolUri) if SymbolUri is not already populated.
-        /// </summary>
-        public string XHandle { get; set; }
+
 
         /// <summary>Returns true when Category is "Security" (case-insensitive).</summary>
         public bool IsSecurity =>

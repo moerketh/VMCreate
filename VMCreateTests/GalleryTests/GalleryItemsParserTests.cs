@@ -21,7 +21,7 @@ namespace VMCreate.Tests.GalleryTests
 
         // ── Helpers ──────────────────────────────────────────────────────────────
 
-        private GalleryItemsParser MakeParser(string? httpResponseBody = null)
+        private GalleryItemsParser MakeParser(string httpResponseBody = null)
         {
             if (httpResponseBody is not null)
             {

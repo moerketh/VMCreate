@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -12,11 +12,9 @@ namespace VMCreate.Gallery
         private const string MinimalIsoPath = "latest-nixos-minimal-x86_64-linux.iso";
         private const string ChannelVersion = "25.05";
 
-        private const string? PublicLogoUrl = "https://nixos.org/logo/nixos-logo.png";
-
         public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
-            var logoUri = await GalleryIcons.ResolveLogoUriAsync(PublicLogoUrl, typeof(NixOS).Assembly, "nixos.svg");
+            var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(NixOS).Assembly, "nixos.svg");
             var galleryItems = new List<GalleryItem>();
             var lastModified = DateTime.UtcNow;
 

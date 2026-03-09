@@ -22,6 +22,7 @@ namespace VMCreate
         public const string PhaseStartVM    = "StartVM";
         public const string PhaseCloneDisk  = "CloneDisk";
         public const string PhaseCustomize  = "Customize";
+        public const string PhasePostBoot   = "PostBoot";
         public const string PhaseDone       = "Done";
 
         private readonly ILogger _logger;
@@ -153,7 +154,21 @@ namespace VMCreate
                     : "Starting the virtual machine",
                 SymbolRegular.Play24));
 
-            // MBR-specific cards are inserted dynamically via InsertMbrPhases()
+            // Show pre-boot customization card upfront if any pre-boot option was selected
+            if (wizardData.Customizations?.HasPreBootCustomizations == true)
+            {
+                Phases.Add(new DeploymentPhase(PhaseCustomize, "Pre-Boot Customizations",
+                    "Applying customizations (xRDP, enhancements) and waiting for the VM to restart",
+                    SymbolRegular.Wrench24));
+            }
+
+            // Show post-boot card upfront if any post-boot customization was selected
+            if (wizardData.Customizations?.HasPostBootCustomizations == true)
+            {
+                Phases.Add(new DeploymentPhase(PhasePostBoot, "Post-Boot Config",
+                    BuildPostBootDescription(wizardData.Customizations),
+                    SymbolRegular.Settings24));
+            }
 
             Phases.Add(new DeploymentPhase(PhaseDone, "Done",
                 "Virtual machine created successfully!",
@@ -162,35 +177,70 @@ namespace VMCreate
 
         /// <summary>
         /// Called at runtime when partition detection reveals an MBR disk.
-        /// Inserts the clone + customize cards before the Done card.
+        /// Inserts the clone + customize cards before PostBoot (or Done if no PostBoot).
         /// </summary>
         public void InsertMbrPhases()
         {
-            int doneIndex = -1;
-            for (int i = 0; i < Phases.Count; i++)
-            {
-                if (Phases[i].Id == PhaseDone) { doneIndex = i; break; }
-            }
-            if (doneIndex < 0) return;
-
             // Only insert once
             if (Phases.Any(p => p.Id == PhaseCloneDisk)) return;
 
-            Phases.Insert(doneIndex, new DeploymentPhase(PhaseCloneDisk, "Clone Disk",
+            int insertIndex = FindInsertIndexBeforePostBootOrDone();
+            if (insertIndex < 0) return;
+
+            Phases.Insert(insertIndex, new DeploymentPhase(PhaseCloneDisk, "Clone Disk",
                 "Cloning MBR disk to GPT format inside the VM",
                 SymbolRegular.HardDrive24));
 
-            Phases.Insert(doneIndex + 1, new DeploymentPhase(PhaseCustomize, "Apply Customizations",
-                "Applying customizations and waiting for the VM to shut down",
-                SymbolRegular.Wrench24));
+            // Only insert Customize card if not already present (may have been added in BuildPhaseList)
+            if (!Phases.Any(p => p.Id == PhaseCustomize))
+            {
+                Phases.Insert(insertIndex + 1, new DeploymentPhase(PhaseCustomize, "Pre-Boot Customizations",
+                    "Applying customizations and waiting for the VM to shut down",
+                    SymbolRegular.Wrench24));
+            }
         }
 
         /// <summary>
         /// Called at runtime for Gen2 pre-installed images that need customization
-        /// (e.g. xRDP install). Inserts a Customize card before Done.
+        /// (e.g. xRDP install). Inserts a Customize card before PostBoot (or Done if no PostBoot).
         /// </summary>
         public void InsertCustomizePhase()
         {
+            // Only insert once
+            if (Phases.Any(p => p.Id == PhaseCustomize)) return;
+
+            int insertIndex = FindInsertIndexBeforePostBootOrDone();
+            if (insertIndex < 0) return;
+
+            Phases.Insert(insertIndex, new DeploymentPhase(PhaseCustomize, "Pre-Boot Customizations",
+                "Installing Hyper-V enhancements and waiting for the VM to restart",
+                SymbolRegular.Wrench24));
+        }
+
+        /// <summary>
+        /// Finds the index to insert dynamic phases (Customize, CloneDisk) so they
+        /// appear before PostBoot. Falls back to before Done if no PostBoot card exists.
+        /// </summary>
+        private int FindInsertIndexBeforePostBootOrDone()
+        {
+            for (int i = 0; i < Phases.Count; i++)
+            {
+                if (Phases[i].Id == PhasePostBoot || Phases[i].Id == PhaseDone)
+                    return i;
+            }
+            return -1;
+        }
+
+        /// <summary>
+        /// Called at runtime when post-boot customization options are enabled
+        /// (e.g. HTB VPN, timezone sync). Inserts a PostBoot card before Done.
+        /// Only needed if the card wasn't already added by BuildPhaseList.
+        /// </summary>
+        public void InsertPostBootPhase()
+        {
+            // Only insert once — already present if customizations were selected in the wizard
+            if (Phases.Any(p => p.Id == PhasePostBoot)) return;
+
             int doneIndex = -1;
             for (int i = 0; i < Phases.Count; i++)
             {
@@ -198,12 +248,20 @@ namespace VMCreate
             }
             if (doneIndex < 0) return;
 
-            // Only insert once
-            if (Phases.Any(p => p.Id == PhaseCustomize)) return;
+            Phases.Insert(doneIndex, new DeploymentPhase(PhasePostBoot, "Post-Boot Config",
+                "Applying post-boot customizations via SSH",
+                SymbolRegular.Settings24));
+        }
 
-            Phases.Insert(doneIndex, new DeploymentPhase(PhaseCustomize, "Customize VM",
-                "Installing Hyper-V enhancements and waiting for the VM to restart",
-                SymbolRegular.Wrench24));
+        /// <summary>Builds a descriptive string for the post-boot card based on what's enabled.</summary>
+        private static string BuildPostBootDescription(VmCustomizations c)
+        {
+            var parts = new System.Collections.Generic.List<string>();
+            if (c.SyncTimezone) parts.Add("timezone sync");
+            if (c.ConfigureHtbVpn) parts.Add("HTB VPN deployment");
+            return parts.Count > 0
+                ? "SSH into VM to apply: " + string.Join(", ", parts)
+                : "Applying post-boot customizations via SSH";
         }
 
         // ── Phase status updates ─────────────────────────────────────────

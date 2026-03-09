@@ -11,10 +11,12 @@ namespace VMCreate
         private readonly SelectImagePageViewModel _viewModel;
         private readonly WizardData _wizardData;
         private readonly ILoggerFactory _loggerFactory;
+        private readonly IHtbApiClient _htbApiClient;
 
-        public SelectImagePage(WizardData wizardData, ILoggerFactory loggerFactory)
+        public SelectImagePage(WizardData wizardData, IHtbApiClient htbApiClient, ILoggerFactory loggerFactory)
         {
             _wizardData = wizardData ?? throw new ArgumentNullException(nameof(wizardData));
+            _htbApiClient = htbApiClient ?? throw new ArgumentNullException(nameof(htbApiClient));
             _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
 
             _viewModel = new SelectImagePageViewModel(
@@ -36,7 +38,7 @@ namespace VMCreate
 
         private void OnNavigateNext()
         {
-            var nextPage = new VmSettingsPage(_wizardData, _loggerFactory);
+            var nextPage = new VmSettingsPage(_wizardData, _htbApiClient, _loggerFactory);
             nextPage.WizardCompleted += (s, args) => WizardCompleted?.Invoke(s, args);
             NavigationService.Navigate(nextPage);
         }

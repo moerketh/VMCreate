@@ -13,9 +13,8 @@ namespace VMCreate.Gallery
         const string BaseUri = "https://partner-images.canonical.com/hyper-v/desktop/";
         const string JammyCurrent = BaseUri + "jammy/release/current/ubuntu-jammy-hyperv-amd64-ubuntu-desktop-hyperv.vhdx.zip";
         const string NobleCurrent = BaseUri + "noble/release/current/ubuntu-noble-hyperv-amd64-ubuntu-desktop-hyperv.vhdx.zip";
-        const string OracularCurrent= BaseUri + "oracular/release/current/ubuntu-oracular-hyperv-amd64-ubuntu-desktop-hyperv.vhdx.zip";
         const string ThumbnailUri = BaseUri + "/bionic/ubuntu_thumbnail.jpg";
-        const string SymbolUri = BaseUri + "bionic/ubuntu_symbol.png";
+        const string SymbolUri = "";
         const string LogoUri = BaseUri + "bionic/ubuntu_logo.png";
         private readonly ILogger<Ubuntu> _logger;
         private readonly IHttpClientFactory _clientFactory;
@@ -29,11 +28,10 @@ namespace VMCreate.Gallery
 
         public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
-            // Fetch all three build-info files in parallel instead of sequentially.
+            // Fetch build-info files in parallel.
             var jammyBuildInfo  = ParseBuildInfo(BaseUri + "jammy/current/unpacked/build-info.txt",    cancellationToken);
             var nobleBuildInfo  = ParseBuildInfo(BaseUri + "noble/current/unpacked/build-info.txt",    cancellationToken);
-            var oracularBuildInfo = ParseBuildInfo(BaseUri + "oracular/current/unpacked/build-info.txt", cancellationToken);
-            await Task.WhenAll(jammyBuildInfo, nobleBuildInfo, oracularBuildInfo).ConfigureAwait(false);
+            await Task.WhenAll(jammyBuildInfo, nobleBuildInfo).ConfigureAwait(false);
 
             return new List<GalleryItem>
             {
@@ -64,20 +62,6 @@ namespace VMCreate.Gallery
                     EnhancedSessionTransportType = "HvSocket",
                     Version = "24.04 LTS",
                     LastUpdated = nobleBuildInfo.Result
-                },
-                new GalleryItem
-                {
-                    Name = "Ubuntu 24.10",
-                    Publisher = "Canonical Group Ltd",
-                    Description = "The open source desktop operating system that powers millions of PCs and laptops around the world.",
-                    ThumbnailUri = ThumbnailUri,
-                    SymbolUri = SymbolUri,
-                    LogoUri = LogoUri,
-                    DiskUri = OracularCurrent,
-                    SecureBoot = "false",
-                    EnhancedSessionTransportType = "HvSocket",
-                    Version = "24.10",
-                    LastUpdated = oracularBuildInfo.Result
                 }
             };
         }
