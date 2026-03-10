@@ -7,13 +7,14 @@ using System.Threading.Tasks;
 
 namespace VMCreate.Gallery
 {
-    public class LoadKaliCurrent : IGalleryLoader
+    public class Kali : IGalleryLoader
     {
         private const string BaseUrl = "https://cdimage.kali.org/current/";
-        private const string LogoUrl = "https://pkg.kali.org/static/img/kali-logo.png";
+        private const string LogoUrl = "https://www.kali.org/images/kali-logo.svg";
+        private const string SymbolUrl = "https://www.kali.org/images/kali-logo.svg";
         private readonly IHttpClientFactory _clientFactory;
 
-        public LoadKaliCurrent(IHttpClientFactory clientFactory)
+        public Kali(IHttpClientFactory clientFactory)
         {
             _clientFactory = clientFactory ?? throw new ArgumentNullException(nameof(clientFactory));
         }
@@ -60,7 +61,7 @@ namespace VMCreate.Gallery
                 Publisher = "OffSec Services Limited",
                 DiskUri = downloadUrl,
                 LogoUri = LogoUrl,
-                SymbolUri = "",
+                SymbolUri = SymbolUrl,
                 LastUpdated = (DateTime.TryParse(date, out var parsedDate) ? parsedDate : DateTime.Now).ToLongDateString(),
                 Version = version,
                 Category = "Security",

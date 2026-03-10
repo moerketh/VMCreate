@@ -79,6 +79,7 @@
     <Compile Include="MediaHandlers\DeSparcify.cs" />
     <Compile Include="MediaHandlers\DiskConverter.cs" />
     <Compile Include="MediaHandlers\IMediaHandler.cs" />
+    <Compile Include="MediaHandlers\IsoMediaHandler.cs" />
     <Compile Include="MediaHandlers\MediaHandler.cs" />
     <Compile Include="MediaHandlers\MediaHandlerFactory.cs" />
     <Compile Include="MediaHandlers\PartitionSchemeDetector.cs" />

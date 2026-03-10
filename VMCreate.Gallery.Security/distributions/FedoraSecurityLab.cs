@@ -5,14 +5,14 @@ using System.Threading.Tasks;
 
 namespace VMCreate.Gallery
 {
-    public class LoadFedoraSecurityLab : IGalleryLoader
+    public class FedoraSecurityLab : IGalleryLoader
     {
         private const string BaseUrl = "https://download.fedoraproject.org/pub/alt/releases/";
         private const string IsoPathTemplate = "{0}Labs/x86_64/iso/Fedora-Security-Live-x86_64-{1}-1.1.iso";
         private const string ReleaseVersion = "42";
         public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
-            var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(LoadFedoraSecurityLab).Assembly, "fedora-logo.svg");
+            var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(FedoraSecurityLab).Assembly, "fedora-logo.svg");
             // Construct the ISO URL with hardcoded version
             var isoUrl = string.Format(IsoPathTemplate, $"{BaseUrl}{ReleaseVersion}/", ReleaseVersion);
             var filename = $"Fedora-Security-Live-x86_64-{ReleaseVersion}-1.1.iso";

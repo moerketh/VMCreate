@@ -152,26 +152,30 @@ namespace VMCreate
                 return;
             }
 
+            // Dynamically insert phase cards based on detected generation.
+            // This is handled outside the phase-transition guard because the
+            // generation info may arrive on a repeated "CreateVM" report
+            // (the first report activates the phase; the second carries the
+            // DetectedGeneration after partition detection completes).
+            if (!string.IsNullOrEmpty(info.DetectedGeneration))
+            {
+                if (info.DetectedGeneration == "1")
+                {
+                    Application.Current.Dispatcher.Invoke(() => _viewModel.InsertMbrPhases());
+                }
+                else if (info.DetectedGeneration == "2")
+                {
+                    Application.Current.Dispatcher.Invoke(() => _viewModel.InsertCustomizePhase());
+                }
+            }
+
             // Phase transitions
-            if (!string.IsNullOrEmpty(info.Phase) && info.Phase != _activePhaseId)
+            if (!string.IsNullOrEmpty(info.Phase))
             {
                 string targetPhase = MapPhaseString(info.Phase);
 
-                if (targetPhase != _activePhaseId)
+                if (targetPhase != null && targetPhase != _activePhaseId)
                 {
-                    // Dynamically insert phase cards based on detected generation
-                    if (!string.IsNullOrEmpty(info.DetectedGeneration))
-                    {
-                        if (info.DetectedGeneration == "1")
-                        {
-                            Application.Current.Dispatcher.Invoke(() => _viewModel.InsertMbrPhases());
-                        }
-                        else if (info.DetectedGeneration == "2")
-                        {
-                            Application.Current.Dispatcher.Invoke(() => _viewModel.InsertCustomizePhase());
-                        }
-                    }
-
                     // Insert PostBoot phase card when transitioning to it
                     if (targetPhase == DeployPageViewModel.PhasePostBoot)
                     {

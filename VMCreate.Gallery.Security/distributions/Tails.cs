@@ -11,19 +11,19 @@ namespace VMCreate.Gallery
     /// Loads the latest stable Tails release from the official Tails JSON API.
     /// Tails is a privacy-focused live OS that routes all traffic through Tor.
     /// </summary>
-    public class LoadTails : IGalleryLoader
+    public class Tails : IGalleryLoader
     {
         private const string ApiUrl = "https://tails.net/install/v2/Tails/amd64/stable/latest.json";
         private readonly IHttpClientFactory _clientFactory;
 
-        public LoadTails(IHttpClientFactory clientFactory)
+        public Tails(IHttpClientFactory clientFactory)
         {
             _clientFactory = clientFactory ?? throw new ArgumentNullException(nameof(clientFactory));
         }
 
         public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
-            var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(LoadTails).Assembly, "tails-logo.svg");
+            var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(Tails).Assembly, "tails-logo.svg");
             var client = _clientFactory.CreateClient();
             client.DefaultRequestHeaders.Add("User-Agent", "VMCreate/1.0");
 

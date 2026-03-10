@@ -7,19 +7,19 @@ using System.Threading.Tasks;
 
 namespace VMCreate.Gallery
 {
-    public class LoadParrotHome : IGalleryLoader
+    public class ParrotHome : IGalleryLoader
     {
         private const string BaseUrl = "https://deb.parrot.sh/parrot/iso/7.1/";
         private readonly IHttpClientFactory _clientFactory;
 
-        public LoadParrotHome(IHttpClientFactory clientFactory)
+        public ParrotHome(IHttpClientFactory clientFactory)
         {
             _clientFactory = clientFactory ?? throw new ArgumentNullException(nameof(clientFactory));
         }
 
         public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
-            var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(LoadParrotHome).Assembly, "parrot-logo.svg");
+            var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(ParrotHome).Assembly, "parrot-logo.svg");
             var client = _clientFactory.CreateClient();
             client.DefaultRequestHeaders.Add("User-Agent", "VMCreate/1.0");
 

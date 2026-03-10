@@ -1,4 +1,5 @@
 using VMCreate.Gallery;
+using VMCreate.Gallery.distributions;
 
 namespace VMCreate.Tests.GalleryTests
 {
@@ -146,7 +147,7 @@ namespace VMCreate.Tests.GalleryTests
         [TestMethod]
         public async Task LoadFedoraSecurityLab_LoadGalleryItems_ReturnsSingleItem()
         {
-            var result = await new LoadFedoraSecurityLab().LoadGalleryItems();
+            var result = await new FedoraSecurityLab().LoadGalleryItems();
 
             Assert.AreEqual(1, result.Count);
         }
@@ -154,7 +155,7 @@ namespace VMCreate.Tests.GalleryTests
         [TestMethod]
         public async Task LoadFedoraSecurityLab_LoadGalleryItems_NameContainsFedora()
         {
-            var item = (await new LoadFedoraSecurityLab().LoadGalleryItems())[0];
+            var item = (await new FedoraSecurityLab().LoadGalleryItems())[0];
 
             StringAssert.Contains(item.Name, "Fedora", StringComparison.OrdinalIgnoreCase);
         }

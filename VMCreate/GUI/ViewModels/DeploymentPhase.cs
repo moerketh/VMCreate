@@ -81,5 +81,11 @@ namespace VMCreate
             get => _isIndeterminate;
             set => SetProperty(ref _isIndeterminate, value);
         }
+
+        /// <summary>
+        /// Indent level for visually nesting sub-steps under a parent phase.
+        /// 0 = top-level, 1 = indented sub-step (e.g. "Clone Disk" under "Pre-Boot Customizations").
+        /// </summary>
+        public int IndentLevel { get; set; }
     }
 }

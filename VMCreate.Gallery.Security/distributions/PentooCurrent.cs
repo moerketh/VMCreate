@@ -12,7 +12,7 @@ namespace VMCreate.Gallery
     /// Version metadata is fetched from versions.json; the download URL is the
     /// stable symlink kept current by the mirror.
     /// </summary>
-    public class LoadPentooCurrent : IGalleryLoader
+    public class PentooCurrent : IGalleryLoader
     {
         private const string MirrorBaseUrl  = "https://pentoo.osuosl.org/";
         private const string VersionsUrl    = MirrorBaseUrl + "latest-iso-symlinks/versions.json";
@@ -20,14 +20,14 @@ namespace VMCreate.Gallery
 
         private readonly IHttpClientFactory _clientFactory;
 
-        public LoadPentooCurrent(IHttpClientFactory clientFactory)
+        public PentooCurrent(IHttpClientFactory clientFactory)
         {
             _clientFactory = clientFactory ?? throw new ArgumentNullException(nameof(clientFactory));
         }
 
         public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
-            var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(LoadPentooCurrent).Assembly, "pentoo-logo.svg");
+            var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(PentooCurrent).Assembly, "pentoo-logo.svg");
             var client = _clientFactory.CreateClient();
             client.DefaultRequestHeaders.Add("User-Agent", "VMCreate/1.0");
 

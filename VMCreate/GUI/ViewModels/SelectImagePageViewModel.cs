@@ -21,6 +21,7 @@ namespace VMCreate
         private GalleryItem _selectedItem;
         private bool _isLoading = true;
         private string _errorMessage;
+        private bool _showIsoInstallers;
 
         /// <summary>Raised when the wizard should complete (e.g. Cancel).</summary>
         public event Action<WizardResult> RequestWizardComplete;
@@ -48,6 +49,9 @@ namespace VMCreate
             NextCommand = new RelayCommand(OnNext, () => SelectedItem != null);
             CancelCommand = new RelayCommand(() => RequestWizardComplete?.Invoke(WizardResult.Canceled));
             DismissErrorCommand = new RelayCommand(() => ErrorMessage = null);
+
+            // Apply the default filter (hides ISO installers)
+            ApplyFilter();
         }
 
         /// <summary>Sorted and filtered view of the gallery items.</summary>
@@ -79,6 +83,17 @@ namespace VMCreate
             set => SetProperty(ref _isLoading, value);
         }
 
+        /// <summary>When true, ISO installer images are visible in the gallery list.</summary>
+        public bool ShowIsoInstallers
+        {
+            get => _showIsoInstallers;
+            set
+            {
+                if (SetProperty(ref _showIsoInstallers, value))
+                    ApplyFilter();
+            }
+        }
+
         /// <summary>Error text shown in a dismissible banner at the top of the page.</summary>
         public string ErrorMessage
         {
@@ -99,18 +114,34 @@ namespace VMCreate
         private void ApplyFilter()
         {
             string filter = _searchText?.Trim().ToLower() ?? string.Empty;
-            if (string.IsNullOrEmpty(filter))
+            bool hasTextFilter = !string.IsNullOrEmpty(filter);
+            bool hideIso = !_showIsoInstallers;
+
+            if (!hasTextFilter && !hideIso)
             {
                 _galleryView.Filter = null;
             }
             else
             {
-                _galleryView.Filter = obj => obj is GalleryItem item &&
-                    (item.Name?.ToLower().Contains(filter) == true ||
-                     item.Publisher?.ToLower().Contains(filter) == true ||
-                     item.Description?.ToLower().Contains(filter) == true);
+                _galleryView.Filter = obj =>
+                {
+                    if (obj is not GalleryItem item) return false;
+
+                    // Hide ISO installers unless the user toggled them on
+                    if (hideIso && !item.IsPreInstalled) return false;
+
+                    // Text search across name, publisher and description
+                    if (hasTextFilter)
+                    {
+                        return item.Name?.ToLower().Contains(filter) == true ||
+                               item.Publisher?.ToLower().Contains(filter) == true ||
+                               item.Description?.ToLower().Contains(filter) == true;
+                    }
+
+                    return true;
+                };
             }
-            _logger.LogDebug("Applied search filter: {Filter}", filter);
+            _logger.LogDebug("Applied search filter: {Filter}, ShowIso: {ShowIso}", filter, _showIsoInstallers);
         }
 
         private void OnNext()

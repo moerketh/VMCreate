@@ -96,15 +96,56 @@ namespace VMCreate
                     
                 IMediaHandler mediaHandler = _mediaHandlerFactory.CreateHandler(item.FileType);
                 string mediaPath = await mediaHandler.PrepareMediaAsync(sourceFile, _defaultVhdxPath, vmSettings, item, createVMProgressInfo, cancellationToken);
-                
+
+                bool isIsoMedia = mediaHandler is IsoMediaHandler;
+
+                if (isIsoMedia)
+                {
+                    // ── ISO installer flow ─────────────────────────────────────
+                    // The downloaded file is an ISO image. We create an empty VHDX
+                    // for the OS to install onto, attach the ISO as a DVD, and boot
+                    // from the DVD so the user can run the installer interactively.
+                    const int targetGeneration = 2;
+
+                    createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM" });
+
+                    await _hyperVManager.CreateVMAsync(vmSettings, _defaultVhdxPath, targetGeneration, cancellationToken);
+                    await _hyperVManager.SetVMLoginNotes(vmSettings, item.InitialUsername, item.InitialPassword, cancellationToken);
+                    await _hyperVManager.ConnectNetworkAdapter(vmSettings, cancellationToken);
+
+                    await _hyperVManager.SetCpuCount(vmSettings, cancellationToken);
+                    await _hyperVManager.DisableDynamicMemory(vmSettings, cancellationToken);
+                    await _hyperVManager.SetSecureBoot(vmSettings, cancellationToken);
+                    await _hyperVManager.EnableGuestServices(vmSettings, cancellationToken);
+
+                    // Create an empty boot disk for the installer to target
+                    await _hyperVManager.AddNewHardDrive(vmSettings, _defaultVhdxPath, cancellationToken);
+
+                    // Attach the ISO as a DVD drive and boot from it
+                    await _hyperVManager.AddBootDvd(vmSettings, mediaPath, cancellationToken);
+                    await _hyperVManager.SetFirstBootToDvd(vmSettings, cancellationToken);
+
+                    if (vmSettings.VirtualizationEnabled)
+                        await _hyperVManager.EnableVirtualization(vmSettings, cancellationToken);
+
+                    createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "StartVM" });
+                    await _hyperVManager.StartVM(vmSettings, cancellationToken);
+
+                    await _hyperVManager.SetEnhancedSession(vmSettings, cancellationToken);
+
+                    // ISO flow is done — the user completes the installation interactively.
+                    return;
+                }
+
+                // ── Disk-image flow (VMDK / QCOW2 / VHDX) ────────────────────
                 string cloningIsoPath = vmSettings.CloningIsoPath;
                 int detectedGeneration = mediaHandler.VmGeneration; // 1 for MBR, 2 for GPT
-                const int targetGeneration = 2; // Always target Gen 2
+                const int targetGen = 2; // Always target Gen 2
 
                 // Report detected generation so the UI can insert MBR-specific cards
                 createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", DetectedGeneration = detectedGeneration.ToString() });
 
-                await _hyperVManager.CreateVMAsync(vmSettings, _defaultVhdxPath, targetGeneration, cancellationToken);
+                await _hyperVManager.CreateVMAsync(vmSettings, _defaultVhdxPath, targetGen, cancellationToken);
                 await _hyperVManager.SetVMLoginNotes(vmSettings, item.InitialUsername, item.InitialPassword, cancellationToken);
                 //await _hyperVManager.AddNetworkAdapter(vmSettings, cancellationToken);
                 await _hyperVManager.ConnectNetworkAdapter(vmSettings, cancellationToken);
@@ -209,21 +250,11 @@ namespace VMCreate
 
                     await _kvpSender.SendKVPToGuestAsync(vmSettings.VMName, "PADDING_1", "true", cancellationToken);
                     await _kvpSender.SendKVPToGuestAsync(vmSettings.VMName, "PADDING_2", "true", cancellationToken);
-#if DEBUG
-                    //await _kvpSender.SendKVPToGuestAsync(vmSettings.VMName, "VMCREATE_DEBUG", "true", cancellationToken);
-#endif
-                    if (detectedGeneration == 2)
-                    {
-                        // Tell the ISO to run customize-only mode (skip disk cloning)
-                        await _kvpSender.SendKVPToGuestAsync(vmSettings.VMName, "VMCREATE_MODE", "customize", cancellationToken);
-                    }
 
-                    if (vmCustomizations.ConfigureXrdp)
-                        await _kvpSender.SendKVPToGuestAsync(vmSettings.VMName, "VMCREATE_XRDP", "true", cancellationToken);
-
-                    // Send SSH public key for secure key-based auth (replaces ubuntu/ubuntu password)
-                    // Extra padding before the SSH key — the key value is ~750 bytes and
-                    // more susceptible to KVP record corruption than short flag values.
+                    // ── SSH key first ────────────────────────────────────────
+                    // Send the SSH public key as early as possible so the ISO's
+                    // inject-ssh-key.service can install it before autorun starts.
+                    // This lets us SSH in to debug even when the main workflow hangs.
                     await _kvpSender.SendKVPToGuestAsync(vmSettings.VMName, "PADDING_3", "true", cancellationToken);
 
                     string sshPublicKey;
@@ -236,19 +267,45 @@ namespace VMCreate
                         sshPublicKey?.Length ?? 0, vmSettings.VMName);
                     await _kvpSender.SendKVPToGuestAsync(vmSettings.VMName, "VMCREATE_SSH_PUBKEY", sshPublicKey, cancellationToken);
 
+                    // ── Workflow flags ────────────────────────────────────────
+#if DEBUG
+                    //await _kvpSender.SendKVPToGuestAsync(vmSettings.VMName, "VMCREATE_DEBUG", "true", cancellationToken);
+#endif
+                    if (detectedGeneration == 2)
+                    {
+                        // Tell the ISO to run customize-only mode (skip disk cloning)
+                        await _kvpSender.SendKVPToGuestAsync(vmSettings.VMName, "VMCREATE_MODE", "customize", cancellationToken);
+                    }
+
+                    if (vmCustomizations.ConfigureXrdp)
+                        await _kvpSender.SendKVPToGuestAsync(vmSettings.VMName, "VMCREATE_XRDP", "true", cancellationToken);
+
                     // ── Monitor ISO progress and wait for shutdown ─────────────
                     const int shutdownTimeoutSeconds = 600;
                     bool shutDown;
 
                     if (detectedGeneration == 1)
                     {
-                        // Gen1: Monitor partclone disk clone progress, then wait for shutdown
-                        await _kvpPoller.PollKVPForProgressAsync(vmSettings.VMName, createVMProgressInfo, cancellationToken);
+                        // Gen1: Monitor partclone disk clone progress, then wait for shutdown.
+                        // PollKVPForProgressAsync now has a timeout and VM-shutdown detection
+                        // so we never hang indefinitely if the completion KVP is missed.
+                        bool cloneMarkerSeen = await _kvpPoller.PollKVPForProgressAsync(
+                            vmSettings.VMName, createVMProgressInfo, cancellationToken, shutdownTimeoutSeconds);
 
-                        // Partclone done — transition from CloneDisk to Customize phase
+                        // Partclone done (or timed out) — transition from CloneDisk to Customize phase
                         createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "Customize" });
 
-                        shutDown = await _shutdownWatcher.WaitForVMShutdownAsync(vmSettings.VMName, cancellationToken, shutdownTimeoutSeconds);
+                        if (cloneMarkerSeen)
+                        {
+                            // Clone completed — wait for the remaining customization + shutdown
+                            shutDown = await _shutdownWatcher.WaitForVMShutdownAsync(vmSettings.VMName, cancellationToken, shutdownTimeoutSeconds);
+                        }
+                        else
+                        {
+                            // Timeout or VM already shut down during clone polling —
+                            // check once with a 0s timeout to see current state.
+                            shutDown = await _shutdownWatcher.WaitForVMShutdownAsync(vmSettings.VMName, cancellationToken, timeoutSeconds: 1);
+                        }
                     }
                     else
                     {
@@ -300,17 +357,20 @@ namespace VMCreate
                 }
                 await _hyperVManager.SetEnhancedSession(vmSettings, cancellationToken);
 
-                // ── Post-boot customization via SSH step pipeline ─────────
+                // ── Post-boot: collect autorun log + run step pipeline ────
                 var postBootSteps = _customizationSteps
                     .Where(s => s.Phase == CustomizationPhase.PostBoot && s.IsApplicable(item, vmCustomizations))
                     .OrderBy(s => s.Order)
                     .ToList();
 
-                if (postBootSteps.Count > 0)
+                // After the ISO boot cycle the VM is off. Start it from the
+                // hard drive so we can collect the autorun log and run any
+                // post-boot customization steps.
+                if (needsIsoBootCycle)
                 {
-                    createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "PostBoot" });
+                    if (postBootSteps.Count > 0)
+                        createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "PostBoot" });
 
-                    // Start the target VM (it's been shut down after ISO phase, or never started if no ISO was needed)
                     await _hyperVManager.StartVM(vmSettings, cancellationToken);
 
                     string privateKeyPath = _sshKeyManager.GetPrivateKeyPath(vmCustomizations.CustomSshPublicKeyPath);
@@ -318,26 +378,43 @@ namespace VMCreate
 
                     await shell.WaitForReadyAsync(cancellationToken);
 
-                    int completed = 0;
-                    foreach (var step in postBootSteps)
+                    // Collect the autorun log saved by the ISO's customize script
+                    try
                     {
-                        _logger.LogInformation("Running post-boot step: {StepName} (order {Order})", step.Name, step.Order);
-                        createVMProgressInfo.Report(new CreateVMProgressInfo
-                        {
-                            Phase = "PostBoot",
-                            ProgressPercentage = (int)((double)completed / postBootSteps.Count * 100),
-                            StepName = step.Name
-                        });
-
-                        await step.ExecuteAsync(shell, item, vmCustomizations, _logger, cancellationToken);
-
-                        completed++;
-                        _logger.LogInformation("Completed post-boot step: {StepName}", step.Name);
+                        string autorunLog = await shell.RunCommandAsync(
+                            "sudo cat /var/log/vmcreate-autorun.log 2>/dev/null || echo '[no autorun log found]'",
+                            cancellationToken);
+                        _logger.LogInformation("Autorun log for {VMName}:\n{Log}", vmSettings.VMName, autorunLog);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to collect autorun log (non-fatal)");
                     }
 
-                    createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "PostBoot", ProgressPercentage = 100 });
+                    // Run post-boot customization steps
+                    if (postBootSteps.Count > 0)
+                    {
+                        int completed = 0;
+                        foreach (var step in postBootSteps)
+                        {
+                            _logger.LogInformation("Running post-boot step: {StepName} (order {Order})", step.Name, step.Order);
+                            createVMProgressInfo.Report(new CreateVMProgressInfo
+                            {
+                                Phase = "PostBoot",
+                                ProgressPercentage = (int)((double)completed / postBootSteps.Count * 100),
+                                StepName = step.Name
+                            });
 
-                    // VM is already running with all customizations applied — no need to restart.
+                            await step.ExecuteAsync(shell, item, vmCustomizations, _logger, cancellationToken);
+
+                            completed++;
+                            _logger.LogInformation("Completed post-boot step: {StepName}", step.Name);
+                        }
+
+                        createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "PostBoot", ProgressPercentage = 100 });
+                    }
+
+                    // VM is running from the hard drive with all customizations applied.
                 }
             }
             catch (Exception ex)

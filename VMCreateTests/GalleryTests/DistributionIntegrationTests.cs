@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using System.Net;
 using VMCreate;
 using VMCreate.Gallery;
+using VMCreate.Gallery.distributions;
 
 namespace VMCreate.Tests.GalleryTests
 {
@@ -123,7 +124,7 @@ namespace VMCreate.Tests.GalleryTests
 
         [TestMethod, Timeout(60_000)]
         public async Task LoadFedoraSecurityLab_AllUrisResolve()
-            => await VerifyAllUrisAsync(await new LoadFedoraSecurityLab().LoadGalleryItems(), nameof(LoadFedoraSecurityLab));
+            => await VerifyAllUrisAsync(await new FedoraSecurityLab().LoadGalleryItems(), nameof(FedoraSecurityLab));
 
         // ════════════════════════════════════════════════════════════════════════
         // HTTP loaders — live scrape then URI verification
@@ -138,20 +139,20 @@ namespace VMCreate.Tests.GalleryTests
         [TestMethod, Timeout(120_000)]
         public async Task LoadKaliCurrent_AllUrisResolve()
             => await VerifyAllUrisAsync(
-                await new LoadKaliCurrent(_factory).LoadGalleryItems(),
-                nameof(LoadKaliCurrent));
+                await new Kali(_factory).LoadGalleryItems(),
+                nameof(Kali));
 
         [TestMethod, Timeout(120_000)]
         public async Task LoadParrotHome_AllUrisResolve()
             => await VerifyAllUrisAsync(
-                await new LoadParrotHome(_factory).LoadGalleryItems(),
-                nameof(LoadParrotHome));
+                await new ParrotHome(_factory).LoadGalleryItems(),
+                nameof(ParrotHome));
 
         [TestMethod, Timeout(120_000)]
         public async Task LoadParrotSecurity_AllUrisResolve()
             => await VerifyAllUrisAsync(
-                await new LoadParrotSecurity(_factory).LoadGalleryItems(),
-                nameof(LoadParrotSecurity));
+                await new ParrotSecurity(_factory).LoadGalleryItems(),
+                nameof(ParrotSecurity));
 
         [TestMethod, Timeout(120_000), Ignore("ClearLinux infrastructure (clearlinux.org/cdn.download.clearlinux.org) has been discontinued by Intel")]
         public async Task ClearLinux_AllUrisResolve()
@@ -171,14 +172,14 @@ namespace VMCreate.Tests.GalleryTests
         [TestMethod, Timeout(120_000)]
         public async Task LoadPentooCurrent_AllUrisResolve()
             => await VerifyAllUrisAsync(
-                await new LoadPentooCurrent(_factory).LoadGalleryItems(),
-                nameof(LoadPentooCurrent));
+                await new PentooCurrent(_factory).LoadGalleryItems(),
+                nameof(PentooCurrent));
 
         [TestMethod, Timeout(120_000)]
         public async Task LoadTails_AllUrisResolve()
             => await VerifyAllUrisAsync(
-                await new LoadTails(_factory).LoadGalleryItems(),
-                nameof(LoadTails));
+                await new Tails(_factory).LoadGalleryItems(),
+                nameof(Tails));
 
         // ════════════════════════════════════════════════════════════════════════
         // Security — new distributions
@@ -203,8 +204,8 @@ namespace VMCreate.Tests.GalleryTests
         [TestMethod, Timeout(120_000)]
         public async Task LoadSecurityOnion_AllUrisResolve()
             => await VerifyAllUrisAsync(
-                await new LoadSecurityOnion(_factory).LoadGalleryItems(),
-                nameof(LoadSecurityOnion));
+                await new SecurityOnion(_factory).LoadGalleryItems(),
+                nameof(SecurityOnion));
 
         // ════════════════════════════════════════════════════════════════════════
         // General — new distributions

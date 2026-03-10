@@ -187,17 +187,27 @@ namespace VMCreate
             int insertIndex = FindInsertIndexBeforePostBootOrDone();
             if (insertIndex < 0) return;
 
-            Phases.Insert(insertIndex, new DeploymentPhase(PhaseCloneDisk, "Clone Disk",
-                "Cloning MBR disk to GPT format inside the VM",
-                SymbolRegular.HardDrive24));
-
-            // Only insert Customize card if not already present (may have been added in BuildPhaseList)
+            // Insert Customize (parent) first if not already present,
+            // then CloneDisk as an indented sub-step underneath it.
             if (!Phases.Any(p => p.Id == PhaseCustomize))
             {
-                Phases.Insert(insertIndex + 1, new DeploymentPhase(PhaseCustomize, "Pre-Boot Customizations",
+                Phases.Insert(insertIndex, new DeploymentPhase(PhaseCustomize, "Pre-Boot Customizations",
                     "Applying customizations and waiting for the VM to shut down",
                     SymbolRegular.Wrench24));
+                insertIndex++; // CloneDisk goes after Customize
             }
+            else
+            {
+                // Customize already present — insert CloneDisk right after it
+                for (int i = 0; i < Phases.Count; i++)
+                {
+                    if (Phases[i].Id == PhaseCustomize) { insertIndex = i + 1; break; }
+                }
+            }
+
+            Phases.Insert(insertIndex, new DeploymentPhase(PhaseCloneDisk, "Clone Disk",
+                "Cloning MBR disk to GPT format inside the VM",
+                SymbolRegular.HardDrive24) { IndentLevel = 1 });
         }
 
         /// <summary>

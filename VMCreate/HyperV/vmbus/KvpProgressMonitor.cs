@@ -20,7 +20,7 @@ namespace VMCreate
         /// <param name="cancellationToken"></param>
         /// <returns></returns>
         /// <exception cref="Exception"></exception>
-        public async Task PollKVPForProgressAsync(string vmName, IProgress<CreateVMProgressInfo> progressReporter, CancellationToken cancellationToken)
+        public async Task<bool> PollKVPForProgressAsync(string vmName, IProgress<CreateVMProgressInfo> progressReporter, CancellationToken cancellationToken, int timeoutSeconds = 600)
         {
             // Initial report
             var initialInfo = new CreateVMProgressInfo
@@ -48,9 +48,21 @@ namespace VMCreate
             };
             progressReporter.Report(vmRunningInfo);
 
-            // Poll loop for KVP
+            DateTime startTime = DateTime.UtcNow;
+
+            // Poll loop for KVP with timeout and VM-shutdown detection
             while (!cancellationToken.IsCancellationRequested)
             {
+                // If the VM shut down, the clone must have completed even
+                // if we missed the KVP completion marker.
+                string currentGuid = GetVMGuid(vmName);
+                if (string.IsNullOrEmpty(currentGuid))
+                    return true;
+
+                // Timeout — let the caller fall through to diagnostics collection
+                if (timeoutSeconds > 0 && (DateTime.UtcNow - startTime).TotalSeconds > timeoutSeconds)
+                    return false;
+
                 Dictionary<string, string> customKvps = GetCustomKVPs(vmGuid);
 
                 if (customKvps.TryGetValue("PartcloneProgress", out string progressValue) && !string.IsNullOrEmpty(progressValue))
@@ -62,11 +74,12 @@ namespace VMCreate
                     // Check for completion
                     if (progressValue.Contains("Completed: 100% | Done"))
                     {
-                        break;
+                        return true;
                     }
                 }
                 await Task.Delay(1000, cancellationToken);
             }
+            return false;
         }
 
         /// <summary>

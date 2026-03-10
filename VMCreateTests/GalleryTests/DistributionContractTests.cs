@@ -3,6 +3,7 @@ using Moq;
 using System.Net;
 using VMCreate;
 using VMCreate.Gallery;
+using VMCreate.Gallery.distributions;
 
 namespace VMCreate.Tests.GalleryTests
 {
@@ -103,7 +104,7 @@ namespace VMCreate.Tests.GalleryTests
             [new NixOS(),               nameof(NixOS)],
             [new FedoraSilverblue(),    nameof(FedoraSilverblue)],
             [new PwnCloudOS(),          nameof(PwnCloudOS)],
-            [new LoadFedoraSecurityLab(), nameof(LoadFedoraSecurityLab)],
+            [new FedoraSecurityLab(),   nameof(FedoraSecurityLab)],
             // Security loaders
             [new REMnux(),             nameof(REMnux)],
             [new CAINE(),              nameof(CAINE)],
@@ -161,9 +162,9 @@ namespace VMCreate.Tests.GalleryTests
                    <td class=""size"">3.5G</td>
                    <td class=""date"">2024-09-11</td>";
 
-            var items = await new LoadKaliCurrent(FactoryFor(html)).LoadGalleryItems();
+            var items = await new Kali(FactoryFor(html)).LoadGalleryItems();
 
-            AssertContractInvariants(items, nameof(LoadKaliCurrent));
+            AssertContractInvariants(items, nameof(Kali));
             Assert.AreEqual(1, items.Count);
         }
 
@@ -173,9 +174,9 @@ namespace VMCreate.Tests.GalleryTests
             const string html =
                 @"<a href=""Parrot-home-6.1_amd64.iso"">Parrot-home-6.1_amd64.iso</a> 15-Jan-2024 10:30  1234567890";
 
-            var items = await new LoadParrotHome(FactoryFor(html)).LoadGalleryItems();
+            var items = await new ParrotHome(FactoryFor(html)).LoadGalleryItems();
 
-            AssertContractInvariants(items, nameof(LoadParrotHome));
+            AssertContractInvariants(items, nameof(ParrotHome));
             Assert.AreEqual(1, items.Count);
         }
 
@@ -185,9 +186,9 @@ namespace VMCreate.Tests.GalleryTests
             const string html =
                 @"<a href=""Parrot-security-6.1_amd64.iso"">Parrot-security-6.1_amd64.iso</a> 15-Jan-2024 10:30  1234567890";
 
-            var items = await new LoadParrotSecurity(FactoryFor(html)).LoadGalleryItems();
+            var items = await new ParrotSecurity(FactoryFor(html)).LoadGalleryItems();
 
-            AssertContractInvariants(items, nameof(LoadParrotSecurity));
+            AssertContractInvariants(items, nameof(ParrotSecurity));
             Assert.AreEqual(1, items.Count);
         }
 
@@ -202,9 +203,9 @@ namespace VMCreate.Tests.GalleryTests
                 ]
                 """;
 
-            var items = await new LoadPentooCurrent(FactoryFor(json)).LoadGalleryItems();
+            var items = await new PentooCurrent(FactoryFor(json)).LoadGalleryItems();
 
-            AssertContractInvariants(items, nameof(LoadPentooCurrent));
+            AssertContractInvariants(items, nameof(PentooCurrent));
             Assert.AreEqual(1, items.Count);
         }
 
@@ -261,9 +262,9 @@ namespace VMCreate.Tests.GalleryTests
                 }
                 """;
 
-            var items = await new LoadTails(FactoryFor(json)).LoadGalleryItems();
+            var items = await new Tails(FactoryFor(json)).LoadGalleryItems();
 
-            AssertContractInvariants(items, nameof(LoadTails));
+            AssertContractInvariants(items, nameof(Tails));
             Assert.AreEqual(1, items.Count);
             StringAssert.EndsWith(items[0].DiskUri, ".img", StringComparison.OrdinalIgnoreCase);
         }
@@ -281,9 +282,9 @@ namespace VMCreate.Tests.GalleryTests
                 }
                 """;
 
-            var items = await new LoadSecurityOnion(FactoryFor(json)).LoadGalleryItems();
+            var items = await new SecurityOnion(FactoryFor(json)).LoadGalleryItems();
 
-            AssertContractInvariants(items, nameof(LoadSecurityOnion));
+            AssertContractInvariants(items, nameof(SecurityOnion));
             Assert.AreEqual(1, items.Count);
         }
 
@@ -306,13 +307,13 @@ namespace VMCreate.Tests.GalleryTests
         public static IEnumerable<object[]> HttpLoaderFactories =>
         [
             ["BlackArch",          new Func<IHttpClientFactory, IGalleryLoader>(f => new BlackArch(f))],
-            ["LoadKaliCurrent",    new Func<IHttpClientFactory, IGalleryLoader>(f => new LoadKaliCurrent(f))],
-            ["LoadParrotHome",     new Func<IHttpClientFactory, IGalleryLoader>(f => new LoadParrotHome(f))],
-            ["LoadParrotSecurity", new Func<IHttpClientFactory, IGalleryLoader>(f => new LoadParrotSecurity(f))],
-            ["LoadPentooCurrent",  new Func<IHttpClientFactory, IGalleryLoader>(f => new LoadPentooCurrent(f))],
+            ["LoadKaliCurrent",    new Func<IHttpClientFactory, IGalleryLoader>(f => new Kali(f))],
+            ["LoadParrotHome",     new Func<IHttpClientFactory, IGalleryLoader>(f => new ParrotHome(f))],
+            ["LoadParrotSecurity", new Func<IHttpClientFactory, IGalleryLoader>(f => new ParrotSecurity(f))],
+            ["LoadPentooCurrent",  new Func<IHttpClientFactory, IGalleryLoader>(f => new PentooCurrent(f))],
             ["ClearLinux",         new Func<IHttpClientFactory, IGalleryLoader>(f => new ClearLinux(f))],
-            ["LoadTails",          new Func<IHttpClientFactory, IGalleryLoader>(f => new LoadTails(f))],
-            ["LoadSecurityOnion",  new Func<IHttpClientFactory, IGalleryLoader>(f => new LoadSecurityOnion(f))],
+            ["LoadTails",          new Func<IHttpClientFactory, IGalleryLoader>(f => new Tails(f))],
+            ["LoadSecurityOnion",  new Func<IHttpClientFactory, IGalleryLoader>(f => new SecurityOnion(f))],
             ["Debian",             new Func<IHttpClientFactory, IGalleryLoader>(f => new Debian(f))],
         ];
 

@@ -88,10 +88,17 @@ namespace VMCreate
             _logger.LogInformation("Connected VM to Default Switch for internet access.");
         }
 
+        /// <summary>
+        /// Builds the path for the new boot drive created during MBR-to-GPT cloning.
+        /// The path must NOT collide with the converted source VHDX (<c>{vmName}.vhdx</c>).
+        /// </summary>
+        internal static string GetNewDrivePath(string vmPath, string vmName)
+            => Path.Combine(vmPath, $"{vmName}_boot.vhdx");
+
         public async Task AddNewHardDrive(VmSettings vmSettings, string vmPath, CancellationToken cancellationToken)
         {
-            // Create new dynamic VHDX
-            string newVhdPath = Path.Combine(vmPath, $"{vmSettings.VMName}.vhdx");
+            // Create new dynamic VHDX (suffixed to avoid collision with the converted source disk)
+            string newVhdPath = GetNewDrivePath(vmPath, vmSettings.VMName);
             _ps.Commands.Clear();
             _ps.AddCommand("New-VHD")
                 .AddParameter("Path", newVhdPath)
@@ -129,8 +136,17 @@ namespace VMCreate
                 .AddParameter("ControllerType", "SCSI")
                 .AddParameter("ControllerNumber", "0")
                 .AddParameter("ControllerLocation", location);
+            var drives = await RunCommand(cancellationToken);
+            if (drives.Count == 0)
+            {
+                _logger.LogWarning("No hard drive found at SCSI(0,{Location}) for VM {VMName} — nothing to remove.", location, vmSettings.VMName);
+                return;
+            }
+            _ps.Commands.Clear();
+            _ps.AddCommand("Remove-VMHardDiskDrive")
+                .AddParameter("VMHardDiskDrive", drives[0]);
             await RunCommand(cancellationToken);
-            _logger.LogInformation($"Detached disk at location: {location}");
+            _logger.LogInformation("Detached disk at SCSI(0,{Location}) for VM {VMName}", location, vmSettings.VMName);
         }
 
         public async Task AddBootDvd(VmSettings vmSettings, string mediaPath, CancellationToken cancellationToken)

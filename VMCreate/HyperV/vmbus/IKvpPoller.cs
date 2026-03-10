@@ -11,8 +11,10 @@ namespace VMCreate
     {
         /// <summary>
         /// Polls KVP for partclone progress and reports to the provided progress reporter.
+        /// Returns true if the completion marker was seen, false if the VM shut down
+        /// or the timeout expired before the marker arrived.
         /// </summary>
-        Task PollKVPForProgressAsync(string vmName, IProgress<CreateVMProgressInfo> progressReporter, CancellationToken cancellationToken);
+        Task<bool> PollKVPForProgressAsync(string vmName, IProgress<CreateVMProgressInfo> progressReporter, CancellationToken cancellationToken, int timeoutSeconds = 600);
 
         /// <summary>
         /// Polls WorkflowProgress KVP while waiting for VM shutdown.

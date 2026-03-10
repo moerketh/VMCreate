@@ -33,7 +33,9 @@ namespace VMCreate
             string filename = string.Empty;
             try
             {
-                if(!galleryItem.FileType.StartsWith("vhd") && !File.Exists(_qemuFileLocation))
+                if(!galleryItem.FileType.StartsWith("vhd", StringComparison.OrdinalIgnoreCase)
+                    && galleryItem.FileType != "ISO"
+                    && !File.Exists(_qemuFileLocation))
                 {
                     throw new Exception("Please install QEMU to support disk image conversion.");
                 }

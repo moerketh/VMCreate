@@ -10,20 +10,20 @@ namespace VMCreate.Gallery
     /// <summary>
     /// Scrapes the Security Onion GitHub Releases API to find the latest ISO download.
     /// </summary>
-    public class LoadSecurityOnion : IGalleryLoader
+    public class SecurityOnion : IGalleryLoader
     {
         private const string ReleasesApiUrl = "https://api.github.com/repos/Security-Onion-Solutions/securityonion/releases/latest";
 
         private readonly IHttpClientFactory _clientFactory;
 
-        public LoadSecurityOnion(IHttpClientFactory clientFactory)
+        public SecurityOnion(IHttpClientFactory clientFactory)
         {
             _clientFactory = clientFactory ?? throw new ArgumentNullException(nameof(clientFactory));
         }
 
         public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
-            var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(LoadSecurityOnion).Assembly, "securityonion-logo.svg");
+            var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(SecurityOnion).Assembly, "securityonion-logo.svg");
             var client = _clientFactory.CreateClient();
             client.DefaultRequestHeaders.Add("User-Agent", "VMCreate/1.0");
             client.DefaultRequestHeaders.TryAddWithoutValidation("Accept", "application/vnd.github.v3+json");

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using System;
+using System.Diagnostics;
 using System.Linq;
 using System.Management.Automation;
 using System.Text;
@@ -9,22 +10,19 @@ using System.Threading.Tasks;
 namespace CreateVM.HyperV.vmbus
 {
     /// <summary>
-    /// Collects diagnostic information from the ISO guest via PowerShell Direct
-    /// (Invoke-Command over VMBus/hv_sock). Used when the customization workflow
-    /// stalls or fails — the host reaches into the guest, pulls logs, and reports
-    /// back before force-stopping the VM.
+    /// Collects diagnostic information from the ISO guest via native SSH.
+    /// Used when the customization workflow stalls or fails — the host reaches
+    /// into the guest, pulls logs, and reports back before force-stopping the VM.
     /// 
     /// Requirements (on the ISO guest):
     ///   - openssh-server running
-    ///   - PowerShell (pwsh) installed with SSH subsystem configured
-    ///   - hv_sock kernel module (built into linux-azure)
     ///   - SSH public key injected via KVP (key-only auth)
     /// </summary>
     public class GuestDiagnosticsCollector : IGuestDiagnosticsCollector
     {
         private readonly ILogger<GuestDiagnosticsCollector> _logger;
         private const string GuestUsername = "ubuntu";
-        private static readonly TimeSpan InvokeTimeout = TimeSpan.FromSeconds(30);
+        private static readonly TimeSpan SshTimeout = TimeSpan.FromSeconds(30);
 
         public GuestDiagnosticsCollector(ILogger<GuestDiagnosticsCollector> logger)
         {
@@ -83,51 +81,117 @@ namespace CreateVM.HyperV.vmbus
         }
 
         /// <summary>
-        /// Executes a command inside the guest VM via Invoke-Command -VMName.
-        /// Uses SSH key-based authentication with the private key path.
+        /// Executes a command inside the guest VM via native ssh.exe.
+        /// Discovers the VM's IP from Hyper-V, then connects with key-based auth.
         /// </summary>
         private async Task<string> RunGuestCommandAsync(string vmName, string linuxCommand, CancellationToken ct, string privateKeyPath = null)
         {
             if (string.IsNullOrEmpty(privateKeyPath) || !System.IO.File.Exists(privateKeyPath))
                 throw new InvalidOperationException("SSH private key path is required for guest diagnostics collection.");
 
-            using var ps = PowerShell.Create();
+            // Discover the VM's IP address via Get-VMNetworkAdapter
+            string vmIp = await DiscoverVmIpAsync(vmName, ct);
+            if (string.IsNullOrEmpty(vmIp))
+                throw new InvalidOperationException($"Could not discover IP address for VM '{vmName}'. Guest networking may not be ready.");
 
-            ps.AddCommand("Invoke-Command")
-              .AddParameter("VMName", vmName)
-              .AddParameter("UserName", GuestUsername)
-              .AddParameter("KeyFilePath", privateKeyPath)
-              .AddParameter("ScriptBlock", ScriptBlock.Create(linuxCommand))
-              .AddParameter("ErrorAction", "Stop");
+            _logger.LogDebug("Discovered VM IP {IP} for diagnostics on {VMName}", vmIp, vmName);
 
-            // Run with timeout — PS Direct can hang if the guest is unresponsive
-            var invokeTask = Task.Run(() => ps.Invoke(), ct);
+            // Normalize line endings for bash
+            linuxCommand = linuxCommand.Replace("\r\n", "\n").Replace("\r", "\n").Trim();
+
+            var args = new StringBuilder();
+            args.Append($"-i \"{privateKeyPath}\" ");
+            args.Append("-o StrictHostKeyChecking=no ");
+            args.Append("-o BatchMode=yes ");
+            args.Append("-o ConnectTimeout=10 ");
+            args.Append("-o UserKnownHostsFile=NUL ");
+            args.Append($"{GuestUsername}@{vmIp} ");
+            args.Append($"bash -c {EscapeForSsh(linuxCommand)}");
+
+            _logger.LogDebug("SSH diagnostics exec: ssh {Args}", args.ToString());
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = "ssh",
+                Arguments = args.ToString(),
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+
+            using var process = new Process { StartInfo = psi };
+            var stdout = new StringBuilder();
+            var stderr = new StringBuilder();
+
+            process.OutputDataReceived += (_, e) => { if (e.Data != null) stdout.AppendLine(e.Data); };
+            process.ErrorDataReceived += (_, e) => { if (e.Data != null) stderr.AppendLine(e.Data); };
+
+            process.Start();
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
 
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutCts.CancelAfter(InvokeTimeout);
+            timeoutCts.CancelAfter(SshTimeout);
 
-            var completedTask = await Task.WhenAny(invokeTask, Task.Delay(Timeout.Infinite, timeoutCts.Token));
-
-            if (completedTask != invokeTask)
+            try
             {
-                ps.Stop(); // Force-stop the hung command
-                throw new TimeoutException($"PowerShell Direct timed out after {InvokeTimeout.TotalSeconds}s — guest may not have pwsh installed or SSH is not responding.");
+                await process.WaitForExitAsync(timeoutCts.Token);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                try { process.Kill(entireProcessTree: true); } catch { }
+                throw new TimeoutException(
+                    $"SSH diagnostics timed out after {SshTimeout.TotalSeconds}s — guest may not have sshd running or network is unreachable.");
+            }
+            catch (OperationCanceledException)
+            {
+                try { process.Kill(entireProcessTree: true); } catch { }
+                throw;
             }
 
-            var results = await invokeTask;
+            string stdoutStr = stdout.ToString();
+            string stderrStr = stderr.ToString();
 
-            if (ps.HadErrors)
+            if (process.ExitCode != 0)
             {
-                string errors = string.Join("; ", ps.Streams.Error.Select(e => e.ToString()));
-                throw new Exception($"PowerShell Direct returned errors: {errors}");
+                string errorDetail = !string.IsNullOrWhiteSpace(stderrStr) ? stderrStr.Trim() : stdoutStr.Trim();
+                _logger.LogWarning("SSH diagnostics command exited with code {ExitCode}: {Error}", process.ExitCode, errorDetail);
+                // Still return whatever output we got — partial diagnostics are better than none
+                if (!string.IsNullOrWhiteSpace(stdoutStr))
+                    return stdoutStr;
+                throw new Exception($"SSH diagnostics failed (exit code {process.ExitCode}): {errorDetail}");
             }
 
-            var sb = new StringBuilder();
-            foreach (var result in results)
-            {
-                sb.AppendLine(result?.ToString());
-            }
-            return sb.ToString();
+            return stdoutStr;
+        }
+
+        /// <summary>
+        /// Discovers the VM's IPv4 address via Get-VMNetworkAdapter.
+        /// </summary>
+        private async Task<string> DiscoverVmIpAsync(string vmName, CancellationToken ct)
+        {
+            using var ps = PowerShell.Create();
+            ps.AddScript($@"
+                $adapters = Get-VMNetworkAdapter -VMName '{vmName.Replace("'", "''")}' -ErrorAction SilentlyContinue
+                foreach ($a in $adapters) {{
+                    foreach ($ip in $a.IPAddresses) {{
+                        if ($ip -match '^\d+\.\d+\.\d+\.\d+$') {{
+                            $ip
+                            return
+                        }}
+                    }}
+                }}
+            ");
+
+            var result = await Task.Run(() => ps.Invoke(), ct);
+            return result.FirstOrDefault()?.ToString();
+        }
+
+        private static string EscapeForSsh(string command)
+        {
+            string escaped = command.Replace("'", "'\\''");
+            return $"'{escaped}'";
         }
 
         /// <summary>

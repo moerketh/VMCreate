@@ -101,6 +101,19 @@ namespace VMCreate
             => throw new NotSupportedException();
     }
 
+    /// <summary>Converts an <see cref="int"/> indent level to a <see cref="Thickness"/> with left margin (level × 32px) and fixed bottom 8px.</summary>
+    public class IndentLevelToMarginConverter : IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        {
+            int level = value is int i ? i : 0;
+            return new Thickness(level * 32, 0, 0, 8);
+        }
+
+        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+            => throw new NotSupportedException();
+    }
+
     /// <summary>Inverts a boolean and converts to Visibility. True→Collapsed, False→Visible.</summary>
     public class InverseBoolToVisibilityConverter : IValueConverter
     {

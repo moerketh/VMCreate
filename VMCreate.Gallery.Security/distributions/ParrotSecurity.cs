@@ -7,19 +7,20 @@ using System.Threading.Tasks;
 
 namespace VMCreate.Gallery
 {
-    public class LoadParrotSecurity : IGalleryLoader
+    public class ParrotSecurity : IGalleryLoader
     {
         private const string BaseUrl = "https://deb.parrot.sh/parrot/iso/7.1/";
+        private const string SymbolUrl = "https://www.parrotsec.org/favicon.png";
         private readonly IHttpClientFactory _clientFactory;
 
-        public LoadParrotSecurity(IHttpClientFactory clientFactory)
+        public ParrotSecurity(IHttpClientFactory clientFactory)
         {
             _clientFactory = clientFactory ?? throw new ArgumentNullException(nameof(clientFactory));
         }
 
         public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
-            var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(LoadParrotSecurity).Assembly, "parrot-logo.svg");
+            var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(ParrotSecurity).Assembly, "parrot-logo.svg");
             var client = _clientFactory.CreateClient();
             client.DefaultRequestHeaders.Add("User-Agent", "VMCreate/1.0");
 
@@ -42,6 +43,7 @@ namespace VMCreate.Gallery
                 throw new Exception("Could not find Security Edition file.");
             }
 
+            // ISO
             if (isoMatch.Success)
             {
                 var filename = isoMatch.Groups[1].Value;
@@ -55,7 +57,7 @@ namespace VMCreate.Gallery
                     Description = $"Parrot Security OS ISO installer, includes a full set of penetration testing tools (version {version})",
                     ThumbnailUri = logoUri,
                     LogoUri = logoUri,
-                    SymbolUri = logoUri,
+                    SymbolUri = SymbolUrl,
                     DiskUri = BaseUrl + filename,
                     ArchiveRelativePath = filename,
                     SecureBoot = "false",
@@ -68,6 +70,7 @@ namespace VMCreate.Gallery
                 });
             }
 
+            //Pre-installed
             if (qcow2Match.Success)
             {
                 var filename = qcow2Match.Groups[1].Value;
@@ -76,12 +79,12 @@ namespace VMCreate.Gallery
 
                 items.Add(new GalleryItem
                 {
-                    Name = "Parrot Security OS (Pre-installed)",
+                    Name = "Parrot Security OS",
                     Publisher = "Parrot Project",
                     Description = $"Parrot Security OS pre-installed disk image, includes a full set of penetration testing tools (version {version})",
                     ThumbnailUri = logoUri,
                     LogoUri = logoUri,
-                    SymbolUri = logoUri,
+                    SymbolUri = SymbolUrl,
                     DiskUri = BaseUrl + filename,
                     ArchiveRelativePath = "",
                     SecureBoot = "false",

@@ -3,13 +3,13 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace VMCreate.Gallery
+namespace VMCreate.Gallery.distributions
 {
     public class PwnCloudOS : IGalleryLoader
     {
         private const string TemplateUrl = "https://download.pwncloudos.pwnedlabs.io/images/pwncloudos-amd64.ova";
         private const string LogoUri = "https://pwncloudos.pwnedlabs.io/hubfs/pwnedlabs-notagline.svg";
-        private const string SymbolUri = "";
+        private const string SymbolUri = LogoUri;
 
         public Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
@@ -29,7 +29,8 @@ namespace VMCreate.Gallery
                 LastUpdated = lastModified.ToString("o"),
                 InitialUsername = "pwnedlabs",
                 InitialPassword = "pwnedlabs",
-                Category = "Security"
+                Category = "Security",
+                IsRecommended = true
             };
             return Task.FromResult(new List<GalleryItem> { galleryItem });
         }
