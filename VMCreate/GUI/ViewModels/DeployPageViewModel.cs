@@ -162,13 +162,13 @@ namespace VMCreate
                     SymbolRegular.Wrench24));
             }
 
-            // Show post-boot card upfront if any post-boot customization was selected
-            if (wizardData.Customizations?.HasPostBootCustomizations == true)
-            {
-                Phases.Add(new DeploymentPhase(PhasePostBoot, "Post-Boot Config",
-                    BuildPostBootDescription(wizardData.Customizations),
-                    SymbolRegular.Settings24));
-            }
+            // Always show the post-boot card — RemoveVBoxGuestAdditionsStep runs
+            // unconditionally, and user-selected options (timezone, VPN) add to it.
+            Phases.Add(new DeploymentPhase(PhasePostBoot, "Post-Boot Config",
+                wizardData.Customizations != null
+                    ? BuildPostBootDescription(wizardData.Customizations)
+                    : "Applying post-boot customizations via SSH",
+                SymbolRegular.Settings24));
 
             Phases.Add(new DeploymentPhase(PhaseDone, "Done",
                 "Virtual machine created successfully!",
