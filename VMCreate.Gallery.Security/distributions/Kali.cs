@@ -10,7 +10,6 @@ namespace VMCreate.Gallery
     public class Kali : IGalleryLoader
     {
         private const string BaseUrl = "https://cdimage.kali.org/current/";
-        private const string LogoUrl = "https://www.kali.org/images/kali-logo.svg";
         private const string SymbolUrl = "https://www.kali.org/images/kali-logo.svg";
         private readonly IHttpClientFactory _clientFactory;
 
@@ -40,7 +39,6 @@ namespace VMCreate.Gallery
             }
 
             var fileName = match.Groups[1].Value;
-            var fileSize = match.Groups[3].Value;
             var date = match.Groups[4].Value;
             var downloadUrl = baseUrl + fileName;
 
@@ -55,12 +53,10 @@ namespace VMCreate.Gallery
             // Create GalleryItem
             var galleryItem = new GalleryItem
             {
-                ArchiveRelativePath = $"kali-linux-{version}-hyperv-amd64\\kali-linux-{version}-hyperv-amd64.vhdx",
                 Name = $"Kali Linux {version}",
                 Description = $"Kali Linux Hyper-V Image ({fileName}) - Released: {date}",
                 Publisher = "OffSec Services Limited",
                 DiskUri = downloadUrl,
-                LogoUri = LogoUrl,
                 SymbolUri = SymbolUrl,
                 LastUpdated = (DateTime.TryParse(date, out var parsedDate) ? parsedDate : DateTime.Now).ToLongDateString(),
                 Version = version,

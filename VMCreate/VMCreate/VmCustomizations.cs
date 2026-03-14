@@ -25,6 +25,13 @@ namespace VMCreate
         public string CustomSshPublicKeyPath { get; set; }
 
         /// <summary>
+        /// When true (default), enable Hyper-V Guest Service Interface and
+        /// Enhanced Session Mode (clipboard, drive redirection, IP discovery).
+        /// Set to false for maximum VM isolation (e.g. malware analysis).
+        /// </summary>
+        public bool EnableIntegrationServices { get; set; } = true;
+
+        /// <summary>
         /// Returns true if any pre-boot customizations are enabled
         /// (i.e. options applied during ISO customization before first boot).
         /// </summary>

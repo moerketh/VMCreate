@@ -14,6 +14,7 @@ namespace VMCreate.Gallery
     public class Debian : IGalleryLoader
     {
         private const string BaseUrl = "https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/";
+        private const string ChecksumUrl = BaseUrl + "SHA256SUMS";
 
         private readonly IHttpClientFactory _clientFactory;
 
@@ -52,10 +53,9 @@ namespace VMCreate.Gallery
                 Publisher   = "The Debian Project",
                 Description = $"Debian is a universal, community-driven Linux distribution renowned for its stability, security, and immense software repository. This is the amd64 network-install ISO for the current stable release (version {version}).",
                 ThumbnailUri = logoUri,
-                LogoUri      = logoUri,
                 SymbolUri    = logoUri,
                 DiskUri      = BaseUrl + filename,
-                ArchiveRelativePath = "",
+                ChecksumUri  = ChecksumUrl,
                 SecureBoot   = "false",
                 EnhancedSessionTransportType = "HvSocket",
                 Version      = version,

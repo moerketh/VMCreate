@@ -9,7 +9,7 @@ namespace VMCreate.Tests.GalleryTests
 {
     /// <summary>
     /// End-to-end integration tests that call real loaders against live servers,
-    /// then verify every returned URL (DiskUri, ThumbnailUri, LogoUri, SymbolUri)
+    /// then verify every returned URL (DiskUri, ThumbnailUri, SymbolUri)
     /// responds with a non-error HTTP status (HEAD request).
     ///
     /// Run with:  dotnet test --filter TestCategory=Integration
@@ -82,7 +82,7 @@ namespace VMCreate.Tests.GalleryTests
         }
 
         /// <summary>
-        /// Verifies DiskUri, ThumbnailUri, LogoUri and SymbolUri for every item
+        /// Verifies DiskUri, ThumbnailUri and SymbolUri for every item
         /// returned by the loader, all in parallel.
         /// </summary>
         private static async Task VerifyAllUrisAsync(List<GalleryItem> items, string loaderName)
@@ -96,7 +96,6 @@ namespace VMCreate.Tests.GalleryTests
                 var n = $"{loaderName}[{item.Name}]";
                 checks.Add(AssertUriRespondsAsync(item.DiskUri,      $"{n}.DiskUri"));
                 checks.Add(AssertUriRespondsAsync(item.ThumbnailUri, $"{n}.ThumbnailUri"));
-                checks.Add(AssertUriRespondsAsync(item.LogoUri,      $"{n}.LogoUri"));
                 checks.Add(AssertUriRespondsAsync(item.SymbolUri,    $"{n}.SymbolUri"));
             }
             await Task.WhenAll(checks);
@@ -143,16 +142,10 @@ namespace VMCreate.Tests.GalleryTests
                 nameof(Kali));
 
         [TestMethod, Timeout(120_000)]
-        public async Task LoadParrotHome_AllUrisResolve()
+        public async Task LoadParrot_AllUrisResolve()
             => await VerifyAllUrisAsync(
-                await new ParrotHome(_factory).LoadGalleryItems(),
-                nameof(ParrotHome));
-
-        [TestMethod, Timeout(120_000)]
-        public async Task LoadParrotSecurity_AllUrisResolve()
-            => await VerifyAllUrisAsync(
-                await new ParrotSecurity(_factory).LoadGalleryItems(),
-                nameof(ParrotSecurity));
+                await new Parrot(_factory).LoadGalleryItems(),
+                nameof(Parrot));
 
         [TestMethod, Timeout(120_000), Ignore("ClearLinux infrastructure (clearlinux.org/cdn.download.clearlinux.org) has been discontinued by Intel")]
         public async Task ClearLinux_AllUrisResolve()

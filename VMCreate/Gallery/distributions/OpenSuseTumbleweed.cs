@@ -14,6 +14,7 @@ namespace VMCreate.Gallery
     {
         // This URL 302-redirects to the latest Tumbleweed NET installer ISO.
         private const string IsoUrl = "https://download.opensuse.org/tumbleweed/iso/openSUSE-Tumbleweed-NET-x86_64-Current.iso";
+        private const string ChecksumUrl = IsoUrl + ".sha256";
         public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
             var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(OpenSuseTumbleweed).Assembly, "opensuse-logo.svg");
@@ -23,10 +24,9 @@ namespace VMCreate.Gallery
                 Publisher   = "SUSE / openSUSE Project",
                 Description = "openSUSE Tumbleweed is a rolling-release Linux distribution delivering the latest stable kernel, libraries and desktop environments. The NET installer fetches packages at setup time, ensuring a fully up-to-date system.",
                 ThumbnailUri = logoUri,
-                LogoUri      = logoUri,
                 SymbolUri    = logoUri,
                 DiskUri      = IsoUrl,
-                ArchiveRelativePath = "",
+                ChecksumUri  = ChecksumUrl,
                 SecureBoot   = "false",
                 EnhancedSessionTransportType = "HvSocket",
                 Version      = "Tumbleweed",

@@ -257,10 +257,11 @@ namespace VMCreate.Tests.GalleryTests
                 Assert.AreEqual("2024-01-01", item.LastUpdated);
                 Assert.AreEqual("Desc", item.Description);
                 Assert.AreEqual("https://example.com/thumb.png", item.ThumbnailUri);
-                Assert.AreEqual("https://example.com/logo.png", item.LogoUri);
                 Assert.AreEqual("https://example.com/sym.png", item.SymbolUri);
                 Assert.AreEqual("https://example.com/disk.vhdx", item.DiskUri);
+#pragma warning disable CS0618
                 Assert.AreEqual("inner/disk.vhd", item.ArchiveRelativePath);
+#pragma warning restore CS0618
                 Assert.AreEqual("true", item.SecureBoot);
                 Assert.AreEqual("HvSocket", item.EnhancedSessionTransportType);
             }
@@ -413,6 +414,60 @@ namespace VMCreate.Tests.GalleryTests
             {
                 // Correct — test passes.
             }
+        }
+    }
+
+    /// <summary>
+    /// Tests for <see cref="GalleryItem.FileType"/> property derivation from DiskUri.
+    /// </summary>
+    [TestClass]
+    public sealed class GalleryItemFileTypeTests
+    {
+        [DataTestMethod]
+        [DataRow("https://example.com/disk.vmdk", "VMDK")]
+        [DataRow("https://example.com/disk.vmdk.xz", "VMDK")]
+        [DataRow("https://example.com/disk.vmdk.gz", "VMDK")]
+        [DataRow("https://example.com/disk.qcow2", "QCOW2")]
+        [DataRow("https://example.com/disk.vhdx", "VHDX")]
+        [DataRow("https://example.com/disk.vhd", "VHD")]
+        [DataRow("https://example.com/install.iso", "ISO")]
+        [DataRow("https://example.com/image.ova", "OVA")]
+        [DataRow("https://example.com/image.zip", "Archive")]
+        [DataRow("https://example.com/image.7z", "Archive")]
+        [DataRow("https://example.com/image.tar", "Archive")]
+        [DataRow("https://example.com/readme.txt", "Other")]
+        public void FileType_DerivesFromDiskUri(string diskUri, string expected)
+        {
+            var item = new GalleryItem { DiskUri = diskUri };
+            Assert.AreEqual(expected, item.FileType);
+        }
+
+        [TestMethod]
+        public void FileType_NullDiskUri_ReturnsUnknown()
+        {
+            var item = new GalleryItem { DiskUri = null };
+            Assert.AreEqual("Unknown", item.FileType);
+        }
+
+        [TestMethod]
+        public void FileType_EmptyDiskUri_ReturnsUnknown()
+        {
+            var item = new GalleryItem { DiskUri = "" };
+            Assert.AreEqual("Unknown", item.FileType);
+        }
+
+        [TestMethod]
+        public void FileType_IgnoresObsoleteArchiveRelativePath()
+        {
+            // Even when ArchiveRelativePath is set, FileType should derive from DiskUri
+#pragma warning disable CS0618
+            var item = new GalleryItem
+            {
+                DiskUri = "https://example.com/image.ova",
+                ArchiveRelativePath = "disk.vmdk"
+            };
+#pragma warning restore CS0618
+            Assert.AreEqual("OVA", item.FileType);
         }
     }
 }

@@ -12,15 +12,19 @@ namespace VMCreate
         private readonly string _qemuFileLocation;
         private readonly string _extractPath;
         private readonly IDownloader _downloader;
+        private readonly IChecksumVerifier _checksumVerifier;
         private readonly IExtractor _extractor;
+        private readonly DiskFileDetector _diskFileDetector;
         private readonly IVmCreator _vmCreator;
         private readonly ILogger<CreateVM> _logger;
         private bool _useCache = true;
 
-        public CreateVM(IDownloader downloader, IExtractor extractor, IVmCreator vmCreator, ILogger<CreateVM> logger, IOptions<AppSettings> options)
+        public CreateVM(IDownloader downloader, IChecksumVerifier checksumVerifier, IExtractor extractor, DiskFileDetector diskFileDetector, IVmCreator vmCreator, ILogger<CreateVM> logger, IOptions<AppSettings> options)
         {
             _downloader = downloader ?? throw new ArgumentNullException(nameof(downloader));
+            _checksumVerifier = checksumVerifier ?? throw new ArgumentNullException(nameof(checksumVerifier));
             _extractor = extractor ?? throw new ArgumentNullException(nameof(extractor));
+            _diskFileDetector = diskFileDetector ?? throw new ArgumentNullException(nameof(diskFileDetector));
             _vmCreator = vmCreator ?? throw new ArgumentNullException(nameof(vmCreator));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             var settings = options?.Value ?? new AppSettings();
@@ -40,22 +44,42 @@ namespace VMCreate
                     throw new Exception("Please install QEMU to support disk image conversion.");
                 }
 
-                _logger.LogInformation("Starting VM creation for {VMName}", vmSettings.VMName);
-
                 // Download file
                 createVmProgressInfo.Report(new CreateVMProgressInfo { Phase = "Download" });
                 filename = await _downloader.DownloadFileAsync(galleryItem.DiskUri, cancellationToken, createVmProgressInfo, _useCache);
                 _logger.LogInformation("Downloaded file {FileName}", filename);
 
-                // Extract if needed
-                if (galleryItem.FileType is not ("ISO" or "QCOW2"))
+                // Verify checksum if configured (inline hash takes precedence over URI)
+                if (!string.IsNullOrEmpty(galleryItem.Checksum))
+                {
+                    await _checksumVerifier.VerifyInlineAsync(
+                        filename, galleryItem.Checksum, galleryItem.ChecksumAlgorithm,
+                        cancellationToken, createVmProgressInfo);
+                }
+                else if (!string.IsNullOrEmpty(galleryItem.ChecksumUri))
+                {
+                    await _checksumVerifier.VerifyAsync(
+                        filename, galleryItem.ChecksumUri, galleryItem.ChecksumAlgorithm,
+                        cancellationToken, createVmProgressInfo);
+                }
+
+                // Extract if needed — archives (OVA, ZIP, 7Z, etc.) and compressed disks (vmdk.xz)
+                // need extraction. ISO and QCOW2 are used directly.
+                bool needsExtraction = galleryItem.FileType is not ("ISO" or "QCOW2" or "VHDX" or "VHD");
+                if (needsExtraction)
                 {
                     createVmProgressInfo.Report(new CreateVMProgressInfo { Phase = "Extract" });
                     await Task.Run(() => _extractor.Extract(filename, _extractPath, cancellationToken, createVmProgressInfo));
                     _logger.LogInformation("Extracted file to {ExtractPath}", _extractPath);
 
-                    // Create VM
-                    await _vmCreator.CreateVMAsync(vmSettings, vmCustomizations, Path.Combine(_extractPath, galleryItem.ArchiveRelativePath ?? throw new Exception("ArchiveRelativePath is null")), galleryItem, cancellationToken, createVmProgressInfo);
+                    // Auto-detect the disk file inside the extracted directory.
+                    // Handles nested archives (e.g. OVA inside ZIP) automatically.
+                    string diskFile = await Task.Run(() =>
+                        _diskFileDetector.FindDiskFile(_extractPath, cancellationToken, createVmProgressInfo));
+                    _logger.LogInformation("Detected disk file {DiskFile}", diskFile);
+
+                    // Create VM using the detected disk file's actual type
+                    await _vmCreator.CreateVMAsync(vmSettings, vmCustomizations, diskFile, galleryItem, cancellationToken, createVmProgressInfo);
                     _logger.LogInformation("Successfully created VM {VMName}", vmSettings.VMName);
                 }
                 else

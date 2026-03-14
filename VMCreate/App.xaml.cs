@@ -41,6 +41,7 @@ namespace VMCreate
             services.AddTransient<IHttpStreamProvider, HttpStreamProvider>();
             services.AddTransient<IStreamCopierWithProgress, StreamCopierWithProgress>();
             services.AddTransient<IDownloader, HttpFileDownloader>();
+            services.AddTransient<IChecksumVerifier, ChecksumVerifier>();
 
             // ── Hyper-V / VM plumbing ───────────────────────────────────────
             services.AddSingleton<IHyperVManager, PowerShellHyperVManager>();
@@ -60,6 +61,7 @@ namespace VMCreate
                 provider.GetRequiredService<XzFileExtractor>(),
                 provider.GetRequiredService<ArchiveExtractor>(),
                 provider.GetRequiredService<ILogger<ExtractorFactory>>()));
+            services.AddTransient<DiskFileDetector>();
 
             // ── Gallery ─────────────────────────────────────────────────────
             // Assemblies to scan for auto-discovered implementations

@@ -53,17 +53,10 @@ namespace VMCreate
                     rawFileName = new string(rawFileName.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c).ToArray());
                     filePath = Path.Combine(Path.GetTempPath(), rawFileName);
 
-                    _logger.LogInformation("Final URI after redirects: {FinalUri}", finalUri);
-                    if (contentLength.HasValue)
-                        _logger.LogInformation("Content-Length: {ContentLength} bytes", contentLength.Value);
-
                     var (writeStream, isCached) = await _fileStreamProvider.GetWriteStreamAsync(filePath, useCache);
 
                     if (isCached)
-                    {
-                        _logger.LogInformation("Using cached file: {FilePath}", filePath);
                         return filePath;
-                    }
 
                     var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken);
 

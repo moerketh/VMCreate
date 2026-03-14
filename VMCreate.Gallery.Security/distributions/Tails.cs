@@ -64,11 +64,8 @@ namespace VMCreate.Gallery
                 Description = $"Tails is a portable OS that protects against surveillance and censorship. " +
                               $"It routes all internet connections through Tor and leaves no trace on the host machine (version {version}).",
                 ThumbnailUri = logoUri,
-                LogoUri = logoUri,
                 SymbolUri = logoUri,
                 DiskUri = imgUrl,
-                ArchiveRelativePath = null,
-                SecureBoot = "false",
                 EnhancedSessionTransportType = "HvSocket",
                 Version = version,
                 LastUpdated = DateTime.UtcNow.ToString("o"),

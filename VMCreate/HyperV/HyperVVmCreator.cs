@@ -94,7 +94,14 @@ namespace VMCreate
                     await ReplacePreviousVmAsync(vmSettings, cancellationToken);
                 }
                     
-                IMediaHandler mediaHandler = _mediaHandlerFactory.CreateHandler(item.FileType);
+                // Determine the media type from the actual file on disk rather than
+                // the gallery item's DiskUri.  After extraction the sourceFile points at
+                // the real disk (e.g. a .vmdk extracted from an OVA).
+                string actualFileType = DiskFileDetector.DetectFileType(sourceFile);
+                if (actualFileType is "Unknown" or "Other")
+                    actualFileType = item.FileType;  // fallback to gallery metadata
+
+                IMediaHandler mediaHandler = _mediaHandlerFactory.CreateHandler(actualFileType);
                 string mediaPath = await mediaHandler.PrepareMediaAsync(sourceFile, _defaultVhdxPath, vmSettings, item, createVMProgressInfo, cancellationToken);
 
                 bool isIsoMedia = mediaHandler is IsoMediaHandler;
@@ -116,7 +123,8 @@ namespace VMCreate
                     await _hyperVManager.SetCpuCount(vmSettings, cancellationToken);
                     await _hyperVManager.DisableDynamicMemory(vmSettings, cancellationToken);
                     await _hyperVManager.SetSecureBoot(vmSettings, cancellationToken);
-                    await _hyperVManager.EnableGuestServices(vmSettings, cancellationToken);
+                    if (vmCustomizations.EnableIntegrationServices)
+                        await _hyperVManager.EnableGuestServices(vmSettings, cancellationToken);
 
                     // Create an empty boot disk for the installer to target
                     await _hyperVManager.AddNewHardDrive(vmSettings, _defaultVhdxPath, cancellationToken);
@@ -131,7 +139,8 @@ namespace VMCreate
                     createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "StartVM" });
                     await _hyperVManager.StartVM(vmSettings, cancellationToken);
 
-                    await _hyperVManager.SetEnhancedSession(vmSettings, cancellationToken);
+                    if (vmCustomizations.EnableIntegrationServices)
+                        await _hyperVManager.SetEnhancedSession(vmSettings, cancellationToken);
 
                     // ISO flow is done — the user completes the installation interactively.
                     return;
@@ -154,7 +163,8 @@ namespace VMCreate
                 await _hyperVManager.SetCpuCount(vmSettings, cancellationToken);
                 await _hyperVManager.DisableDynamicMemory(vmSettings, cancellationToken);
                 await _hyperVManager.SetSecureBoot(vmSettings, cancellationToken);
-                await _hyperVManager.EnableGuestServices(vmSettings, cancellationToken);
+                if (vmCustomizations.EnableIntegrationServices)
+                    await _hyperVManager.EnableGuestServices(vmSettings, cancellationToken);
 
                 if (detectedGeneration == 2)
                 {
@@ -278,7 +288,12 @@ namespace VMCreate
                     }
 
                     if (vmCustomizations.ConfigureXrdp)
+                    {
                         await _kvpSender.SendKVPToGuestAsync(vmSettings.VMName, "VMCREATE_XRDP", "true", cancellationToken);
+
+                        if (!string.IsNullOrEmpty(item.InitialUsername))
+                            await _kvpSender.SendKVPToGuestAsync(vmSettings.VMName, "VMCREATE_XRDP_USERNAME", item.InitialUsername, cancellationToken);
+                    }
 
                     // ── Monitor ISO progress and wait for shutdown ─────────────
                     const int shutdownTimeoutSeconds = 600;
@@ -355,7 +370,8 @@ namespace VMCreate
                     // Set hard drive as first boot device now that DVD and old disk are removed
                     await _hyperVManager.SetFirstBootToHardDrive(vmSettings, cancellationToken);
                 }
-                await _hyperVManager.SetEnhancedSession(vmSettings, cancellationToken);
+                if (vmCustomizations.EnableIntegrationServices)
+                    await _hyperVManager.SetEnhancedSession(vmSettings, cancellationToken);
 
                 // ── Post-boot: collect autorun log + run step pipeline ────
                 var postBootSteps = _customizationSteps

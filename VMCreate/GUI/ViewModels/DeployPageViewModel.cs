@@ -122,8 +122,8 @@ namespace VMCreate
         private void BuildPhaseList(WizardData wizardData)
         {
             string fileType = wizardData.SelectedItem?.FileType ?? "Unknown";
-            bool needsExtraction = fileType is not ("ISO" or "QCOW2");
-            bool needsConversion = fileType is "VMDK" or "QCOW2";
+            bool needsExtraction = fileType is not ("ISO" or "QCOW2" or "VHDX" or "VHD");
+            bool needsConversion = fileType is "VMDK" or "QCOW2" or "OVA" or "Archive";
             bool nestedVirt = wizardData.Settings?.VirtualizationEnabled ?? true;
 
             Phases.Add(new DeploymentPhase(PhaseDownload, "Download",
@@ -283,6 +283,26 @@ namespace VMCreate
         {
             var phase = FindPhase(id);
             if (phase == null) return;
+
+            // When activating a sub-step, also activate its parent phase
+            // so the UI shows both as in-progress (e.g. "Clone Disk" under "Pre-Boot Customizations").
+            if (phase.IndentLevel > 0)
+            {
+                int idx = Phases.IndexOf(phase);
+                for (int i = idx - 1; i >= 0; i--)
+                {
+                    if (Phases[i].IndentLevel < phase.IndentLevel)
+                    {
+                        if (Phases[i].Status == DeploymentPhaseStatus.Pending)
+                        {
+                            Phases[i].Status = DeploymentPhaseStatus.Active;
+                            Phases[i].IsIndeterminate = true;
+                        }
+                        break;
+                    }
+                }
+            }
+
             phase.Status = DeploymentPhaseStatus.Active;
             phase.IsIndeterminate = true;
             _logger.LogDebug("Phase activated: {Phase}", id);

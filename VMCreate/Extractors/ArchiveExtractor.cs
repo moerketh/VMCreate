@@ -39,46 +39,60 @@ namespace VMCreate
 
                 SetupExtractDirectory(extractPath, _logger);
 
-                string filePart = "";
-                double bytesRead = 0;
-                double totalBytesRead = 0;
-
-                using (var archive = ArchiveFactory.Open(filePath))
+                using (var archive = ArchiveFactory.OpenArchive(filePath))
                 {
-                    archive.FilePartExtractionBegin += (sender, e) =>
-                    {
-                        filePart = e.Name;
-                        totalBytesRead += bytesRead;
-                        _logger.LogDebug("Extracting archive file part {FilePart}", filePart);
-                    };
+                    var totalSize = archive.TotalUncompressedSize;
+                    long cumulativeBytes = 0;
 
-                    archive.CompressedBytesRead += (sender, e) =>
+                    var entryProgress = new Progress<ProgressReport>(report =>
                     {
-                        var progress = archive.TotalUncompressSize > 0
-                            ? (((double)e.CompressedBytesRead + totalBytesRead) / (double)archive.TotalUncompressSize) * 100
-                            : 0;
-                        progressReportInfo.Report(new CreateVMProgressInfo
+                        if (report.PercentComplete.HasValue)
                         {
-                            Phase = "Extracting Archive...",
-                            URI = Path.Combine(extractPath, filePart),
-                            DownloadSpeed = -1,
-                            ProgressPercentage = Convert.ToInt32(progress)
-                        });
-                        bytesRead = e.CompressedBytesRead;
+                            // Estimate overall progress from cumulative bytes + current entry progress
+                            var entryBytes = report.BytesTransferred;
+                            var overall = totalSize > 0
+                                ? ((double)(cumulativeBytes + entryBytes) / totalSize) * 100
+                                : 0;
+                            progressReportInfo.Report(new CreateVMProgressInfo
+                            {
+                                Phase = "Extracting Archive...",
+                                URI = Path.Combine(extractPath, report.EntryPath ?? ""),
+                                DownloadSpeed = -1,
+                                ProgressPercentage = Convert.ToInt32(Math.Min(overall, 100))
+                            });
+                        }
                         cancellationToken.ThrowIfCancellationRequested();
-                    };
+                    });
 
                     foreach (var entry in archive.Entries)
                     {
                         if (!entry.IsDirectory)
                         {
                             cancellationToken.ThrowIfCancellationRequested();
-                            _logger.LogDebug("Writing archive entry {EntryKey} to {ExtractPath}", entry.Key, extractPath);
-                            entry.WriteToDirectory(extractPath, new ExtractionOptions
+
+                            if (entry.Key == null)
                             {
-                                ExtractFullPath = true,
-                                Overwrite = true
-                            });
+                                // Single-file compressors (e.g. gzip) don't store a filename.
+                                // Derive the output name from the archive path by stripping the
+                                // compression extension (e.g. disk.vmdk.gz → disk.vmdk).
+                                string outputName = Path.GetFileNameWithoutExtension(filePath);
+                                string outputPath = Path.Combine(extractPath, outputName);
+                                _logger.LogDebug("Writing keyless archive entry as {OutputPath}", outputPath);
+                                using var entryStream = entry.OpenEntryStream();
+                                using var fileStream = File.Create(outputPath);
+                                entryStream.CopyTo(fileStream);
+                            }
+                            else
+                            {
+                                _logger.LogDebug("Writing archive entry {EntryKey} to {ExtractPath}", entry.Key, extractPath);
+                                entry.WriteToDirectory(extractPath, new ExtractionOptions
+                                {
+                                    ExtractFullPath = true,
+                                    Overwrite = true
+                                });
+                            }
+
+                            cumulativeBytes += entry.Size;
                         }
                     }
                 }

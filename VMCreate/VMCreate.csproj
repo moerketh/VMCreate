@@ -20,12 +20,14 @@
     <Compile Include="AssemblyInfo.cs" />
     <Compile Include="VMCreate\CreateVM.cs" />
     <Compile Include="VMCreate\CreateVMProgressInfo.cs" />
+    <Compile Include="Downloaders\ChecksumVerifier.cs" />
     <Compile Include="Downloaders\FileStreamProvider.cs" />
     <Compile Include="Downloaders\HttpFileDownloader.cs" />
     <Compile Include="Downloaders\HttpStreamProvider.cs" />
     <Compile Include="Downloaders\StreamCopierWithProgress .cs" />
     <Compile Include="Downloaders\StreamCopier.cs" />
     <Compile Include="Extractors\ArchiveExtractor.cs" />
+    <Compile Include="Extractors\DiskFileDetector.cs" />
     <Compile Include="Extractors\ExtractorFactory.cs" />
     <Compile Include="Extractors\IExtractor.cs" />
     <Compile Include="Extractors\XzFileExtractor.cs" />
@@ -69,9 +71,11 @@
     <Compile Include="HyperV\SshKeyManager.cs" />
     <Compile Include="HyperV\HtbApiClient.cs" />
     <Compile Include="HyperV\SshGuestShell.cs" />
+    <Compile Include="HyperV\Steps\RemoveVBoxGuestAdditionsStep.cs" />
     <Compile Include="HyperV\Steps\SyncTimezoneStep.cs" />
     <Compile Include="HyperV\Steps\InstallOpenVpnStep.cs" />
     <Compile Include="HyperV\Steps\DeployVpnConfigsStep.cs" />
+    <Compile Include="HyperV\Steps\DisableSshStep.cs" />
     <Compile Include="HyperV\IHyperVManagerRoles.cs" />
     <Compile Include="HyperV\PowerShellHyperVManager.cs" />
     <Compile Include="HyperV\HyperVVmCreator.cs" />
@@ -147,16 +151,16 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.7" />
-    <PackageReference Include="Microsoft.Extensions.Http" Version="9.0.7" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.5" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.5" />
     <PackageReference Include="Microsoft.PowerShell.SDK" Version="7.4.11" />
-    <PackageReference Include="Serilog.Extensions.Logging" Version="9.0.2" />
+    <PackageReference Include="Serilog.Extensions.Logging" Version="10.0.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
-    <PackageReference Include="SharpCompress" Version="0.40.0" />
-    <PackageReference Include="SharpVectors" Version="1.8.4.2" />
+    <PackageReference Include="SharpCompress" Version="0.47.0" />
+    <PackageReference Include="SharpVectors" Version="1.8.5" />
     <PackageReference Include="WPF-UI" Version="4.2.0" />
     <PackageReference Include="XZ.NET-netstandard" Version="2.0.0.2" />
-    <PackageReference Include="ZstdSharp.Port" Version="0.8.6" />
+    <PackageReference Include="ZstdSharp.Port" Version="0.8.7" />
   </ItemGroup>
 
   <ItemGroup>

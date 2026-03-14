@@ -26,7 +26,26 @@ namespace VMCreate.Gallery
             // Run all loaders in parallel; individual failures are isolated and logged
             var tasks = _loaders.Select(loader => LoadFromSingleLoader(loader, cancellationToken));
             var results = await Task.WhenAll(tasks);
-            return results.SelectMany(r => r).ToList();
+            return DeduplicateByDiskUri(results.SelectMany(r => r));
+        }
+
+        /// <summary>
+        /// Multiple loaders may return items with the same DiskUri (e.g. the Microsoft gallery URL
+        /// appears both in LoadFromMicrosoftURI and in the registry GalleryLocations). Keep only the
+        /// first occurrence so the UI doesn't show duplicates.
+        /// </summary>
+        private List<GalleryItem> DeduplicateByDiskUri(IEnumerable<GalleryItem> items)
+        {
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var result = new List<GalleryItem>();
+            foreach (var item in items)
+            {
+                if (string.IsNullOrEmpty(item.DiskUri) || seen.Add(item.DiskUri))
+                    result.Add(item);
+                else
+                    _logger.LogDebug("Skipping duplicate gallery item: {DiskUri}", item.DiskUri);
+            }
+            return result;
         }
 
         /// <summary>
@@ -38,6 +57,7 @@ namespace VMCreate.Gallery
             Action<List<GalleryItem>> onBatch,
             CancellationToken cancellationToken = default)
         {
+            var seenUris = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var pending = _loaders
                 .Select(loader => LoadFromSingleLoader(loader, cancellationToken))
                 .ToList();
@@ -47,8 +67,10 @@ namespace VMCreate.Gallery
                 var completed = await Task.WhenAny(pending).ConfigureAwait(false);
                 pending.Remove(completed);
                 var items = await completed;
-                if (items.Count > 0)
-                    onBatch(items);
+                // Filter out items whose DiskUri was already emitted by a previous batch
+                var unique = items.Where(i => string.IsNullOrEmpty(i.DiskUri) || seenUris.Add(i.DiskUri)).ToList();
+                if (unique.Count > 0)
+                    onBatch(unique);
             }
         }
 

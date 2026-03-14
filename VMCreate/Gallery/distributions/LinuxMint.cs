@@ -14,6 +14,7 @@ namespace VMCreate.Gallery
     {
         private const string PinnedVersion = "22.1";
         private const string IsoUrl = "https://mirrors.edge.kernel.org/linuxmint/stable/22.1/linuxmint-22.1-cinnamon-64bit.iso";
+        private const string ChecksumUrl = "https://mirrors.edge.kernel.org/linuxmint/stable/22.1/sha256sum.txt";
         public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
             var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(LinuxMint).Assembly, "linuxmint-logo.svg");
@@ -23,10 +24,9 @@ namespace VMCreate.Gallery
                 Publisher   = "Linux Mint Project",
                 Description = $"Linux Mint is a user-friendly, Ubuntu-based distribution featuring the Cinnamon desktop. Ideal for users migrating from Windows, it emphasises ease of use, stability and out-of-the-box multimedia support (version {PinnedVersion}).",
                 ThumbnailUri = logoUri,
-                LogoUri      = logoUri,
                 SymbolUri    = logoUri,
                 DiskUri      = IsoUrl,
-                ArchiveRelativePath = "",
+                ChecksumUri  = ChecksumUrl,
                 SecureBoot   = "false",
                 EnhancedSessionTransportType = "HvSocket",
                 Version      = PinnedVersion,

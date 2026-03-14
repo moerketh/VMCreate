@@ -53,7 +53,7 @@ namespace VMCreate.Gallery
                         }
                         else
                         {
-                            _logger.LogError("Invalid local path: {Location}", location);
+                            _logger.LogWarning("Gallery location path not found, skipping: {Location}", location);
                         }
                     }
                 }

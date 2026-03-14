@@ -63,7 +63,7 @@ namespace VMCreate.Gallery
                 Publisher   = "Pentoo Project",
                 Description = "Pentoo is a Live CD and Live USB designed for penetration testing and " +
                               "security assessment. Based off Gentoo Linux.",
-                LogoUri                     = logoUri,
+                SymbolUri                   = logoUri,
                 DiskUri                     = SymlinkUrl,
                 SecureBoot                  = "false",
                 EnhancedSessionTransportType = "HvSocket",

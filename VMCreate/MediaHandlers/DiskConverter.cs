@@ -84,6 +84,27 @@ namespace VMCreate
                     destRoot, driveInfo.AvailableFreeSpace / (1024 * 1024), requiredBytes / (1024 * 1024));
             }
 
+            // Log qemu-img version for diagnostics
+            try
+            {
+                var versionInfo = new ProcessStartInfo
+                {
+                    FileName = _qemuImgPath,
+                    Arguments = "--version",
+                    RedirectStandardOutput = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                using var vProc = Process.Start(versionInfo);
+                var versionLine = await Task.Run(() => vProc.StandardOutput.ReadLine());
+                vProc.WaitForExit();
+                _logger.LogInformation("Using {QemuVersion}", versionLine);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not determine qemu-img version");
+            }
+
             //string tmpDestinationPath = destinationPath + ".tmp";
             try
             {

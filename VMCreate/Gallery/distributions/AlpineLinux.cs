@@ -15,6 +15,7 @@ namespace VMCreate.Gallery
     {
         private const string PinnedVersion = "3.21.3";
         private const string IsoUrl = "https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/x86_64/alpine-virt-3.21.3-x86_64.iso";
+        private const string ChecksumUrl = IsoUrl + ".sha256";
         public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
             var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(AlpineLinux).Assembly, "alpine-logo.svg");
@@ -24,10 +25,9 @@ namespace VMCreate.Gallery
                 Publisher   = "Alpine Linux Development Team",
                 Description = $"Alpine Linux is a security-oriented, lightweight distribution built around musl libc and BusyBox. The virt flavour is stripped to the minimum for use in virtual machines, making it ideal for containers and low-resource setups (version {PinnedVersion}).",
                 ThumbnailUri = logoUri,
-                LogoUri      = logoUri,
                 SymbolUri    = logoUri,
                 DiskUri      = IsoUrl,
-                ArchiveRelativePath = "",
+                ChecksumUri  = ChecksumUrl,
                 SecureBoot   = "false",
                 EnhancedSessionTransportType = "HvSocket",
                 Version      = PinnedVersion,

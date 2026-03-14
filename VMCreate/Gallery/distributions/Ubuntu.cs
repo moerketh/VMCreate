@@ -15,7 +15,6 @@ namespace VMCreate.Gallery
         const string NobleCurrent = BaseUri + "noble/release/current/ubuntu-noble-hyperv-amd64-ubuntu-desktop-hyperv.vhdx.zip";
         const string ThumbnailUri = BaseUri + "/bionic/ubuntu_thumbnail.jpg";
         const string SymbolUri = "";
-        const string LogoUri = BaseUri + "bionic/ubuntu_logo.png";
         private readonly ILogger<Ubuntu> _logger;
         private readonly IHttpClientFactory _clientFactory;
 
@@ -42,7 +41,6 @@ namespace VMCreate.Gallery
                     Description = "The open source desktop operating system that powers millions of PCs and laptops around the world.",
                     ThumbnailUri = ThumbnailUri,
                     SymbolUri = SymbolUri,
-                    LogoUri = LogoUri,
                     DiskUri = JammyCurrent,
                     SecureBoot = "false",
                     EnhancedSessionTransportType = "HvSocket",
@@ -56,7 +54,6 @@ namespace VMCreate.Gallery
                     Description = "The open source desktop operating system that powers millions of PCs and laptops around the world.",
                     ThumbnailUri = ThumbnailUri,
                     SymbolUri = SymbolUri,
-                    LogoUri = LogoUri,
                     DiskUri = NobleCurrent,
                     SecureBoot = "false",
                     EnhancedSessionTransportType = "HvSocket",

@@ -34,6 +34,7 @@ namespace VMCreate
         private bool _syncTimezone;
         private bool _useCustomSshKey;
         private string _customSshPublicKeyPath;
+        private bool _enableIntegrationServices = true;
 
         /// <summary>Raised when the wizard should complete (Finished or Canceled).</summary>
         public event Action<WizardResult> RequestWizardComplete;
@@ -115,6 +116,12 @@ namespace VMCreate
             set => SetProperty(ref _customSshPublicKeyPath, value);
         }
 
+        public bool EnableIntegrationServices
+        {
+            get => _enableIntegrationServices;
+            set => SetProperty(ref _enableIntegrationServices, value);
+        }
+
         public bool IsSshKeyPathEnabled => _useCustomSshKey;
 
         /// <summary>True when the selected image is not in VHDX format (requires conversion).</summary>
@@ -137,10 +144,11 @@ namespace VMCreate
                 _downloadedKeys.Count > 0 || !string.IsNullOrEmpty(_ovpnFilePath);
             _wizardData.Customizations.SyncTimezone = _syncTimezone;
             _wizardData.Customizations.CustomSshPublicKeyPath = _useCustomSshKey ? _customSshPublicKeyPath : null;
+            _wizardData.Customizations.EnableIntegrationServices = _enableIntegrationServices;
 
             _logger.LogDebug(
-                "Finished customization: ConfigureXrdp={Xrdp}, HtbVpnKeys={KeyCount}, ManualOvpn={ManualPath}, SyncTimezone={Tz}, CustomKey={Key}",
-                _configureXrdp, _downloadedKeys.Count, _ovpnFilePath, _syncTimezone, _useCustomSshKey);
+                "Finished customization: ConfigureXrdp={Xrdp}, HtbVpnKeys={KeyCount}, ManualOvpn={ManualPath}, SyncTimezone={Tz}, CustomKey={Key}, IntegrationServices={IntSvc}",
+                _configureXrdp, _downloadedKeys.Count, _ovpnFilePath, _syncTimezone, _useCustomSshKey, _enableIntegrationServices);
 
             RequestWizardComplete?.Invoke(WizardResult.Finished);
         }

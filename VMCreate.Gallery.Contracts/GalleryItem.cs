@@ -9,70 +9,85 @@ namespace VMCreate
         public string Publisher { get; set; }
         public string Description { get; set; }
         public string ThumbnailUri { get; set; }
-        public string LogoUri { get; set; }
         public string DiskUri { get; set; }
         public string SymbolUri { get; set; }
+        [Obsolete("Set is no longer needed. Disk files are auto-detected after extraction. " +
+                 "Existing values are ignored by the extraction pipeline.")]
         public string ArchiveRelativePath { get; set; }
         public string SecureBoot { get; set; }
         public string EnhancedSessionTransportType { get; set; }
         public string Version { get; set; }
         public string LastUpdated { get; set; }
 
+        /// <summary>
+        /// Infers the download type from <see cref="DiskUri"/>.
+        /// For archives (OVA, ZIP, 7Z) the actual disk type is unknown until extraction;
+        /// use <see cref="DiskFileDetector.DetectFileType"/> on the extracted file instead.
+        /// </summary>
         public string FileType
         {
             get
             {
-                string path = !string.IsNullOrEmpty(ArchiveRelativePath) ? ArchiveRelativePath : DiskUri;
-                if (string.IsNullOrEmpty(path))
+                if (string.IsNullOrEmpty(DiskUri))
                     return "Unknown";
 
-                string extension = Path.GetExtension(path).ToLower().TrimStart('.');
-                string baseName = Path.GetFileNameWithoutExtension(path);
+                // Peel off compression wrappers to find the real extension.
+                // e.g. "image.vmdk.xz" → "image.vmdk" → ".vmdk"
+                //      "image.vmdk.gz" → "image.vmdk" → ".vmdk"
+                string name = GetFileNameFromUri(DiskUri);
+                string ext = Path.GetExtension(name).ToLowerInvariant().TrimStart('.');
 
-                // Handle common compression extensions
-                switch (extension.ToLower())
+                // Strip single-file compression to reach the inner extension
+                if (ext is "xz" or "gz" or "bz2" or "lz" or "zst")
                 {
-                    case "7z":
-                    case "zip":
-                    case "gz":
-                        extension = ArchiveRelativePath != null
-                        ?  Path.GetExtension(ArchiveRelativePath).ToLower().TrimStart('.')
-                        :  Path.GetExtension(baseName).ToLower().TrimStart('.');
-                        break;
-                    case "xz":                    
-                        extension = Path.GetExtension(baseName).ToLower().TrimStart('.');
-                        break;
-                    case "tar.gz":
-                        extension = Path.GetExtension(Path.GetFileNameWithoutExtension(baseName)).ToLower().TrimStart('.');
-                        break;
-                    default:
-                        // No compression extension, use the original extension
-                        break;
+                    name = Path.GetFileNameWithoutExtension(name);
+                    ext = Path.GetExtension(name).ToLowerInvariant().TrimStart('.');
                 }
 
-                // Determine file type based on the final extension
-                switch (extension)
+                return ext switch
                 {
-                    case "ova":
-                        return "OVA";
-                    case "iso":
-                        return "ISO";
-                    case "vmdk":
-                        return "VMDK";
-                    case "vhd":
-                        return "VHD";
-                    case "vhdx":
-                        return "VHDX";
-                    case "qcow2":
-                        return "QCOW2";
-                    default:
-                        return "Other";
-                }
+                    "vmdk"  => "VMDK",
+                    "qcow2" => "QCOW2",
+                    "vhdx"  => "VHDX",
+                    "vhd"   => "VHD",
+                    "iso"   => "ISO",
+                    "ova"   => "OVA",
+                    "zip" or "7z" or "rar" or "tar" => "Archive",
+                    _ => "Other"
+                };
             }
+        }
+
+        private static string GetFileNameFromUri(string uri)
+        {
+            // Handle both local file paths and HTTP URIs
+            if (Uri.TryCreate(uri, UriKind.Absolute, out var parsed) && !parsed.IsFile)
+                return Path.GetFileName(parsed.LocalPath);
+            return Path.GetFileName(uri);
         }
 
         public string InitialUsername { get; set; }
         public string InitialPassword { get; set; }
+
+        /// <summary>
+        /// URL to a checksum file for verifying download integrity.
+        /// Supports GNU coreutils format (<c>hash  filename</c>), BSD-style
+        /// (<c>SHA256 (filename) = hash</c>), and bare hash (single-line) files.
+        /// When set, the downloaded file is verified before extraction.
+        /// </summary>
+        public string ChecksumUri { get; set; }
+
+        /// <summary>
+        /// Inline expected hash of the downloaded file.
+        /// Use this instead of <see cref="ChecksumUri"/> when the hash is known at compile time.
+        /// </summary>
+        public string Checksum { get; set; }
+
+        /// <summary>
+        /// Hash algorithm used for verification: "sha256" (default) or "sha512".
+        /// Applies to both <see cref="ChecksumUri"/> and <see cref="Checksum"/>.
+        /// </summary>
+        public string ChecksumAlgorithm { get; set; }
 
         /// <summary>Category label, e.g. "Security" or "General". Defaults to null (treated as General).</summary>
         public string Category { get; set; }

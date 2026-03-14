@@ -9,12 +9,14 @@ namespace VMCreate.Gallery
     {
         private const string BaseUrl = "https://download.fedoraproject.org/pub/fedora/linux/releases/";
         private const string IsoPathTemplate = "{0}Silverblue/x86_64/iso/Fedora-Silverblue-ostree-x86_64-{1}-1.1.iso";
+        private const string ChecksumTemplate = "{0}Silverblue/x86_64/iso/Fedora-Silverblue-{1}-1.1-x86_64-CHECKSUM";
         private const string ReleaseVersion = "42";
         public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
             var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(FedoraSilverblue).Assembly, "fedora-logo.svg");
             // Construct the ISO URL with hardcoded version
             var isoUrl = string.Format(IsoPathTemplate, $"{BaseUrl}{ReleaseVersion}/", ReleaseVersion);
+            var checksumUrl = string.Format(ChecksumTemplate, $"{BaseUrl}{ReleaseVersion}/", ReleaseVersion);
             var filename = $"Fedora-Silverblue-ostree-x86_64-{ReleaseVersion}-1.1.iso";
 
             // Use current UTC time as fallback for LastUpdated
@@ -26,10 +28,9 @@ namespace VMCreate.Gallery
                 Publisher = "Fedora Project",
                 Description = $"Fedora Silverblue, an immutable desktop OS with GNOME for a reliable and modern user experience.",
                 ThumbnailUri = logoUri,
-                LogoUri = logoUri,
                 SymbolUri = logoUri,
                 DiskUri = isoUrl,
-                ArchiveRelativePath = filename,
+                ChecksumUri = checksumUrl,
                 SecureBoot = "false",
                 EnhancedSessionTransportType = "HvSocket",
                 Version = ReleaseVersion,

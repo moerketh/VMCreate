@@ -98,25 +98,25 @@ namespace VMCreate.Tests.GalleryTests
         // STATIC LOADERS — data-driven over all five static loaders
         // ════════════════════════════════════════════════════════════════════
 
-        public static IEnumerable<object[]> StaticLoaders =>
-        [
-            [new Arch(),                nameof(Arch)],
-            [new NixOS(),               nameof(NixOS)],
-            [new FedoraSilverblue(),    nameof(FedoraSilverblue)],
-            [new PwnCloudOS(),          nameof(PwnCloudOS)],
-            [new FedoraSecurityLab(),   nameof(FedoraSecurityLab)],
+        public static IEnumerable<object[]> StaticLoaders => new object[][]
+        {
+            new object[] { new Arch(),                nameof(Arch) },
+            new object[] { new NixOS(),               nameof(NixOS) },
+            new object[] { new FedoraSilverblue(),    nameof(FedoraSilverblue) },
+            new object[] { new PwnCloudOS(),          nameof(PwnCloudOS) },
+            new object[] { new FedoraSecurityLab(),   nameof(FedoraSecurityLab) },
             // Security loaders
-            [new REMnux(),             nameof(REMnux)],
-            [new CAINE(),              nameof(CAINE)],
-            [new Whonix(),             nameof(Whonix)],
-            [new Tsurugi(),            nameof(Tsurugi)],
+            new object[] { new REMnux(),             nameof(REMnux) },
+            new object[] { new CAINE(),              nameof(CAINE) },
+            new object[] { new Whonix(),             nameof(Whonix) },
+            new object[] { new Tsurugi(),            nameof(Tsurugi) },
             // General loaders
-            [new FedoraWorkstation(),  nameof(FedoraWorkstation)],
-            [new OpenSuseTumbleweed(), nameof(OpenSuseTumbleweed)],
-            [new LinuxMint(),          nameof(LinuxMint)],
-            [new AlpineLinux(),        nameof(AlpineLinux)],
-            [new RockyLinux(),         nameof(RockyLinux)],
-        ];
+            new object[] { new FedoraWorkstation(),  nameof(FedoraWorkstation) },
+            new object[] { new OpenSuseTumbleweed(), nameof(OpenSuseTumbleweed) },
+            new object[] { new LinuxMint(),          nameof(LinuxMint) },
+            new object[] { new AlpineLinux(),        nameof(AlpineLinux) },
+            new object[] { new RockyLinux(),         nameof(RockyLinux) },
+        };
 
         [TestMethod]
         [DynamicData(nameof(StaticLoaders))]
@@ -169,27 +169,16 @@ namespace VMCreate.Tests.GalleryTests
         }
 
         [TestMethod]
-        public async Task LoadParrotHome_MeetsContract()
+        public async Task LoadParrot_MeetsContract()
         {
             const string html =
-                @"<a href=""Parrot-home-6.1_amd64.iso"">Parrot-home-6.1_amd64.iso</a> 15-Jan-2024 10:30  1234567890";
+                @"<a href=""Parrot-security-6.1_amd64.iso"">Parrot-security-6.1_amd64.iso</a> 15-Jan-2024 10:30  1234567890
+                  <a href=""Parrot-home-6.1_amd64.iso"">Parrot-home-6.1_amd64.iso</a> 15-Jan-2024 10:30  1234567890";
 
-            var items = await new ParrotHome(FactoryFor(html)).LoadGalleryItems();
+            var items = await new Parrot(FactoryFor(html)).LoadGalleryItems();
 
-            AssertContractInvariants(items, nameof(ParrotHome));
-            Assert.AreEqual(1, items.Count);
-        }
-
-        [TestMethod]
-        public async Task LoadParrotSecurity_MeetsContract()
-        {
-            const string html =
-                @"<a href=""Parrot-security-6.1_amd64.iso"">Parrot-security-6.1_amd64.iso</a> 15-Jan-2024 10:30  1234567890";
-
-            var items = await new ParrotSecurity(FactoryFor(html)).LoadGalleryItems();
-
-            AssertContractInvariants(items, nameof(ParrotSecurity));
-            Assert.AreEqual(1, items.Count);
+            AssertContractInvariants(items, nameof(Parrot));
+            Assert.AreEqual(2, items.Count);
         }
 
         [TestMethod]
@@ -308,8 +297,7 @@ namespace VMCreate.Tests.GalleryTests
         [
             ["BlackArch",          new Func<IHttpClientFactory, IGalleryLoader>(f => new BlackArch(f))],
             ["LoadKaliCurrent",    new Func<IHttpClientFactory, IGalleryLoader>(f => new Kali(f))],
-            ["LoadParrotHome",     new Func<IHttpClientFactory, IGalleryLoader>(f => new ParrotHome(f))],
-            ["LoadParrotSecurity", new Func<IHttpClientFactory, IGalleryLoader>(f => new ParrotSecurity(f))],
+            ["LoadParrot",         new Func<IHttpClientFactory, IGalleryLoader>(f => new Parrot(f))],
             ["LoadPentooCurrent",  new Func<IHttpClientFactory, IGalleryLoader>(f => new PentooCurrent(f))],
             ["ClearLinux",         new Func<IHttpClientFactory, IGalleryLoader>(f => new ClearLinux(f))],
             ["LoadTails",          new Func<IHttpClientFactory, IGalleryLoader>(f => new Tails(f))],

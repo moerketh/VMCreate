@@ -19,6 +19,12 @@ namespace VMCreate
         private const long ScanStartOffset = 0x10000; // 64KB, minimum for VHDX headers
         private const long ScanEndOffset = 0xA00000; // 10MB, reasonable limit for data region
         private const int SectorSize = 512; // Standard disk sector size
+        private const int GptEntrySize = 128;
+        private const int MaxGptEntriesToScan = 16; // Check first 16 entries for ESP
+
+        // EFI System Partition GUID: C12A7328-F81F-11D2-BA4B-00A0C93EC93B (mixed-endian)
+        private static readonly byte[] EspTypeGuid =
+            { 0x28, 0x73, 0x2A, 0xC1, 0x1F, 0xF8, 0xD2, 0x11, 0xBA, 0x4B, 0x00, 0xA0, 0xC9, 0x3E, 0xC9, 0x3B };
 
         public PartitionSchemeDetector(ILogger<PartitionSchemeDetector> logger)
         {
@@ -89,7 +95,18 @@ namespace VMCreate
                         {
                             _logger.LogInformation("Detected GPT partition scheme at offset {Offset}",
                                 offset + SectorSize);
-                            return "GPT";
+
+                            // Read partition entries to check for an EFI System Partition.
+                            // GPT without an ESP (e.g. BIOS boot partition only) can't boot
+                            // under UEFI firmware and needs the MBR→GPT clone path.
+                            bool hasEsp = await HasEfiSystemPartitionAsync(stream, offset + SectorSize);
+                            if (hasEsp)
+                            {
+                                return "GPT";
+                            }
+
+                            _logger.LogWarning("GPT disk has no EFI System Partition — treating as BIOS-only (will clone to UEFI layout)");
+                            return "GPT_BIOS";
                         }
 
                         offset += SectorSize;
@@ -113,6 +130,58 @@ namespace VMCreate
                 // Default to MBR on error for safety
                 _logger.LogWarning("Defaulting to MBR after raw scan error");
                 return "MBR";
+            }
+        }
+
+        /// <summary>
+        /// Reads GPT partition entries following the header and checks whether any
+        /// entry has the EFI System Partition type GUID.
+        /// </summary>
+        private async Task<bool> HasEfiSystemPartitionAsync(FileStream stream, long gptHeaderOffset)
+        {
+            try
+            {
+                // Partition entries start one sector after the GPT header
+                long entriesOffset = gptHeaderOffset + SectorSize;
+                int bytesToRead = MaxGptEntriesToScan * GptEntrySize;
+                byte[] entries = new byte[bytesToRead];
+
+                stream.Seek(entriesOffset, SeekOrigin.Begin);
+                int bytesRead = await stream.ReadAsync(entries, 0, bytesToRead);
+
+                int entriesToCheck = Math.Min(MaxGptEntriesToScan, bytesRead / GptEntrySize);
+                for (int i = 0; i < entriesToCheck; i++)
+                {
+                    int entryBase = i * GptEntrySize;
+
+                    // Check if entry is empty (all-zero type GUID)
+                    bool isEmpty = true;
+                    for (int b = 0; b < 16; b++)
+                    {
+                        if (entries[entryBase + b] != 0) { isEmpty = false; break; }
+                    }
+                    if (isEmpty) break;
+
+                    // Compare type GUID with ESP GUID
+                    bool isEsp = true;
+                    for (int b = 0; b < 16; b++)
+                    {
+                        if (entries[entryBase + b] != EspTypeGuid[b]) { isEsp = false; break; }
+                    }
+                    if (isEsp)
+                    {
+                        _logger.LogInformation("Found EFI System Partition at entry {Index}", i);
+                        return true;
+                    }
+                }
+
+                _logger.LogDebug("Scanned {Count} GPT entries, no ESP found", entriesToCheck);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to read GPT partition entries, assuming ESP is present");
+                return true; // Conservative: assume UEFI-capable on read failure
             }
         }
     }

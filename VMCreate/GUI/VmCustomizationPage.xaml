@@ -133,6 +133,24 @@
                 </StackPanel>
             </Border>
 
+            <!-- Integration Services card -->
+            <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
+                    CornerRadius="8" Padding="20,16" Margin="0,0,0,12"
+                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
+                <StackPanel>
+                    <TextBlock Text="Integration Services" FontSize="14" FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,0,4"/>
+                    <TextBlock Text="Hyper-V integration services enable clipboard sharing, drive redirection, and automatic IP discovery via Enhanced Session Mode. Disable for maximum isolation when analysing untrusted software."
+                               FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,10"
+                               TextWrapping="Wrap"/>
+                    <CheckBox Content="Enable Hyper-V integration services"
+                              IsChecked="{Binding EnableIntegrationServices}"
+                              FontSize="14"
+                              ToolTip="Controls Guest Service Interface and Enhanced Session Mode (RDP over VMBus). When disabled, the VM runs without clipboard, drive redirection, or IP discovery — useful for malware analysis."
+                              AutomationProperties.Name="Enable Hyper-V integration services"/>
+                </StackPanel>
+            </Border>
+
             <!-- Advanced: SSH Key card -->
             <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
                     CornerRadius="8" Padding="20,16" Margin="0,0,0,12"

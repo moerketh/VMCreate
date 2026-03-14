@@ -48,6 +48,15 @@ namespace VMCreate
             await Task.Run(() => _ps.Invoke(), cancellationToken);
             _logger.LogInformation("Created Gen 2 VM: {VMName}", vmSettings.VMName);
             if (_ps.HadErrors) throw new Exception(string.Join("; ", _ps.Streams.Error.Select(e => e.ToString())));
+
+            // Disable automatic checkpoints — they create AVHDX differencing disks on
+            // every VM start, which breaks SetFirstBootToHardDrive (firmware can't boot
+            // from the transient AVHDX path).
+            _ps.Commands.Clear();
+            _ps.AddCommand("Set-VM")
+                .AddParameter("Name", vmSettings.VMName)
+                .AddParameter("AutomaticCheckpointsEnabled", false);
+            await RunCommand(cancellationToken);
         }
 
         public async Task SetVMLoginNotes(VmSettings vmSettings, string initialUsername, string initialPassword, CancellationToken cancellationToken)
