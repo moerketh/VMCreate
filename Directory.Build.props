@@ -1,0 +1,16 @@
+<Project>
+  <PropertyGroup>
+    <Company>moerketh</Company>
+    <Authors>moerketh</Authors>
+    <Product>VMCreate</Product>
+    <Copyright>Copyright © moerketh $([System.DateTime]::Now.Year)</Copyright>
+    <!-- MinVer reads the nearest git tag (e.g. v1.0.0) to set Version automatically.
+         Without a tag, defaults to 0.0.0-alpha.0.{height}. -->
+    <MinVerTagPrefix>v</MinVerTagPrefix>
+  </PropertyGroup>
+
+  <!-- MinVer only works with SDK-style .NET projects, not WiX -->
+  <ItemGroup Condition="'$(MSBuildProjectExtension)' != '.wixproj'">
+    <PackageReference Include="MinVer" Version="6.0.0" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

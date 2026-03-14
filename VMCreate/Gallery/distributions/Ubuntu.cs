@@ -66,7 +66,7 @@ namespace VMCreate.Gallery
         private async Task<string> ParseBuildInfo(string buildInfoUri, CancellationToken cancellationToken = default)
         {
             var client = _clientFactory.CreateClient();
-            client.DefaultRequestHeaders.Add("User-Agent", "VMCreate/1.0");
+            client.DefaultRequestHeaders.Add("User-Agent", ProductInfo.UserAgent);
 
             var response = await client.GetAsync(buildInfoUri, cancellationToken);
             response.EnsureSuccessStatusCode();

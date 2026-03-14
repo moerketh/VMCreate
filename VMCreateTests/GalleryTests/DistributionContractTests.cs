@@ -198,17 +198,6 @@ namespace VMCreate.Tests.GalleryTests
             Assert.AreEqual(1, items.Count);
         }
 
-        [TestMethod]
-        public async Task ClearLinux_MeetsContract()
-        {
-            const string html =
-                @"<a href=""clear-42510-live-desktop.iso"">clear-42510-live-desktop.iso</a>  15-Jan-2024 10:30  1234";
-
-            var items = await new ClearLinux(FactoryFor(html)).LoadGalleryItems();
-
-            AssertContractInvariants(items, nameof(ClearLinux));
-            Assert.AreEqual(1, items.Count);
-        }
 
         [TestMethod]
         public async Task Ubuntu_MeetsContract()
@@ -299,7 +288,6 @@ namespace VMCreate.Tests.GalleryTests
             ["LoadKaliCurrent",    new Func<IHttpClientFactory, IGalleryLoader>(f => new Kali(f))],
             ["LoadParrot",         new Func<IHttpClientFactory, IGalleryLoader>(f => new Parrot(f))],
             ["LoadPentooCurrent",  new Func<IHttpClientFactory, IGalleryLoader>(f => new PentooCurrent(f))],
-            ["ClearLinux",         new Func<IHttpClientFactory, IGalleryLoader>(f => new ClearLinux(f))],
             ["LoadTails",          new Func<IHttpClientFactory, IGalleryLoader>(f => new Tails(f))],
             ["LoadSecurityOnion",  new Func<IHttpClientFactory, IGalleryLoader>(f => new SecurityOnion(f))],
             ["Debian",             new Func<IHttpClientFactory, IGalleryLoader>(f => new Debian(f))],

@@ -25,7 +25,7 @@ namespace VMCreate.Gallery
         {
             var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(SecurityOnion).Assembly, "securityonion-logo.svg");
             var client = _clientFactory.CreateClient();
-            client.DefaultRequestHeaders.Add("User-Agent", "VMCreate/1.0");
+            client.DefaultRequestHeaders.Add("User-Agent", ProductInfo.UserAgent);
             client.DefaultRequestHeaders.TryAddWithoutValidation("Accept", "application/vnd.github.v3+json");
 
             var response = await client.GetAsync(ReleasesApiUrl, cancellationToken);

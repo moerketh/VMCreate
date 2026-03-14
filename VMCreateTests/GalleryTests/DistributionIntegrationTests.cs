@@ -147,11 +147,6 @@ namespace VMCreate.Tests.GalleryTests
                 await new Parrot(_factory).LoadGalleryItems(),
                 nameof(Parrot));
 
-        [TestMethod, Timeout(120_000), Ignore("ClearLinux infrastructure (clearlinux.org/cdn.download.clearlinux.org) has been discontinued by Intel")]
-        public async Task ClearLinux_AllUrisResolve()
-            => await VerifyAllUrisAsync(
-                await new ClearLinux(_factory).LoadGalleryItems(),
-                nameof(ClearLinux));
 
         [TestMethod, Timeout(120_000)]
         public async Task Ubuntu_AllUrisResolve()

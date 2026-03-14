@@ -6,6 +6,7 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using VMCreate.Gallery;
 
 namespace VMCreate
 {
@@ -385,7 +386,7 @@ namespace VMCreate
         {
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiToken);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("*/*"));
-            request.Headers.TryAddWithoutValidation("User-Agent", "VMCreate");
+            request.Headers.TryAddWithoutValidation("User-Agent", ProductInfo.UserAgent);
         }
 
         private HtbVpnDownloadResult ValidateAndReturn(string name, string guestFileName, string content)

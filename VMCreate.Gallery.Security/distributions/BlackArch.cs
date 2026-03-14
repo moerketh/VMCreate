@@ -23,7 +23,7 @@ namespace VMCreate.Gallery
             var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(BlackArch).Assembly, "blackarch-logo.png");
             var galleryItems = new List<GalleryItem>();
             var client = _clientFactory.CreateClient();
-            client.DefaultRequestHeaders.Add("User-Agent", "VMCreate/1.0");
+            client.DefaultRequestHeaders.Add("User-Agent", ProductInfo.UserAgent);
 
             // Fetch the downloads page
             var response = await client.GetAsync(DownloadsUrl, cancellationToken);

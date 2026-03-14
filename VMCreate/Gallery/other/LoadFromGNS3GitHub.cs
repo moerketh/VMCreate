@@ -27,7 +27,7 @@ namespace VMCreate.Gallery
             try
             {
                 var client = _clientFactory.CreateClient();
-                client.DefaultRequestHeaders.Add("User-Agent", "VMCreate-GalleryLoader/1.0");
+                client.DefaultRequestHeaders.Add("User-Agent", ProductInfo.UserAgent);
                 string jsonResponse = await client.GetStringAsync(GitHubApiUrl, cancellationToken);
                 JsonDocument doc = null;
                 try

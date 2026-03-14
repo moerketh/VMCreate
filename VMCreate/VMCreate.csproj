@@ -5,7 +5,7 @@
 	<EnableDefaultItems>false</EnableDefaultItems>
     <OutputType>WinExe</OutputType>
     <RootNamespace>VMCreate</RootNamespace>
-    <AssemblyName>CreateVM</AssemblyName>
+    <AssemblyName>VMCreate</AssemblyName>
     <WarningLevel>4</WarningLevel>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
 	<PublishSingleFile>true</PublishSingleFile>
@@ -38,7 +38,6 @@
     <Compile Include="Gallery\distributions\Debian.cs" />
     <Compile Include="Gallery\distributions\FedoraSilverblue.cs" />
     <Compile Include="Gallery\distributions\FedoraWorkstation.cs" />
-    <Compile Include="Gallery\distributions\ClearLinux.cs" />
     <Compile Include="Gallery\distributions\LinuxMint.cs" />
     <Compile Include="Gallery\distributions\OpenSuseTumbleweed.cs" />
     <Compile Include="Gallery\distributions\RockyLinux.cs" />

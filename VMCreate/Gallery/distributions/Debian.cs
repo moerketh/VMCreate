@@ -27,7 +27,7 @@ namespace VMCreate.Gallery
         {
             var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(Debian).Assembly, "debian-logo.svg");
             var client = _clientFactory.CreateClient();
-            client.DefaultRequestHeaders.Add("User-Agent", "VMCreate/1.0");
+            client.DefaultRequestHeaders.Add("User-Agent", ProductInfo.UserAgent);
 
             var response = await client.GetAsync(BaseUrl, cancellationToken);
             response.EnsureSuccessStatusCode();

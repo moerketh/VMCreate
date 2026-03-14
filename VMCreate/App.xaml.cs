@@ -25,6 +25,8 @@ namespace VMCreate
                 .WriteTo.File(logPath, rollingInterval: RollingInterval.Day)
                 .CreateLogger();
 
+            Log.Information("VMCreate {Version} starting", ProductInfo.InformationalVersion);
+
             var services = new ServiceCollection();
             services.AddLogging(loggingBuilder =>
             {

@@ -1,0 +1,86 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <Package Name="VMCreate"
+           Manufacturer="moerketh"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="7A3E8F1B-2C4D-4E5F-9A6B-1D2E3F4A5B6C"
+           InstallerVersion="500"
+           Scope="perMachine">
+
+    <SummaryInformation Description="VMCreate — Linux VM Quick Create for Hyper-V" />
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of VMCreate is already installed."
+                  Schedule="afterInstallValidate" />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <!-- ── Icon for Add/Remove Programs ─────────────────────────────── -->
+    <Icon Id="VMCreate.ico" SourceFile="VMCreate.exe" />
+    <Property Id="ARPPRODUCTICON" Value="VMCreate.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/moerketh/VMCreate" />
+
+    <!-- ── Directory layout ─────────────────────────────────────────── -->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="VMCreate">
+        <Component Id="VMCreateExe" Guid="A1B2C3D4-E5F6-7890-ABCD-EF1234567890" Bitness="always64">
+          <File Id="VMCreateExe" Source="VMCreate.exe" KeyPath="yes" />
+        </Component>
+        <Component Id="License" Guid="B2C3D4E5-F6A7-8901-BCDE-F12345678901" Bitness="always64">
+          <File Id="License" Source="$(var.SolutionDir)LICENSE.txt" Name="LICENSE.txt" KeyPath="yes" />
+        </Component>
+        <Component Id="ThirdParty" Guid="C3D4E5F6-A7B8-9012-CDEF-123456789012" Bitness="always64">
+          <File Id="ThirdParty" Source="$(var.SolutionDir)THIRD-PARTY-NOTICES.md" Name="THIRD-PARTY-NOTICES.md" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <!-- ── Hyper-V Quick Create replacement ─────────────────────────── -->
+    <Property Id="HYPERVDIR" Value="[ProgramFiles64Folder]Hyper-V\" />
+
+    <!-- Backup: copy original VMCreate.exe to VMCreate.exe.original (only if not already backed up) -->
+    <SetProperty Id="BackupQuickCreate" Before="BackupQuickCreate" Sequence="execute"
+                 Value="&quot;[SystemFolder]cmd.exe&quot; /c if not exist &quot;[ProgramFiles64Folder]Hyper-V\VMCreate.exe.original&quot; if exist &quot;[ProgramFiles64Folder]Hyper-V\VMCreate.exe&quot; copy /Y &quot;[ProgramFiles64Folder]Hyper-V\VMCreate.exe&quot; &quot;[ProgramFiles64Folder]Hyper-V\VMCreate.exe.original&quot;" />
+    <CustomAction Id="BackupQuickCreate"
+                  DllEntry="WixQuietExec64"
+                  BinaryRef="Wix4UtilCA_X64"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+
+    <!-- Replace: copy our VMCreate.exe over the Hyper-V one -->
+    <SetProperty Id="ReplaceQuickCreate" Before="ReplaceQuickCreate" Sequence="execute"
+                 Value="&quot;[SystemFolder]cmd.exe&quot; /c copy /Y &quot;[INSTALLFOLDER]VMCreate.exe&quot; &quot;[ProgramFiles64Folder]Hyper-V\VMCreate.exe&quot;" />
+    <CustomAction Id="ReplaceQuickCreate"
+                  DllEntry="WixQuietExec64"
+                  BinaryRef="Wix4UtilCA_X64"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+
+    <!-- Restore: on uninstall, put the original back -->
+    <SetProperty Id="RestoreQuickCreate" Before="RestoreQuickCreate" Sequence="execute"
+                 Value="&quot;[SystemFolder]cmd.exe&quot; /c if exist &quot;[ProgramFiles64Folder]Hyper-V\VMCreate.exe.original&quot; (copy /Y &quot;[ProgramFiles64Folder]Hyper-V\VMCreate.exe.original&quot; &quot;[ProgramFiles64Folder]Hyper-V\VMCreate.exe&quot; &amp;&amp; del &quot;[ProgramFiles64Folder]Hyper-V\VMCreate.exe.original&quot;)" />
+    <CustomAction Id="RestoreQuickCreate"
+                  DllEntry="WixQuietExec64"
+                  BinaryRef="Wix4UtilCA_X64"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+
+    <InstallExecuteSequence>
+      <!-- On first install: backup then replace -->
+      <Custom Action="BackupQuickCreate" Before="InstallFiles" Condition="NOT Installed" />
+      <Custom Action="ReplaceQuickCreate" After="InstallFiles" Condition="NOT Installed OR UPGRADINGPRODUCTCODE" />
+      <!-- On uninstall (not upgrade): restore original -->
+      <Custom Action="RestoreQuickCreate" After="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+    </InstallExecuteSequence>
+
+    <!-- ── Feature ──────────────────────────────────────────────────── -->
+    <Feature Id="Main" Title="VMCreate" Level="1">
+      <ComponentRef Id="VMCreateExe" />
+      <ComponentRef Id="License" />
+      <ComponentRef Id="ThirdParty" />
+    </Feature>
+
+  </Package>
+</Wix>

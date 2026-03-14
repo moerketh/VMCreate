@@ -61,5 +61,10 @@
                     IsOpen="False" IsClosable="True" Margin="8,0,8,4"/>
 
         <Frame x:Name="_mainFrame" Grid.Row="3" NavigationUIVisibility="Hidden" />
+
+        <TextBlock x:Name="VersionLabel" Grid.Row="3"
+                   HorizontalAlignment="Left" VerticalAlignment="Bottom"
+                   Margin="8,0,0,4" FontSize="10" Opacity="0.5"
+                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
     </Grid>
 </ui:FluentWindow>

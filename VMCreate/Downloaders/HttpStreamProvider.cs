@@ -3,6 +3,7 @@ using System;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using VMCreate.Gallery;
 
 namespace VMCreate
 {
@@ -25,7 +26,7 @@ namespace VMCreate
         public async Task<HttpResponseMessage> GetResponseAsync(string uri, CancellationToken cancellationToken)
         {
             HttpClient client = _clientFactory.CreateClient();
-            client.DefaultRequestHeaders.Add("User-Agent", "VMCreate");
+            client.DefaultRequestHeaders.Add("User-Agent", ProductInfo.UserAgent);
 
             var response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             response.EnsureSuccessStatusCode();

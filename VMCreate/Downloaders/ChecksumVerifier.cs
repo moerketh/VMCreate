@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using VMCreate.Gallery;
 
 namespace VMCreate
 {
@@ -54,7 +55,7 @@ namespace VMCreate
             _logger.LogInformation("Downloading checksum file from {ChecksumUri}", checksumUri);
 
             var client = _clientFactory.CreateClient();
-            client.DefaultRequestHeaders.Add("User-Agent", "VMCreate");
+            client.DefaultRequestHeaders.Add("User-Agent", ProductInfo.UserAgent);
 
             var response = await client.GetAsync(checksumUri, cancellationToken);
             response.EnsureSuccessStatusCode();
