@@ -28,6 +28,7 @@ namespace VMCreate
         private readonly IVmShutdownWatcher _shutdownWatcher;
         private readonly IGuestDiagnosticsCollector _diagnosticsCollector;
         private readonly IGuestShellFactory _guestShellFactory;
+        private readonly ICloningIsoDownloader _cloningIsoDownloader;
         private readonly IEnumerable<ICustomizationStep> _customizationSteps;
         private const int OriginalDiskScsiControllerLocation = 1;
         public HyperVVmCreator(
@@ -40,7 +41,8 @@ namespace VMCreate
             IKvpPoller kvpPoller,
             IVmShutdownWatcher shutdownWatcher,
             IGuestDiagnosticsCollector diagnosticsCollector,
-            IGuestShellFactory guestShellFactory)
+            IGuestShellFactory guestShellFactory,
+            ICloningIsoDownloader cloningIsoDownloader)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _mediaHandlerFactory = mediaHandlerFactory ?? throw new ArgumentNullException(nameof(mediaHandlerFactory));
@@ -52,6 +54,7 @@ namespace VMCreate
             _shutdownWatcher = shutdownWatcher ?? throw new ArgumentNullException(nameof(shutdownWatcher));
             _diagnosticsCollector = diagnosticsCollector ?? throw new ArgumentNullException(nameof(diagnosticsCollector));
             _guestShellFactory = guestShellFactory ?? throw new ArgumentNullException(nameof(guestShellFactory));
+            _cloningIsoDownloader = cloningIsoDownloader ?? throw new ArgumentNullException(nameof(cloningIsoDownloader));
             _defaultVhdxPath = GetDefaultVirtualHardDiskPath();
         }
 
@@ -147,6 +150,7 @@ namespace VMCreate
                 }
 
                 // ── Disk-image flow (VMDK / QCOW2 / VHDX) ────────────────────
+                await _cloningIsoDownloader.EnsureIsoAsync(vmSettings, cancellationToken, createVMProgressInfo);
                 string cloningIsoPath = vmSettings.CloningIsoPath;
                 int detectedGeneration = mediaHandler.VmGeneration; // 1 for MBR, 2 for GPT
                 const int targetGen = 2; // Always target Gen 2
@@ -312,8 +316,11 @@ namespace VMCreate
 
                         if (cloneMarkerSeen)
                         {
-                            // Clone completed — wait for the remaining customization + shutdown
-                            shutDown = await _shutdownWatcher.WaitForVMShutdownAsync(vmSettings.VMName, cancellationToken, shutdownTimeoutSeconds);
+                            // Clone completed — poll WorkflowProgress KVP for pre-boot sub-step
+                            // updates (Hyper-V packages, xRDP, PowerShell, SSH) while waiting
+                            // for the remaining customization + shutdown.
+                            shutDown = await _kvpPoller.WaitForShutdownWithProgressAsync(
+                                vmSettings.VMName, createVMProgressInfo, cancellationToken, shutdownTimeoutSeconds);
                         }
                         else
                         {
@@ -360,8 +367,14 @@ namespace VMCreate
 
                     if (detectedGeneration == 1)
                     {
-                        // Remove original disk
+                        // Remove original disk from VM and delete the orphaned file
                         await _hyperVManager.RemoveHardDrive(vmSettings, OriginalDiskScsiControllerLocation, cancellationToken);
+
+                        if (File.Exists(mediaPath))
+                        {
+                            File.Delete(mediaPath);
+                            _logger.LogInformation("Deleted original MBR source disk: {MediaPath}", mediaPath);
+                        }
                     }
 
                     // Remove ISO

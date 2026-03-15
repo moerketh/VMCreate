@@ -21,6 +21,7 @@ namespace VMCreate
         private int _progressPercentage;
         private string _progressText;
         private bool _isIndeterminate;
+        private bool _isVisible = true;
 
         public DeploymentPhase(string id, string name, string description, SymbolRegular icon)
         {
@@ -87,5 +88,15 @@ namespace VMCreate
         /// 0 = top-level, 1 = indented sub-step (e.g. "Clone Disk" under "Pre-Boot Customizations").
         /// </summary>
         public int IndentLevel { get; set; }
+
+        /// <summary>
+        /// Controls card visibility. Sub-steps are hidden when their parent is collapsed
+        /// (Pending or Completed). Top-level phases are always visible.
+        /// </summary>
+        public bool IsVisible
+        {
+            get => _isVisible;
+            set => SetProperty(ref _isVisible, value);
+        }
     }
 }

@@ -42,6 +42,22 @@ namespace VMCreate
                 using (var archive = ArchiveFactory.OpenArchive(filePath))
                 {
                     var totalSize = archive.TotalUncompressedSize;
+
+                    // Pre-flight: check available disk space before extracting
+                    if (totalSize > 0)
+                    {
+                        var driveInfo = new DriveInfo(Path.GetPathRoot(extractPath));
+                        if (driveInfo.AvailableFreeSpace < totalSize)
+                        {
+                            string needed = FormatBytes(totalSize);
+                            string available = FormatBytes(driveInfo.AvailableFreeSpace);
+                            string msg = $"Not enough disk space on {driveInfo.Name} to extract the archive. " +
+                                         $"Need {needed}, only {available} available. Free up space and try again.";
+                            _logger.LogError(msg);
+                            throw new IOException(msg);
+                        }
+                    }
+
                     long cumulativeBytes = 0;
 
                     var entryProgress = new Progress<ProgressReport>(report =>
@@ -104,6 +120,12 @@ namespace VMCreate
                 _logger.LogError(ex, "Failed to determine compressed stream type for {FilePath}. Supported formats: Zip, Rar, 7Zip, GZip, Tar. Ensure file format is valid.", filePath);
                 throw;
             }
+            catch (IOException ex) when (ex.HResult == unchecked((int)0x80070070))
+            {
+                string drive = Path.GetPathRoot(extractPath) ?? extractPath;
+                _logger.LogError(ex, "Not enough disk space to extract {FilePath} to {ExtractPath}", filePath, extractPath);
+                throw new IOException($"Not enough disk space on {drive} to extract the archive. Free up space and try again.", ex);
+            }
             catch (OperationCanceledException)
             {
                 _logger.LogInformation("Archive extraction of {FilePath} was cancelled", filePath);
@@ -125,6 +147,15 @@ namespace VMCreate
             }
             logger.LogDebug("Creating directory {ExtractPath}", extractPath);
             Directory.CreateDirectory(extractPath);
-        }        
+        }
+
+        private static string FormatBytes(long bytes)
+        {
+            string[] units = { "B", "KB", "MB", "GB", "TB" };
+            double value = bytes;
+            int i = 0;
+            while (value >= 1024 && i < units.Length - 1) { value /= 1024; i++; }
+            return $"{value:F1} {units[i]}";
+        }
     }
 }

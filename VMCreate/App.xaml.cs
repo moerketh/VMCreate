@@ -44,6 +44,7 @@ namespace VMCreate
             services.AddTransient<IStreamCopierWithProgress, StreamCopierWithProgress>();
             services.AddTransient<IDownloader, HttpFileDownloader>();
             services.AddTransient<IChecksumVerifier, ChecksumVerifier>();
+            services.AddTransient<ICloningIsoDownloader, CloningIsoDownloader>();
 
             // ── Hyper-V / VM plumbing ───────────────────────────────────────
             services.AddSingleton<IHyperVManager, PowerShellHyperVManager>();

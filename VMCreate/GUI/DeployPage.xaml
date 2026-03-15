@@ -61,7 +61,8 @@
                                 BorderThickness="1"
                                 BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
                                 Background="{DynamicResource ControlFillColorDefaultBrush}"
-                                Margin="{Binding IndentLevel, Converter={StaticResource IndentMargin}}">
+                                Margin="{Binding IndentLevel, Converter={StaticResource IndentMargin}}"
+                                Visibility="{Binding IsVisible, Converter={StaticResource BoolToVis}}">
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto"/>

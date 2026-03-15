@@ -25,6 +25,20 @@ namespace VMCreate
         public const string PhasePostBoot   = "PostBoot";
         public const string PhaseDone       = "Done";
 
+        // Pre-boot sub-step IDs (matched to KVP WorkflowProgress prefixes)
+        public const string SubInstallGrub   = "Sub_InstallGrub";
+        public const string SubInstallHyperV = "Sub_InstallHyperV";
+        public const string SubInstallXrdp   = "Sub_InstallXrdp";
+        public const string SubInstallPwsh   = "Sub_InstallPwsh";
+        public const string SubSshSetup      = "Sub_SshSetup";
+        public const string SubReboot        = "Sub_Reboot";
+
+        // Post-boot sub-step IDs (matched to ICustomizationStep.Name)
+        public const string SubRemoveVBox    = "Sub_RemoveVBox";
+        public const string SubSyncTimezone  = "Sub_SyncTimezone";
+        public const string SubConfigureVpn  = "Sub_ConfigureVpn";
+        public const string SubRestoreSsh    = "Sub_RestoreSsh";
+
         private readonly ILogger _logger;
         private bool _isDeploying;
         private bool _isComplete;
@@ -42,6 +56,7 @@ namespace VMCreate
 
             VmName = wizardData.Settings?.VMName ?? "VM";
             SelectedItem = wizardData.SelectedItem;
+            _lastCustomizations = wizardData.Customizations;
 
             CancelCommand = new RelayCommand(OnCancel, () => _isDeploying && !_isComplete);
             ConnectToVmCommand = new RelayCommand(OnConnectToVm);
@@ -160,6 +175,7 @@ namespace VMCreate
                 Phases.Add(new DeploymentPhase(PhaseCustomize, "Pre-Boot Customizations",
                     "Applying customizations (xRDP, enhancements) and waiting for the VM to restart",
                     SymbolRegular.Wrench24));
+                AddPreBootSubSteps(wizardData.Customizations);
             }
 
             // Always show the post-boot card — RemoveVBoxGuestAdditionsStep runs
@@ -169,6 +185,7 @@ namespace VMCreate
                     ? BuildPostBootDescription(wizardData.Customizations)
                     : "Applying post-boot customizations via SSH",
                 SymbolRegular.Settings24));
+            AddPostBootSubSteps(wizardData.Customizations);
 
             Phases.Add(new DeploymentPhase(PhaseDone, "Done",
                 "Virtual machine created successfully!",
@@ -188,26 +205,48 @@ namespace VMCreate
             if (insertIndex < 0) return;
 
             // Insert Customize (parent) first if not already present,
-            // then CloneDisk as an indented sub-step underneath it.
+            // then CloneDisk as the first sub-step (it runs before the other customizations).
             if (!Phases.Any(p => p.Id == PhaseCustomize))
             {
                 Phases.Insert(insertIndex, new DeploymentPhase(PhaseCustomize, "Pre-Boot Customizations",
                     "Applying customizations and waiting for the VM to shut down",
                     SymbolRegular.Wrench24));
-                insertIndex++; // CloneDisk goes after Customize
+                insertIndex++;
+
+                // Clone Disk runs first in the Gen1 MBR flow
+                Phases.Insert(insertIndex, new DeploymentPhase(PhaseCloneDisk, "Clone Disk",
+                    "Cloning MBR disk to GPT format inside the VM",
+                    SymbolRegular.HardDrive24) { IndentLevel = 1, IsVisible = false });
+                insertIndex++;
+
+                // GRUB install follows clone (lengthy step)
+                Phases.Insert(insertIndex, new DeploymentPhase(SubInstallGrub, "Install GRUB",
+                    "Installing GRUB bootloader for UEFI boot",
+                    SymbolRegular.ArrowSync24) { IndentLevel = 1, IsVisible = false });
+                insertIndex++;
+
+                // Then the remaining pre-boot sub-steps
+                InsertPreBootSubStepsAt(insertIndex, _lastCustomizations);
             }
             else
             {
-                // Customize already present — insert CloneDisk right after it
+                // Customize already present — insert CloneDisk right after parent, before other sub-steps
+                int customizeIdx = -1;
                 for (int i = 0; i < Phases.Count; i++)
                 {
-                    if (Phases[i].Id == PhaseCustomize) { insertIndex = i + 1; break; }
+                    if (Phases[i].Id == PhaseCustomize) { customizeIdx = i; break; }
+                }
+                if (customizeIdx >= 0)
+                {
+                    int insertAt = customizeIdx + 1;
+                    Phases.Insert(insertAt++, new DeploymentPhase(PhaseCloneDisk, "Clone Disk",
+                        "Cloning MBR disk to GPT format inside the VM",
+                        SymbolRegular.HardDrive24) { IndentLevel = 1, IsVisible = false });
+                    Phases.Insert(insertAt, new DeploymentPhase(SubInstallGrub, "Install GRUB",
+                        "Installing GRUB bootloader for UEFI boot",
+                        SymbolRegular.ArrowSync24) { IndentLevel = 1, IsVisible = false });
                 }
             }
-
-            Phases.Insert(insertIndex, new DeploymentPhase(PhaseCloneDisk, "Clone Disk",
-                "Cloning MBR disk to GPT format inside the VM",
-                SymbolRegular.HardDrive24) { IndentLevel = 1 });
         }
 
         /// <summary>
@@ -225,6 +264,8 @@ namespace VMCreate
             Phases.Insert(insertIndex, new DeploymentPhase(PhaseCustomize, "Pre-Boot Customizations",
                 "Installing Hyper-V enhancements and waiting for the VM to restart",
                 SymbolRegular.Wrench24));
+            insertIndex++;
+            InsertPreBootSubStepsAt(insertIndex, _lastCustomizations);
         }
 
         /// <summary>
@@ -261,6 +302,7 @@ namespace VMCreate
             Phases.Insert(doneIndex, new DeploymentPhase(PhasePostBoot, "Post-Boot Config",
                 "Applying post-boot customizations via SSH",
                 SymbolRegular.Settings24));
+            InsertPostBootSubStepsAt(doneIndex + 1, _lastCustomizations);
         }
 
         /// <summary>Builds a descriptive string for the post-boot card based on what's enabled.</summary>
@@ -272,6 +314,103 @@ namespace VMCreate
             return parts.Count > 0
                 ? "SSH into VM to apply: " + string.Join(", ", parts)
                 : "Applying post-boot customizations via SSH";
+        }
+
+        // ── Sub-step helpers ─────────────────────────────────────────────
+
+        /// <summary>Stashed customizations so dynamic Insert* methods can add the right sub-steps.</summary>
+        private VmCustomizations _lastCustomizations;
+
+        /// <summary>Appends pre-boot sub-step cards (IndentLevel=1, hidden) to the end of Phases.</summary>
+        private void AddPreBootSubSteps(VmCustomizations c)
+        {
+            Phases.Add(new DeploymentPhase(SubInstallHyperV, "Install Hyper-V packages",
+                "Installing guest integration services", SymbolRegular.Box24) { IndentLevel = 1, IsVisible = false });
+            if (c?.ConfigureXrdp == true)
+            {
+                Phases.Add(new DeploymentPhase(SubInstallXrdp, "Install xRDP",
+                    "Installing xRDP for Enhanced Session support", SymbolRegular.Desktop24) { IndentLevel = 1, IsVisible = false });
+            }
+            Phases.Add(new DeploymentPhase(SubInstallPwsh, "Install PowerShell",
+                "Installing PowerShell for post-boot management", SymbolRegular.Code24) { IndentLevel = 1, IsVisible = false });
+            Phases.Add(new DeploymentPhase(SubSshSetup, "SSH setup",
+                "Creating automation user and injecting SSH key", SymbolRegular.Key24) { IndentLevel = 1, IsVisible = false });
+            Phases.Add(new DeploymentPhase(SubReboot, "Reboot",
+                "Shutting down VM to boot from converted disk", SymbolRegular.Power24) { IndentLevel = 1, IsVisible = false });
+        }
+
+        /// <summary>Inserts pre-boot sub-step cards at a given index (hidden). Returns the next free index.</summary>
+        private int InsertPreBootSubStepsAt(int index, VmCustomizations c)
+        {
+            Phases.Insert(index++, new DeploymentPhase(SubInstallHyperV, "Install Hyper-V packages",
+                "Installing guest integration services", SymbolRegular.Box24) { IndentLevel = 1, IsVisible = false });
+            if (c?.ConfigureXrdp == true)
+            {
+                Phases.Insert(index++, new DeploymentPhase(SubInstallXrdp, "Install xRDP",
+                    "Installing xRDP for Enhanced Session support", SymbolRegular.Desktop24) { IndentLevel = 1, IsVisible = false });
+            }
+            Phases.Insert(index++, new DeploymentPhase(SubInstallPwsh, "Install PowerShell",
+                "Installing PowerShell for post-boot management", SymbolRegular.Code24) { IndentLevel = 1, IsVisible = false });
+            Phases.Insert(index++, new DeploymentPhase(SubSshSetup, "SSH setup",
+                "Creating automation user and injecting SSH key", SymbolRegular.Key24) { IndentLevel = 1, IsVisible = false });
+            Phases.Insert(index++, new DeploymentPhase(SubReboot, "Reboot",
+                "Shutting down VM to boot from converted disk", SymbolRegular.Power24) { IndentLevel = 1, IsVisible = false });
+            return index;
+        }
+
+        /// <summary>Appends post-boot sub-step cards (IndentLevel=1, hidden) to the end of Phases.</summary>
+        private void AddPostBootSubSteps(VmCustomizations c)
+        {
+            Phases.Add(new DeploymentPhase(SubRemoveVBox, "Remove VBox Guest Additions",
+                "Cleaning up VirtualBox artifacts", SymbolRegular.Delete24) { IndentLevel = 1, IsVisible = false });
+            if (c?.SyncTimezone == true)
+            {
+                Phases.Add(new DeploymentPhase(SubSyncTimezone, "Sync Timezone",
+                    "Setting guest timezone to match host", SymbolRegular.Clock24) { IndentLevel = 1, IsVisible = false });
+            }
+            if (c?.ConfigureHtbVpn == true)
+            {
+                Phases.Add(new DeploymentPhase(SubConfigureVpn, "Configure VPN",
+                    "Installing OpenVPN and deploying VPN configs", SymbolRegular.Globe24) { IndentLevel = 1, IsVisible = false });
+            }
+            Phases.Add(new DeploymentPhase(SubRestoreSsh, "Restore SSH State",
+                "Restoring the original SSH configuration", SymbolRegular.ShieldKeyhole24) { IndentLevel = 1, IsVisible = false });
+        }
+
+        /// <summary>Inserts post-boot sub-step cards at a given index (hidden). Returns the next free index.</summary>
+        private int InsertPostBootSubStepsAt(int index, VmCustomizations c)
+        {
+            Phases.Insert(index++, new DeploymentPhase(SubRemoveVBox, "Remove VBox Guest Additions",
+                "Cleaning up VirtualBox artifacts", SymbolRegular.Delete24) { IndentLevel = 1, IsVisible = false });
+            if (c?.SyncTimezone == true)
+            {
+                Phases.Insert(index++, new DeploymentPhase(SubSyncTimezone, "Sync Timezone",
+                    "Setting guest timezone to match host", SymbolRegular.Clock24) { IndentLevel = 1, IsVisible = false });
+            }
+            if (c?.ConfigureHtbVpn == true)
+            {
+                Phases.Insert(index++, new DeploymentPhase(SubConfigureVpn, "Configure VPN",
+                    "Installing OpenVPN and deploying VPN configs", SymbolRegular.Globe24) { IndentLevel = 1, IsVisible = false });
+            }
+            Phases.Insert(index++, new DeploymentPhase(SubRestoreSsh, "Restore SSH State",
+                "Restoring the original SSH configuration", SymbolRegular.ShieldKeyhole24) { IndentLevel = 1, IsVisible = false });
+            return index;
+        }
+
+        /// <summary>Finds the index after the last IndentLevel>0 child of the Customize phase.</summary>
+        private int FindEndOfCustomizeSubSteps()
+        {
+            int customizeIdx = -1;
+            for (int i = 0; i < Phases.Count; i++)
+            {
+                if (Phases[i].Id == PhaseCustomize) { customizeIdx = i; break; }
+            }
+            if (customizeIdx < 0) return 0;
+
+            int end = customizeIdx + 1;
+            while (end < Phases.Count && Phases[end].IndentLevel > 0)
+                end++;
+            return end;
         }
 
         // ── Phase status updates ─────────────────────────────────────────
@@ -298,10 +437,16 @@ namespace VMCreate
                             Phases[i].Status = DeploymentPhaseStatus.Active;
                             Phases[i].IsIndeterminate = true;
                         }
+                        // Ensure children are visible when parent becomes active
+                        SetChildrenVisible(i, true);
                         break;
                     }
                 }
             }
+
+            // When activating a parent phase, expand its children
+            if (phase.IndentLevel == 0)
+                SetChildrenVisible(Phases.IndexOf(phase), true);
 
             phase.Status = DeploymentPhaseStatus.Active;
             phase.IsIndeterminate = true;
@@ -316,6 +461,11 @@ namespace VMCreate
             phase.ProgressPercentage = 100;
             phase.IsIndeterminate = false;
             phase.ProgressText = null;
+
+            // Collapse children when a parent phase completes
+            if (phase.IndentLevel == 0)
+                SetChildrenVisible(Phases.IndexOf(phase), false);
+
             _logger.LogDebug("Phase completed: {Phase}", id);
         }
 
@@ -326,6 +476,24 @@ namespace VMCreate
             phase.Status = DeploymentPhaseStatus.Failed;
             phase.IsIndeterminate = false;
             phase.ProgressText = message;
+
+            // Collapse children when a parent phase fails
+            if (phase.IndentLevel == 0)
+                SetChildrenVisible(Phases.IndexOf(phase), false);
+        }
+
+        /// <summary>
+        /// Shows or hides all IndentLevel>0 children immediately following the parent at <paramref name="parentIndex"/>.
+        /// </summary>
+        private void SetChildrenVisible(int parentIndex, bool visible)
+        {
+            if (parentIndex < 0) return;
+            for (int i = parentIndex + 1; i < Phases.Count; i++)
+            {
+                if (Phases[i].IndentLevel <= Phases[parentIndex].IndentLevel)
+                    break;
+                Phases[i].IsVisible = visible;
+            }
         }
 
         public void UpdatePhaseProgress(string id, int percentage, string text = null)

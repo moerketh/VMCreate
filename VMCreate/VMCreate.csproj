@@ -21,6 +21,7 @@
     <Compile Include="VMCreate\CreateVM.cs" />
     <Compile Include="VMCreate\CreateVMProgressInfo.cs" />
     <Compile Include="Downloaders\ChecksumVerifier.cs" />
+    <Compile Include="Downloaders\CloningIsoDownloader.cs" />
     <Compile Include="Downloaders\FileStreamProvider.cs" />
     <Compile Include="Downloaders\HttpFileDownloader.cs" />
     <Compile Include="Downloaders\HttpStreamProvider.cs" />

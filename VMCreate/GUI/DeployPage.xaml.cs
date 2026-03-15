@@ -18,6 +18,7 @@ namespace VMCreate
         private readonly ILogger _logger;
         private CancellationTokenSource _cts;
         private string _activePhaseId;
+        private string _activeSubStepId;
 
         public DeployPage(WizardData wizardData, CreateVM createVM, ILoggerFactory loggerFactory)
         {
@@ -182,8 +183,33 @@ namespace VMCreate
                         Application.Current.Dispatcher.Invoke(() => _viewModel.InsertPostBootPhase());
                     }
 
+                    CompleteCurrentSubStep();
                     CompleteCurrentPhase();
                     ActivateNextPhase(targetPhase);
+                }
+            }
+
+            // Sub-step activation for post-boot steps (driven by StepName)
+            if (_activePhaseId == DeployPageViewModel.PhasePostBoot && !string.IsNullOrEmpty(info.StepName))
+            {
+                string subId = MapPostBootStepName(info.StepName);
+                if (subId != null && subId != _activeSubStepId)
+                {
+                    CompleteCurrentSubStep();
+                    _activeSubStepId = subId;
+                    _viewModel.ActivatePhase(subId);
+                }
+            }
+
+            // Sub-step activation for pre-boot (driven by KVP WorkflowProgress via URI)
+            if (_activePhaseId == DeployPageViewModel.PhaseCustomize && !string.IsNullOrEmpty(info.URI))
+            {
+                string subId = MapPreBootProgress(info.URI);
+                if (subId != null && subId != _activeSubStepId)
+                {
+                    CompleteCurrentSubStep();
+                    _activeSubStepId = subId;
+                    _viewModel.ActivatePhase(subId);
                 }
             }
 
@@ -254,7 +280,18 @@ namespace VMCreate
         {
             if (_activePhaseId != null)
             {
+                // Complete any lingering sub-step along with the parent
+                CompleteCurrentSubStep();
                 _viewModel.CompletePhase(_activePhaseId);
+            }
+        }
+
+        private void CompleteCurrentSubStep()
+        {
+            if (_activeSubStepId != null)
+            {
+                _viewModel.CompletePhase(_activeSubStepId);
+                _activeSubStepId = null;
             }
         }
 
@@ -264,6 +301,35 @@ namespace VMCreate
             {
                 _viewModel.FailPhase(_activePhaseId, message);
             }
+        }
+
+        /// <summary>Maps ICustomizationStep.Name to a post-boot sub-step card ID.</summary>
+        private static string MapPostBootStepName(string stepName) => stepName switch
+        {
+            "Remove VirtualBox Guest Additions" => DeployPageViewModel.SubRemoveVBox,
+            "Sync Timezone"                     => DeployPageViewModel.SubSyncTimezone,
+            "Install OpenVPN"                   => DeployPageViewModel.SubConfigureVpn,
+            "Deploy VPN Configs"                => DeployPageViewModel.SubConfigureVpn, // collapsed into one card
+            "Restore SSH State"                 => DeployPageViewModel.SubRestoreSsh,
+            _ => null
+        };
+
+        /// <summary>Maps KVP WorkflowProgress prefix to a pre-boot sub-step card ID.</summary>
+        private static string MapPreBootProgress(string progress)
+        {
+            if (progress.StartsWith("INSTALL_GRUB", StringComparison.OrdinalIgnoreCase))
+                return DeployPageViewModel.SubInstallGrub;
+            if (progress.StartsWith("INSTALL_HYPERV", StringComparison.OrdinalIgnoreCase))
+                return DeployPageViewModel.SubInstallHyperV;
+            if (progress.StartsWith("INSTALL_XRDP", StringComparison.OrdinalIgnoreCase))
+                return DeployPageViewModel.SubInstallXrdp;
+            if (progress.StartsWith("INSTALL_PWSH", StringComparison.OrdinalIgnoreCase))
+                return DeployPageViewModel.SubInstallPwsh;
+            if (progress.StartsWith("SSH_SETUP", StringComparison.OrdinalIgnoreCase))
+                return DeployPageViewModel.SubSshSetup;
+            if (progress.StartsWith("REBOOT", StringComparison.OrdinalIgnoreCase))
+                return DeployPageViewModel.SubReboot;
+            return null;
         }
     }
 }

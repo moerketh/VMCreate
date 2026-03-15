@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Management;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Xml.Linq;
@@ -105,14 +106,10 @@ namespace VMCreate
             {
                 // Check if VM is still running
                 string currentGuid = GetVMGuid(vmName);
-                if (string.IsNullOrEmpty(currentGuid))
-                    return true; // VM shut down successfully
+                bool vmOff = string.IsNullOrEmpty(currentGuid);
 
-                // Check timeout
-                if (timeoutSeconds > 0 && (DateTime.UtcNow - startTime).TotalSeconds > timeoutSeconds)
-                    return false; // Timeout — VM still running
-
-                // Poll WorkflowProgress KVP and report to UI
+                // Always do a KVP read (even after shutdown) so we don't
+                // miss the last few progress updates (e.g. SSH_SETUP, REBOOT).
                 try
                 {
                     var kvps = GetCustomKVPs(vmGuid);
@@ -132,6 +129,13 @@ namespace VMCreate
                 {
                     // KVP read may fail transiently while VM is shutting down
                 }
+
+                if (vmOff)
+                    return true; // VM shut down successfully
+
+                // Check timeout
+                if (timeoutSeconds > 0 && (DateTime.UtcNow - startTime).TotalSeconds > timeoutSeconds)
+                    return false; // Timeout — VM still running
 
                 await Task.Delay(2000, cancellationToken);
             }
@@ -208,10 +212,19 @@ namespace VMCreate
                 }
                 else if (part.StartsWith("Rate: "))
                 {
-                    string rateStr = part.Split(':')[1].Trim().Replace(" GB/min", "");
-                    if (double.TryParse(rateStr, new CultureInfo("en-US"), out double rateGbMin))
+                    // Rate string may be "10.24GB/min", "10235392.00MB/min", or "5.07 GB/min".
+                    string rateStr = part.Substring("Rate: ".Length).Trim();
+                    var rateMatch = Regex.Match(rateStr, @"([\d.]+)\s*(GB|MB|KB)/min");
+                    if (rateMatch.Success
+                        && double.TryParse(rateMatch.Groups[1].Value, CultureInfo.InvariantCulture, out double rateValue))
                     {
-                        info.DownloadSpeed = rateGbMin * 1000 / 60;  // Convert GB/min to MB/s
+                        info.DownloadSpeed = rateMatch.Groups[2].Value switch
+                        {
+                            "GB" => rateValue * 1000 / 60,   // GB/min → MB/s
+                            "MB" => rateValue / 60,           // MB/min → MB/s
+                            "KB" => rateValue / 1024 / 60,    // KB/min → MB/s
+                            _ => -1
+                        };
                     }
                 }
             }
