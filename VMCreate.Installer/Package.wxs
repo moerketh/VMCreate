@@ -6,7 +6,8 @@
            Version="$(var.ProductVersion)"
            UpgradeCode="7A3E8F1B-2C4D-4E5F-9A6B-1D2E3F4A5B6C"
            InstallerVersion="500"
-           Scope="perMachine">
+           Scope="perMachine"
+           Platform="x64">
 
     <SummaryInformation Description="VMCreate — Linux VM Quick Create for Hyper-V" />
 
