@@ -8,7 +8,7 @@ reproduced below.
 
 ## SharpCompress
 
-- **Version:** 0.40.0
+- **Version:** 0.47.0
 - **Project:** https://github.com/adamhathcock/sharpcompress
 - **License:** MIT
 
@@ -205,7 +205,7 @@ has waived all copyright and related or neighboring rights to XZ Utils.
 
 ## ZstdSharp
 
-- **Version:** 0.8.6
+- **Version:** 0.8.7
 - **Project:** https://github.com/oleg-st/ZstdSharp
 - **License:** MIT
 
@@ -261,7 +261,7 @@ SOFTWARE.
 
 ## SharpVectors
 
-- **Version:** 1.8.4.2
+- **Version:** 1.8.5
 - **Project:** https://github.com/ElinamLLC/SharpVectors
 - **License:** BSD-3-Clause
 

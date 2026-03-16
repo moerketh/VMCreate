@@ -101,6 +101,8 @@ namespace CreateVM.HyperV.vmbus
 
             var args = new StringBuilder();
             args.Append($"-i \"{privateKeyPath}\" ");
+            // Host key checking is intentionally disabled: we connect to freshly-created
+            // local Hyper-V guests whose host keys are regenerated on every install.
             args.Append("-o StrictHostKeyChecking=no ");
             args.Append("-o BatchMode=yes ");
             args.Append("-o ConnectTimeout=10 ");

@@ -32,16 +32,19 @@ namespace VMCreate
                         key.Name, guestPath, shell.VmName);
 
                     // Import into NetworkManager so it appears in the system tray
+                    string safeGuestPath = EscapeSingleQuotes(guestPath);
                     string importResult = await shell.RunCommandAsync(
-                        $"sudo nmcli connection import type openvpn file '{guestPath}' 2>&1", ct);
+                        $"sudo nmcli connection import type openvpn file '{safeGuestPath}' 2>&1", ct);
 
                     if (importResult != null && !importResult.Contains("Error"))
                     {
                         // Rename to prefix with "HTB" so VPN connections are easily identifiable
                         string connName = Path.GetFileNameWithoutExtension(key.GuestFileName);
                         string htbName = $"HTB {key.Name}";
+                        string safeConnName = EscapeSingleQuotes(connName);
+                        string safeHtbName = EscapeSingleQuotes(htbName);
                         await shell.RunCommandAsync(
-                            $"sudo nmcli connection modify '{connName}' connection.id '{htbName}' 2>&1", ct);
+                            $"sudo nmcli connection modify '{safeConnName}' connection.id '{safeHtbName}' 2>&1", ct);
 
                         logger.LogInformation("Imported {Name} VPN as '{HtbName}' into NetworkManager on VM {VMName}",
                             key.Name, htbName, shell.VmName);
@@ -60,8 +63,9 @@ namespace VMCreate
                 string guestPath = "/etc/openvpn/client/manual.ovpn";
                 await shell.CopyFileAsync(customizations.OvpnFilePath, guestPath, ct);
 
+                string safeGuestPath = EscapeSingleQuotes(guestPath);
                 string importResult = await shell.RunCommandAsync(
-                    $"sudo nmcli connection import type openvpn file '{guestPath}' 2>&1", ct);
+                    $"sudo nmcli connection import type openvpn file '{safeGuestPath}' 2>&1", ct);
 
                 if (importResult != null && !importResult.Contains("Error"))
                 {
@@ -81,5 +85,11 @@ namespace VMCreate
 
             logger.LogInformation("HTB VPN configured for VM {VMName}", shell.VmName);
         }
+
+        /// <summary>
+        /// Escapes a value for safe embedding inside a single-quoted bash string.
+        /// </summary>
+        private static string EscapeSingleQuotes(string value) =>
+            value.Replace("'", "'\\''");
     }
 }

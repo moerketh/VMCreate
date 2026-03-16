@@ -123,11 +123,12 @@ namespace VMCreate
         {
             byte[] bytes = Encoding.UTF8.GetBytes(content);
             string base64 = Convert.ToBase64String(bytes);
+            string safePath = EscapeSingleQuotes(guestPath);
 
             string command = $@"
-                sudo mkdir -p ""$(dirname '{guestPath}')""
-                echo '{base64}' | base64 -d | sudo tee '{guestPath}' > /dev/null
-                sudo chmod 644 '{guestPath}'
+                sudo mkdir -p ""$(dirname '{safePath}')""
+                echo '{base64}' | base64 -d | sudo tee '{safePath}' > /dev/null
+                sudo chmod 644 '{safePath}'
             ";
 
             await RunCommandAsync(command, ct);
@@ -142,11 +143,12 @@ namespace VMCreate
 
             byte[] content = await File.ReadAllBytesAsync(hostPath, ct);
             string base64 = Convert.ToBase64String(content);
+            string safePath = EscapeSingleQuotes(guestPath);
 
             string command = $@"
-                sudo mkdir -p ""$(dirname '{guestPath}')""
-                echo '{base64}' | base64 -d | sudo tee '{guestPath}' > /dev/null
-                sudo chmod 644 '{guestPath}'
+                sudo mkdir -p ""$(dirname '{safePath}')""
+                echo '{base64}' | base64 -d | sudo tee '{safePath}' > /dev/null
+                sudo chmod 644 '{safePath}'
             ";
 
             await RunCommandAsync(command, ct);
@@ -222,6 +224,8 @@ namespace VMCreate
 
             var args = new StringBuilder();
             args.Append($"-i \"{_privateKeyPath}\" ");
+            // Host key checking is intentionally disabled: we connect to freshly-created
+            // local Hyper-V guests whose host keys are regenerated on every install.
             args.Append("-o StrictHostKeyChecking=no ");
             args.Append("-o BatchMode=yes ");
             args.Append("-o ConnectTimeout=10 ");
@@ -295,6 +299,13 @@ namespace VMCreate
 
             return stdoutStr;
         }
+
+        /// <summary>
+        /// Escapes a value for safe embedding inside a single-quoted bash string.
+        /// Closes the quote, inserts an escaped literal quote, and re-opens the quote.
+        /// </summary>
+        private static string EscapeSingleQuotes(string value) =>
+            value.Replace("'", "'\\''");
 
         private static string EscapeForSsh(string command)
         {
