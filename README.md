@@ -1,35 +1,32 @@
 # VMCreate
 
-A Windows desktop application that replaces Hyper-V Quick Create with a streamlined workflow for downloading, converting, and deploying Linux virtual machines — with built-in support for 20+ distributions including security-focused images.
+A Windows desktop application that replaces Hyper-V Quick Create with a streamlined workflow for deploying security and penetration testing virtual machines — select a distribution, click Create, and VMCreate handles the download, extraction, disk conversion, and VM provisioning automatically.
 
 ## Features
 
 - **One-click VM creation** — select a distribution, click Create, and VMCreate handles the download, extraction, disk conversion, VM provisioning, and post-boot customization automatically
-- **Multi-format media support** — ISO, QCOW2, VMDK, VHD/VHDX, OVA, 7z, XZ, and Zstandard archives
+- **Multi-format media support** — QCOW2, VMDK, VHD/VHDX, OVA, IMG, 7z, XZ, and Zstandard archives
 - **Gen 1 & Gen 2 Hyper-V VMs** — automatic MBR-to-GPT migration and cloning for Gen 2 UEFI boot
 - **Post-boot customization** — SSH-based guest automation for timezone sync, VPN deployment, and Enhanced Session setup (xRDP)
 - **Hack The Box integration** — deploy OpenVPN configs from HTB Labs, Starting Point, and Academy directly into the guest
 - **SHA-256 checksum verification** on all downloads
 - **Phase-card progress UI** — real-time status for each stage of the deployment pipeline
 
-## Supported Distributions
+## One-Click Distributions
 
-| General | Security |
-|---------|----------|
-| Alpine Linux | BlackArch |
-| Arch Linux | CAINE |
-| Debian | Fedora Security Lab |
-| Fedora Workstation | Kali Linux |
-| Fedora Silverblue | Parrot OS |
-| Linux Mint | Pentoo |
-| NixOS | PwnCloud OS |
-| openSUSE Tumbleweed | REMnux |
-| Rocky Linux | Security Onion |
-| Ubuntu | Tails |
-| | Tsurugi |
-| | Whonix |
+These distributions ship disk images and can be deployed without manual installation:
 
-Additional images can be loaded from the Microsoft gallery, local JSON files, or custom registry entries.
+| Security | General |
+|----------|---------|
+| BlackArch | Arch Linux |
+| Kali Linux | Ubuntu |
+| Parrot OS | |
+| PwnCloud OS | |
+| REMnux | |
+| Tails | |
+| Whonix | |
+
+Additional ISO-based distributions (Alpine, CAINE, Debian, Fedora, Linux Mint, NixOS, openSUSE, Pentoo, Rocky Linux, Security Onion, Tsurugi) are available but hidden by default as they require manual OS installation. Custom images can also be loaded from the Microsoft gallery, local JSON files, or registry entries.
 
 ## Requirements
 
