@@ -65,7 +65,8 @@ jobs:
       - name: Generate checksums
         shell: pwsh
         run: |
-          $msi = Get-ChildItem -Path VMCreate.Installer/bin/Release -Filter "*.msi" -Recurse | Select-Object -First 1
+          $msi = Get-ChildItem -Path VMCreate.Installer/bin -Filter "*.msi" -Recurse | Select-Object -First 1
+          if (-not $msi) { throw "MSI not found under VMCreate.Installer/bin" }
           $exe = "publish/VMCreate.exe"
           $msiHash = (Get-FileHash $msi.FullName -Algorithm SHA256).Hash
           $exeHash = (Get-FileHash $exe -Algorithm SHA256).Hash
@@ -77,7 +78,8 @@ jobs:
         shell: pwsh
         run: |
           $ver = "${{ steps.version.outputs.version }}"
-          $msi = Get-ChildItem -Path VMCreate.Installer/bin/Release -Filter "*.msi" -Recurse | Select-Object -First 1
+          $msi = Get-ChildItem -Path VMCreate.Installer/bin -Filter "*.msi" -Recurse | Select-Object -First 1
+          if (-not $msi) { throw "MSI not found under VMCreate.Installer/bin" }
           Copy-Item $msi.FullName "VMCreate-$ver.msi"
           Copy-Item "publish/VMCreate.exe" "VMCreate-$ver.exe"
 

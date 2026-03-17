@@ -35,11 +35,11 @@
     </StandardDirectory>
 
     <!-- ── Hyper-V Quick Create replacement ─────────────────────────── -->
-    <Property Id="HYPERVDIR" Value="[ProgramFiles64Folder]Hyper-V\" />
+    <SetProperty Id="HYPERVDIR" After="CostFinalize" Sequence="execute" Value="[ProgramFiles64Folder]Hyper-V\" />
 
     <!-- Backup: copy original VMCreate.exe to VMCreate.exe.original (only if not already backed up) -->
     <SetProperty Id="BackupQuickCreate" Before="BackupQuickCreate" Sequence="execute"
-                 Value="&quot;[SystemFolder]cmd.exe&quot; /c if not exist &quot;[ProgramFiles64Folder]Hyper-V\VMCreate.exe.original&quot; if exist &quot;[ProgramFiles64Folder]Hyper-V\VMCreate.exe&quot; copy /Y &quot;[ProgramFiles64Folder]Hyper-V\VMCreate.exe&quot; &quot;[ProgramFiles64Folder]Hyper-V\VMCreate.exe.original&quot;" />
+                 Value="&quot;[SystemFolder]cmd.exe&quot; /c if not exist &quot;[HYPERVDIR]VMCreate.exe.original&quot; if exist &quot;[HYPERVDIR]VMCreate.exe&quot; copy /Y &quot;[HYPERVDIR]VMCreate.exe&quot; &quot;[HYPERVDIR]VMCreate.exe.original&quot;" />
     <CustomAction Id="BackupQuickCreate"
                   DllEntry="WixQuietExec64"
                   BinaryRef="Wix4UtilCA_X64"
@@ -49,7 +49,7 @@
 
     <!-- Replace: copy our VMCreate.exe over the Hyper-V one -->
     <SetProperty Id="ReplaceQuickCreate" Before="ReplaceQuickCreate" Sequence="execute"
-                 Value="&quot;[SystemFolder]cmd.exe&quot; /c copy /Y &quot;[INSTALLFOLDER]VMCreate.exe&quot; &quot;[ProgramFiles64Folder]Hyper-V\VMCreate.exe&quot;" />
+                 Value="&quot;[SystemFolder]cmd.exe&quot; /c copy /Y &quot;[INSTALLFOLDER]VMCreate.exe&quot; &quot;[HYPERVDIR]VMCreate.exe&quot;" />
     <CustomAction Id="ReplaceQuickCreate"
                   DllEntry="WixQuietExec64"
                   BinaryRef="Wix4UtilCA_X64"
@@ -59,7 +59,7 @@
 
     <!-- Restore: on uninstall, put the original back -->
     <SetProperty Id="RestoreQuickCreate" Before="RestoreQuickCreate" Sequence="execute"
-                 Value="&quot;[SystemFolder]cmd.exe&quot; /c if exist &quot;[ProgramFiles64Folder]Hyper-V\VMCreate.exe.original&quot; (copy /Y &quot;[ProgramFiles64Folder]Hyper-V\VMCreate.exe.original&quot; &quot;[ProgramFiles64Folder]Hyper-V\VMCreate.exe&quot; &amp;&amp; del &quot;[ProgramFiles64Folder]Hyper-V\VMCreate.exe.original&quot;)" />
+                 Value="&quot;[SystemFolder]cmd.exe&quot; /c if exist &quot;[HYPERVDIR]VMCreate.exe.original&quot; (copy /Y &quot;[HYPERVDIR]VMCreate.exe.original&quot; &quot;[HYPERVDIR]VMCreate.exe&quot; &amp;&amp; del &quot;[HYPERVDIR]VMCreate.exe.original&quot;)" />
     <CustomAction Id="RestoreQuickCreate"
                   DllEntry="WixQuietExec64"
                   BinaryRef="Wix4UtilCA_X64"
