@@ -83,15 +83,26 @@ jobs:
           Copy-Item $msi.FullName "VMCreate-$ver.msi"
           Copy-Item "publish/VMCreate.exe" "VMCreate-$ver.exe"
 
-      - name: Upload build artifacts
+      - name: Upload MSI artifact
         if: github.ref_type == 'branch'
         uses: actions/upload-artifact@v4
         with:
-          name: vmcreate-${{ steps.version.outputs.version }}
-          path: |
-            VMCreate-${{ steps.version.outputs.version }}.msi
-            VMCreate-${{ steps.version.outputs.version }}.exe
-            checksums.sha256
+          name: VMCreate-${{ steps.version.outputs.msi_version }}.msi
+          path: VMCreate-${{ steps.version.outputs.version }}.msi
+
+      - name: Upload EXE artifact
+        if: github.ref_type == 'branch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: VMCreate-${{ steps.version.outputs.msi_version }}.exe
+          path: VMCreate-${{ steps.version.outputs.version }}.exe
+
+      - name: Upload checksums artifact
+        if: github.ref_type == 'branch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: checksums.sha256
+          path: checksums.sha256
 
       - name: Create GitHub Release
         if: github.ref_type == 'tag'
