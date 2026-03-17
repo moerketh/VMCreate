@@ -11,9 +11,6 @@ namespace VMCreate
         public string ThumbnailUri { get; set; }
         public string DiskUri { get; set; }
         public string SymbolUri { get; set; }
-        [Obsolete("Set is no longer needed. Disk files are auto-detected after extraction. " +
-                 "Existing values are ignored by the extraction pipeline.")]
-        public string ArchiveRelativePath { get; set; }
         public string SecureBoot { get; set; }
         public string EnhancedSessionTransportType { get; set; }
         public string Version { get; set; }

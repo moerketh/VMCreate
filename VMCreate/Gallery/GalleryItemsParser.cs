@@ -145,11 +145,6 @@ namespace VMCreate.Gallery
                                 ? symbolUriProp.GetString() ?? ""
                                 : "",
                             DiskUri = diskUri,
-#pragma warning disable CS0618 // ArchiveRelativePath is obsolete — still read from JSON for backward compat
-                            ArchiveRelativePath = diskProp.TryGetProperty("archiveRelativePath", out var archivePathProp)
-                                ? archivePathProp.GetString() ?? ""
-                                : "",
-#pragma warning restore CS0618
                             SecureBoot = secureBoot,
                             EnhancedSessionTransportType = enhancedSessionTransportType,
                             Version = image.TryGetProperty("version", out var versionProp) ? versionProp.GetString() ?? "" : "",

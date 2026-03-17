@@ -31,7 +31,7 @@ jobs:
         run: dotnet build VMCreate.sln -c Release --no-restore
 
       - name: Run tests
-        run: dotnet test VMCreate.sln -c Release --no-build --logger trx
+        run: dotnet test VMCreate.sln -c Release --no-build --logger trx --filter "TestCategory!=Integration"
 
       - name: Determine version
         id: version

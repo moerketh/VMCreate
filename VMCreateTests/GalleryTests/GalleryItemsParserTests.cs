@@ -231,8 +231,7 @@ namespace VMCreate.Tests.GalleryTests
                             "logo":      { "uri": "https://example.com/logo.png"  },
                             "symbol":    { "uri": "https://example.com/sym.png"   },
                             "disk": {
-                                "uri": "https://example.com/disk.vhdx",
-                                "archiveRelativePath": "inner/disk.vhd"
+                                "uri": "https://example.com/disk.vhdx"
                             },
                             "config": {
                                 "secureBoot": "true",
@@ -259,9 +258,6 @@ namespace VMCreate.Tests.GalleryTests
                 Assert.AreEqual("https://example.com/thumb.png", item.ThumbnailUri);
                 Assert.AreEqual("https://example.com/sym.png", item.SymbolUri);
                 Assert.AreEqual("https://example.com/disk.vhdx", item.DiskUri);
-#pragma warning disable CS0618
-                Assert.AreEqual("inner/disk.vhd", item.ArchiveRelativePath);
-#pragma warning restore CS0618
                 Assert.AreEqual("true", item.SecureBoot);
                 Assert.AreEqual("HvSocket", item.EnhancedSessionTransportType);
             }
@@ -456,18 +452,6 @@ namespace VMCreate.Tests.GalleryTests
             Assert.AreEqual("Unknown", item.FileType);
         }
 
-        [TestMethod]
-        public void FileType_IgnoresObsoleteArchiveRelativePath()
-        {
-            // Even when ArchiveRelativePath is set, FileType should derive from DiskUri
-#pragma warning disable CS0618
-            var item = new GalleryItem
-            {
-                DiskUri = "https://example.com/image.ova",
-                ArchiveRelativePath = "disk.vmdk"
-            };
-#pragma warning restore CS0618
-            Assert.AreEqual("OVA", item.FileType);
-        }
+
     }
 }

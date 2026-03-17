@@ -74,7 +74,6 @@ namespace VMCreate.Gallery
                         ThumbnailUri = "https://blackarch.org/images/screenshots/menu_slim.png",
                         SymbolUri = logoUri,
                         DiskUri = ovaUrl,
-                        ArchiveRelativePath = "blackarch-disk001.vmdk",
                         SecureBoot = "false",
                         EnhancedSessionTransportType = "HvSocket",
                         Version = PinnedVersion,
