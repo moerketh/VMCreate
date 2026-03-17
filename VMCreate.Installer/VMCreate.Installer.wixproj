@@ -1,6 +1,7 @@
 <Project Sdk="WixToolset.Sdk/5.0.2">
   <PropertyGroup>
     <OutputType>Package</OutputType>
+    <Platform>x64</Platform>
     <!-- Pass -p:ProductVersion=x.y.z from CI or it defaults to 1.0.0 -->
     <ProductVersion Condition="'$(ProductVersion)' == ''">1.0.0</ProductVersion>
     <!-- Directory containing published VMCreate.exe (set by CI or manual publish) -->
