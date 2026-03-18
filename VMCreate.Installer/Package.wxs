@@ -37,6 +37,16 @@
     <!-- ── Hyper-V Quick Create replacement ─────────────────────────── -->
     <SetProperty Id="HYPERVDIR" After="CostFinalize" Sequence="execute" Value="[ProgramFiles64Folder]Hyper-V\" />
 
+    <!-- Take ownership of the Hyper-V VMCreate.exe so we can overwrite it (owned by TrustedInstaller) -->
+    <SetProperty Id="TakeOwnership" Before="TakeOwnership" Sequence="execute"
+                 Value="&quot;[System64Folder]cmd.exe&quot; /c if exist &quot;[HYPERVDIR]VMCreate.exe&quot; (takeown /F &quot;[HYPERVDIR]VMCreate.exe&quot; /A &amp;&amp; icacls &quot;[HYPERVDIR]VMCreate.exe&quot; /grant Administrators:F)" />
+    <CustomAction Id="TakeOwnership"
+                  DllEntry="WixQuietExec64"
+                  BinaryRef="Wix4UtilCA_X64"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+
     <!-- Backup: copy original VMCreate.exe to VMCreate.exe.original (only if not already backed up) -->
     <SetProperty Id="BackupQuickCreate" Before="BackupQuickCreate" Sequence="execute"
                  Value="&quot;[System64Folder]cmd.exe&quot; /c if not exist &quot;[HYPERVDIR]VMCreate.exe.original&quot; if exist &quot;[HYPERVDIR]VMCreate.exe&quot; copy /Y &quot;[HYPERVDIR]VMCreate.exe&quot; &quot;[HYPERVDIR]VMCreate.exe.original&quot;" />
@@ -57,9 +67,19 @@
                   Impersonate="no"
                   Return="ignore" />
 
-    <!-- Restore: on uninstall, put the original back -->
+    <!-- Re-lock: restore TrustedInstaller ownership and remove admin full-control -->
+    <SetProperty Id="LockPermissions" Before="LockPermissions" Sequence="execute"
+                 Value="&quot;[System64Folder]cmd.exe&quot; /c icacls &quot;[HYPERVDIR]VMCreate.exe&quot; /setowner &quot;NT SERVICE\TrustedInstaller&quot; &amp;&amp; icacls &quot;[HYPERVDIR]VMCreate.exe&quot; /remove:g Administrators" />
+    <CustomAction Id="LockPermissions"
+                  DllEntry="WixQuietExec64"
+                  BinaryRef="Wix4UtilCA_X64"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+
+    <!-- Restore: on uninstall, put the original back and reset ownership to TrustedInstaller -->
     <SetProperty Id="RestoreQuickCreate" Before="RestoreQuickCreate" Sequence="execute"
-                 Value="&quot;[System64Folder]cmd.exe&quot; /c if exist &quot;[HYPERVDIR]VMCreate.exe.original&quot; (copy /Y &quot;[HYPERVDIR]VMCreate.exe.original&quot; &quot;[HYPERVDIR]VMCreate.exe&quot; &amp;&amp; del &quot;[HYPERVDIR]VMCreate.exe.original&quot;)" />
+                 Value="&quot;[System64Folder]cmd.exe&quot; /c if exist &quot;[HYPERVDIR]VMCreate.exe.original&quot; (copy /Y &quot;[HYPERVDIR]VMCreate.exe.original&quot; &quot;[HYPERVDIR]VMCreate.exe&quot; &amp;&amp; del &quot;[HYPERVDIR]VMCreate.exe.original&quot; &amp;&amp; icacls &quot;[HYPERVDIR]VMCreate.exe&quot; /setowner &quot;NT SERVICE\TrustedInstaller&quot;)" />
     <CustomAction Id="RestoreQuickCreate"
                   DllEntry="WixQuietExec64"
                   BinaryRef="Wix4UtilCA_X64"
@@ -68,10 +88,13 @@
                   Return="ignore" />
 
     <InstallExecuteSequence>
+      <!-- Take ownership before any file operations -->
+      <Custom Action="TakeOwnership" Before="BackupQuickCreate" Condition="NOT Installed OR REMOVE=&quot;ALL&quot;" />
       <!-- On first install: backup then replace -->
       <Custom Action="BackupQuickCreate" Before="InstallFiles" Condition="NOT Installed" />
       <Custom Action="ReplaceQuickCreate" After="InstallFiles" Condition="NOT Installed OR UPGRADINGPRODUCTCODE" />
-      <!-- On uninstall (not upgrade): restore original -->
+      <Custom Action="LockPermissions" After="ReplaceQuickCreate" Condition="NOT Installed OR UPGRADINGPRODUCTCODE" />
+      <!-- On uninstall (not upgrade): restore original and reset ownership -->
       <Custom Action="RestoreQuickCreate" After="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
     </InstallExecuteSequence>
 
