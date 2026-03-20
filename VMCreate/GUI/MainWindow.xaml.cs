@@ -95,41 +95,24 @@ namespace VMCreate
                 _ => 0
             };
 
-            var accentBrush = (System.Windows.Media.Brush)FindResource("AccentBrush");
-            var secondaryBrush = (System.Windows.Media.Brush)FindResource("TextFillColorSecondaryBrush");
-
-            SetStepStyle(Step1Icon, Step1Text, SymbolRegular.Image24, activeStep == 1, activeStep > 1, accentBrush, secondaryBrush);
-            SetStepStyle(Step2Icon, Step2Text, SymbolRegular.Settings24, activeStep == 2, activeStep > 2, accentBrush, secondaryBrush);
-            SetStepStyle(Step3Icon, Step3Text, SymbolRegular.Wrench24, activeStep == 3, activeStep > 3, accentBrush, secondaryBrush);
-            SetStepStyle(Step4Icon, Step4Text, SymbolRegular.Rocket24, activeStep == 4, false, accentBrush, secondaryBrush);
+            SetStepStyle(Step1Icon, Step1Text, SymbolRegular.Image24, activeStep == 1, activeStep > 1);
+            SetStepStyle(Step2Icon, Step2Text, SymbolRegular.Settings24, activeStep == 2, activeStep > 2);
+            SetStepStyle(Step3Icon, Step3Text, SymbolRegular.Wrench24, activeStep == 3, activeStep > 3);
+            SetStepStyle(Step4Icon, Step4Text, SymbolRegular.Rocket24, activeStep == 4, false);
         }
 
         private static void SetStepStyle(
             SymbolIcon icon, System.Windows.Controls.TextBlock text,
-            SymbolRegular defaultSymbol, bool active, bool completed,
-            System.Windows.Media.Brush accentBrush, System.Windows.Media.Brush secondaryBrush)
+            SymbolRegular defaultSymbol, bool active, bool completed)
         {
-            if (completed)
-            {
-                icon.Symbol = SymbolRegular.CheckmarkCircle24;
-                icon.Foreground = accentBrush;
-                text.Foreground = accentBrush;
-                text.FontWeight = FontWeights.Normal;
-            }
-            else if (active)
-            {
-                icon.Symbol = defaultSymbol;
-                icon.Foreground = accentBrush;
-                text.Foreground = accentBrush;
-                text.FontWeight = FontWeights.SemiBold;
-            }
-            else
-            {
-                icon.Symbol = defaultSymbol;
-                text.Foreground = secondaryBrush;
-                icon.Foreground = secondaryBrush;
-                text.FontWeight = FontWeights.Normal;
-            }
+            string brushKey = (active || completed) ? "AccentTextBrush" : "TextFillColorPrimaryBrush";
+
+            icon.Symbol = completed ? SymbolRegular.CheckmarkCircle24 : defaultSymbol;
+            text.FontWeight = active ? FontWeights.SemiBold : FontWeights.Normal;
+
+            // SetResourceReference creates a live link that updates on theme change.
+            icon.SetResourceReference(SymbolIcon.ForegroundProperty, brushKey);
+            text.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, brushKey);
         }
 
         private async void MyWindow_LoadedAsync(object sender, RoutedEventArgs e)

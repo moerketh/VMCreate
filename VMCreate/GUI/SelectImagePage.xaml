@@ -132,8 +132,10 @@
                     FontSize="14" Margin="9,4,4,4" Padding="12,8"
                     AutomationProperties.Name="Next step">
                 <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="Next" VerticalAlignment="Center"/>
-                    <ui:SymbolIcon Symbol="ArrowRight24" Margin="6,0,0,0"/>
+                    <TextBlock Text="Next" VerticalAlignment="Center"
+                               Foreground="{DynamicResource TextOnAccentFillColorPrimaryBrush}"/>
+                    <ui:SymbolIcon Symbol="ArrowRight24" Margin="6,0,0,0"
+                                   Foreground="{DynamicResource TextOnAccentFillColorPrimaryBrush}"/>
                 </StackPanel>
             </ui:Button>
         </StackPanel>

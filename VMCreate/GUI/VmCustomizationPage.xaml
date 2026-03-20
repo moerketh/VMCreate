@@ -192,8 +192,10 @@
                     FontSize="14" Margin="9,4,4,4" Padding="12,8"
                     AutomationProperties.Name="Deploy virtual machine">
                 <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="Deploy" VerticalAlignment="Center"/>
-                    <ui:SymbolIcon Symbol="Rocket24" Margin="6,0,0,0"/>
+                    <TextBlock Text="Deploy" VerticalAlignment="Center"
+                               Foreground="{DynamicResource TextOnAccentFillColorPrimaryBrush}"/>
+                    <ui:SymbolIcon Symbol="Rocket24" Margin="6,0,0,0"
+                                   Foreground="{DynamicResource TextOnAccentFillColorPrimaryBrush}"/>
                 </StackPanel>
             </ui:Button>
         </StackPanel>

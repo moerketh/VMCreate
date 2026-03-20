@@ -19,6 +19,7 @@
             <!-- Semantic brush aliases that map to WPF-UI theme-aware resources.
                  Using DynamicResource so they update when the theme changes at runtime. -->
             <SolidColorBrush x:Key="AccentBrush" Color="{DynamicResource SystemAccentColorSecondary}"/>
+            <SolidColorBrush x:Key="AccentTextBrush" Color="{DynamicResource SystemAccentColor}"/>
             <SolidColorBrush x:Key="AccentForegroundBrush" Color="{DynamicResource TextOnAccentFillColorPrimary}"/>
             <SolidColorBrush x:Key="SubtleTextBrush" Color="{DynamicResource TextFillColorSecondary}"/>
             <SolidColorBrush x:Key="ItemBorderBrush" Color="{DynamicResource ControlStrokeColorDefault}"/>

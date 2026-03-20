@@ -18,7 +18,7 @@ namespace VMCreate
             string resourceKey = status switch
             {
                 DeploymentPhaseStatus.Completed => "SystemFillColorSuccessBrush",
-                DeploymentPhaseStatus.Active    => "AccentBrush",
+                DeploymentPhaseStatus.Active    => "AccentTextBrush",
                 DeploymentPhaseStatus.Failed    => "SystemFillColorCriticalBrush",
                 _                               => "TextFillColorSecondaryBrush"
             };

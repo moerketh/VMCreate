@@ -70,7 +70,7 @@
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="Memory" FontSize="14" FontWeight="SemiBold"
                                    Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
                         <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding MemoryDisplay}" FontSize="14"
-                                   Foreground="{DynamicResource AccentBrush}" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource AccentTextBrush}" FontWeight="SemiBold"
                                    HorizontalAlignment="Right"/>
                         <Slider Grid.Row="1" Grid.ColumnSpan="2"
                                 Value="{Binding MemoryMB}" Minimum="512" Maximum="32768"
@@ -99,7 +99,7 @@
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="CPU" FontSize="14" FontWeight="SemiBold"
                                    Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
                         <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding CpuDisplay}" FontSize="14"
-                                   Foreground="{DynamicResource AccentBrush}" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource AccentTextBrush}" FontWeight="SemiBold"
                                    HorizontalAlignment="Right"/>
                         <Slider Grid.Row="1" Grid.ColumnSpan="2"
                                 Value="{Binding CpuCount}" Minimum="1" Maximum="32"
@@ -162,8 +162,10 @@
                     FontSize="14" Margin="9,4,4,4" Padding="12,8"
                     AutomationProperties.Name="Next step">
                 <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="Next" VerticalAlignment="Center"/>
-                    <ui:SymbolIcon Symbol="ArrowRight24" Margin="6,0,0,0"/>
+                    <TextBlock Text="Next" VerticalAlignment="Center"
+                               Foreground="{DynamicResource TextOnAccentFillColorPrimaryBrush}"/>
+                    <ui:SymbolIcon Symbol="ArrowRight24" Margin="6,0,0,0"
+                                   Foreground="{DynamicResource TextOnAccentFillColorPrimaryBrush}"/>
                 </StackPanel>
             </ui:Button>
         </StackPanel>
