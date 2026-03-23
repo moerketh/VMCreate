@@ -34,11 +34,19 @@ namespace VMCreate
                 string name = GetFileNameFromUri(DiskUri);
                 string ext = Path.GetExtension(name).ToLowerInvariant().TrimStart('.');
 
-                // Strip single-file compression to reach the inner extension
-                if (ext is "xz" or "gz" or "bz2" or "lz" or "zst")
+                // Strip compression and archive wrappers to reach the inner extension.
+                // e.g. "image.vmdk.xz" → ".vmdk", "image.vhdx.zip" → ".vhdx"
+                // Only unwraps when a recognized disk extension is inside;
+                // a plain "archive.zip" with no inner disk extension stays as Archive.
+                if (ext is "xz" or "gz" or "bz2" or "lz" or "zst" or "zip")
                 {
-                    name = Path.GetFileNameWithoutExtension(name);
-                    ext = Path.GetExtension(name).ToLowerInvariant().TrimStart('.');
+                    string inner = Path.GetExtension(Path.GetFileNameWithoutExtension(name))
+                                       .ToLowerInvariant().TrimStart('.');
+                    if (inner is "vmdk" or "qcow2" or "vhdx" or "vhd" or "iso" or "ova")
+                    {
+                        name = Path.GetFileNameWithoutExtension(name);
+                        ext = inner;
+                    }
                 }
 
                 return ext switch
@@ -92,7 +100,56 @@ namespace VMCreate
         /// <summary>When true, this item is surfaced at the very top of the list as officially recommended.</summary>
         public bool IsRecommended { get; set; }
 
+        /// <summary>
+        /// True when the image is a native Hyper-V disk that needs no conversion,
+        /// no customization ISO, and no post-boot Linux steps (e.g. Windows dev environments).
+        /// Auto-detected from the DiskUri (".HyperV." in the filename, or a .zip
+        /// hosted on download.microsoft.com) or set explicitly.
+        /// </summary>
+        public bool IsNativeHyperV
+        {
+            get => _isNativeHyperV
+                   || (!string.IsNullOrEmpty(DiskUri) && IsNativeHyperVUri(DiskUri));
+            set => _isNativeHyperV = value;
+        }
+        private bool _isNativeHyperV;
 
+        private static bool IsNativeHyperVUri(string uri)
+        {
+            if (uri.IndexOf(".HyperV.", StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+
+            // Microsoft's own gallery only ships native Hyper-V zips
+            if (uri.IndexOf("download.microsoft.com/download/", StringComparison.OrdinalIgnoreCase) >= 0
+                && uri.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            // Canonical ships native Hyper-V VHDX images for Ubuntu
+            if (uri.IndexOf("partner-images.canonical.com/hyper-v/", StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+
+            return false;
+        }
+
+        /// <summary>
+        /// True when the downloaded file is wrapped in a compression or archive
+        /// format that must be extracted before the disk can be used.
+        /// Unlike <see cref="FileType"/> (which reports the inner disk type),
+        /// this checks the outermost extension of the URI.
+        /// </summary>
+        public bool NeedsExtraction
+        {
+            get
+            {
+                if (string.IsNullOrEmpty(DiskUri))
+                    return false;
+
+                string name = GetFileNameFromUri(DiskUri);
+                string ext = Path.GetExtension(name).ToLowerInvariant().TrimStart('.');
+                return ext is "xz" or "gz" or "bz2" or "lz" or "zst"
+                           or "zip" or "7z" or "rar" or "tar" or "ova";
+            }
+        }
 
         /// <summary>Returns true when Category is "Security" (case-insensitive).</summary>
         public bool IsSecurity =>

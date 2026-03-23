@@ -16,6 +16,7 @@ namespace VMCreate
         public int NewDriveSizeInGB { get; set; } = 150;
         public string EnhancedSessionTransportType { get; set; }
         public bool SecureBoot { get; internal set; }
+        public string SecureBootTemplate { get; set; } = "MicrosoftUEFICertificateAuthority";
         public bool ReplacePreviousVm { get; set; }
         public string CloningIsoPath { get; set; } = DefaultCloningIsoPath;
     }

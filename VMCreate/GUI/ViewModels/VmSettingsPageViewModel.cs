@@ -103,9 +103,11 @@ namespace VMCreate
             set { if (SetProperty(ref _newDriveSizeText, value)) ClearValidationError(); }
         }
 
-        /// <summary>True when the selected image is not in VHDX format (requires conversion).</summary>
+        /// <summary>True when the selected image is not in VHDX format and needs conversion.
+        /// Native Hyper-V images (e.g. Windows) are already in VHDX format and need no conversion.</summary>
         public bool IsNotVhdx =>
-            !string.Equals(_wizardData.SelectedItem?.FileType, "VHDX", StringComparison.OrdinalIgnoreCase);
+            _wizardData.SelectedItem?.IsNativeHyperV != true
+            && !string.Equals(_wizardData.SelectedItem?.FileType, "VHDX", StringComparison.OrdinalIgnoreCase);
 
         public string ValidationError
         {

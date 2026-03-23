@@ -37,7 +37,8 @@ namespace VMCreate
             string filename = string.Empty;
             try
             {
-                if(!galleryItem.FileType.StartsWith("vhd", StringComparison.OrdinalIgnoreCase)
+                if(!galleryItem.IsNativeHyperV
+                    && !galleryItem.FileType.StartsWith("vhd", StringComparison.OrdinalIgnoreCase)
                     && galleryItem.FileType != "ISO"
                     && !File.Exists(_qemuFileLocation))
                 {
@@ -63,9 +64,9 @@ namespace VMCreate
                         cancellationToken, createVmProgressInfo);
                 }
 
-                // Extract if needed — archives (OVA, ZIP, 7Z, etc.) and compressed disks (vmdk.xz)
-                // need extraction. ISO and QCOW2 are used directly.
-                bool needsExtraction = galleryItem.FileType is not ("ISO" or "QCOW2" or "VHDX" or "VHD");
+                // Extract if needed — archives (OVA, ZIP, 7Z, etc.) and compressed disks
+                // (vmdk.xz, vhdx.zip) need extraction. Bare ISO/QCOW2/VHDX/VHD are used directly.
+                bool needsExtraction = galleryItem.NeedsExtraction;
                 if (needsExtraction)
                 {
                     createVmProgressInfo.Report(new CreateVMProgressInfo { Phase = "Extract" });

@@ -45,6 +45,8 @@ namespace VMCreate
     {
         Task AddNetworkAdapter(VmSettings vmSettings, CancellationToken cancellationToken);
         Task ConnectNetworkAdapter(VmSettings vmSettings, CancellationToken cancellationToken);
+        Task AddTemporaryNetworkAdapter(VmSettings vmSettings, CancellationToken cancellationToken);
+        Task RemoveTemporaryNetworkAdapter(VmSettings vmSettings, CancellationToken cancellationToken);
     }
 
     /// <summary>

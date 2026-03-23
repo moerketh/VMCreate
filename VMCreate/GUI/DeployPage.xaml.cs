@@ -158,7 +158,9 @@ namespace VMCreate
             // generation info may arrive on a repeated "CreateVM" report
             // (the first report activates the phase; the second carries the
             // DetectedGeneration after partition detection completes).
-            if (!string.IsNullOrEmpty(info.DetectedGeneration))
+            // Skip for native Hyper-V images — they have no customization phases.
+            if (!string.IsNullOrEmpty(info.DetectedGeneration)
+                && _wizardData.SelectedItem?.IsNativeHyperV != true)
             {
                 if (info.DetectedGeneration == "1")
                 {

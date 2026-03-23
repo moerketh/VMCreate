@@ -162,7 +162,9 @@ namespace VMCreate
             using var ps = PowerShell.Create();
             ps.AddScript($@"
                 $adapters = Get-VMNetworkAdapter -VMName '{VmName.Replace("'", "''")}' -ErrorAction SilentlyContinue
-                foreach ($a in $adapters) {{
+                # Prefer the temporary adapter added by VMCreate for post-boot SSH
+                $sorted = $adapters | Sort-Object {{ if ($_.Name -eq 'VMCreate Temp') {{ 0 }} else {{ 1 }} }}
+                foreach ($a in $sorted) {{
                     foreach ($ip in $a.IPAddresses) {{
                         if ($ip -match '^\d+\.\d+\.\d+\.\d+$') {{
                             $ip

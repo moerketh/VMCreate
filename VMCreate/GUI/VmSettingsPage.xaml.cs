@@ -35,6 +35,14 @@ namespace VMCreate
 
         private void OnNavigateNext()
         {
+            // Native Hyper-V images (e.g. Windows) skip the customization page —
+            // Linux-specific options (xRDP, SSH, VPN) don't apply.
+            if (_wizardData.SelectedItem?.IsNativeHyperV == true)
+            {
+                WizardCompleted?.Invoke(this, new WizardResultEventArgs(WizardResult.Finished));
+                return;
+            }
+
             var nextPage = new VmCustomizationPage(_wizardData, _htbApiClient, _loggerFactory);
             nextPage.WizardCompleted += (s, args) => WizardCompleted?.Invoke(s, args);
             NavigationService.Navigate(nextPage);

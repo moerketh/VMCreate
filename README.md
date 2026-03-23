@@ -28,6 +28,14 @@ These distributions ship disk images and can be deployed without manual installa
 
 Additional ISO-based distributions (Alpine, CAINE, Debian, Fedora, Linux Mint, NixOS, openSUSE, Pentoo, Rocky Linux, Security Onion, Tsurugi) are available but hidden by default as they require manual OS installation. Custom images can also be loaded from the Microsoft gallery, local JSON files, or registry entries.
 
+## Security & Privacy Notice
+
+VMCreate's goal is to run Linux VM disk images directly in Hyper-V — without installing VirtualBox, VMware, or any other third-party hypervisor on your Windows machine. To make this work, the conversion process modifies network configuration, firewall rules, SSH settings, and boot infrastructure inside the guest. VMCreate does its best to restore distribution defaults after customization completes.
+
+**If you depend on the security or privacy features of a distribution (e.g. Whonix, Tails), do not use VMCreate to deploy it.** The modifications made during conversion may weaken or bypass the protections those distributions are designed to provide.
+
+Many of these distributions were not designed or tested by their creators to run in Hyper-V. Running them in this way may void any warranty or support provided by the distribution maintainers.
+
 ## Requirements
 
 - Windows 10/11 with Hyper-V enabled

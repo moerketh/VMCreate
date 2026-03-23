@@ -137,8 +137,10 @@ namespace VMCreate
         private void BuildPhaseList(WizardData wizardData)
         {
             string fileType = wizardData.SelectedItem?.FileType ?? "Unknown";
+            bool isNativeHyperV = wizardData.SelectedItem?.IsNativeHyperV == true;
             bool needsExtraction = fileType is not ("ISO" or "QCOW2" or "VHDX" or "VHD");
-            bool needsConversion = fileType is "VMDK" or "QCOW2" or "OVA" or "Archive";
+            bool needsConversion = !isNativeHyperV
+                && fileType is "VMDK" or "QCOW2" or "OVA" or "Archive";
             bool nestedVirt = wizardData.Settings?.VirtualizationEnabled ?? true;
 
             Phases.Add(new DeploymentPhase(PhaseDownload, "Download",
@@ -169,23 +171,26 @@ namespace VMCreate
                     : "Starting the virtual machine",
                 SymbolRegular.Play24));
 
-            // Show pre-boot customization card upfront if any pre-boot option was selected
-            if (wizardData.Customizations?.HasPreBootCustomizations == true)
+            if (!isNativeHyperV)
             {
-                Phases.Add(new DeploymentPhase(PhaseCustomize, "Pre-Boot Customizations",
-                    "Applying customizations (xRDP, enhancements) and waiting for the VM to restart",
-                    SymbolRegular.Wrench24));
-                AddPreBootSubSteps(wizardData.Customizations);
-            }
+                // Show pre-boot customization card upfront if any pre-boot option was selected
+                if (wizardData.Customizations?.HasPreBootCustomizations == true)
+                {
+                    Phases.Add(new DeploymentPhase(PhaseCustomize, "Pre-Boot Customizations",
+                        "Applying customizations (xRDP, enhancements) and waiting for the VM to restart",
+                        SymbolRegular.Wrench24));
+                    AddPreBootSubSteps(wizardData.Customizations);
+                }
 
-            // Always show the post-boot card — RemoveVBoxGuestAdditionsStep runs
-            // unconditionally, and user-selected options (timezone, VPN) add to it.
-            Phases.Add(new DeploymentPhase(PhasePostBoot, "Post-Boot Config",
-                wizardData.Customizations != null
-                    ? BuildPostBootDescription(wizardData.Customizations)
-                    : "Applying post-boot customizations via SSH",
-                SymbolRegular.Settings24));
-            AddPostBootSubSteps(wizardData.Customizations);
+                // Always show the post-boot card — RemoveVBoxGuestAdditionsStep runs
+                // unconditionally, and user-selected options (timezone, VPN) add to it.
+                Phases.Add(new DeploymentPhase(PhasePostBoot, "Post-Boot Config",
+                    wizardData.Customizations != null
+                        ? BuildPostBootDescription(wizardData.Customizations)
+                        : "Applying post-boot customizations via SSH",
+                    SymbolRegular.Settings24));
+                AddPostBootSubSteps(wizardData.Customizations);
+            }
 
             Phases.Add(new DeploymentPhase(PhaseDone, "Done",
                 "Virtual machine created successfully!",

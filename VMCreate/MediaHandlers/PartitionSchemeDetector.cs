@@ -16,11 +16,22 @@ namespace VMCreate
     public class PartitionSchemeDetector : IPartitionSchemeDetector
     {
         private readonly ILogger<PartitionSchemeDetector> _logger;
-        private const long ScanStartOffset = 0x10000; // 64KB, minimum for VHDX headers
+        internal const long ScanStartOffset = 0x10000; // 64KB, minimum for VHDX headers
         private const long ScanEndOffset = 0xA00000; // 10MB, reasonable limit for data region
-        private const int SectorSize = 512; // Standard disk sector size
-        private const int GptEntrySize = 128;
-        private const int MaxGptEntriesToScan = 16; // Check first 16 entries for ESP
+        internal const int SectorSize = 512; // Standard disk sector size
+        private const int DefaultGptEntrySize = 128;
+        private const int MaxGptEntriesToScan = 128; // GPT standard max
+
+        // GPT header field offsets (relative to start of GPT header sector)
+        private const int GptRevisionOffset = 8;     // bytes 8-11: uint32
+        private const int GptHeaderSizeOffset = 12;   // bytes 12-15: uint32
+        private const int GptMyLbaOffset = 24;         // bytes 24-31: uint64
+        private const int GptEntryStartLbaOffset = 72; // bytes 72-79: uint64
+        private const int GptEntryCountOffset = 80;    // bytes 80-83: uint32
+        private const int GptEntrySizeOffset = 84;     // bytes 84-87: uint32
+
+        private const uint GptRevision1_0 = 0x00010000;
+        private const uint GptStandardHeaderSize = 92;
 
         // EFI System Partition GUID: C12A7328-F81F-11D2-BA4B-00A0C93EC93B (mixed-endian)
         private static readonly byte[] EspTypeGuid =
@@ -93,13 +104,28 @@ namespace VMCreate
                         string gptSignature = System.Text.Encoding.ASCII.GetString(buffer, SectorSize, 8);
                         if (gptSignature == "EFI PART")
                         {
+                            // Validate key GPT header fields before trusting this match.
+                            // This rejects false positives from VHDX metadata, backup GPT headers, etc.
+                            uint revision = BitConverter.ToUInt32(buffer, SectorSize + GptRevisionOffset);
+                            uint headerSize = BitConverter.ToUInt32(buffer, SectorSize + GptHeaderSizeOffset);
+                            ulong myLba = BitConverter.ToUInt64(buffer, SectorSize + GptMyLbaOffset);
+
+                            if (revision != GptRevision1_0 || headerSize < GptStandardHeaderSize || myLba != 1)
+                            {
+                                _logger.LogDebug(
+                                    "Skipping invalid GPT header at offset {Offset}: Revision=0x{Revision:X8}, HeaderSize={HeaderSize}, MyLBA={MyLBA}",
+                                    offset + SectorSize, revision, headerSize, myLba);
+                                offset += SectorSize;
+                                continue;
+                            }
+
                             _logger.LogInformation("Detected GPT partition scheme at offset {Offset}",
                                 offset + SectorSize);
 
-                            // Read partition entries to check for an EFI System Partition.
-                            // GPT without an ESP (e.g. BIOS boot partition only) can't boot
-                            // under UEFI firmware and needs the MBR→GPT clone path.
-                            bool hasEsp = await HasEfiSystemPartitionAsync(stream, offset + SectorSize);
+                            // Read partition entry location from the header instead of assuming
+                            // entries immediately follow the header. In a VHDX container file
+                            // the bytes at gptHeader+512 may be container metadata, not entries.
+                            bool hasEsp = await HasEfiSystemPartitionAsync(stream, offset, buffer);
                             if (hasEsp)
                             {
                                 return "GPT";
@@ -134,25 +160,45 @@ namespace VMCreate
         }
 
         /// <summary>
-        /// Reads GPT partition entries following the header and checks whether any
-        /// entry has the EFI System Partition type GUID.
+        /// Reads GPT partition entries and checks whether any entry has the EFI
+        /// System Partition type GUID. Entry location, count, and size are read
+        /// from the GPT header (bytes 72-87) rather than hardcoded.
         /// </summary>
-        private async Task<bool> HasEfiSystemPartitionAsync(FileStream stream, long gptHeaderOffset)
+        /// <param name="stream">Open file stream positioned anywhere.</param>
+        /// <param name="mbrFileOffset">File offset of the MBR sector (virtual disk base).</param>
+        /// <param name="scanBuffer">
+        /// The 1024-byte buffer from the scan loop. GPT header occupies bytes [512..1023].
+        /// </param>
+        private async Task<bool> HasEfiSystemPartitionAsync(FileStream stream, long mbrFileOffset, byte[] scanBuffer)
         {
             try
             {
-                // Partition entries start one sector after the GPT header
-                long entriesOffset = gptHeaderOffset + SectorSize;
-                int bytesToRead = MaxGptEntriesToScan * GptEntrySize;
-                byte[] entries = new byte[bytesToRead];
+                // Parse entry array location from the GPT header (already in scanBuffer)
+                ulong entryStartLba = BitConverter.ToUInt64(scanBuffer, SectorSize + GptEntryStartLbaOffset);
+                uint entryCount = BitConverter.ToUInt32(scanBuffer, SectorSize + GptEntryCountOffset);
+                uint entrySize = BitConverter.ToUInt32(scanBuffer, SectorSize + GptEntrySizeOffset);
 
-                stream.Seek(entriesOffset, SeekOrigin.Begin);
+                // Sanity-check values to avoid reading garbage
+                if (entrySize < 128 || entrySize > 4096 || entryCount == 0)
+                {
+                    _logger.LogDebug("GPT header has suspicious entry values: count={Count}, size={Size}", entryCount, entrySize);
+                    return false;
+                }
+
+                int entriesToCheck = (int)Math.Min(entryCount, MaxGptEntriesToScan);
+                int bytesToRead = entriesToCheck * (int)entrySize;
+
+                // Calculate file offset: MBR is LBA 0, so entries are at mbrOffset + entryStartLba * 512
+                long entriesFileOffset = mbrFileOffset + (long)entryStartLba * SectorSize;
+
+                byte[] entries = new byte[bytesToRead];
+                stream.Seek(entriesFileOffset, SeekOrigin.Begin);
                 int bytesRead = await stream.ReadAsync(entries, 0, bytesToRead);
 
-                int entriesToCheck = Math.Min(MaxGptEntriesToScan, bytesRead / GptEntrySize);
-                for (int i = 0; i < entriesToCheck; i++)
+                int actualEntries = Math.Min(entriesToCheck, bytesRead / (int)entrySize);
+                for (int i = 0; i < actualEntries; i++)
                 {
-                    int entryBase = i * GptEntrySize;
+                    int entryBase = i * (int)entrySize;
 
                     // Check if entry is empty (all-zero type GUID)
                     bool isEmpty = true;
@@ -175,7 +221,7 @@ namespace VMCreate
                     }
                 }
 
-                _logger.LogDebug("Scanned {Count} GPT entries, no ESP found", entriesToCheck);
+                _logger.LogDebug("Scanned {Count} GPT entries, no ESP found", actualEntries);
                 return false;
             }
             catch (Exception ex)

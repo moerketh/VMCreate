@@ -97,6 +97,31 @@ namespace VMCreate
             _logger.LogInformation("Connected VM to Default Switch for internet access.");
         }
 
+        public async Task AddTemporaryNetworkAdapter(VmSettings vmSettings, CancellationToken cancellationToken)
+        {
+            _ps.Commands.Clear();
+            _ps.AddCommand("Add-VMNetworkAdapter")
+                .AddParameter("VMName", vmSettings.VMName)
+                .AddParameter("Name", "VMCreate Temp")
+                .AddParameter("SwitchName", "Default Switch");
+            await RunCommand(cancellationToken);
+            _logger.LogInformation("Added temporary network adapter 'VMCreate Temp' on Default Switch.");
+        }
+
+        public async Task RemoveTemporaryNetworkAdapter(VmSettings vmSettings, CancellationToken cancellationToken)
+        {
+            _ps.Commands.Clear();
+            _ps.AddScript($@"
+                $adapter = Get-VMNetworkAdapter -VMName '{vmSettings.VMName.Replace("'", "''")}' -Name 'VMCreate Temp' -ErrorAction SilentlyContinue
+                if ($adapter) {{ Remove-VMNetworkAdapter -VMNetworkAdapter $adapter }}
+            ");
+            await Task.Run(_ps.Invoke, cancellationToken);
+            // Intentionally ignores errors — this is called idempotently when
+            // the adapter may not exist yet (e.g. cleanup from a previous failed run).
+            _ps.Streams.Error.Clear();
+            _logger.LogInformation("Removed temporary network adapter 'VMCreate Temp' (if present).");
+        }
+
         /// <summary>
         /// Builds the path for the new boot drive created during MBR-to-GPT cloning.
         /// The path must NOT collide with the converted source VHDX (<c>{vmName}.vhdx</c>).
@@ -247,10 +272,14 @@ namespace VMCreate
 
         public async Task SetEnhancedSession(VmSettings vmSettings, CancellationToken cancellationToken)
         {
+            string transportType = string.IsNullOrEmpty(vmSettings.EnhancedSessionTransportType)
+                ? "HvSocket"
+                : vmSettings.EnhancedSessionTransportType;
+
             _ps.Commands.Clear();
             _ps.AddCommand("Set-VM")
                 .AddParameter("VMName", vmSettings.VMName)
-                .AddParameter("EnhancedSessionTransportType", vmSettings.EnhancedSessionTransportType ?? "HvSocket");
+                .AddParameter("EnhancedSessionTransportType", transportType);
             await RunCommand(cancellationToken);
         }
 
@@ -260,7 +289,7 @@ namespace VMCreate
             _ps.AddCommand("Set-VMFirmware")
                 .AddParameter("VMName", vmSettings.VMName)
                 .AddParameter("EnableSecureBoot", vmSettings.SecureBoot.ToOnOff())
-                .AddParameter("SecureBootTemplate", "MicrosoftUEFICertificateAuthority");
+                .AddParameter("SecureBootTemplate", vmSettings.SecureBootTemplate);
             await RunCommand(cancellationToken);
         }
 

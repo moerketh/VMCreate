@@ -76,6 +76,8 @@
     <Compile Include="HyperV\Steps\InstallOpenVpnStep.cs" />
     <Compile Include="HyperV\Steps\DeployVpnConfigsStep.cs" />
     <Compile Include="HyperV\Steps\DisableSshStep.cs" />
+    <Compile Include="HyperV\Steps\CleanupTemporaryNicStep.cs" />
+    <Compile Include="HyperV\Steps\RemoveAutomationUserStep.cs" />
     <Compile Include="HyperV\IHyperVManagerRoles.cs" />
     <Compile Include="HyperV\PowerShellHyperVManager.cs" />
     <Compile Include="HyperV\HyperVVmCreator.cs" />

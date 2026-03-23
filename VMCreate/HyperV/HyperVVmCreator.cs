@@ -150,6 +150,47 @@ namespace VMCreate
                 }
 
                 // ── Disk-image flow (VMDK / QCOW2 / VHDX) ────────────────────
+
+                // ── Native Hyper-V image (e.g. Windows 11 dev environment) ────
+                // These images are pre-built for Hyper-V and need no conversion,
+                // no customization ISO, and no post-boot Linux steps.
+                if (item.IsNativeHyperV)
+                {
+                    int detectedGen = mediaHandler.VmGeneration;
+                    const int targetGenNative = 2;
+
+                    // Windows native images need the Windows template; Linux images
+                    // (SecureBoot = "false") keep the default UEFI CA template.
+                    if (!string.Equals(item.SecureBoot, "false", StringComparison.OrdinalIgnoreCase))
+                        vmSettings.SecureBootTemplate = "MicrosoftWindows";
+
+                    createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", DetectedGeneration = detectedGen.ToString() });
+
+                    await _hyperVManager.CreateVMAsync(vmSettings, _defaultVhdxPath, targetGenNative, cancellationToken);
+                    await _hyperVManager.SetVMLoginNotes(vmSettings, item.InitialUsername, item.InitialPassword, cancellationToken);
+                    await _hyperVManager.ConnectNetworkAdapter(vmSettings, cancellationToken);
+                    await _hyperVManager.SetCpuCount(vmSettings, cancellationToken);
+                    await _hyperVManager.DisableDynamicMemory(vmSettings, cancellationToken);
+                    await _hyperVManager.SetSecureBoot(vmSettings, cancellationToken);
+                    if (vmCustomizations.EnableIntegrationServices)
+                        await _hyperVManager.EnableGuestServices(vmSettings, cancellationToken);
+
+                    await _hyperVManager.AddExistingHardDrive(vmSettings, mediaPath, cancellationToken);
+                    await _hyperVManager.SetFirstBootToHardDrive(vmSettings, cancellationToken);
+
+                    if (vmSettings.VirtualizationEnabled)
+                        await _hyperVManager.EnableVirtualization(vmSettings, cancellationToken);
+
+                    createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "StartVM" });
+                    await _hyperVManager.StartVM(vmSettings, cancellationToken);
+
+                    if (vmCustomizations.EnableIntegrationServices)
+                        await _hyperVManager.SetEnhancedSession(vmSettings, cancellationToken);
+
+                    // Native Hyper-V flow is done — no customization or post-boot needed.
+                    return;
+                }
+
                 await _cloningIsoDownloader.EnsureIsoAsync(vmSettings, cancellationToken, createVMProgressInfo);
                 string cloningIsoPath = vmSettings.CloningIsoPath;
                 int detectedGeneration = mediaHandler.VmGeneration; // 1 for MBR, 2 for GPT
@@ -294,9 +335,6 @@ namespace VMCreate
                     if (vmCustomizations.ConfigureXrdp)
                     {
                         await _kvpSender.SendKVPToGuestAsync(vmSettings.VMName, "VMCREATE_XRDP", "true", cancellationToken);
-
-                        if (!string.IsNullOrEmpty(item.InitialUsername))
-                            await _kvpSender.SendKVPToGuestAsync(vmSettings.VMName, "VMCREATE_XRDP_USERNAME", item.InitialUsername, cancellationToken);
                     }
 
                     // ── Monitor ISO progress and wait for shutdown ─────────────
@@ -400,47 +438,68 @@ namespace VMCreate
                     if (postBootSteps.Count > 0)
                         createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "PostBoot" });
 
-                    await _hyperVManager.StartVM(vmSettings, cancellationToken);
+                    // Add a temporary second NIC on Default Switch so the host
+                    // can reach the VM via DHCP even when the primary NIC uses a
+                    // static IP that isn't routable on the Default Switch.
+                    await _hyperVManager.RemoveTemporaryNetworkAdapter(vmSettings, cancellationToken); // idempotent cleanup
+                    await _hyperVManager.AddTemporaryNetworkAdapter(vmSettings, cancellationToken);
 
-                    string privateKeyPath = _sshKeyManager.GetPrivateKeyPath(vmCustomizations.CustomSshPublicKeyPath);
-                    var shell = _guestShellFactory.Create(vmSettings.VMName, privateKeyPath);
-
-                    await shell.WaitForReadyAsync(cancellationToken);
-
-                    // Collect the autorun log saved by the ISO's customize script
                     try
                     {
-                        string autorunLog = await shell.RunCommandAsync(
-                            "sudo cat /var/log/vmcreate-autorun.log 2>/dev/null || echo '[no autorun log found]'",
-                            cancellationToken);
-                        _logger.LogInformation("Autorun log for {VMName}:\n{Log}", vmSettings.VMName, autorunLog);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to collect autorun log (non-fatal)");
-                    }
+                        await _hyperVManager.StartVM(vmSettings, cancellationToken);
 
-                    // Run post-boot customization steps
-                    if (postBootSteps.Count > 0)
-                    {
-                        int completed = 0;
-                        foreach (var step in postBootSteps)
+                        string privateKeyPath = _sshKeyManager.GetPrivateKeyPath(vmCustomizations.CustomSshPublicKeyPath);
+                        var shell = _guestShellFactory.Create(vmSettings.VMName, privateKeyPath);
+
+                        await shell.WaitForReadyAsync(cancellationToken);
+
+                        // Collect the autorun log saved by the ISO's customize script
+                        try
                         {
-                            _logger.LogInformation("Running post-boot step: {StepName} (order {Order})", step.Name, step.Order);
-                            createVMProgressInfo.Report(new CreateVMProgressInfo
-                            {
-                                Phase = "PostBoot",
-                                ProgressPercentage = (int)((double)completed / postBootSteps.Count * 100),
-                                StepName = step.Name
-                            });
-
-                            await step.ExecuteAsync(shell, item, vmCustomizations, _logger, cancellationToken);
-
-                            completed++;
-                            _logger.LogInformation("Completed post-boot step: {StepName}", step.Name);
+                            string autorunLog = await shell.RunCommandAsync(
+                                "sudo cat /var/log/vmcreate-autorun.log 2>/dev/null || echo '[no autorun log found]'",
+                                cancellationToken);
+                            _logger.LogInformation("Autorun log for {VMName}:\n{Log}", vmSettings.VMName, autorunLog);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to collect autorun log (non-fatal)");
                         }
 
-                        createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "PostBoot", ProgressPercentage = 100 });
+                        // Run post-boot customization steps
+                        if (postBootSteps.Count > 0)
+                        {
+                            int completed = 0;
+                            foreach (var step in postBootSteps)
+                            {
+                                _logger.LogInformation("Running post-boot step: {StepName} (order {Order})", step.Name, step.Order);
+                                createVMProgressInfo.Report(new CreateVMProgressInfo
+                                {
+                                    Phase = "PostBoot",
+                                    ProgressPercentage = (int)((double)completed / postBootSteps.Count * 100),
+                                    StepName = step.Name
+                                });
+
+                                await step.ExecuteAsync(shell, item, vmCustomizations, _logger, cancellationToken);
+
+                                completed++;
+                                _logger.LogInformation("Completed post-boot step: {StepName}", step.Name);
+                            }
+
+                            createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "PostBoot", ProgressPercentage = 100 });
+                        }
+                    }
+                    finally
+                    {
+                        // Always remove the temporary NIC — even if post-boot steps fail
+                        try
+                        {
+                            await _hyperVManager.RemoveTemporaryNetworkAdapter(vmSettings, cancellationToken);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to remove temporary network adapter (non-fatal)");
+                        }
                     }
 
                     // VM is running from the hard drive with all customizations applied.

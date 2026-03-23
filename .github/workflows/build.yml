@@ -2,10 +2,10 @@ name: Build VMCreate
 
 on:
   push:
-    branches: [master]
+    branches: [main]
     tags: ['v*']
   pull_request:
-    branches: [master]
+    branches: [main]
 
 jobs:
   build:
@@ -32,7 +32,7 @@ jobs:
         run: dotnet build VMCreate.sln -c Release --no-restore
 
       - name: Run tests
-        run: dotnet test VMCreate.sln -c Release --no-build --logger trx --filter "TestCategory!=Integration"
+        run: dotnet test VMCreate.sln -c Release --no-build --logger trx
 
       - name: Determine version
         id: version
@@ -66,8 +66,7 @@ jobs:
       - name: Generate checksums
         shell: pwsh
         run: |
-          $msi = Get-ChildItem -Path VMCreate.Installer/bin -Filter "*.msi" -Recurse | Select-Object -First 1
-          if (-not $msi) { throw "MSI not found under VMCreate.Installer/bin" }
+          $msi = Get-ChildItem -Path VMCreate.Installer/bin/Release -Filter "*.msi" -Recurse | Select-Object -First 1
           $exe = "publish/VMCreate.exe"
           $msiHash = (Get-FileHash $msi.FullName -Algorithm SHA256).Hash
           $exeHash = (Get-FileHash $exe -Algorithm SHA256).Hash
@@ -79,8 +78,7 @@ jobs:
         shell: pwsh
         run: |
           $ver = "${{ steps.version.outputs.version }}"
-          $msi = Get-ChildItem -Path VMCreate.Installer/bin -Filter "*.msi" -Recurse | Select-Object -First 1
-          if (-not $msi) { throw "MSI not found under VMCreate.Installer/bin" }
+          $msi = Get-ChildItem -Path VMCreate.Installer/bin/Release -Filter "*.msi" -Recurse | Select-Object -First 1
           Copy-Item $msi.FullName "VMCreate-$ver.msi"
           Copy-Item "publish/VMCreate.exe" "VMCreate-$ver.exe"
 
@@ -103,29 +101,16 @@ jobs:
               });
             }
 
-      - name: Upload MSI artifact
+      - name: Upload build artifacts
         if: github.ref_type == 'branch'
         uses: actions/upload-artifact@v4
         with:
-          name: VMCreate-${{ steps.version.outputs.msi_version }}.msi
+          name: vmcreate-${{ steps.version.outputs.version }}
           retention-days: 5
-          path: VMCreate-${{ steps.version.outputs.version }}.msi
-
-      - name: Upload EXE artifact
-        if: github.ref_type == 'branch'
-        uses: actions/upload-artifact@v4
-        with:
-          name: VMCreate-${{ steps.version.outputs.msi_version }}.exe
-          retention-days: 5
-          path: VMCreate-${{ steps.version.outputs.version }}.exe
-
-      - name: Upload checksums artifact
-        if: github.ref_type == 'branch'
-        uses: actions/upload-artifact@v4
-        with:
-          name: checksums.sha256
-          retention-days: 5
-          path: checksums.sha256
+          path: |
+            VMCreate-${{ steps.version.outputs.version }}.msi
+            VMCreate-${{ steps.version.outputs.version }}.exe
+            checksums.sha256
 
       - name: Create GitHub Release
         if: github.ref_type == 'tag'
