@@ -1,5 +1,7 @@
 # VMCreate
 
+![VMCreate](Assets/vmcreate.png)
+
 A Windows desktop application that replaces Hyper-V Quick Create with a streamlined workflow for deploying security and penetration testing virtual machines — select a distribution, click Create, and VMCreate handles the download, extraction, disk conversion, and VM provisioning automatically.
 
 ## Features
@@ -23,7 +25,6 @@ These distributions ship disk images and can be deployed without manual installa
 | Parrot OS | |
 | PwnCloud OS | |
 | REMnux | |
-| Tails | |
 | Whonix | |
 
 Additional ISO-based distributions (Alpine, CAINE, Debian, Fedora, Linux Mint, NixOS, openSUSE, Pentoo, Rocky Linux, Security Onion, Tsurugi) are available but hidden by default as they require manual OS installation. Custom images can also be loaded from the Microsoft gallery, local JSON files, or registry entries.
@@ -32,7 +33,7 @@ Additional ISO-based distributions (Alpine, CAINE, Debian, Fedora, Linux Mint, N
 
 VMCreate's goal is to run Linux VM disk images directly in Hyper-V — without installing VirtualBox, VMware, or any other third-party hypervisor on your Windows machine. To make this work, the conversion process modifies network configuration, firewall rules, SSH settings, and boot infrastructure inside the guest. VMCreate does its best to restore distribution defaults after customization completes.
 
-**If you depend on the security or privacy features of a distribution (e.g. Whonix, Tails), do not use VMCreate to deploy it.** The modifications made during conversion may weaken or bypass the protections those distributions are designed to provide.
+**If you depend on the security or privacy features of a distribution, do not use VMCreate to deploy it.** The modifications made during conversion may weaken or bypass the protections those distributions are designed to provide.
 
 Many of these distributions were not designed or tested by their creators to run in Hyper-V. Running them in this way may void any warranty or support provided by the distribution maintainers.
 
