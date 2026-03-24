@@ -87,6 +87,7 @@ namespace VMCreate
 
         public async Task CreateVMAsync(VmSettings vmSettings, VmCustomizations vmCustomizations, string sourceFile, GalleryItem item, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo> createVMProgressInfo)
         {
+            bool vmCreated = false;
             try
             {
                 _logger.LogInformation("Starting VM creation for {VMName}", vmSettings.VMName);
@@ -105,9 +106,17 @@ namespace VMCreate
                     actualFileType = item.FileType;  // fallback to gallery metadata
 
                 IMediaHandler mediaHandler = _mediaHandlerFactory.CreateHandler(actualFileType);
-                string mediaPath = await mediaHandler.PrepareMediaAsync(sourceFile, _defaultVhdxPath, vmSettings, item, createVMProgressInfo, cancellationToken);
-
                 bool isIsoMedia = mediaHandler is IsoMediaHandler;
+
+                // Start the cloning ISO download in parallel with media preparation.
+                // Only disk-image flows (not ISO installer, not native Hyper-V) need it.
+                Task ensureIsoTask = null;
+                if (!isIsoMedia && !item.IsNativeHyperV)
+                {
+                    ensureIsoTask = _cloningIsoDownloader.EnsureIsoAsync(vmSettings, cancellationToken, createVMProgressInfo);
+                }
+
+                string mediaPath = await mediaHandler.PrepareMediaAsync(sourceFile, _defaultVhdxPath, vmSettings, item, createVMProgressInfo, cancellationToken);
 
                 if (isIsoMedia)
                 {
@@ -119,10 +128,15 @@ namespace VMCreate
 
                     createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM" });
 
+                    createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_CreateVMSkeleton" });
                     await _hyperVManager.CreateVMAsync(vmSettings, _defaultVhdxPath, targetGeneration, cancellationToken);
+                    vmCreated = true;
                     await _hyperVManager.SetVMLoginNotes(vmSettings, item.InitialUsername, item.InitialPassword, cancellationToken);
+
+                    createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_ConnectNic" });
                     await _hyperVManager.ConnectNetworkAdapter(vmSettings, cancellationToken);
 
+                    createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_ConfigureHardware" });
                     await _hyperVManager.SetCpuCount(vmSettings, cancellationToken);
                     await _hyperVManager.DisableDynamicMemory(vmSettings, cancellationToken);
                     await _hyperVManager.SetSecureBoot(vmSettings, cancellationToken);
@@ -130,14 +144,21 @@ namespace VMCreate
                         await _hyperVManager.EnableGuestServices(vmSettings, cancellationToken);
 
                     // Create an empty boot disk for the installer to target
+                    createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_AttachDisk" });
                     await _hyperVManager.AddNewHardDrive(vmSettings, _defaultVhdxPath, cancellationToken);
 
                     // Attach the ISO as a DVD drive and boot from it
+                    createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_AttachBootDvd" });
                     await _hyperVManager.AddBootDvd(vmSettings, mediaPath, cancellationToken);
+
+                    createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_SetBootOrder" });
                     await _hyperVManager.SetFirstBootToDvd(vmSettings, cancellationToken);
 
                     if (vmSettings.VirtualizationEnabled)
+                    {
+                        createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_EnableNestedVirt" });
                         await _hyperVManager.EnableVirtualization(vmSettings, cancellationToken);
+                    }
 
                     createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "StartVM" });
                     await _hyperVManager.StartVM(vmSettings, cancellationToken);
@@ -166,20 +187,32 @@ namespace VMCreate
 
                     createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", DetectedGeneration = detectedGen.ToString() });
 
+                    createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_CreateVMSkeleton" });
                     await _hyperVManager.CreateVMAsync(vmSettings, _defaultVhdxPath, targetGenNative, cancellationToken);
+                    vmCreated = true;
                     await _hyperVManager.SetVMLoginNotes(vmSettings, item.InitialUsername, item.InitialPassword, cancellationToken);
+
+                    createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_ConnectNic" });
                     await _hyperVManager.ConnectNetworkAdapter(vmSettings, cancellationToken);
+
+                    createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_ConfigureHardware" });
                     await _hyperVManager.SetCpuCount(vmSettings, cancellationToken);
                     await _hyperVManager.DisableDynamicMemory(vmSettings, cancellationToken);
                     await _hyperVManager.SetSecureBoot(vmSettings, cancellationToken);
                     if (vmCustomizations.EnableIntegrationServices)
                         await _hyperVManager.EnableGuestServices(vmSettings, cancellationToken);
 
+                    createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_AttachDisk" });
                     await _hyperVManager.AddExistingHardDrive(vmSettings, mediaPath, cancellationToken);
+
+                    createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_SetBootOrder" });
                     await _hyperVManager.SetFirstBootToHardDrive(vmSettings, cancellationToken);
 
                     if (vmSettings.VirtualizationEnabled)
+                    {
+                        createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_EnableNestedVirt" });
                         await _hyperVManager.EnableVirtualization(vmSettings, cancellationToken);
+                    }
 
                     createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "StartVM" });
                     await _hyperVManager.StartVM(vmSettings, cancellationToken);
@@ -191,7 +224,8 @@ namespace VMCreate
                     return;
                 }
 
-                await _cloningIsoDownloader.EnsureIsoAsync(vmSettings, cancellationToken, createVMProgressInfo);
+                // Await the parallel cloning ISO download (started before PrepareMediaAsync)
+                await ensureIsoTask;
                 string cloningIsoPath = vmSettings.CloningIsoPath;
                 int detectedGeneration = mediaHandler.VmGeneration; // 1 for MBR, 2 for GPT
                 const int targetGen = 2; // Always target Gen 2
@@ -199,12 +233,17 @@ namespace VMCreate
                 // Report detected generation so the UI can insert MBR-specific cards
                 createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", DetectedGeneration = detectedGeneration.ToString() });
 
+                createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_CreateVMSkeleton" });
                 await _hyperVManager.CreateVMAsync(vmSettings, _defaultVhdxPath, targetGen, cancellationToken);
+                vmCreated = true;
                 await _hyperVManager.SetVMLoginNotes(vmSettings, item.InitialUsername, item.InitialPassword, cancellationToken);
+
+                createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_ConnectNic" });
                 //await _hyperVManager.AddNetworkAdapter(vmSettings, cancellationToken);
                 await _hyperVManager.ConnectNetworkAdapter(vmSettings, cancellationToken);
 
                 // Common settings: CPU, enhanced session, secure boot
+                createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_ConfigureHardware" });
                 await _hyperVManager.SetCpuCount(vmSettings, cancellationToken);
                 await _hyperVManager.DisableDynamicMemory(vmSettings, cancellationToken);
                 await _hyperVManager.SetSecureBoot(vmSettings, cancellationToken);
@@ -214,6 +253,7 @@ namespace VMCreate
                 if (detectedGeneration == 2)
                 {
                     // Drive is GPT partitioned: Attach media directly as primary boot disk
+                    createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_AttachDisk" });
                     await _hyperVManager.AddExistingHardDrive(vmSettings, mediaPath, cancellationToken);
 
                     bool needsIsoBoot = vmCustomizations.ConfigureXrdp
@@ -223,27 +263,34 @@ namespace VMCreate
                     if (needsIsoBoot)
                     {
                         // GPT + customization: boot from customization ISO to chroot-install packages
+                        createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_AttachBootDvd" });
                         await _hyperVManager.AddBootDvd(vmSettings, cloningIsoPath, cancellationToken);
+                        createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_SetBootOrder" });
                         await _hyperVManager.SetFirstBootToDvd(vmSettings, cancellationToken);
                     }
                     else
                     {
+                        createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_SetBootOrder" });
                         await _hyperVManager.SetFirstBootToHardDrive(vmSettings, cancellationToken);
                     }
                 }
                 else if (detectedGeneration == 1)
                 {
                     // Drive is MBR partitioned: Add a new (larger) drive first so that we can copy data from old drive
+                    createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_AttachDisk" });
                     await _hyperVManager.AddNewHardDrive(vmSettings, _defaultVhdxPath, cancellationToken);
 
                     // Attach old disk
+                    createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_AttachCloneDisk" });
                     await _hyperVManager.AddExistingHardDrive(vmSettings, mediaPath, cancellationToken);
                     _logger.LogInformation("Attached MBR disk as secondary for cloning: {MediaPath}", mediaPath);
 
                     // Attach cloning ISO and set as first boot device
+                    createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_AttachBootDvd" });
                     await _hyperVManager.AddBootDvd(vmSettings, cloningIsoPath, cancellationToken);
 
                     // Set ISO as first boot (for one-time clone)
+                    createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_SetBootOrder" });
                     await _hyperVManager.SetFirstBootToDvd(vmSettings, cancellationToken);
                 }
                 else
@@ -253,6 +300,7 @@ namespace VMCreate
 
                 if (vmSettings.VirtualizationEnabled)
                 {
+                    createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_EnableNestedVirt" });
                     await _hyperVManager.EnableVirtualization(vmSettings, cancellationToken);
                 }
                 else
@@ -406,6 +454,7 @@ namespace VMCreate
                     if (detectedGeneration == 1)
                     {
                         // Remove original disk from VM and delete the orphaned file
+                        createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "Customize", SubStep = "Sub_CleanupIsoBoot" });
                         await _hyperVManager.RemoveHardDrive(vmSettings, OriginalDiskScsiControllerLocation, cancellationToken);
 
                         if (File.Exists(mediaPath))
@@ -416,6 +465,7 @@ namespace VMCreate
                     }
 
                     // Remove ISO
+                    createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "Customize", SubStep = "Sub_CleanupIsoBoot" });
                     await _hyperVManager.RemoveBootDvd(vmSettings, cloningIsoPath, cancellationToken);
 
                     // Set hard drive as first boot device now that DVD and old disk are removed
@@ -441,6 +491,7 @@ namespace VMCreate
                     // Add a temporary second NIC on Default Switch so the host
                     // can reach the VM via DHCP even when the primary NIC uses a
                     // static IP that isn't routable on the Default Switch.
+                    createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "PostBoot", SubStep = "Sub_AddTempNic" });
                     await _hyperVManager.RemoveTemporaryNetworkAdapter(vmSettings, cancellationToken); // idempotent cleanup
                     await _hyperVManager.AddTemporaryNetworkAdapter(vmSettings, cancellationToken);
 
@@ -451,6 +502,7 @@ namespace VMCreate
                         string privateKeyPath = _sshKeyManager.GetPrivateKeyPath(vmCustomizations.CustomSshPublicKeyPath);
                         var shell = _guestShellFactory.Create(vmSettings.VMName, privateKeyPath);
 
+                        createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "PostBoot", SubStep = "Sub_WaitForSsh" });
                         await shell.WaitForReadyAsync(cancellationToken);
 
                         // Collect the autorun log saved by the ISO's customize script
@@ -505,10 +557,93 @@ namespace VMCreate
                     // VM is running from the hard drive with all customizations applied.
                 }
             }
+            catch (OperationCanceledException)
+            {
+                _logger.LogWarning("VM creation cancelled for {VMName} — cleaning up", vmSettings.VMName);
+                await CleanupFailedVmAsync(vmSettings, vmCreated);
+                throw;
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error creating VM: {Message}", ex.Message);
+                await CleanupFailedVmAsync(vmSettings, vmCreated);
                 throw;
+            }
+        }
+
+        /// <summary>
+        /// Best-effort cleanup after a failed or cancelled deployment.
+        /// Removes the VM from Hyper-V, deletes its VHDX files, and removes
+        /// the VM configuration folder. Uses <see cref="CancellationToken.None"/>
+        /// because the original token may already be cancelled.
+        /// </summary>
+        private async Task CleanupFailedVmAsync(VmSettings vmSettings, bool vmCreated)
+        {
+            string vmName = vmSettings.VMName;
+            _logger.LogInformation("Cleaning up after failed/cancelled deployment: {VMName}", vmName);
+            try
+            {
+                if (vmCreated)
+                {
+                    // Collect VHDX paths before removing the VM (Remove-VM detaches them)
+                    string[] vhdxPaths;
+                    try
+                    {
+                        vhdxPaths = await _hyperVManager.GetVmHardDiskPathsAsync(vmName, CancellationToken.None);
+                    }
+                    catch
+                    {
+                        vhdxPaths = Array.Empty<string>();
+                    }
+
+                    try { await _hyperVManager.StopVMAsync(vmName, CancellationToken.None); }
+                    catch (Exception ex) { _logger.LogDebug(ex, "Stop VM during cleanup (may not be running)"); }
+
+                    try { await _hyperVManager.RemoveVMAsync(vmName, CancellationToken.None); }
+                    catch (Exception ex) { _logger.LogWarning(ex, "Failed to remove VM {VMName} during cleanup", vmName); }
+
+                    foreach (string vhdxPath in vhdxPaths)
+                    {
+                        try
+                        {
+                            if (File.Exists(vhdxPath))
+                            {
+                                File.Delete(vhdxPath);
+                                _logger.LogInformation("Cleanup: deleted VHDX {Path}", vhdxPath);
+                            }
+                        }
+                        catch (Exception ex) { _logger.LogWarning(ex, "Cleanup: failed to delete {Path}", vhdxPath); }
+                    }
+                }
+
+                // Delete the converted VHDX that may exist from PrepareMediaAsync
+                // (not yet attached to a VM if vmCreated is false)
+                string convertedVhdx = Path.Combine(_defaultVhdxPath, vmName + ".vhdx");
+                try
+                {
+                    if (File.Exists(convertedVhdx))
+                    {
+                        File.Delete(convertedVhdx);
+                        _logger.LogInformation("Cleanup: deleted converted VHDX {Path}", convertedVhdx);
+                    }
+                }
+                catch (Exception ex) { _logger.LogWarning(ex, "Cleanup: failed to delete {Path}", convertedVhdx); }
+
+                // Remove the VM configuration folder Hyper-V creates
+                string vmConfigFolder = Path.Combine(_defaultVhdxPath, vmName);
+                try
+                {
+                    if (Directory.Exists(vmConfigFolder))
+                    {
+                        Directory.Delete(vmConfigFolder, true);
+                        _logger.LogInformation("Cleanup: deleted VM config folder {Path}", vmConfigFolder);
+                    }
+                }
+                catch (Exception ex) { _logger.LogWarning(ex, "Cleanup: failed to delete folder {Path}", vmConfigFolder); }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Cleanup encountered an unexpected error for {VMName}", vmName);
             }
         }
 

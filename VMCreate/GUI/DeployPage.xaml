@@ -53,8 +53,9 @@
         <TextBlock Grid.Row="1" Text="Deploy Virtual Machine" Style="{StaticResource TitleText}" Margin="0,0,0,8"/>
 
         <!-- Phase cards -->
-        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" Padding="0,0,0,4">
-            <ItemsControl ItemsSource="{Binding Phases}">
+        <ScrollViewer x:Name="PhaseScrollViewer" Grid.Row="2" VerticalScrollBarVisibility="Auto" Padding="0,0,0,4">
+            <StackPanel>
+            <ItemsControl x:Name="PhaseItemsControl" ItemsSource="{Binding Phases}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate DataType="{x:Type local:DeploymentPhase}">
                         <Border CornerRadius="8" Padding="16,12"
@@ -114,6 +115,9 @@
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
+            <!-- Bottom spacer: ensures any card can be scrolled to the viewport top -->
+            <Rectangle x:Name="BottomSpacer" Height="{Binding ActualHeight, ElementName=PhaseScrollViewer}" />
+            </StackPanel>
         </ScrollViewer>
 
         <!-- Bottom action bar -->

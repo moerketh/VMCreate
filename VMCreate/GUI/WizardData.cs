@@ -14,5 +14,6 @@ namespace VMCreate
         public GalleryItem SelectedItem { get; set; }
         public VmSettings Settings { get; set; } = new VmSettings();
         public VmCustomizations Customizations { get; set; } = new VmCustomizations();
+        public bool DemoMode { get; set; }
     }
 }

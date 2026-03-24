@@ -3,6 +3,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using VMCreate;
 
@@ -20,7 +21,7 @@ namespace VMCreate
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
-        public async Task<string> ConvertToVhdxAsync(string sourcePath, string destinationPath, IProgress<CreateVMProgressInfo> progress)
+        public async Task<string> ConvertToVhdxAsync(string sourcePath, string destinationPath, IProgress<CreateVMProgressInfo> progress, CancellationToken cancellationToken = default)
         {
             _logger.LogInformation("Starting disk conversion from {SourcePath} to {DestinationPath}", sourcePath, destinationPath);
 
@@ -134,6 +135,20 @@ namespace VMCreate
 
                 using (var process = new Process { StartInfo = processInfo, EnableRaisingEvents = true })
                 {
+                    // Kill the qemu-img process if cancellation is requested.
+                    using var ctReg = cancellationToken.Register(() =>
+                    {
+                        try
+                        {
+                            if (!process.HasExited)
+                            {
+                                _logger.LogWarning("Cancellation requested — killing qemu-img process");
+                                process.Kill();
+                            }
+                        }
+                        catch (InvalidOperationException) { /* already exited */ }
+                    });
+
                     var progressRegex = new Regex(@"\s+\((\d+)\.\d+/100%\)", RegexOptions.Compiled);
                     process.OutputDataReceived += (sender, e) =>
                     {
@@ -155,6 +170,8 @@ namespace VMCreate
                     process.BeginOutputReadLine();
                     string error = await Task.Run(() => process.StandardError.ReadToEnd());
                     await Task.Run(() => process.WaitForExit());
+
+                    cancellationToken.ThrowIfCancellationRequested();
 
                     if (process.ExitCode != 0)
                     {
@@ -189,6 +206,7 @@ namespace VMCreate
                 // qemu-img may produce a sparse file on NTFS; if the sparse regions are
                 // not physically allocated, Hyper-V reads zeros and compressed (e.g. zstd)
                 // filesystem data becomes corrupted.
+                cancellationToken.ThrowIfCancellationRequested();
                 _logger.LogInformation("De-sparsifying VHDX: {Path}", destinationPath);
                 if (progress != null)
                 {
@@ -214,6 +232,21 @@ namespace VMCreate
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error during conversion: {Message}", ex.Message);
+
+                // Clean up partial VHDX so we don't leave orphaned files
+                try
+                {
+                    if (File.Exists(destinationPath))
+                    {
+                        File.Delete(destinationPath);
+                        _logger.LogInformation("Deleted partial VHDX: {Path}", destinationPath);
+                    }
+                }
+                catch (Exception cleanupEx)
+                {
+                    _logger.LogWarning(cleanupEx, "Failed to delete partial VHDX: {Path}", destinationPath);
+                }
+
                 throw;
             }
         }

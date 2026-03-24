@@ -63,7 +63,9 @@ namespace VMCreate
             {
                 if (checksumUrl != null)
                 {
-                    await _checksumVerifier.VerifyAsync(tempPath, checksumUrl, "sha256", cancellationToken, progress);
+                    string isoFileName = Path.GetFileName(new Uri(isoUrl).LocalPath);
+                    await _checksumVerifier.VerifyAsync(tempPath, checksumUrl, "sha256",
+                        cancellationToken, progress, expectedFileName: isoFileName);
                 }
 
                 string directory = Path.GetDirectoryName(isoPath);

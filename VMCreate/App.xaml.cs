@@ -16,8 +16,14 @@ namespace VMCreate
     {
         private IServiceProvider _serviceProvider;
 
+        /// <summary>When true, VMConnect is launched automatically after the VM starts.</summary>
+        internal static bool DemoMode { get; private set; }
+
         private void App_OnStartup(object sender, StartupEventArgs e)
         {
+            DemoMode = e.Args != null && e.Args.Any(a =>
+                a.Equals("/demo", StringComparison.OrdinalIgnoreCase)
+                || a.Equals("--demo", StringComparison.OrdinalIgnoreCase));
             var logPath = Path.Combine(Path.GetTempPath(), "VMCreate.log");
             Log.Logger = new LoggerConfiguration()
                 .MinimumLevel.Debug()

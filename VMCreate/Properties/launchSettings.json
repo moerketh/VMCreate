@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "VMCreate": {
+      "commandName": "Project",
+      "commandLineArgs": "/demo"
+    }
+  }
+}

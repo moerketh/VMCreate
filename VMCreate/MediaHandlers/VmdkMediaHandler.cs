@@ -31,7 +31,7 @@ namespace VMCreate.MediaHandlers
             progressInfo.Report(new CreateVMProgressInfo { Phase = "Convert" });
             _vhdDestFile = Path.Combine(destinationPath, vmSettings.VMName + ".vhdx");
             _logger.LogInformation("Converting VMDK to VHDX: {VhdDestFile}", _vhdDestFile);
-            string convertedFile = await _diskConverter.ConvertToVhdxAsync(sourceFile, _vhdDestFile, progressInfo);
+            string convertedFile = await _diskConverter.ConvertToVhdxAsync(sourceFile, _vhdDestFile, progressInfo, cancellationToken);
             _logger.LogInformation("Converted VMDK to VHDX: {ConvertedFile}", convertedFile);
 
             string partitionScheme = await _partitionSchemeDetector.DetectPartitionSchemeAsync(convertedFile);

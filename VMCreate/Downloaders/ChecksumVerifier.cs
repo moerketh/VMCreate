@@ -16,9 +16,14 @@ namespace VMCreate
         /// Downloads the checksum file, computes the hash of the local file,
         /// and throws if the values do not match.
         /// </summary>
+        /// <param name="expectedFileName">
+        /// Optional filename to look up in the checksum file. When <c>null</c>,
+        /// the filename is derived from <paramref name="filePath"/>.
+        /// </param>
         Task VerifyAsync(string filePath, string checksumUri, string algorithm,
                          CancellationToken cancellationToken,
-                         IProgress<CreateVMProgressInfo> progress);
+                         IProgress<CreateVMProgressInfo> progress,
+                         string expectedFileName = null);
 
         /// <summary>
         /// Computes the hash of the local file and verifies it matches the
@@ -42,7 +47,8 @@ namespace VMCreate
 
         public async Task VerifyAsync(string filePath, string checksumUri, string algorithm,
                                       CancellationToken cancellationToken,
-                                      IProgress<CreateVMProgressInfo> progress)
+                                      IProgress<CreateVMProgressInfo> progress,
+                                      string expectedFileName = null)
         {
             algorithm ??= "sha256";
 
@@ -61,7 +67,7 @@ namespace VMCreate
             response.EnsureSuccessStatusCode();
             var checksumContent = await response.Content.ReadAsStringAsync(cancellationToken);
 
-            var fileName = Path.GetFileName(filePath);
+            var fileName = expectedFileName ?? Path.GetFileName(filePath);
             var expectedHash = ParseChecksum(checksumContent, fileName);
 
             if (string.IsNullOrEmpty(expectedHash))

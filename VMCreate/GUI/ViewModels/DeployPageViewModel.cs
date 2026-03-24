@@ -18,6 +18,7 @@ namespace VMCreate
         public const string PhaseDownload   = "Download";
         public const string PhaseExtract    = "Extract";
         public const string PhaseConvert    = "Convert";
+        public const string PhaseDownloadCloningIso = "DownloadCloningIso";
         public const string PhaseCreateVM   = "CreateVM";
         public const string PhaseStartVM    = "StartVM";
         public const string PhaseCloneDisk  = "CloneDisk";
@@ -32,6 +33,23 @@ namespace VMCreate
         public const string SubInstallPwsh   = "Sub_InstallPwsh";
         public const string SubSshSetup      = "Sub_SshSetup";
         public const string SubReboot        = "Sub_Reboot";
+
+        // CreateVM sub-step IDs (reported via CreateVMProgressInfo.SubStep)
+        public const string SubCreateVMSkeleton  = "Sub_CreateVMSkeleton";
+        public const string SubConnectNic        = "Sub_ConnectNic";
+        public const string SubConfigureHardware = "Sub_ConfigureHardware";
+        public const string SubAttachDisk        = "Sub_AttachDisk";
+        public const string SubAttachCloneDisk   = "Sub_AttachCloneDisk";
+        public const string SubAttachBootDvd     = "Sub_AttachBootDvd";
+        public const string SubSetBootOrder      = "Sub_SetBootOrder";
+        public const string SubEnableNestedVirt  = "Sub_EnableNestedVirt";
+
+        // Post-ISO-cycle cleanup sub-step ID
+        public const string SubCleanupIsoBoot = "Sub_CleanupIsoBoot";
+
+        // Post-boot infrastructure sub-step IDs
+        public const string SubAddTempNic   = "Sub_AddTempNic";
+        public const string SubWaitForSsh   = "Sub_WaitForSsh";
 
         // Post-boot sub-step IDs (matched to ICustomizationStep.Name)
         public const string SubRemoveVBox    = "Sub_RemoveVBox";
@@ -57,6 +75,7 @@ namespace VMCreate
             VmName = wizardData.Settings?.VMName ?? "VM";
             SelectedItem = wizardData.SelectedItem;
             _lastCustomizations = wizardData.Customizations;
+            _lastSettings = wizardData.Settings;
 
             CancelCommand = new RelayCommand(OnCancel, () => _isDeploying && !_isComplete);
             ConnectToVmCommand = new RelayCommand(OnConnectToVm);
@@ -164,6 +183,7 @@ namespace VMCreate
             Phases.Add(new DeploymentPhase(PhaseCreateVM, "Create VM",
                 "Creating and configuring the Hyper-V virtual machine",
                 SymbolRegular.Desktop24));
+            AddCreateVMSubSteps(wizardData);
 
             Phases.Add(new DeploymentPhase(PhaseStartVM, "Start VM",
                 nestedVirt
@@ -258,6 +278,26 @@ namespace VMCreate
         /// Called at runtime for Gen2 pre-installed images that need customization
         /// (e.g. xRDP install). Inserts a Customize card before PostBoot (or Done if no PostBoot).
         /// </summary>
+        /// <summary>
+        /// Inserts a "Download Cloning ISO" card before CreateVM.
+        /// Called dynamically when the cloning ISO download phase fires.
+        /// </summary>
+        public void InsertDownloadCloningIsoPhase()
+        {
+            if (Phases.Any(p => p.Id == PhaseDownloadCloningIso)) return;
+
+            int createVmIndex = -1;
+            for (int i = 0; i < Phases.Count; i++)
+            {
+                if (Phases[i].Id == PhaseCreateVM) { createVmIndex = i; break; }
+            }
+            if (createVmIndex < 0) return;
+
+            Phases.Insert(createVmIndex, new DeploymentPhase(PhaseDownloadCloningIso, "Download Cloning ISO",
+                "Downloading the cloning ISO for VM customization",
+                SymbolRegular.ArrowDownload24));
+        }
+
         public void InsertCustomizePhase()
         {
             // Only insert once
@@ -326,6 +366,87 @@ namespace VMCreate
         /// <summary>Stashed customizations so dynamic Insert* methods can add the right sub-steps.</summary>
         private VmCustomizations _lastCustomizations;
 
+        /// <summary>Stashed settings so dynamic Insert* methods can add conditional sub-steps.</summary>
+        private VmSettings _lastSettings;
+
+        /// <summary>Appends CreateVM sub-step cards (IndentLevel=1, hidden) after the CreateVM parent phase.</summary>
+        private void AddCreateVMSubSteps(WizardData wizardData)
+        {
+            bool nestedVirt = wizardData.Settings?.VirtualizationEnabled ?? true;
+            bool isIso = (wizardData.SelectedItem?.FileType ?? "Unknown") == "ISO";
+
+            Phases.Add(new DeploymentPhase(SubCreateVMSkeleton, "Create Hyper-V VM",
+                "Creating the virtual machine shell", SymbolRegular.Desktop24) { IndentLevel = 1, IsVisible = false });
+            Phases.Add(new DeploymentPhase(SubConnectNic, "Connect Network Adapter",
+                "Connecting VM to Default Switch", SymbolRegular.PlugConnected24) { IndentLevel = 1, IsVisible = false });
+            Phases.Add(new DeploymentPhase(SubConfigureHardware, "Configure Hardware",
+                "Setting CPU count, memory, secure boot, and integration services", SymbolRegular.Board24) { IndentLevel = 1, IsVisible = false });
+            Phases.Add(new DeploymentPhase(SubAttachDisk, isIso ? "Create Boot Disk" : "Attach Disk",
+                isIso ? "Creating empty VHDX for the OS installer" : "Attaching converted disk image",
+                SymbolRegular.HardDrive24) { IndentLevel = 1, IsVisible = false });
+            // AttachCloneDisk and AttachBootDvd are inserted dynamically when DetectedGeneration arrives,
+            // or statically for ISO flows
+            if (isIso)
+            {
+                Phases.Add(new DeploymentPhase(SubAttachBootDvd, "Attach Installer ISO",
+                    "Mounting ISO image as DVD drive", SymbolRegular.Storage24) { IndentLevel = 1, IsVisible = false });
+            }
+            Phases.Add(new DeploymentPhase(SubSetBootOrder, "Set Boot Order",
+                "Configuring boot device priority", SymbolRegular.ArrowSort24) { IndentLevel = 1, IsVisible = false });
+            if (nestedVirt)
+            {
+                Phases.Add(new DeploymentPhase(SubEnableNestedVirt, "Enable Nested Virtualization",
+                    "Exposing virtualization extensions to the guest", SymbolRegular.LayerDiagonal24) { IndentLevel = 1, IsVisible = false });
+            }
+        }
+
+        /// <summary>
+        /// Called at runtime when DetectedGeneration arrives. Inserts the AttachCloneDisk
+        /// (Gen1 only) and AttachBootDvd cards into the CreateVM sub-step list.
+        /// </summary>
+        public void InsertDiskSubSteps(int detectedGeneration, bool needsIsoBoot)
+        {
+            // Find AttachDisk card index — insert Clone/DVD after it
+            int attachDiskIdx = -1;
+            for (int i = 0; i < Phases.Count; i++)
+            {
+                if (Phases[i].Id == SubAttachDisk) { attachDiskIdx = i; break; }
+            }
+            if (attachDiskIdx < 0) return;
+
+            int insertAt = attachDiskIdx + 1;
+
+            if (detectedGeneration == 1 && !Phases.Any(p => p.Id == SubAttachCloneDisk))
+            {
+                Phases.Insert(insertAt++, new DeploymentPhase(SubAttachCloneDisk, "Attach Source Disk",
+                    "Attaching original MBR disk as secondary for cloning",
+                    SymbolRegular.HardDrive24) { IndentLevel = 1, IsVisible = false });
+            }
+
+            if (needsIsoBoot && !Phases.Any(p => p.Id == SubAttachBootDvd))
+            {
+                Phases.Insert(insertAt, new DeploymentPhase(SubAttachBootDvd, "Attach Boot ISO",
+                    "Mounting customization ISO as DVD drive",
+                    SymbolRegular.Storage24) { IndentLevel = 1, IsVisible = false });
+            }
+        }
+
+        /// <summary>
+        /// Dynamically inserts a cleanup card between Pre-Boot Customizations and PostBoot/Done.
+        /// Called after the ISO boot cycle completes.
+        /// </summary>
+        public void InsertCleanupIsoBootPhase()
+        {
+            if (Phases.Any(p => p.Id == SubCleanupIsoBoot)) return;
+
+            int insertIndex = FindInsertIndexBeforePostBootOrDone();
+            if (insertIndex < 0) return;
+
+            Phases.Insert(insertIndex, new DeploymentPhase(SubCleanupIsoBoot, "Cleanup Boot Media",
+                "Removing ISO and source disk, setting boot to hard drive",
+                SymbolRegular.Broom24) { IndentLevel = 0 });
+        }
+
         /// <summary>Appends pre-boot sub-step cards (IndentLevel=1, hidden) to the end of Phases.</summary>
         private void AddPreBootSubSteps(VmCustomizations c)
         {
@@ -366,6 +487,10 @@ namespace VMCreate
         /// <summary>Appends post-boot sub-step cards (IndentLevel=1, hidden) to the end of Phases.</summary>
         private void AddPostBootSubSteps(VmCustomizations c)
         {
+            Phases.Add(new DeploymentPhase(SubAddTempNic, "Add Temporary NIC",
+                "Adding temporary network adapter for SSH access", SymbolRegular.PlugConnected24) { IndentLevel = 1, IsVisible = false });
+            Phases.Add(new DeploymentPhase(SubWaitForSsh, "Waiting for SSH",
+                "Waiting for the VM to accept SSH connections", SymbolRegular.PlugConnected24) { IndentLevel = 1, IsVisible = false });
             Phases.Add(new DeploymentPhase(SubRemoveVBox, "Remove VBox Guest Additions",
                 "Cleaning up VirtualBox artifacts", SymbolRegular.Delete24) { IndentLevel = 1, IsVisible = false });
             if (c?.SyncTimezone == true)
@@ -385,6 +510,10 @@ namespace VMCreate
         /// <summary>Inserts post-boot sub-step cards at a given index (hidden). Returns the next free index.</summary>
         private int InsertPostBootSubStepsAt(int index, VmCustomizations c)
         {
+            Phases.Insert(index++, new DeploymentPhase(SubAddTempNic, "Add Temporary NIC",
+                "Adding temporary network adapter for SSH access", SymbolRegular.PlugConnected24) { IndentLevel = 1, IsVisible = false });
+            Phases.Insert(index++, new DeploymentPhase(SubWaitForSsh, "Waiting for SSH",
+                "Waiting for the VM to accept SSH connections", SymbolRegular.PlugConnected24) { IndentLevel = 1, IsVisible = false });
             Phases.Insert(index++, new DeploymentPhase(SubRemoveVBox, "Remove VBox Guest Additions",
                 "Cleaning up VirtualBox artifacts", SymbolRegular.Delete24) { IndentLevel = 1, IsVisible = false });
             if (c?.SyncTimezone == true)

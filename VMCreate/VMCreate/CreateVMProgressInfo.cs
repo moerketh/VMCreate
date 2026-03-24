@@ -30,5 +30,11 @@
         /// Used by the Deploy page to show per-step progress text.
         /// </summary>
         public string StepName { get; set; }
+
+        /// <summary>
+        /// Identifies a sub-step within the current phase (e.g. "Sub_ConnectNic" during CreateVM).
+        /// When set, the Deploy page activates the matching indented sub-step card.
+        /// </summary>
+        public string SubStep { get; set; }
     }
 }

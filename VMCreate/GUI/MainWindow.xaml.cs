@@ -121,7 +121,7 @@ namespace VMCreate
 
             // Navigate to the first page IMMEDIATELY so the UI is visible straight away.
             // Gallery items will stream into _galleryItems in the background below.
-            _wizardData = new WizardData { GalleryItems = _galleryItems };
+            _wizardData = new WizardData { GalleryItems = _galleryItems, DemoMode = App.DemoMode };
             var firstPage = new SelectImagePage(_wizardData, _htbApiClient, _loggerFactory);
             firstPage.WizardCompleted += WizardPage_Completed;
             _mainFrame.Navigate(firstPage);
@@ -206,7 +206,7 @@ namespace VMCreate
                 // If we're on the Deploy page, "Finished" means "New VM" — reset the wizard.
                 if (sender is DeployPage)
                 {
-                    _wizardData = new WizardData { GalleryItems = _galleryItems };
+                    _wizardData = new WizardData { GalleryItems = _galleryItems, DemoMode = App.DemoMode };
                     var firstPage = new SelectImagePage(_wizardData, _htbApiClient, _loggerFactory);
                     firstPage.WizardCompleted += WizardPage_Completed;
                     _mainFrame.Navigate(firstPage);

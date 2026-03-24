@@ -9,6 +9,7 @@ namespace VMCreate.Gallery.distributions
     {
         private const string TemplateUrl = "https://download.pwncloudos.pwnedlabs.io/images/pwncloudos-amd64.ova";
         private const string SymbolUri = "https://pwncloudos.pwnedlabs.io/hubfs/pwnedlabs-notagline.svg";
+        private const string ThumbnailUri = "https://pwncloudos.pwnedlabs.io/hubfs/image-1.png";
 
         public Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
@@ -20,6 +21,7 @@ namespace VMCreate.Gallery.distributions
                 Publisher = "Pwned Labs",
                 Description = $"The multi-cloud security platform for hackers and defenders.",
                 SymbolUri = SymbolUri,
+                ThumbnailUri = ThumbnailUri,
                 DiskUri = TemplateUrl,
                 SecureBoot = "false",
                 EnhancedSessionTransportType = "HvSocket",

@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace VMCreate
@@ -11,6 +12,6 @@ namespace VMCreate
         /// <summary>
         /// Converts a source disk image to VHDX format, including de-sparsification.
         /// </summary>
-        Task<string> ConvertToVhdxAsync(string sourcePath, string destinationPath, IProgress<CreateVMProgressInfo> progress);
+        Task<string> ConvertToVhdxAsync(string sourcePath, string destinationPath, IProgress<CreateVMProgressInfo> progress, CancellationToken cancellationToken = default);
     }
 }

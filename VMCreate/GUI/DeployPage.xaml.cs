@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Threading;
 
 namespace VMCreate
 {
@@ -19,6 +20,8 @@ namespace VMCreate
         private CancellationTokenSource _cts;
         private string _activePhaseId;
         private string _activeSubStepId;
+        private bool _autoScrollEnabled = true;
+        private bool _isScrollingProgrammatically;
 
         public DeployPage(WizardData wizardData, CreateVM createVM, ILoggerFactory loggerFactory)
         {
@@ -36,8 +39,16 @@ namespace VMCreate
             _viewModel.RequestWizardComplete += result =>
                 WizardCompleted?.Invoke(this, new WizardResultEventArgs(result));
 
-            Loaded += async (_, __) => await StartDeploymentAsync();
-            Unloaded += (_, __) => Cleanup();
+            Loaded += async (_, __) =>
+            {
+                PhaseScrollViewer.ScrollChanged += OnScrollChanged;
+                await StartDeploymentAsync();
+            };
+            Unloaded += (_, __) =>
+            {
+                PhaseScrollViewer.ScrollChanged -= OnScrollChanged;
+                Cleanup();
+            };
         }
 
         /// <summary>
@@ -117,6 +128,8 @@ namespace VMCreate
 
                 _viewModel.IsComplete = true;
                 _viewModel.IsDeploying = false;
+                BottomSpacer.Height = 0;
+                ScrollToPhase(DeployPageViewModel.PhaseDone);
                 _logger.LogInformation("Deployment completed successfully for {VMName}", vmSettings.VMName);
             }
             catch (OperationCanceledException)
@@ -126,6 +139,7 @@ namespace VMCreate
                 _viewModel.ErrorMessage = "Deployment was cancelled.";
                 _viewModel.HasFailed = true;
                 _viewModel.IsDeploying = false;
+                BottomSpacer.Height = 0;
             }
             catch (Exception ex)
             {
@@ -134,6 +148,7 @@ namespace VMCreate
                 _viewModel.ErrorMessage = $"Deployment failed: {ex.Message}";
                 _viewModel.HasFailed = true;
                 _viewModel.IsDeploying = false;
+                BottomSpacer.Height = 0;
             }
         }
 
@@ -164,11 +179,22 @@ namespace VMCreate
             {
                 if (info.DetectedGeneration == "1")
                 {
-                    Application.Current.Dispatcher.Invoke(() => _viewModel.InsertMbrPhases());
+                    Application.Current.Dispatcher.Invoke(() =>
+                    {
+                        _viewModel.InsertMbrPhases();
+                        _viewModel.InsertDiskSubSteps(1, needsIsoBoot: true);
+                    });
                 }
                 else if (info.DetectedGeneration == "2")
                 {
-                    Application.Current.Dispatcher.Invoke(() => _viewModel.InsertCustomizePhase());
+                    bool needsIsoBoot = _wizardData.Customizations?.ConfigureXrdp == true
+                        || _wizardData.Customizations?.ConfigureHtbVpn == true
+                        || _wizardData.Customizations?.SyncTimezone == true;
+                    Application.Current.Dispatcher.Invoke(() =>
+                    {
+                        _viewModel.InsertCustomizePhase();
+                        _viewModel.InsertDiskSubSteps(2, needsIsoBoot);
+                    });
                 }
             }
 
@@ -179,8 +205,12 @@ namespace VMCreate
 
                 if (targetPhase != null && targetPhase != _activePhaseId)
                 {
-                    // Insert PostBoot phase card when transitioning to it
-                    if (targetPhase == DeployPageViewModel.PhasePostBoot)
+                    // Dynamically insert cards for phases that aren't built upfront
+                    if (targetPhase == DeployPageViewModel.PhaseDownloadCloningIso)
+                    {
+                        Application.Current.Dispatcher.Invoke(() => _viewModel.InsertDownloadCloningIsoPhase());
+                    }
+                    else if (targetPhase == DeployPageViewModel.PhasePostBoot)
                     {
                         Application.Current.Dispatcher.Invoke(() => _viewModel.InsertPostBootPhase());
                     }
@@ -200,6 +230,7 @@ namespace VMCreate
                     CompleteCurrentSubStep();
                     _activeSubStepId = subId;
                     _viewModel.ActivatePhase(subId);
+                    ScrollToPhase(subId);
                 }
             }
 
@@ -212,7 +243,23 @@ namespace VMCreate
                     CompleteCurrentSubStep();
                     _activeSubStepId = subId;
                     _viewModel.ActivatePhase(subId);
+                    ScrollToPhase(subId);
                 }
+            }
+
+            // Sub-step activation driven by SubStep field (CreateVM sub-steps, CleanupIsoBoot, PostBoot infra)
+            if (!string.IsNullOrEmpty(info.SubStep) && info.SubStep != _activeSubStepId)
+            {
+                // Insert the cleanup card dynamically when first reported
+                if (info.SubStep == DeployPageViewModel.SubCleanupIsoBoot)
+                {
+                    Application.Current.Dispatcher.Invoke(() => _viewModel.InsertCleanupIsoBootPhase());
+                }
+
+                CompleteCurrentSubStep();
+                _activeSubStepId = info.SubStep;
+                _viewModel.ActivatePhase(info.SubStep);
+                ScrollToPhase(info.SubStep);
             }
 
             // Update progress on the currently active phase
@@ -254,6 +301,7 @@ namespace VMCreate
                 DeployPageViewModel.PhaseCreateVM  => DeployPageViewModel.PhaseCreateVM,
                 DeployPageViewModel.PhaseStartVM   => DeployPageViewModel.PhaseStartVM,
                 DeployPageViewModel.PhaseCloneDisk => DeployPageViewModel.PhaseCloneDisk,
+                DeployPageViewModel.PhaseDownloadCloningIso => DeployPageViewModel.PhaseDownloadCloningIso,
                 DeployPageViewModel.PhaseCustomize => DeployPageViewModel.PhaseCustomize,
                 DeployPageViewModel.PhasePostBoot  => DeployPageViewModel.PhasePostBoot,
                 _ => phase switch
@@ -276,6 +324,11 @@ namespace VMCreate
             if (phaseId == null) return;
             _activePhaseId = phaseId;
             _viewModel.ActivatePhase(phaseId);
+            ScrollToPhase(phaseId);
+
+            // /demo: auto-open VMConnect when the VM first starts
+            if (phaseId == DeployPageViewModel.PhaseStartVM && _wizardData.DemoMode)
+                LaunchVmConnect();
         }
 
         private void CompleteCurrentPhase()
@@ -332,6 +385,104 @@ namespace VMCreate
             if (progress.StartsWith("REBOOT", StringComparison.OrdinalIgnoreCase))
                 return DeployPageViewModel.SubReboot;
             return null;
+        }
+
+        // ── Autoscroll ───────────────────────────────────────────────────
+
+        /// <summary>
+        /// Detects manual (user-initiated) scrolling. When the user drags the
+        /// scrollbar upward, autoscroll is paused. Autoscroll re-enables
+        /// automatically on the next programmatic <see cref="ScrollToPhase"/> call.
+        /// </summary>
+        private void OnScrollChanged(object sender, ScrollChangedEventArgs e)
+        {
+            // Ignore programmatic scrolls entirely — the flag stays set until
+            // the next Loaded-priority callback resets it, so it covers the
+            // async ScrollChanged that WPF fires after layout.
+            if (_isScrollingProgrammatically) return;
+
+            // Ignore scroll events triggered by content size changes (new cards
+            // inserted / visibility toggled). These are NOT user gestures.
+            if (e.ExtentHeightChange != 0) return;
+
+            // Ignore events where the viewport changed (window resize / layout).
+            if (e.ViewportHeightChange != 0) return;
+
+            // User scrolled UP → pause autoscroll.
+            if (e.VerticalChange < 0)
+                _autoScrollEnabled = false;
+        }
+
+        /// <summary>
+        /// Scrolls the phase list so that the card for <paramref name="phaseId"/>
+        /// appears at the top of the viewport. Runs asynchronously after layout
+        /// so that newly-inserted cards are measured before we compute offsets.
+        /// </summary>
+        private void ScrollToPhase(string phaseId)
+        {
+            if (!_autoScrollEnabled || phaseId == null) return;
+
+            // Set the flag before dispatching so that any intermediate
+            // ScrollChanged events (from layout) are suppressed.
+            _isScrollingProgrammatically = true;
+
+            Dispatcher.InvokeAsync(() =>
+            {
+                try
+                {
+                    var phase = _viewModel.FindPhase(phaseId);
+                    if (phase == null) return;
+
+                    int index = _viewModel.Phases.IndexOf(phase);
+                    if (index < 0) return;
+
+                    // ItemsControl (non-virtualizing) creates a ContentPresenter for each item
+                    var container = PhaseItemsControl.ItemContainerGenerator.ContainerFromIndex(index) as FrameworkElement;
+                    if (container == null) return;
+
+                    // Compute the container's position relative to the ScrollViewer content
+                    var transform = container.TransformToAncestor(PhaseScrollViewer);
+                    var point = transform.Transform(new Point(0, 0));
+                    double targetOffset = PhaseScrollViewer.VerticalOffset + point.Y;
+
+                    // Keep one completed card visible above the active card
+                    if (index > 0)
+                    {
+                        var prev = PhaseItemsControl.ItemContainerGenerator.ContainerFromIndex(index - 1) as FrameworkElement;
+                        if (prev != null)
+                            targetOffset -= prev.ActualHeight;
+                    }
+
+                    PhaseScrollViewer.ScrollToVerticalOffset(Math.Max(0, targetOffset));
+                }
+                finally
+                {
+                    // Reset on the next Loaded pass so the flag covers the
+                    // async ScrollChanged WPF fires after our offset change.
+                    Dispatcher.InvokeAsync(() => _isScrollingProgrammatically = false,
+                        DispatcherPriority.Input);
+                }
+            }, DispatcherPriority.Loaded);
+        }
+
+        // ── Demo mode ────────────────────────────────────────────────────
+
+        private void LaunchVmConnect()
+        {
+            try
+            {
+                var vmName = _wizardData.Settings?.VMName;
+                if (string.IsNullOrEmpty(vmName)) return;
+
+                _logger.LogInformation("Demo mode: launching VMConnect for {VMName}", vmName);
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
+                    "vmconnect.exe", $"localhost \"{vmName}\"")
+                { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to launch vmconnect.exe in demo mode");
+            }
         }
     }
 }
