@@ -77,10 +77,20 @@
                   Impersonate="no"
                   Return="ignore" />
 
-    <!-- Restore: on uninstall, put the original back and reset ownership to TrustedInstaller -->
+    <!-- Restore: on uninstall, copy the backup back and clean up -->
     <SetProperty Id="RestoreQuickCreate" Before="RestoreQuickCreate" Sequence="execute"
-                 Value="&quot;[System64Folder]cmd.exe&quot; /c if exist &quot;[HYPERVDIR]VMCreate.exe.original&quot; (copy /Y &quot;[HYPERVDIR]VMCreate.exe.original&quot; &quot;[HYPERVDIR]VMCreate.exe&quot; &amp;&amp; del &quot;[HYPERVDIR]VMCreate.exe.original&quot; &amp;&amp; icacls &quot;[HYPERVDIR]VMCreate.exe&quot; /setowner &quot;NT SERVICE\TrustedInstaller&quot;)" />
+                 Value="&quot;[System64Folder]cmd.exe&quot; /c if exist &quot;[HYPERVDIR]VMCreate.exe.original&quot; (copy /Y &quot;[HYPERVDIR]VMCreate.exe.original&quot; &quot;[HYPERVDIR]VMCreate.exe&quot; &amp;&amp; del &quot;[HYPERVDIR]VMCreate.exe.original&quot;)" />
     <CustomAction Id="RestoreQuickCreate"
+                  DllEntry="WixQuietExec64"
+                  BinaryRef="Wix4UtilCA_X64"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+
+    <!-- Re-lock restored file: reset ownership to TrustedInstaller -->
+    <SetProperty Id="RestoreOwnership" Before="RestoreOwnership" Sequence="execute"
+                 Value="&quot;[System64Folder]cmd.exe&quot; /c icacls &quot;[HYPERVDIR]VMCreate.exe&quot; /setowner &quot;NT SERVICE\TrustedInstaller&quot;" />
+    <CustomAction Id="RestoreOwnership"
                   DllEntry="WixQuietExec64"
                   BinaryRef="Wix4UtilCA_X64"
                   Execute="deferred"
@@ -96,6 +106,7 @@
       <Custom Action="LockPermissions" After="ReplaceQuickCreate" Condition="NOT Installed OR UPGRADINGPRODUCTCODE" />
       <!-- On uninstall (not upgrade): restore original and reset ownership -->
       <Custom Action="RestoreQuickCreate" After="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+      <Custom Action="RestoreOwnership" After="RestoreQuickCreate" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
     </InstallExecuteSequence>
 
     <!-- ── Feature ──────────────────────────────────────────────────── -->
