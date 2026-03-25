@@ -42,7 +42,7 @@ namespace VMCreate.Gallery
 
                     var slimItem = new GalleryItem
                     {
-                        Name = "BlackArch Linux 64 bit Slim ISO",
+                        Name = "BlackArch",
                         Publisher = "BlackArch Project",
                         Description = $"BlackArch Linux is an Arch Linux-based penetration testing distribution for penetration testers and security researchers. This is the Slim ISO (version {PinnedVersion}), which contains a functional BlackArch Linux system with a selected set of common/well-known tools and system utilities for pentesting.",
                         ThumbnailUri = "https://blackarch.org/images/screenshots/menu_slim.png",
@@ -68,7 +68,7 @@ namespace VMCreate.Gallery
 
                     var ovaItem = new GalleryItem
                     {
-                        Name = "BlackArch Linux 64 bit OVA Image",
+                        Name = "BlackArch",
                         Publisher = "BlackArch Project",
                         Description = $"BlackArch Linux is an Arch Linux-based penetration testing distribution for penetration testers and security researchers. This is the OVA Image (version {PinnedVersion}), suitable for running in VirtualBox, VMware, and QEMU.",
                         ThumbnailUri = "https://blackarch.org/images/screenshots/menu_slim.png",
