@@ -37,6 +37,20 @@ namespace VMCreate.MediaHandlers
             string partitionScheme = await _partitionSchemeDetector.DetectPartitionSchemeAsync(convertedFile);
             _vmGeneration = partitionScheme == "GPT" ? 2 : 1;
             _logger.LogInformation("Detected {PartitionScheme} partition scheme, setting VM generation to {Generation}", partitionScheme, _vmGeneration);
+
+            if (_vmGeneration == 1)
+            {
+                long virtualSizeBytes = await _diskConverter.GetVirtualSizeAsync(convertedFile, cancellationToken);
+                long newDriveSizeBytes = vmSettings.NewDriveSizeInGB * 1024L * 1024L * 1024L;
+                if (newDriveSizeBytes < virtualSizeBytes)
+                {
+                    long minimumGB = (long)Math.Ceiling((double)virtualSizeBytes / (1024 * 1024 * 1024));
+                    throw new InvalidOperationException(
+                        $"New drive size ({vmSettings.NewDriveSizeInGB} GB) is too small for the source disk ({minimumGB} GB). " +
+                        $"The new drive must be at least {minimumGB} GB for MBR-to-GPT cloning.");
+                }
+            }
+
             return _vhdDestFile;
         }
     }

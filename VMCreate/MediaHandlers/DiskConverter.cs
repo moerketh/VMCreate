@@ -2,6 +2,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -249,6 +250,46 @@ namespace VMCreate
 
                 throw;
             }
+        }
+
+        public async Task<long> GetVirtualSizeAsync(string diskPath, CancellationToken cancellationToken = default)
+        {
+            if (!File.Exists(diskPath))
+                throw new FileNotFoundException($"Disk file not found: {diskPath}");
+
+            var processInfo = new ProcessStartInfo
+            {
+                FileName = _qemuImgPath,
+                Arguments = $"info --output=json \"{diskPath}\"",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            using var process = Process.Start(processInfo);
+            string output = await Task.Run(() => process.StandardOutput.ReadToEnd());
+            string error = await Task.Run(() => process.StandardError.ReadToEnd());
+            await Task.Run(() => process.WaitForExit());
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (process.ExitCode != 0)
+            {
+                _logger.LogError("qemu-img info failed for {Path}: {Error}", diskPath, error);
+                throw new InvalidOperationException($"Failed to read disk info for {diskPath}: {error}");
+            }
+
+            using var doc = JsonDocument.Parse(output);
+            if (doc.RootElement.TryGetProperty("virtual-size", out JsonElement sizeElement))
+            {
+                long virtualSize = sizeElement.GetInt64();
+                _logger.LogInformation("Virtual size of {Path}: {SizeBytes} bytes ({SizeGB} GB)",
+                    diskPath, virtualSize, (double)virtualSize / (1024 * 1024 * 1024));
+                return virtualSize;
+            }
+
+            throw new InvalidOperationException($"Could not determine virtual size of {diskPath}");
         }
 
         private string GetQemuSourceFormat(string extension)
