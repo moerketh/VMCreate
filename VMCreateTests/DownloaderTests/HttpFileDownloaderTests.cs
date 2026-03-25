@@ -123,7 +123,6 @@ namespace VMCreate.Tests
         }
 
         [TestMethod]
-        [ExpectedException(typeof(Exception))]
         public async Task DownloadFileAsync_MaxRetriesExceeded_ThrowsException()
         {
             // Arrange
@@ -134,11 +133,11 @@ namespace VMCreate.Tests
                 .ThrowsAsync(new HttpRequestException("Persistent failure"));
 
             // Act
-            await _downloader.DownloadFileAsync(uri, CancellationToken.None, mockProgress.Object, false);
+            await Assert.ThrowsAsync<Exception>(
+                () => _downloader.DownloadFileAsync(uri, CancellationToken.None, mockProgress.Object, false));
         }
 
         [TestMethod]
-        [ExpectedException(typeof(OperationCanceledException))]
         public async Task DownloadFileAsync_CancellationRequested_ThrowsAndCleansUp()
         {
             // Arrange
@@ -163,7 +162,8 @@ namespace VMCreate.Tests
                 .ThrowsAsync(new OperationCanceledException());
 
             // Act
-            await _downloader.DownloadFileAsync(uri, cts.Token, mockProgress.Object, false);
+            await Assert.ThrowsAsync<OperationCanceledException>(
+                () => _downloader.DownloadFileAsync(uri, cts.Token, mockProgress.Object, false));
         }
 
         [TestMethod]

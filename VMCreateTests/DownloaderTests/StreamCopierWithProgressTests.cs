@@ -59,7 +59,6 @@ namespace VMCreate.Tests
         }
 
         [TestMethod]
-        [ExpectedException(typeof(TaskCanceledException))]
         public async Task CopyAsync_CancellationRequested_ThrowsException()
         {
             // Arrange
@@ -70,7 +69,8 @@ namespace VMCreate.Tests
             var mockProgress = new Mock<IProgress<CreateVMProgressInfo>>();
 
             // Act
-            await _copier.CopyAsync(sourceStream, destinationStream, 1024L, "http://example.com", mockProgress.Object, cts.Token);
+            await Assert.ThrowsAsync<TaskCanceledException>(
+                () => _copier.CopyAsync(sourceStream, destinationStream, 1024L, "http://example.com", mockProgress.Object, cts.Token));
         }
 
         [TestMethod]

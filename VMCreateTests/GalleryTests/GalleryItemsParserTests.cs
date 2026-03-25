@@ -419,7 +419,7 @@ namespace VMCreate.Tests.GalleryTests
     [TestClass]
     public sealed class GalleryItemFileTypeTests
     {
-        [DataTestMethod]
+        [TestMethod]
         [DataRow("https://example.com/disk.vmdk", "VMDK")]
         [DataRow("https://example.com/disk.vmdk.xz", "VMDK")]
         [DataRow("https://example.com/disk.vmdk.gz", "VMDK")]

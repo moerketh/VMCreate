@@ -155,7 +155,7 @@ namespace VMCreate.Tests
                 var logger = new Mock<ILogger<ChecksumVerifier>>();
                 var verifier = new ChecksumVerifier(factory, logger.Object);
 
-                var ex = await Assert.ThrowsExceptionAsync<InvalidOperationException>(() =>
+                var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
                     verifier.VerifyAsync(tempFile, "http://example.com/SHA256SUMS", "sha256",
                         CancellationToken.None, null));
 
@@ -182,7 +182,7 @@ namespace VMCreate.Tests
                 var logger = new Mock<ILogger<ChecksumVerifier>>();
                 var verifier = new ChecksumVerifier(factory, logger.Object);
 
-                var ex = await Assert.ThrowsExceptionAsync<InvalidOperationException>(() =>
+                var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
                     verifier.VerifyAsync(tempFile, "http://example.com/SHA256SUMS", "sha256",
                         CancellationToken.None, null));
 
@@ -269,7 +269,7 @@ namespace VMCreate.Tests
                 var logger = new Mock<ILogger<ChecksumVerifier>>();
                 var verifier = new ChecksumVerifier(factory, logger.Object);
 
-                var ex = await Assert.ThrowsExceptionAsync<InvalidOperationException>(() =>
+                var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
                     verifier.VerifyInlineAsync(tempFile,
                         "0000000000000000000000000000000000000000000000000000000000000000",
                         "sha256", CancellationToken.None, null));

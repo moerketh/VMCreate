@@ -108,25 +108,23 @@ namespace VMCreate.Tests
         }
 
         [TestMethod]
-        [ExpectedException(typeof(FileNotFoundException))]
         public void FindDiskFile_EmptyDirectory_Throws()
         {
-            _detector.FindDiskFile(_tempDir);
+            Assert.Throws<FileNotFoundException>(() => _detector.FindDiskFile(_tempDir));
         }
 
         [TestMethod]
-        [ExpectedException(typeof(FileNotFoundException))]
         public void FindDiskFile_OnlyUnsupportedFiles_Throws()
         {
             File.WriteAllText(Path.Combine(_tempDir, "readme.txt"), "hello");
             File.WriteAllText(Path.Combine(_tempDir, "manifest.mf"), "sha256");
 
-            _detector.FindDiskFile(_tempDir);
+            Assert.Throws<FileNotFoundException>(() => _detector.FindDiskFile(_tempDir));
         }
 
         // ── DetectFileType static method ─────────────────────────────────
 
-        [DataTestMethod]
+        [TestMethod]
         [DataRow("C:\\temp\\disk.vmdk", "VMDK")]
         [DataRow("/tmp/disk.qcow2", "QCOW2")]
         [DataRow("C:\\img\\disk.vhdx", "VHDX")]

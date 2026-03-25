@@ -298,7 +298,7 @@ namespace VMCreate.Tests.GalleryTests
         public async Task HttpLoader_ServerError_Throws(
             string name, Func<IHttpClientFactory, IGalleryLoader> create)
         {
-            await Assert.ThrowsExceptionAsync<HttpRequestException>(
+            await Assert.ThrowsAsync<HttpRequestException>(
                 () => create(ServerErrorFactory()).LoadGalleryItems(),
                 $"{name}: should throw HttpRequestException on HTTP 500");
         }
@@ -332,7 +332,7 @@ namespace VMCreate.Tests.GalleryTests
             using var cts = new CancellationTokenSource();
             cts.Cancel();
 
-            // Use try/catch (polymorphic) because MSTest ThrowsExceptionAsync uses exact-type matching
+            // Use try/catch (polymorphic) because MSTest ThrowsAsync uses exact-type matching
             // and HttpClient wraps cancellation as TaskCanceledException : OperationCanceledException.
             OperationCanceledException caught = null;
             try

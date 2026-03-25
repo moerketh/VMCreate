@@ -11,6 +11,6 @@
 
   <!-- MinVer only works with SDK-style .NET projects, not WiX -->
   <ItemGroup Condition="'$(MSBuildProjectExtension)' != '.wixproj'">
-    <PackageReference Include="MinVer" Version="6.0.0" PrivateAssets="all" />
+    <PackageReference Include="MinVer" Version="7.0.0" PrivateAssets="all" />
   </ItemGroup>
 </Project>
