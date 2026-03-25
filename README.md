@@ -40,7 +40,7 @@ Many of these distributions were not designed or tested by their creators to run
 ## Requirements
 
 - Windows 10/11 with Hyper-V enabled
-- .NET 8.0 (bundled with the self-contained build)
+- .NET 10.0 (bundled with the self-contained build)
 
 ## Installation
 
