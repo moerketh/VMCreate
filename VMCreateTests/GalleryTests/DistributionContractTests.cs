@@ -103,7 +103,7 @@ namespace VMCreate.Tests.GalleryTests
             new object[] { new Arch(),                nameof(Arch) },
             new object[] { new NixOS(),               nameof(NixOS) },
             new object[] { new FedoraSilverblue(),    nameof(FedoraSilverblue) },
-            new object[] { new PwnCloudOS(),          nameof(PwnCloudOS) },
+            new object[] { new PwnCloudOS(EmptyHtmlFactory()), nameof(PwnCloudOS) },
             new object[] { new FedoraSecurityLab(),   nameof(FedoraSecurityLab) },
             // Security loaders
             new object[] { new REMnux(),             nameof(REMnux) },

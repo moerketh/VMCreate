@@ -366,7 +366,7 @@ namespace VMCreate
             "Install OpenVPN"                   => DeployPageViewModel.SubConfigureVpn,
             "Deploy VPN Configs"                => DeployPageViewModel.SubConfigureVpn, // collapsed into one card
             "Restore SSH State"                 => DeployPageViewModel.SubRestoreSsh,
-            _ => null
+            _ => DeployPageViewModel.DistOptionSubId(stepName) // distribution-specific steps
         };
 
         /// <summary>Maps KVP WorkflowProgress prefix to a pre-boot sub-step card ID.</summary>

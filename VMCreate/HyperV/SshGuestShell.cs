@@ -282,7 +282,13 @@ namespace VMCreate
 
             if (process.ExitCode != 0)
             {
-                string errorDetail = !string.IsNullOrWhiteSpace(stderrStr) ? stderrStr.Trim() : stdoutStr.Trim();
+                // Filter out the benign "Permanently added" SSH warning before choosing the error detail
+                string significantStderr = string.Join("\n", stderrStr
+                    .Split('\n')
+                    .Where(line => !string.IsNullOrWhiteSpace(line)
+                                && !line.Contains("Permanently added", StringComparison.OrdinalIgnoreCase)))
+                    .Trim();
+                string errorDetail = !string.IsNullOrEmpty(significantStderr) ? significantStderr : stdoutStr.Trim();
                 throw new Exception(
                     $"SSH command failed (exit code {process.ExitCode}) on VM '{VmName}': {errorDetail}");
             }

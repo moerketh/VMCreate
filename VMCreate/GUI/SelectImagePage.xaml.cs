@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Logging;
 using System;
+using System.Collections.Generic;
 using System.Windows.Controls;
 
 namespace VMCreate
@@ -12,11 +13,13 @@ namespace VMCreate
         private readonly WizardData _wizardData;
         private readonly ILoggerFactory _loggerFactory;
         private readonly IHtbApiClient _htbApiClient;
+        private readonly IEnumerable<IConfigurableCustomizationStep> _configurableSteps;
 
-        public SelectImagePage(WizardData wizardData, IHtbApiClient htbApiClient, ILoggerFactory loggerFactory)
+        public SelectImagePage(WizardData wizardData, IHtbApiClient htbApiClient, IEnumerable<IConfigurableCustomizationStep> configurableSteps, ILoggerFactory loggerFactory)
         {
             _wizardData = wizardData ?? throw new ArgumentNullException(nameof(wizardData));
             _htbApiClient = htbApiClient ?? throw new ArgumentNullException(nameof(htbApiClient));
+            _configurableSteps = configurableSteps ?? throw new ArgumentNullException(nameof(configurableSteps));
             _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
 
             _viewModel = new SelectImagePageViewModel(
@@ -38,7 +41,7 @@ namespace VMCreate
 
         private void OnNavigateNext()
         {
-            var nextPage = new VmSettingsPage(_wizardData, _htbApiClient, _loggerFactory);
+            var nextPage = new VmSettingsPage(_wizardData, _htbApiClient, _configurableSteps, _loggerFactory);
             nextPage.WizardCompleted += (s, args) => WizardCompleted?.Invoke(s, args);
             NavigationService.Navigate(nextPage);
         }

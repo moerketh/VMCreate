@@ -1,3 +1,6 @@
+using System.Net;
+using System.Net.Http;
+using Moq;
 using VMCreate.Gallery;
 using VMCreate.Gallery.distributions;
 
@@ -10,6 +13,25 @@ namespace VMCreate.Tests.GalleryTests
     [TestClass]
     public sealed class StaticLoaderTests
     {
+        /// <summary>Returns a mock IHttpClientFactory whose client always responds with empty HTML.</summary>
+        private static IHttpClientFactory EmptyFactory()
+        {
+            var mock = new Mock<IHttpClientFactory>();
+            mock.Setup(f => f.CreateClient(It.IsAny<string>()))
+                .Returns(() => new HttpClient(new EmptyHandler(), disposeHandler: false));
+            return mock.Object;
+        }
+
+        private sealed class EmptyHandler : HttpMessageHandler
+        {
+            protected override Task<HttpResponseMessage> SendAsync(
+                HttpRequestMessage request, CancellationToken cancellationToken)
+                => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("<html></html>")
+                });
+        }
+
         // ── Arch ─────────────────────────────────────────────────────────────────
 
         [TestMethod]
@@ -128,7 +150,7 @@ namespace VMCreate.Tests.GalleryTests
         [TestMethod]
         public async Task PwnCloudOS_LoadGalleryItems_ReturnsSingleItem()
         {
-            var result = await new PwnCloudOS().LoadGalleryItems();
+            var result = await new PwnCloudOS(EmptyFactory()).LoadGalleryItems();
 
             Assert.AreEqual(1, result.Count);
         }
@@ -136,7 +158,7 @@ namespace VMCreate.Tests.GalleryTests
         [TestMethod]
         public async Task PwnCloudOS_LoadGalleryItems_ItemHasNonEmptyNameAndUri()
         {
-            var item = (await new PwnCloudOS().LoadGalleryItems())[0];
+            var item = (await new PwnCloudOS(EmptyFactory()).LoadGalleryItems())[0];
 
             Assert.IsFalse(string.IsNullOrEmpty(item.Name));
             Assert.IsFalse(string.IsNullOrEmpty(item.DiskUri));

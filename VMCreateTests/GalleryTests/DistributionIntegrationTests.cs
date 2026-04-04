@@ -119,7 +119,7 @@ namespace VMCreate.Tests.GalleryTests
 
         [TestMethod, Timeout(60_000)]
         public async Task PwnCloudOS_AllUrisResolve()
-            => await VerifyAllUrisAsync(await new PwnCloudOS().LoadGalleryItems(), nameof(PwnCloudOS));
+            => await VerifyAllUrisAsync(await new PwnCloudOS(_factory).LoadGalleryItems(), nameof(PwnCloudOS));
 
         [TestMethod, Timeout(60_000)]
         public async Task LoadFedoraSecurityLab_AllUrisResolve()

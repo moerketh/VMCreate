@@ -57,6 +57,9 @@ namespace VMCreate
         public const string SubConfigureVpn  = "Sub_ConfigureVpn";
         public const string SubRestoreSsh    = "Sub_RestoreSsh";
 
+        /// <summary>Generates a sub-card phase ID for a distribution-specific option step.</summary>
+        public static string DistOptionSubId(string stepName) => $"Sub_Dist_{stepName}";
+
         private readonly ILogger _logger;
         private bool _isDeploying;
         private bool _isComplete;
@@ -503,6 +506,17 @@ namespace VMCreate
                 Phases.Add(new DeploymentPhase(SubConfigureVpn, "Configure VPN",
                     "Installing OpenVPN and deploying VPN configs", SymbolRegular.Globe24) { IndentLevel = 1, IsVisible = false });
             }
+            if (c?.DistributionOptions != null)
+            {
+                foreach (var kv in c.DistributionOptions)
+                {
+                    if (kv.Value)
+                    {
+                        Phases.Add(new DeploymentPhase(DistOptionSubId(kv.Key), kv.Key,
+                            "Running distribution-specific tool", SymbolRegular.ArrowSync24) { IndentLevel = 1, IsVisible = false });
+                    }
+                }
+            }
             Phases.Add(new DeploymentPhase(SubRestoreSsh, "Restore SSH State",
                 "Restoring the original SSH configuration", SymbolRegular.ShieldKeyhole24) { IndentLevel = 1, IsVisible = false });
         }
@@ -525,6 +539,17 @@ namespace VMCreate
             {
                 Phases.Insert(index++, new DeploymentPhase(SubConfigureVpn, "Configure VPN",
                     "Installing OpenVPN and deploying VPN configs", SymbolRegular.Globe24) { IndentLevel = 1, IsVisible = false });
+            }
+            if (c?.DistributionOptions != null)
+            {
+                foreach (var kv in c.DistributionOptions)
+                {
+                    if (kv.Value)
+                    {
+                        Phases.Insert(index++, new DeploymentPhase(DistOptionSubId(kv.Key), kv.Key,
+                            "Running distribution-specific tool", SymbolRegular.ArrowSync24) { IndentLevel = 1, IsVisible = false });
+                    }
+                }
             }
             Phases.Insert(index++, new DeploymentPhase(SubRestoreSsh, "Restore SSH State",
                 "Restoring the original SSH configuration", SymbolRegular.ShieldKeyhole24) { IndentLevel = 1, IsVisible = false });

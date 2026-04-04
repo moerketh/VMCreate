@@ -24,18 +24,21 @@ namespace VMCreate
         private readonly IGalleryService _galleryService;
         private readonly Func<WizardData, DeployPage> _deployPageFactory;
         private readonly IHtbApiClient _htbApiClient;
+        private readonly IEnumerable<IConfigurableCustomizationStep> _configurableSteps;
         private WizardData _wizardData;
 
         public MainWindow(
             IGalleryService galleryService,
             Func<WizardData, DeployPage> deployPageFactory,
             IHtbApiClient htbApiClient,
+            IEnumerable<IConfigurableCustomizationStep> configurableSteps,
             ILogger<MainWindow> logger,
             ILoggerFactory loggerFactory)
         {
             _galleryService = galleryService ?? throw new ArgumentNullException(nameof(galleryService));
             _deployPageFactory = deployPageFactory ?? throw new ArgumentNullException(nameof(deployPageFactory));
             _htbApiClient = htbApiClient ?? throw new ArgumentNullException(nameof(htbApiClient));
+            _configurableSteps = configurableSteps ?? throw new ArgumentNullException(nameof(configurableSteps));
             _logger = logger;
             _loggerFactory = loggerFactory;
 
@@ -122,7 +125,7 @@ namespace VMCreate
             // Navigate to the first page IMMEDIATELY so the UI is visible straight away.
             // Gallery items will stream into _galleryItems in the background below.
             _wizardData = new WizardData { GalleryItems = _galleryItems, DemoMode = App.DemoMode };
-            var firstPage = new SelectImagePage(_wizardData, _htbApiClient, _loggerFactory);
+            var firstPage = new SelectImagePage(_wizardData, _htbApiClient, _configurableSteps, _loggerFactory);
             firstPage.WizardCompleted += WizardPage_Completed;
             _mainFrame.Navigate(firstPage);
 
@@ -207,7 +210,7 @@ namespace VMCreate
                 if (sender is DeployPage)
                 {
                     _wizardData = new WizardData { GalleryItems = _galleryItems, DemoMode = App.DemoMode };
-                    var firstPage = new SelectImagePage(_wizardData, _htbApiClient, _loggerFactory);
+                    var firstPage = new SelectImagePage(_wizardData, _htbApiClient, _configurableSteps, _loggerFactory);
                     firstPage.WizardCompleted += WizardPage_Completed;
                     _mainFrame.Navigate(firstPage);
                     return;

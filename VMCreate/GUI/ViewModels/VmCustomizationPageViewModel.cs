@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Linq;
 using System.Threading;
 using System.Windows.Input;
 
@@ -42,11 +43,21 @@ namespace VMCreate
         /// <summary>Raised when the user clicks Back.</summary>
         public event Action RequestNavigateBack;
 
-        public VmCustomizationPageViewModel(WizardData wizardData, IHtbApiClient htbApiClient, ILogger logger)
+        public VmCustomizationPageViewModel(
+            WizardData wizardData, IHtbApiClient htbApiClient, ILogger logger,
+            IEnumerable<IConfigurableCustomizationStep> configurableSteps)
         {
             _wizardData = wizardData ?? throw new ArgumentNullException(nameof(wizardData));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _htbApiClient = htbApiClient ?? throw new ArgumentNullException(nameof(htbApiClient));
+
+            // Build the list of distribution-specific options visible for the selected image.
+            var selectedItem = wizardData.SelectedItem;
+            if (selectedItem != null && configurableSteps != null)
+            {
+                foreach (var step in configurableSteps.Where(s => s.IsVisibleFor(selectedItem)))
+                    DistributionOptions.Add(new DistributionOptionItem(step));
+            }
 
             FinishCommand = new RelayCommand(OnFinish);
             BackCommand = new RelayCommand(() => RequestNavigateBack?.Invoke());
@@ -124,6 +135,9 @@ namespace VMCreate
 
         public bool IsSshKeyPathEnabled => _useCustomSshKey;
 
+        /// <summary>Distribution-specific options discovered from plugin assemblies.</summary>
+        public ObservableCollection<DistributionOptionItem> DistributionOptions { get; } = new();
+
         /// <summary>True when the selected image is not in VHDX format and needs conversion.
         /// Native Hyper-V images (e.g. Windows) are already in VHDX format and need no conversion.</summary>
         public bool IsNotVhdx =>
@@ -148,9 +162,13 @@ namespace VMCreate
             _wizardData.Customizations.CustomSshPublicKeyPath = _useCustomSshKey ? _customSshPublicKeyPath : null;
             _wizardData.Customizations.EnableIntegrationServices = _enableIntegrationServices;
 
+            foreach (var opt in DistributionOptions)
+                _wizardData.Customizations.DistributionOptions[opt.Name] = opt.IsEnabled;
+
             _logger.LogDebug(
-                "Finished customization: ConfigureXrdp={Xrdp}, HtbVpnKeys={KeyCount}, ManualOvpn={ManualPath}, SyncTimezone={Tz}, CustomKey={Key}, IntegrationServices={IntSvc}",
-                _configureXrdp, _downloadedKeys.Count, _ovpnFilePath, _syncTimezone, _useCustomSshKey, _enableIntegrationServices);
+                "Finished customization: ConfigureXrdp={Xrdp}, HtbVpnKeys={KeyCount}, ManualOvpn={ManualPath}, SyncTimezone={Tz}, CustomKey={Key}, IntegrationServices={IntSvc}, DistOptions={DistOpts}",
+                _configureXrdp, _downloadedKeys.Count, _ovpnFilePath, _syncTimezone, _useCustomSshKey, _enableIntegrationServices,
+                string.Join(", ", DistributionOptions.Select(o => $"{o.Name}={o.IsEnabled}")));
 
             RequestWizardComplete?.Invoke(WizardResult.Finished);
         }

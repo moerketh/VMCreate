@@ -109,6 +109,13 @@ namespace VMCreate
             foreach (var stepType in stepTypes)
                 services.AddTransient(typeof(ICustomizationStep), stepType);
 
+            // Also register IConfigurableCustomizationStep so pages can
+            // discover distribution-specific UI options via DI.
+            var configurableStepTypes = stepTypes
+                .Where(t => typeof(IConfigurableCustomizationStep).IsAssignableFrom(t));
+            foreach (var stepType in configurableStepTypes)
+                services.AddTransient(typeof(IConfigurableCustomizationStep), stepType);
+
             // ── HTB API client (uses IHttpClientFactory) ────────────────────
             services.AddHttpClient<IHtbApiClient, HtbApiClient>();
 

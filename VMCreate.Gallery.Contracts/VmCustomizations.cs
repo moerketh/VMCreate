@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 
 namespace VMCreate
 {
@@ -32,6 +33,12 @@ namespace VMCreate
         public bool EnableIntegrationServices { get; set; } = true;
 
         /// <summary>
+        /// Per-distribution options populated by <see cref="IConfigurableCustomizationStep"/> UI cards.
+        /// Keys are step names; values indicate whether the user enabled the option.
+        /// </summary>
+        public Dictionary<string, bool> DistributionOptions { get; set; } = new();
+
+        /// <summary>
         /// Returns true if any pre-boot customizations are enabled
         /// (i.e. options applied during ISO customization before first boot).
         /// </summary>
@@ -42,6 +49,6 @@ namespace VMCreate
         /// (i.e. options that require SSH into the running VM).
         /// </summary>
         public bool HasPostBootCustomizations =>
-            ConfigureHtbVpn || SyncTimezone;
+            ConfigureHtbVpn || SyncTimezone || DistributionOptions.Any(kv => kv.Value);
     }
 }

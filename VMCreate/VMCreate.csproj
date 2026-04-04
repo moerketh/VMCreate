@@ -116,6 +116,7 @@
     <Compile Include="GUI\ViewModels\SelectImagePageViewModel.cs" />
     <Compile Include="GUI\ViewModels\VmSettingsPageViewModel.cs" />
     <Compile Include="GUI\ViewModels\VmCustomizationPageViewModel.cs" />
+    <Compile Include="GUI\ViewModels\DistributionOptionItem.cs" />
     <Compile Include="GUI\ViewModels\DeploymentPhase.cs" />
     <Compile Include="GUI\ViewModels\DeployPageViewModel.cs" />
     <Compile Include="GUI\ViewModels\DeployPageConverters.cs" />
