@@ -27,6 +27,9 @@ namespace VMCreate.Gallery
                 .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
                 ?.InformationalVersion ?? "0.0.0";
 
+        /// <summary>Release code name for the current version.</summary>
+        public const string CodeName = "Du bist schnell, aber wir sind noch schneller";
+
         /// <summary>User-Agent header value for HTTP requests (e.g. "VMCreate/1.0.0").</summary>
         public static string UserAgent => $"VMCreate/{Version}";
     }

@@ -41,11 +41,14 @@ jobs:
           # MinVer embeds version in the built assembly; extract it
           $dll = Get-ChildItem -Path VMCreate.Gallery.Contracts/bin/Release -Filter "VMCreate.Gallery.Contracts.dll" -Recurse | Select-Object -First 1
           $ver = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($dll.FullName).ProductVersion
-          # Strip +sha suffix for MSI version (must be X.Y.Z)
-          $msiVer = ($ver -split '\+')[0] -replace '-.*', ''
+          # Strip +sha suffix for clean display version (keeps pre-release tags)
+          $cleanVer = ($ver -split '\+')[0]
+          # Strip pre-release suffix too for MSI version (must be X.Y.Z)
+          $msiVer = $cleanVer -replace '-.*', ''
           echo "version=$ver" >> $env:GITHUB_OUTPUT
+          echo "clean_version=$cleanVer" >> $env:GITHUB_OUTPUT
           echo "msi_version=$msiVer" >> $env:GITHUB_OUTPUT
-          echo "Version: $ver / MSI: $msiVer"
+          echo "Version: $ver / Clean: $cleanVer / MSI: $msiVer"
 
       - name: Publish self-contained executable
         run: >
@@ -71,18 +74,18 @@ jobs:
           $exe = "publish/VMCreate.exe"
           $msiHash = (Get-FileHash $msi.FullName -Algorithm SHA256).Hash
           $exeHash = (Get-FileHash $exe -Algorithm SHA256).Hash
-          "$msiHash  VMCreate-${{ steps.version.outputs.version }}.msi" | Out-File -Encoding utf8 checksums.sha256
-          "$exeHash  VMCreate-${{ steps.version.outputs.version }}.exe" | Add-Content -Encoding utf8 checksums.sha256
+          "$msiHash  vmcreate-${{ steps.version.outputs.clean_version }}.msi" | Out-File -Encoding utf8 checksums.sha256
+          "$exeHash  vmcreate-${{ steps.version.outputs.clean_version }}.exe" | Add-Content -Encoding utf8 checksums.sha256
           Get-Content checksums.sha256
 
       - name: Rename artifacts for release
         shell: pwsh
         run: |
-          $ver = "${{ steps.version.outputs.version }}"
+          $ver = "${{ steps.version.outputs.clean_version }}"
           $msi = Get-ChildItem -Path VMCreate.Installer/bin -Filter "*.msi" -Recurse | Select-Object -First 1
           if (-not $msi) { throw "MSI not found under VMCreate.Installer/bin" }
-          Copy-Item $msi.FullName "VMCreate-$ver.msi"
-          Copy-Item "publish/VMCreate.exe" "VMCreate-$ver.exe"
+          Copy-Item $msi.FullName "vmcreate-$ver.msi"
+          Copy-Item "publish/VMCreate.exe" "vmcreate-$ver.exe"
 
       - name: Delete old artifacts
         if: github.ref_type == 'branch'
@@ -107,17 +110,17 @@ jobs:
         if: github.ref_type == 'branch'
         uses: actions/upload-artifact@v4
         with:
-          name: VMCreate-${{ steps.version.outputs.msi_version }}.msi
+          name: vmcreate-${{ steps.version.outputs.clean_version }}.msi
           retention-days: 5
-          path: VMCreate-${{ steps.version.outputs.version }}.msi
+          path: vmcreate-${{ steps.version.outputs.clean_version }}.msi
 
       - name: Upload EXE artifact
         if: github.ref_type == 'branch'
         uses: actions/upload-artifact@v4
         with:
-          name: VMCreate-${{ steps.version.outputs.msi_version }}.exe
+          name: vmcreate-${{ steps.version.outputs.clean_version }}.exe
           retention-days: 5
-          path: VMCreate-${{ steps.version.outputs.version }}.exe
+          path: vmcreate-${{ steps.version.outputs.clean_version }}.exe
 
       - name: Upload checksums artifact
         if: github.ref_type == 'branch'
@@ -132,7 +135,7 @@ jobs:
         uses: ncipollo/release-action@v1
         with:
           artifacts: >
-            VMCreate-${{ steps.version.outputs.version }}.msi,
-            VMCreate-${{ steps.version.outputs.version }}.exe,
+            vmcreate-${{ steps.version.outputs.clean_version }}.msi,
+            vmcreate-${{ steps.version.outputs.clean_version }}.exe,
             checksums.sha256
           generateReleaseNotes: true

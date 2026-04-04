@@ -45,7 +45,7 @@ namespace VMCreate
             InitializeComponent();
 
             Title = $"New Virtual Machine Wizard — v{ProductInfo.Version}";
-            VersionLabel.Text = $"v{ProductInfo.Version}";
+            VersionLabel.Text = $"v{ProductInfo.Version} \u2014 {ProductInfo.CodeName}";
 
             // Follow the Windows system theme by default
             SystemThemeWatcher.Watch(this);

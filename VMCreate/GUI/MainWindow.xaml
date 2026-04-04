@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         xmlns:local="clr-namespace:VMCreate"
-        Title="New Virtual Machine Wizard" Height="652" Width="1000"
+        Title="New Virtual Machine Wizard" Height="720" Width="1050"
         ExtendsContentIntoTitleBar="True"
         WindowBackdropType="Mica">
     <Grid>
