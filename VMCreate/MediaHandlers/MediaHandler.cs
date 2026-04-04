@@ -19,6 +19,19 @@ namespace VMCreate.MediaHandlers
 
         public virtual int VmGeneration => 2; // Default to Gen2 (UEFI/GPT)
 
+        public virtual long DetectedVirtualSizeBytes { get; protected set; }
+
+        /// <summary>
+        /// Computes the auto-detected new drive size in GB from a virtual size in bytes.
+        /// Uses max(110% of source, source + 2 GB), rounded up to the next whole GB.
+        /// </summary>
+        protected static int ComputeAutoDriveSizeGB(long virtualSizeBytes)
+        {
+            const long twoGB = 2L * 1024 * 1024 * 1024;
+            double expanded = Math.Max(virtualSizeBytes * 1.10, virtualSizeBytes + twoGB);
+            return (int)Math.Ceiling(expanded / (1024.0 * 1024 * 1024));
+        }
+
         public virtual async Task<string> PrepareMediaAsync(string sourceFile, string destinationPath, VmSettings vmSettings, GalleryItem item, IProgress<CreateVMProgressInfo> progressInfo, CancellationToken cancellationToken)
         {
             _logger.LogDebug("Checking source file: {SourceFile}", sourceFile);

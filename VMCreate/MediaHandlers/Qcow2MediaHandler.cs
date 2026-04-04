@@ -41,13 +41,25 @@ namespace VMCreate.MediaHandlers
             if (_vmGeneration == 1)
             {
                 long virtualSizeBytes = await _diskConverter.GetVirtualSizeAsync(convertedFile, cancellationToken);
-                long newDriveSizeBytes = vmSettings.NewDriveSizeInGB * 1024L * 1024L * 1024L;
-                if (newDriveSizeBytes < virtualSizeBytes)
+                DetectedVirtualSizeBytes = virtualSizeBytes;
+
+                if (vmSettings.AutoDetectDiskSize)
                 {
-                    long minimumGB = (long)Math.Ceiling((double)virtualSizeBytes / (1024 * 1024 * 1024));
-                    throw new InvalidOperationException(
-                        $"New drive size ({vmSettings.NewDriveSizeInGB} GB) is too small for the source disk ({minimumGB} GB). " +
-                        $"The new drive must be at least {minimumGB} GB for MBR-to-GPT cloning.");
+                    int autoGB = ComputeAutoDriveSizeGB(virtualSizeBytes);
+                    vmSettings.NewDriveSizeInGB = autoGB;
+                    _logger.LogInformation("Auto-detected disk size: source={SourceGB:F1} GB, target={TargetGB} GB",
+                        virtualSizeBytes / (1024.0 * 1024 * 1024), autoGB);
+                }
+                else
+                {
+                    long newDriveSizeBytes = vmSettings.NewDriveSizeInGB * 1024L * 1024L * 1024L;
+                    if (newDriveSizeBytes < virtualSizeBytes)
+                    {
+                        long minimumGB = (long)Math.Ceiling((double)virtualSizeBytes / (1024 * 1024 * 1024));
+                        throw new InvalidOperationException(
+                            $"New drive size ({vmSettings.NewDriveSizeInGB} GB) is too small for the source disk ({minimumGB} GB). " +
+                            $"The new drive must be at least {minimumGB} GB for MBR-to-GPT cloning.");
+                    }
                 }
             }
 

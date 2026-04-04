@@ -6,8 +6,8 @@
             "type": "coreclr",
             "request": "launch",
             "preLaunchTask": "build",
-            "program": "${workspaceFolder}/VMCreate/bin/Debug/net8.0-windows/CreateVM.exe",
-            "args": [],
+            "program": "${workspaceFolder}/VMCreate/bin/Debug/net10.0-windows/win-x64/VMCreate.exe",
+            "args": ["/demo"],
             "cwd": "${workspaceFolder}/VMCreate",
             "console": "internalConsole",
             "stopAtEntry": false

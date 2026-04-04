@@ -119,11 +119,22 @@
                     <StackPanel Visibility="{Binding IsNotVhdx, Converter={StaticResource BoolToVis}}" Margin="0,8,0,0">
                         <TextBlock Text="New Drive Size (GB)" FontSize="14" FontWeight="SemiBold"
                                    Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,0,6"/>
+                        <CheckBox Content="Auto-detect from source image"
+                                  IsChecked="{Binding AutoDetectDiskSize}"
+                                  FontSize="14" Margin="0,0,0,6"
+                                  Visibility="{Binding IsDiskImage, Converter={StaticResource BoolToVis}}"
+                                  ToolTip="Automatically size the new drive based on the source disk image (recommended)."
+                                  AutomationProperties.Name="Auto-detect disk size"/>
+                        <TextBlock Text="Disk size will be calculated from the source image at creation time."
+                                   FontSize="12" FontStyle="Italic"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,6"
+                                   Visibility="{Binding ShowAutoSizeHint, Converter={StaticResource BoolToVis}}"/>
                         <ui:TextBox x:Name="NewDriveSizeTextBox"
                                  Text="{Binding NewDriveSizeText, UpdateSourceTrigger=PropertyChanged}"
                                  FontSize="14" PlaceholderText="40"
                                  MaxWidth="200" HorizontalAlignment="Left" MinWidth="120"
                                  PreviewTextInput="NumberValidationTextBox" DataObject.Pasting="TextBoxPasting"
+                                 Visibility="{Binding ShowManualDiskSize, Converter={StaticResource BoolToVis}}"
                                  ToolTip="Enter new drive size in GB (at least 10, must be larger than the original disk size)."
                                  AutomationProperties.Name="New drive size in gigabytes"/>
                     </StackPanel>

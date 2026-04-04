@@ -14,6 +14,7 @@ namespace VMCreate
         public int CPUCount { get; set; } = 2;
         public bool VirtualizationEnabled { get; set; } = true;
         public int NewDriveSizeInGB { get; set; } = 150;
+        public bool AutoDetectDiskSize { get; set; }
         public string EnhancedSessionTransportType { get; set; }
         public bool SecureBoot { get; internal set; }
         public string SecureBootTemplate { get; set; } = "MicrosoftUEFICertificateAuthority";

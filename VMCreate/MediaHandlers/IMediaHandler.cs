@@ -8,6 +8,7 @@ namespace VMCreate.MediaHandlers
     {
         bool RequiresExtraction { get; }
         int VmGeneration { get; }
+        long DetectedVirtualSizeBytes { get; }
         Task<string> PrepareMediaAsync(string sourceFile, string destinationPath, VmSettings vmSettings, GalleryItem item, IProgress<CreateVMProgressInfo> progressInfo, CancellationToken cancellationToken);
     }
 }

@@ -25,7 +25,7 @@ namespace VMCreate.MediaHandlers
                 case "QCOW2":
                     return new Qcow2MediaHandler(_loggerFactory.CreateLogger<Qcow2MediaHandler>(), _diskConverter, _partitionSchemeDetector);
                 case "VHDX":
-                    return new VhdxMediaHandler(_loggerFactory.CreateLogger<VhdxMediaHandler>(), _partitionSchemeDetector);
+                    return new VhdxMediaHandler(_loggerFactory.CreateLogger<VhdxMediaHandler>(), _partitionSchemeDetector, _diskConverter);
                 case "ISO":
                     return new IsoMediaHandler(_loggerFactory.CreateLogger<IsoMediaHandler>());
                 default:

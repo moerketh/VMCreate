@@ -20,6 +20,7 @@ namespace VMCreate
         private bool _replacePreviousVm;
         private string _newDriveSizeText;
         private string _validationError;
+        private bool _autoDetectDiskSize;
 
         /// <summary>Raised when the wizard should complete (e.g. Cancel).</summary>
         public event Action<WizardResult> RequestWizardComplete;
@@ -37,6 +38,7 @@ namespace VMCreate
 
             _vmName = _wizardData.SelectedItem?.Name ?? "";
             _newDriveSizeText = _wizardData.Settings.NewDriveSizeInGB.ToString();
+            _autoDetectDiskSize = IsDiskImage;
 
             NextCommand = new RelayCommand(OnNext);
             BackCommand = new RelayCommand(() => RequestNavigateBack?.Invoke());
@@ -103,6 +105,31 @@ namespace VMCreate
             set { if (SetProperty(ref _newDriveSizeText, value)) ClearValidationError(); }
         }
 
+        public bool AutoDetectDiskSize
+        {
+            get => _autoDetectDiskSize;
+            set
+            {
+                if (SetProperty(ref _autoDetectDiskSize, value))
+                {
+                    OnPropertyChanged(nameof(ShowManualDiskSize));
+                    OnPropertyChanged(nameof(ShowAutoSizeHint));
+                    ClearValidationError();
+                }
+            }
+        }
+
+        /// <summary>True for disk-based images (VMDK, QCOW2, VHD, OVA) that are not ISO installers and not already VHDX/native.</summary>
+        public bool IsDiskImage =>
+            IsNotVhdx
+            && !string.Equals(_wizardData.SelectedItem?.FileType, "ISO", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>Show the manual textbox when the user opts out of auto-detection, or for ISO installs.</summary>
+        public bool ShowManualDiskSize => IsNotVhdx && !_autoDetectDiskSize;
+
+        /// <summary>Show the auto-size hint when auto-detect is enabled for disk images.</summary>
+        public bool ShowAutoSizeHint => IsDiskImage && _autoDetectDiskSize;
+
         /// <summary>True when the selected image is not in VHDX format and needs conversion.
         /// Native Hyper-V images (e.g. Windows) are already in VHDX format and need no conversion.</summary>
         public bool IsNotVhdx =>
@@ -154,12 +181,20 @@ namespace VMCreate
 
             if (IsNotVhdx)
             {
-                if (!int.TryParse(_newDriveSizeText, out int sizeGB) || sizeGB < 10)
+                if (_autoDetectDiskSize && IsDiskImage)
                 {
-                    ValidationError = "New Drive Size must be at least 10 GB!";
-                    return;
+                    _wizardData.Settings.AutoDetectDiskSize = true;
                 }
-                _wizardData.Settings.NewDriveSizeInGB = sizeGB;
+                else
+                {
+                    _wizardData.Settings.AutoDetectDiskSize = false;
+                    if (!int.TryParse(_newDriveSizeText, out int sizeGB) || sizeGB < 10)
+                    {
+                        ValidationError = "New Drive Size must be at least 10 GB!";
+                        return;
+                    }
+                    _wizardData.Settings.NewDriveSizeInGB = sizeGB;
+                }
             }
 
             // Apply validated values to WizardData (timestamp is appended in CreateVMAsync)
