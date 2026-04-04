@@ -135,6 +135,9 @@ namespace VMCreate
 
         public bool IsSshKeyPathEnabled => _useCustomSshKey;
 
+        /// <summary>True when the selected image is a security distribution (e.g. Kali, Parrot, PwnCloudOS).</summary>
+        public bool ShowHtbVpn => SelectedItem?.IsSecurity == true;
+
         /// <summary>Distribution-specific options discovered from plugin assemblies.</summary>
         public ObservableCollection<DistributionOptionItem> DistributionOptions { get; } = new();
 

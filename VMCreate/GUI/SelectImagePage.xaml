@@ -5,32 +5,18 @@
       xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
       xmlns:local="clr-namespace:VMCreate"
       Title="Select Virtual Machine Image">
-    <Grid Margin="10" FocusManager.FocusedElement="{Binding ElementName=SearchBox}">
+    <Grid Margin="10">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
-        <TextBlock Grid.Row="0" Text="Select a Virtual Machine Image" Style="{StaticResource TitleText}"/>
         <!-- Dismissible error banner (theme-aware via InfoBar) -->
-        <ui:InfoBar Grid.Row="1" Title="Error" Severity="Error"
+        <ui:InfoBar Grid.Row="0" Title="Error" Severity="Error"
                     Message="{Binding ErrorMessage}"
                     IsOpen="{Binding HasError, Mode=OneWay}"
                     IsClosable="True" Margin="0,0,0,6"/>
-        <ui:TextBox x:Name="SearchBox" Grid.Row="2" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
-                 PlaceholderText="Search images…"
-                 Margin="0,10,0,4" FontSize="14"
-                 Icon="{ui:SymbolIcon Search24}"
-                 AutomationProperties.Name="Search gallery images"/>
-        <CheckBox Grid.Row="2" Content="Show ISO installers"
-                  IsChecked="{Binding ShowIsoInstallers}"
-                  HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                  Margin="0,0,0,4"
-                  ToolTip="ISO images require manual OS installation inside the VM"
-                  AutomationProperties.Name="Show ISO installer images"/>
-        <Grid Grid.Row="3">
+        <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" MinWidth="350" MaxWidth="500"/>
                 <ColumnDefinition Width="*"/>
@@ -125,7 +111,14 @@
             </StackPanel>
             </ScrollViewer>
         </Grid>
-        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+        <Grid Grid.Row="2" Margin="0,10,0,0">
+            <CheckBox Content="Show ISO installers"
+                      IsChecked="{Binding ShowIsoInstallers}"
+                      HorizontalAlignment="Left" VerticalAlignment="Center"
+                      FontSize="12" Opacity="0.8"
+                      ToolTip="ISO images require manual OS installation inside the VM"
+                      AutomationProperties.Name="Show ISO installer images"/>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
             <Button Content="Cancel" Command="{Binding CancelCommand}" Style="{StaticResource CommonButton}"
                     AutomationProperties.Name="Cancel wizard"/>
             <ui:Button Command="{Binding NextCommand}" Appearance="Primary"
@@ -138,6 +131,7 @@
                                    Foreground="{DynamicResource TextOnAccentFillColorPrimaryBrush}"/>
                 </StackPanel>
             </ui:Button>
-        </StackPanel>
+            </StackPanel>
+        </Grid>
     </Grid>
 </Page>
