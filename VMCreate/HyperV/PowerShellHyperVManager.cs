@@ -39,6 +39,7 @@ namespace VMCreate
         public async Task CreateVMAsync(VmSettings vmSettings, string vmPath, int targetGeneration, CancellationToken cancellationToken)
         {
             _ps.Commands.Clear();
+            _ps.Streams.Error.Clear();
             _ps.AddCommand("New-VM")
                 .AddParameter("Name", vmSettings.VMName)
                 .AddParameter("MemoryStartupBytes", vmSettings.MemoryInMB * 1024L * 1024L)
@@ -334,6 +335,7 @@ namespace VMCreate
 
         private async Task<System.Collections.ObjectModel.Collection<PSObject>> RunCommand(CancellationToken cancellationToken)
         {
+            _ps.Streams.Error.Clear();
             var result = await Task.Run(_ps.Invoke, cancellationToken);
             if (_ps.HadErrors) throw new Exception(string.Join("; ", _ps.Streams.Error.Select(e => e.ToString())));
             return result;
