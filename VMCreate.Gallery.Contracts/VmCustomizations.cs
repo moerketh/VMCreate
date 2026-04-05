@@ -3,9 +3,32 @@ using System.Linq;
 
 namespace VMCreate
 {
+    /// <summary>
+    /// Controls how DNS nameservers are configured on the guest VM.
+    /// </summary>
+    public enum DnsMode
+    {
+        /// <summary>Use the Windows host machine's DNS servers (default).</summary>
+        Host,
+        /// <summary>Use user-specified nameservers.</summary>
+        Custom,
+    }
+
     public class VmCustomizations
     {
         public bool ConfigureXrdp { get; set; }
+
+        /// <summary>
+        /// DNS configuration mode. Default is <see cref="DnsMode.Host"/>
+        /// which resolves the host machine's DNS servers and sends them to the guest.
+        /// </summary>
+        public DnsMode DnsMode { get; set; } = DnsMode.Host;
+
+        /// <summary>
+        /// Comma-separated nameserver IP addresses for <see cref="DnsMode.Custom"/> mode.
+        /// Example: "9.9.9.9,1.1.1.1"
+        /// </summary>
+        public string CustomNameservers { get; set; }
 
         /// <summary>When true, install OpenVPN and deploy VPN configs to the VM.</summary>
         public bool ConfigureHtbVpn { get; set; }

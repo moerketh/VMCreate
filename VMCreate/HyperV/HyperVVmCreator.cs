@@ -5,6 +5,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 using VMCreate.MediaHandlers;
@@ -83,6 +85,51 @@ namespace VMCreate
                 _logger.LogError(ex, "Error reading DefaultVirtualHardDiskPath: {Message}", ex.Message);
             }
             return defaultPath;
+        }
+
+        /// <summary>
+        /// Resolves the DNS server addresses configured on the Windows host machine.
+        /// Returns a comma-separated list of IP addresses from all active network
+        /// interfaces that have an IPv4 default gateway, falling back to all
+        /// operational interfaces if none have a gateway.
+        /// </summary>
+        private string ResolveHostDnsServers()
+        {
+            try
+            {
+                var interfaces = NetworkInterface.GetAllNetworkInterfaces()
+                    .Where(ni => ni.OperationalStatus == OperationalStatus.Up
+                              && ni.NetworkInterfaceType != NetworkInterfaceType.Loopback);
+
+                // Prefer interfaces that have a default gateway (most likely the active connection)
+                var gatewayInterfaces = interfaces
+                    .Where(ni => ni.GetIPProperties().GatewayAddresses.Any(g =>
+                        g.Address.AddressFamily == AddressFamily.InterNetwork))
+                    .ToList();
+
+                var source = gatewayInterfaces.Count > 0 ? gatewayInterfaces : interfaces;
+
+                var dnsAddresses = source
+                    .SelectMany(ni => ni.GetIPProperties().DnsAddresses)
+                    .Where(addr => addr.AddressFamily == AddressFamily.InterNetwork
+                                || addr.AddressFamily == AddressFamily.InterNetworkV6)
+                    .Select(addr => addr.ToString())
+                    .Distinct()
+                    .ToList();
+
+                if (dnsAddresses.Count > 0)
+                {
+                    _logger.LogDebug("Resolved host DNS servers: {DnsServers}", string.Join(", ", dnsAddresses));
+                    return string.Join(",", dnsAddresses);
+                }
+
+                _logger.LogWarning("No DNS servers found on any active network interface");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to resolve host DNS servers");
+            }
+            return null;
         }
 
         public async Task CreateVMAsync(VmSettings vmSettings, VmCustomizations vmCustomizations, string sourceFile, GalleryItem item, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo> createVMProgressInfo)
@@ -383,6 +430,19 @@ namespace VMCreate
                     if (vmCustomizations.ConfigureXrdp)
                     {
                         await _kvpSender.SendKVPToGuestAsync(vmSettings.VMName, "VMCREATE_XRDP", "true", cancellationToken);
+                    }
+
+                    // ── DNS nameservers ───────────────────────────────────────
+                    string nameservers = vmCustomizations.DnsMode switch
+                    {
+                        DnsMode.Custom => vmCustomizations.CustomNameservers,
+                        _ => ResolveHostDnsServers(),
+                    };
+                    if (!string.IsNullOrWhiteSpace(nameservers))
+                    {
+                        _logger.LogInformation("Sending DNS nameservers via KVP to VM {VMName}: {Nameservers}",
+                            vmSettings.VMName, nameservers);
+                        await _kvpSender.SendKVPToGuestAsync(vmSettings.VMName, "VMCREATE_NAMESERVERS", nameservers, cancellationToken);
                     }
 
                     // ── Monitor ISO progress and wait for shutdown ─────────────

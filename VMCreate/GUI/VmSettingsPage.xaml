@@ -13,6 +13,8 @@
         <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" Padding="0,0,0,4">
         <StackPanel FocusManager.FocusedElement="{Binding ElementName=VMNameTextBox}">
 
+            <TextBlock Text="Configure Virtual Machine Settings" Style="{StaticResource TitleText}" Margin="0,0,0,12"/>
+
             <!-- Selected image summary card -->
             <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
                     CornerRadius="8" Padding="16,12" Margin="0,0,0,12"

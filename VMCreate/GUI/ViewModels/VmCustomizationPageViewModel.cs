@@ -36,6 +36,8 @@ namespace VMCreate
         private bool _useCustomSshKey;
         private string _customSshPublicKeyPath;
         private bool _enableIntegrationServices = true;
+        private bool _isCustomDns;
+        private string _customNameservers;
 
         /// <summary>Raised when the wizard should complete (Finished or Canceled).</summary>
         public event Action<WizardResult> RequestWizardComplete;
@@ -133,6 +135,32 @@ namespace VMCreate
             set => SetProperty(ref _enableIntegrationServices, value);
         }
 
+        public bool IsHostDns
+        {
+            get => !_isCustomDns;
+            set
+            {
+                if (value && SetProperty(ref _isCustomDns, false))
+                    OnPropertyChanged(nameof(IsCustomDns));
+            }
+        }
+
+        public bool IsCustomDns
+        {
+            get => _isCustomDns;
+            set
+            {
+                if (SetProperty(ref _isCustomDns, value))
+                    OnPropertyChanged(nameof(IsHostDns));
+            }
+        }
+
+        public string CustomNameservers
+        {
+            get => _customNameservers;
+            set => SetProperty(ref _customNameservers, value);
+        }
+
         public bool IsSshKeyPathEnabled => _useCustomSshKey;
 
         /// <summary>True when the selected image is a security distribution (e.g. Kali, Parrot, PwnCloudOS).</summary>
@@ -164,13 +192,16 @@ namespace VMCreate
             _wizardData.Customizations.SyncTimezone = _syncTimezone;
             _wizardData.Customizations.CustomSshPublicKeyPath = _useCustomSshKey ? _customSshPublicKeyPath : null;
             _wizardData.Customizations.EnableIntegrationServices = _enableIntegrationServices;
+            _wizardData.Customizations.DnsMode = _isCustomDns ? DnsMode.Custom : DnsMode.Host;
+            _wizardData.Customizations.CustomNameservers = _isCustomDns ? _customNameservers : null;
 
             foreach (var opt in DistributionOptions)
                 _wizardData.Customizations.DistributionOptions[opt.Name] = opt.IsEnabled;
 
             _logger.LogDebug(
-                "Finished customization: ConfigureXrdp={Xrdp}, HtbVpnKeys={KeyCount}, ManualOvpn={ManualPath}, SyncTimezone={Tz}, CustomKey={Key}, IntegrationServices={IntSvc}, DistOptions={DistOpts}",
+                "Finished customization: ConfigureXrdp={Xrdp}, HtbVpnKeys={KeyCount}, ManualOvpn={ManualPath}, SyncTimezone={Tz}, CustomKey={Key}, IntegrationServices={IntSvc}, DnsMode={DnsMode}, DistOptions={DistOpts}",
                 _configureXrdp, _downloadedKeys.Count, _ovpnFilePath, _syncTimezone, _useCustomSshKey, _enableIntegrationServices,
+                _isCustomDns ? "Custom" : "Host",
                 string.Join(", ", DistributionOptions.Select(o => $"{o.Name}={o.IsEnabled}")));
 
             RequestWizardComplete?.Invoke(WizardResult.Finished);

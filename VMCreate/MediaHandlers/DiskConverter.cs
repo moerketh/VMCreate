@@ -24,6 +24,8 @@ namespace VMCreate
 
         public async Task<string> ConvertToVhdxAsync(string sourcePath, string destinationPath, IProgress<CreateVMProgressInfo> progress, CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             _logger.LogInformation("Starting disk conversion from {SourcePath} to {DestinationPath}", sourcePath, destinationPath);
 
             if (!File.Exists(sourcePath))
@@ -150,6 +152,11 @@ namespace VMCreate
                         catch (InvalidOperationException) { /* already exited */ }
                     });
 
+                    // If cancellation was already requested, the Register callback above
+                    // fired on a not-yet-started process and was swallowed. Bail out now
+                    // before starting qemu-img.
+                    cancellationToken.ThrowIfCancellationRequested();
+
                     var progressRegex = new Regex(@"\s+\((\d+)\.\d+/100%\)", RegexOptions.Compiled);
                     process.OutputDataReceived += (sender, e) =>
                     {
@@ -214,12 +221,17 @@ namespace VMCreate
                     progress.Report(new CreateVMProgressInfo() { ProgressPercentage = 0, Phase = "Making file non-sparse...", URI = $"{destinationPath}" });
                 }
 
-                if (!SparseFileUtility.MakeNonSparse(destinationPath))
+                await Task.Run(() =>
                 {
-                    throw new IOException(
-                        $"Failed to de-sparsify the VHDX file '{destinationPath}'. " +
-                        $"This can cause data corruption. Check disk space and permissions on {Path.GetPathRoot(destinationPath)?.TrimEnd('\\') ?? "the destination drive"}.");
-                }
+                    if (!SparseFileUtility.MakeNonSparse(destinationPath))
+                    {
+                        throw new IOException(
+                            $"Failed to de-sparsify the VHDX file '{destinationPath}'. " +
+                            $"This can cause data corruption. Check disk space and permissions on {Path.GetPathRoot(destinationPath)?.TrimEnd('\\') ?? "the destination drive"}.");
+                    }
+                });
+
+                cancellationToken.ThrowIfCancellationRequested();
 
                 if (progress != null)
                 {

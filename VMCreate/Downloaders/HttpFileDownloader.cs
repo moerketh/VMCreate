@@ -56,7 +56,10 @@ namespace VMCreate
                     var (writeStream, isCached) = await _fileStreamProvider.GetWriteStreamAsync(filePath, useCache);
 
                     if (isCached)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
                         return filePath;
+                    }
 
                     var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken);
 
