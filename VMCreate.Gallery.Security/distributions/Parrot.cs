@@ -41,8 +41,7 @@ namespace VMCreate.Gallery
             var baseUrl = await DiscoverLatestVersionAsync(client, cancellationToken);
             if (baseUrl == null)
             {
-                _logger.LogWarning("Could not discover the latest Parrot version from {IndexUrl}; returning empty list.", IndexUrl);
-                return new List<GalleryItem>();
+                throw new InvalidOperationException($"Could not discover the latest Parrot version from {IndexUrl}.");
             }
 
             var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(Parrot).Assembly, "parrot-logo.svg");
@@ -82,8 +81,7 @@ namespace VMCreate.Gallery
 
             if (items.Count == 0)
             {
-                _logger.LogWarning("Could not find any Parrot editions in {BaseUrl}; returning empty list.", baseUrl);
-                return new List<GalleryItem>();
+                throw new InvalidOperationException($"Could not find any Parrot editions in {baseUrl}.");
             }
 
             return items;
@@ -128,6 +126,14 @@ namespace VMCreate.Gallery
                 var latest = versions[0].Raw;
                 _logger.LogDebug("Discovered latest Parrot version: {Version}", latest);
                 return $"{IndexUrl}{latest}/";
+            }
+            catch (OperationCanceledException)
+            {
+                throw; // propagate cancellation
+            }
+            catch (HttpRequestException)
+            {
+                throw; // propagate HTTP errors (e.g. server 500)
             }
             catch (Exception ex)
             {

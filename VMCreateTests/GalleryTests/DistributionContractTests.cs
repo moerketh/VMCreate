@@ -171,11 +171,28 @@ namespace VMCreate.Tests.GalleryTests
         [TestMethod]
         public async Task LoadParrot_MeetsContract()
         {
-            const string html =
+            // Parrot makes two HTTP requests: first to the index page to discover the version,
+            // then to the version directory to find the ISOs. We must mock both.
+            const string indexHtml =
+                @"<a href=""6.1/"">6.1/</a>  15-Jan-2024 10:30";
+            const string versionHtml =
                 @"<a href=""Parrot-security-6.1_amd64.iso"">Parrot-security-6.1_amd64.iso</a> 15-Jan-2024 10:30  1234567890
                   <a href=""Parrot-home-6.1_amd64.iso"">Parrot-home-6.1_amd64.iso</a> 15-Jan-2024 10:30  1234567890";
 
-            var items = await new Parrot(FactoryFor(html)).LoadGalleryItems();
+            var factory = FactoryFor(req =>
+            {
+                // First request: index page listing version directories
+                // Second request: version directory listing ISOs
+                var content = req.RequestUri?.AbsolutePath?.Contains("/6.1/") == true
+                    ? versionHtml
+                    : indexHtml;
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(content)
+                };
+            });
+
+            var items = await new Parrot(factory).LoadGalleryItems();
 
             AssertContractInvariants(items, nameof(Parrot));
             Assert.AreEqual(2, items.Count);
