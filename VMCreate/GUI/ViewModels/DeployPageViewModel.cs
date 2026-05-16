@@ -160,6 +160,7 @@ namespace VMCreate
         {
             string fileType = wizardData.SelectedItem?.FileType ?? "Unknown";
             bool isNativeHyperV = wizardData.SelectedItem?.IsNativeHyperV == true;
+            bool isIso = string.Equals(fileType, "ISO", StringComparison.OrdinalIgnoreCase);
             bool needsExtraction = fileType is not ("ISO" or "QCOW2" or "VHDX" or "VHD");
             bool needsConversion = !isNativeHyperV
                 && fileType is "VMDK" or "QCOW2" or "OVA" or "Archive";
@@ -194,7 +195,11 @@ namespace VMCreate
                     : "Starting the virtual machine",
                 SymbolRegular.Play24));
 
-            if (!isNativeHyperV)
+            // Pre-boot and post-boot customizations only apply to disk-image flows
+            // (VMDK, QCOW2, VHDX, etc.). ISO installer images and native Hyper-V
+            // images have no customization pipeline — the user installs interactively
+            // or the image is pre-built.
+            if (!isNativeHyperV && !isIso)
             {
                 // Show pre-boot customization card upfront if any pre-boot option was selected
                 if (wizardData.Customizations?.HasPreBootCustomizations == true)

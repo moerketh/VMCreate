@@ -41,7 +41,7 @@
                     <ui:SymbolIcon x:Name="Step2Icon" Symbol="Settings24" FontSize="16" Margin="0,0,4,0"/>
                     <TextBlock x:Name="Step2Text" Text="Configure" VerticalAlignment="Center" FontSize="13"/>
                 </StackPanel>
-                <TextBlock Text="―" VerticalAlignment="Center" Margin="6,0"
+                <TextBlock x:Name="Step3Separator" Text="―" VerticalAlignment="Center" Margin="6,0"
                            Foreground="{DynamicResource TextFillColorTertiaryBrush}" FontSize="13"/>
                 <StackPanel x:Name="Step3Panel" Orientation="Horizontal" Margin="6,0">
                     <ui:SymbolIcon x:Name="Step3Icon" Symbol="Wrench24" FontSize="16" Margin="0,0,4,0"/>

@@ -38,9 +38,11 @@ namespace VMCreate
 
         private void OnNavigateNext()
         {
-            // Native Hyper-V images (e.g. Windows) skip the customization page —
-            // Linux-specific options (xRDP, SSH, VPN) don't apply.
-            if (_wizardData.SelectedItem?.IsNativeHyperV == true)
+            // Native Hyper-V images (e.g. Windows) and ISO installer images skip
+            // the customization page — Linux-specific options (xRDP, SSH, VPN)
+            // don't apply, and ISO installs are interactive with no post-boot steps.
+            if (_wizardData.SelectedItem?.IsNativeHyperV == true
+                || string.Equals(_wizardData.SelectedItem?.FileType, "ISO", StringComparison.OrdinalIgnoreCase))
             {
                 WizardCompleted?.Invoke(this, new WizardResultEventArgs(WizardResult.Finished));
                 return;

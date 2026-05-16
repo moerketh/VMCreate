@@ -89,19 +89,38 @@ namespace VMCreate
         private void UpdateStepIndicator()
         {
             var page = _mainFrame.Content;
+
+            // Hide the Customize step for flows that skip it (ISO installers, native Hyper-V).
+            bool skipCustomize = _wizardData?.SelectedItem != null
+                && (_wizardData.SelectedItem.IsNativeHyperV
+                    || string.Equals(_wizardData.SelectedItem.FileType, "ISO", StringComparison.OrdinalIgnoreCase));
+
+            Step3Panel.Visibility = skipCustomize ? Visibility.Collapsed : Visibility.Visible;
+            Step3Separator.Visibility = skipCustomize ? Visibility.Collapsed : Visibility.Visible;
+
+            // When Customize is skipped, renumber: Configure→2, Deploy→3.
             int activeStep = page switch
             {
                 SelectImagePage => 1,
                 VmSettingsPage => 2,
                 VmCustomizationPage => 3,
-                DeployPage => 4,
+                DeployPage => skipCustomize ? 3 : 4,
                 _ => 0
             };
 
             SetStepStyle(Step1Icon, Step1Text, SymbolRegular.Image24, activeStep == 1, activeStep > 1);
             SetStepStyle(Step2Icon, Step2Text, SymbolRegular.Settings24, activeStep == 2, activeStep > 2);
-            SetStepStyle(Step3Icon, Step3Text, SymbolRegular.Wrench24, activeStep == 3, activeStep > 3);
-            SetStepStyle(Step4Icon, Step4Text, SymbolRegular.Rocket24, activeStep == 4, false);
+
+            if (!skipCustomize)
+            {
+                SetStepStyle(Step3Icon, Step3Text, SymbolRegular.Wrench24, activeStep == 3, activeStep > 3);
+                SetStepStyle(Step4Icon, Step4Text, SymbolRegular.Rocket24, activeStep == 4, false);
+            }
+            else
+            {
+                // Deploy is the last step when Customize is hidden
+                SetStepStyle(Step4Icon, Step4Text, SymbolRegular.Rocket24, activeStep == 3, false);
+            }
         }
 
         private static void SetStepStyle(
