@@ -10,8 +10,8 @@ using System.Threading.Tasks;
 namespace VMCreate.Gallery
 {
     /// <summary>
-    /// Single gallery loader for both Parrot Security and Parrot Home editions.
-    /// Fetches the shared directory listing once and returns items for both editions.
+    /// Single gallery loader for Parrot Security, Parrot Home, and Parrot HTB editions.
+    /// Fetches the shared directory listing once and returns items for all editions.
     /// Automatically discovers the latest Parrot release version from the mirror index.
     /// </summary>
     public class Parrot : IGalleryLoader
@@ -69,6 +69,15 @@ namespace VMCreate.Gallery
                 versionPattern: @"Parrot-home-([\d\.]+)_amd64\.",
                 editionName: "Parrot Home Edition",
                 editionDesc: "for daily use with a focus on privacy and productivity",
+                isRecommended: false);
+
+            // ── HTB (Hack The Box) Edition ──
+            AddEdition(items, htmlContent, baseUrl, logoUri,
+                isoPattern:   @"<a href=""(Parrot-spin-htb-[\d\.]+_amd64\.iso)"">.*?</a>\s+(\d{2}-[A-Za-z]{3}-\d{4} \d{2}:\d{2})\s+(\d+)",
+                qcow2Pattern: @"<a href=""(Parrot-spin-htb-[\d\.]+_amd64\.qcow2(?:\.zip)?)"">.*?</a>\s+(\d{2}-[A-Za-z]{3}-\d{4} \d{2}:\d{2})\s+(\d+)",
+                versionPattern: @"Parrot-spin-htb-([\d\.]+)_amd64\.",
+                editionName: "Parrot HTB Edition",
+                editionDesc: "Hack The Box edition with pre-configured HTB tools and VPN integration",
                 isRecommended: false);
 
             if (items.Count == 0)
