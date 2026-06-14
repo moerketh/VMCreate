@@ -83,6 +83,15 @@
     <Compile Include="HyperV\IHyperVManagerRoles.cs" />
     <Compile Include="HyperV\PowerShellHyperVManager.cs" />
     <Compile Include="HyperV\HyperVVmCreator.cs" />
+    <Compile Include="HyperV\VmCreation\HostNetworkService.cs" />
+    <Compile Include="HyperV\VmCreation\IVmCreationStrategy.cs" />
+    <Compile Include="HyperV\VmCreation\IVmPathService.cs" />
+    <Compile Include="HyperV\VmCreation\IsoVmCreationStrategy.cs" />
+    <Compile Include="HyperV\VmCreation\NativeHyperVVmCreationStrategy.cs" />
+    <Compile Include="HyperV\VmCreation\DiskImageVmCreationStrategy.cs" />
+    <Compile Include="HyperV\VmCreation\PostBootCustomizationService.cs" />
+    <Compile Include="HyperV\VmCreation\VmCreationContext.cs" />
+    <Compile Include="HyperV\VmCreation\VmPathService.cs" />
     <Compile Include="HyperV\IUnattendInjector.cs" />
     <Compile Include="HyperV\ElevatedUnattendInjector.cs" />
     <Compile Include="HyperV\UnattendInjector.cs" />

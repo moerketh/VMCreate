@@ -9,6 +9,7 @@ using System.IO;
 using System.Linq;
 using System.Windows;
 using VMCreate.Gallery;
+using VMCreate.HyperV.VmCreation;
 using VMCreate.MediaHandlers;
 
 namespace VMCreate
@@ -103,6 +104,14 @@ namespace VMCreate
             services.AddTransient<IGuestDiagnosticsCollector, GuestDiagnosticsCollector>();
             services.AddTransient<IGuestShellFactory, GuestShellFactory>();
             services.AddTransient<PowerShellDirectGuestShellFactory>();
+
+            // ── VM creation services ────────────────────────────────────────
+            services.AddSingleton<IVmPathService, VmPathService>();
+            services.AddSingleton<IHostNetworkService, HostNetworkService>();
+            services.AddTransient<IPostBootCustomizationService, PostBootCustomizationService>();
+            services.AddTransient<IVmCreationStrategy, IsoVmCreationStrategy>();
+            services.AddTransient<IVmCreationStrategy, NativeHyperVVmCreationStrategy>();
+            services.AddTransient<IVmCreationStrategy, DiskImageVmCreationStrategy>();
 
             // ── Disk / media handling ───────────────────────────────────────
             services.AddSingleton<IDiskConverter, DiskConverter>();

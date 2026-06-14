@@ -4,6 +4,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Management.Automation;
+using System.Management.Automation.Runspaces;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -20,56 +21,74 @@ namespace VMCreate
 
     internal class PowerShellHyperVManager : IHyperVManager
     {
-        private readonly PowerShell _ps;
         private readonly ILogger<PowerShellHyperVManager> _logger;
+        private readonly InitialSessionState _initialSessionState;
 
         public PowerShellHyperVManager(ILogger<PowerShellHyperVManager> logger)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            _ps = PowerShell.Create();
-            _ps.AddCommand("Import-Module").AddParameter("Name", "Hyper-V").Invoke();
-            if (_ps.HadErrors)
-            {
-                string error = string.Join("; ", _ps.Streams.Error.Select(e => e.ToString()));
-                throw new Exception($"Failed to import Hyper-V module. Ensure that your system supports Hyper-V. {error}");
-            }
-            _ps.Commands.Clear();
+            _initialSessionState = InitialSessionState.CreateDefault();
+            // Import the Hyper-V module once per manager instance so every
+            // PowerShell runspace created from this state has it available.
+            _initialSessionState.ImportPSModule(new[] { "Hyper-V" });
+        }
+
+        /// <summary>
+        /// Creates a fresh PowerShell instance backed by a dedicated runspace.
+        /// Each public operation must use its own instance to avoid races when
+        /// multiple async calls interleave command construction and invocation.
+        /// </summary>
+        private PowerShell CreatePowerShell()
+        {
+            var runspace = RunspaceFactory.CreateRunspace(_initialSessionState);
+            runspace.Open();
+            var ps = PowerShell.Create();
+            ps.Runspace = runspace;
+            return ps;
+        }
+
+        private static async Task<System.Collections.ObjectModel.Collection<PSObject>> RunCommand(
+            PowerShell ps, CancellationToken cancellationToken)
+        {
+            ps.Streams.Error.Clear();
+            var result = await Task.Run(ps.Invoke, cancellationToken);
+            if (ps.HadErrors) throw new Exception(string.Join("; ", ps.Streams.Error.Select(e => e.ToString())));
+            return result;
         }
 
         public async Task CreateVMAsync(VmSettings vmSettings, string vmPath, int targetGeneration, CancellationToken cancellationToken)
         {
-            _ps.Commands.Clear();
-            _ps.Streams.Error.Clear();
+            using var ps = CreatePowerShell();
 
             long memBytes = vmSettings.MemoryInMB * 1024L * 1024L;
             _logger.LogInformation(
                 "Invoking New-VM -Name '{Name}' -Path '{Path}' -Generation {Gen} -MemoryStartupBytes {Mem} -NoVHD",
                 vmSettings.VMName, vmPath, targetGeneration, memBytes);
 
-            _ps.AddCommand("New-VM")
+            ps.AddCommand("New-VM")
                 .AddParameter("Name", vmSettings.VMName)
                 .AddParameter("MemoryStartupBytes", memBytes)
                 .AddParameter("Path", vmPath)
                 .AddParameter("Generation", targetGeneration)
                 .AddParameter("NoVHD", true);
 
-            var results = await Task.Run(() => _ps.Invoke(), cancellationToken);
+            var results = await Task.Run(() => ps.Invoke(), cancellationToken);
             _logger.LogInformation("New-VM invoked for {VMName}: {ResultCount} result(s), HadErrors={HadErrors}",
-                vmSettings.VMName, results.Count, _ps.HadErrors);
+                vmSettings.VMName, results.Count, ps.HadErrors);
 
-            if (_ps.HadErrors)
+            if (ps.HadErrors)
             {
-                var errors = _ps.Streams.Error.Select(e =>
+                var errors = ps.Streams.Error.Select(e =>
                     $"[Category={e.CategoryInfo?.Category}, Reason={e.CategoryInfo?.Reason}, " +
                     $"Id={e.FullyQualifiedErrorId}, Target={e.TargetObject}, Message={e.Exception?.Message}]");
                 string errorDetail = string.Join("; ", errors);
                 _logger.LogError("New-VM returned errors for {VMName}: {Errors}", vmSettings.VMName, errorDetail);
 
                 // Check if the VM was actually created despite the error stream
-                _ps.Commands.Clear();
-                _ps.AddCommand("Get-VM").AddParameter("Name", vmSettings.VMName);
-                var existing = await Task.Run(() => _ps.Invoke(), cancellationToken);
-                bool vmExists = existing.Count > 0 && !_ps.HadErrors;
+                ps.Commands.Clear();
+                ps.AddCommand("Get-VM").AddParameter("Name", vmSettings.VMName);
+                var existing = await Task.Run(() => ps.Invoke(), cancellationToken);
+                bool vmExists = existing.Count > 0 && !ps.HadErrors;
                 _logger.LogInformation("Post-New-VM existence check for {VMName}: exists={Exists}", vmSettings.VMName, vmExists);
 
                 if (vmExists)
@@ -85,73 +104,73 @@ namespace VMCreate
             // Disable automatic checkpoints — they create AVHDX differencing disks on
             // every VM start, which breaks SetFirstBootToHardDrive (firmware can't boot
             // from the transient AVHDX path).
-            _ps.Commands.Clear();
-            _ps.AddCommand("Set-VM")
+            ps.Commands.Clear();
+            ps.AddCommand("Set-VM")
                 .AddParameter("Name", vmSettings.VMName)
                 .AddParameter("AutomaticCheckpointsEnabled", false);
-            await RunCommand(cancellationToken);
+            await RunCommand(ps, cancellationToken);
         }
 
         public async Task SetVMLoginNotes(VmSettings vmSettings, string initialUsername, string initialPassword, CancellationToken cancellationToken)
         {
-            _ps.Commands.Clear();
-            _ps.AddCommand("Set-VM")
+            using var ps = CreatePowerShell();
+            ps.AddCommand("Set-VM")
                 .AddParameter("Name", vmSettings.VMName)
                 .AddParameter("Notes", $"Initial Username: {initialUsername}\r\nInitial Password: {initialPassword}");
-            await RunCommand(cancellationToken);
+            await RunCommand(ps, cancellationToken);
 
         }
 
         public async Task DisableDynamicMemory(VmSettings vmSettings, CancellationToken cancellationToken)
         {
-            _ps.Commands.Clear();
-            _ps.AddCommand("Set-VMMemory")
+            using var ps = CreatePowerShell();
+            ps.AddCommand("Set-VMMemory")
                 .AddParameter("VMName", vmSettings.VMName)
                 .AddParameter("DynamicMemoryEnabled", false);
-            await RunCommand(cancellationToken);
+            await RunCommand(ps, cancellationToken);
         }
 
         public async Task AddNetworkAdapter(VmSettings vmSettings, CancellationToken cancellationToken)
         {
-            _ps.Commands.Clear();
-            _ps.AddCommand("Add-VMNetworkAdapter")
+            using var ps = CreatePowerShell();
+            ps.AddCommand("Add-VMNetworkAdapter")
                 .AddParameter("VMName", vmSettings.VMName)
                 .AddParameter("Name", "Network Adapter");
-            await RunCommand(cancellationToken);
+            await RunCommand(ps, cancellationToken);
         }
 
         public async Task ConnectNetworkAdapter(VmSettings vmSettings, CancellationToken cancellationToken)
         {
-            _ps.Commands.Clear();
-            _ps.AddCommand("Connect-VMNetworkAdapter")
+            using var ps = CreatePowerShell();
+            ps.AddCommand("Connect-VMNetworkAdapter")
                 .AddParameter("VMName", vmSettings.VMName)
                 .AddParameter("SwitchName", "Default Switch");
-            await RunCommand(cancellationToken);
+            await RunCommand(ps, cancellationToken);
             _logger.LogInformation("Connected VM to Default Switch for internet access.");
         }
 
         public async Task AddTemporaryNetworkAdapter(VmSettings vmSettings, CancellationToken cancellationToken)
         {
-            _ps.Commands.Clear();
-            _ps.AddCommand("Add-VMNetworkAdapter")
+            using var ps = CreatePowerShell();
+            ps.AddCommand("Add-VMNetworkAdapter")
                 .AddParameter("VMName", vmSettings.VMName)
                 .AddParameter("Name", "VMCreate Temp")
                 .AddParameter("SwitchName", "Default Switch");
-            await RunCommand(cancellationToken);
+            await RunCommand(ps, cancellationToken);
             _logger.LogInformation("Added temporary network adapter 'VMCreate Temp' on Default Switch.");
         }
 
         public async Task RemoveTemporaryNetworkAdapter(VmSettings vmSettings, CancellationToken cancellationToken)
         {
-            _ps.Commands.Clear();
-            _ps.AddScript($@"
+            using var ps = CreatePowerShell();
+            ps.AddScript($@"
                 $adapter = Get-VMNetworkAdapter -VMName '{vmSettings.VMName.Replace("'", "''")}' -Name 'VMCreate Temp' -ErrorAction SilentlyContinue
                 if ($adapter) {{ Remove-VMNetworkAdapter -VMNetworkAdapter $adapter }}
             ");
-            await Task.Run(_ps.Invoke, cancellationToken);
+            await Task.Run(ps.Invoke, cancellationToken);
             // Intentionally ignores errors — this is called idempotently when
             // the adapter may not exist yet (e.g. cleanup from a previous failed run).
-            _ps.Streams.Error.Clear();
+            ps.Streams.Error.Clear();
             _logger.LogInformation("Removed temporary network adapter 'VMCreate Temp' (if present).");
         }
 
@@ -166,71 +185,71 @@ namespace VMCreate
         {
             // Create new dynamic VHDX (suffixed to avoid collision with the converted source disk)
             string newVhdPath = GetNewDrivePath(vmPath, vmSettings.VMName);
-            _ps.Commands.Clear();
-            _ps.AddCommand("New-VHD")
+            using var ps = CreatePowerShell();
+            ps.AddCommand("New-VHD")
                 .AddParameter("Path", newVhdPath)
                 .AddParameter("Dynamic", true)
                 .AddParameter("SizeBytes", vmSettings.NewDriveSizeInGB * 1024L * 1024L * 1024L);
-            await RunCommand(cancellationToken);
+            await RunCommand(ps, cancellationToken);
             _logger.LogInformation($"Created new dynamic VHDX for cloning: {newVhdPath}");
 
             // Attach new VHDX
-            _ps.Commands.Clear();
-            _ps.AddCommand("Add-VMHardDiskDrive")
+            ps.Commands.Clear();
+            ps.AddCommand("Add-VMHardDiskDrive")
                 .AddParameter("VMName", vmSettings.VMName)
                 .AddParameter("Path", newVhdPath)
                 .AddParameter("ControllerType", "SCSI");
-            await RunCommand(cancellationToken);
+            await RunCommand(ps, cancellationToken);
             _logger.LogInformation($"Attached new dynamic VHDX for cloning: {newVhdPath}");
         }
 
         public async Task AddExistingHardDrive(VmSettings vmSettings, string mediaPath, CancellationToken cancellationToken)
         {
-            _ps.Commands.Clear();
-            _ps.AddCommand("Add-VMHardDiskDrive")
+            using var ps = CreatePowerShell();
+            ps.AddCommand("Add-VMHardDiskDrive")
                 .AddParameter("VMName", vmSettings.VMName)
                 .AddParameter("Path", mediaPath)
                 .AddParameter("ControllerType", "SCSI");
-            await RunCommand(cancellationToken);
+            await RunCommand(ps, cancellationToken);
             _logger.LogInformation($"Attached VHDX: {mediaPath}");
         }
 
         public async Task RemoveHardDrive(VmSettings vmSettings, int location, CancellationToken cancellationToken)
         {
-            _ps.Commands.Clear();
-            _ps.AddCommand("Get-VMHardDiskDrive")
+            using var ps = CreatePowerShell();
+            ps.AddCommand("Get-VMHardDiskDrive")
                 .AddParameter("VMName", vmSettings.VMName)
                 .AddParameter("ControllerType", "SCSI")
                 .AddParameter("ControllerNumber", "0")
                 .AddParameter("ControllerLocation", location);
-            var drives = await RunCommand(cancellationToken);
+            var drives = await RunCommand(ps, cancellationToken);
             if (drives.Count == 0)
             {
                 _logger.LogWarning("No hard drive found at SCSI(0,{Location}) for VM {VMName} — nothing to remove.", location, vmSettings.VMName);
                 return;
             }
-            _ps.Commands.Clear();
-            _ps.AddCommand("Remove-VMHardDiskDrive")
+            ps.Commands.Clear();
+            ps.AddCommand("Remove-VMHardDiskDrive")
                 .AddParameter("VMHardDiskDrive", drives[0]);
-            await RunCommand(cancellationToken);
+            await RunCommand(ps, cancellationToken);
             _logger.LogInformation("Detached disk at SCSI(0,{Location}) for VM {VMName}", location, vmSettings.VMName);
         }
 
         public async Task AddBootDvd(VmSettings vmSettings, string mediaPath, CancellationToken cancellationToken)
         {
             _logger.LogInformation($"Checking for DVD drive on VM: {vmSettings.VMName}");
-            _ps.Commands.Clear();
-            _ps.AddCommand("Get-VMDvdDrive")
+            using var ps = CreatePowerShell();
+            ps.AddCommand("Get-VMDvdDrive")
                 .AddParameter("VMName", vmSettings.VMName);
-            var results = await RunCommand(cancellationToken);
+            var results = await RunCommand(ps, cancellationToken);
 
             if (results.Count == 0)
             {
                 _logger.LogInformation($"No DVD drive found, adding one to VM: {vmSettings.VMName}");
-                _ps.Commands.Clear();
-                _ps.AddCommand("Add-VMDvdDrive")
+                ps.Commands.Clear();
+                ps.AddCommand("Add-VMDvdDrive")
                     .AddParameter("VMName", vmSettings.VMName);
-                await RunCommand(cancellationToken);
+                await RunCommand(ps, cancellationToken);
                 _logger.LogInformation($"Added DVD drive to VM: {vmSettings.VMName}");
             }
             else
@@ -239,68 +258,68 @@ namespace VMCreate
             }
 
             _logger.LogInformation("Attaching ISO as DVD drive: {MediaPath}", mediaPath);
-            _ps.Commands.Clear();
-            _ps.AddCommand("Set-VMDvdDrive")
+            ps.Commands.Clear();
+            ps.AddCommand("Set-VMDvdDrive")
                 .AddParameter("VMName", vmSettings.VMName)
                 .AddParameter("Path", mediaPath);
-            await RunCommand(cancellationToken);
+            await RunCommand(ps, cancellationToken);
             _logger.LogInformation("Attached ISO to DVD drive: {MediaPath}", mediaPath);
         }
 
         public async Task RemoveBootDvd(VmSettings vmSettings, string mediaPath, CancellationToken cancellationToken)
         {
             _logger.LogInformation("Detaching ISO from DVD drive: {MediaPath}", mediaPath);
-            _ps.Commands.Clear();
-            _ps.AddCommand("Set-VMDvdDrive")
+            using var ps = CreatePowerShell();
+            ps.AddCommand("Set-VMDvdDrive")
                 .AddParameter("VMName", vmSettings.VMName)
                 .AddParameter("Path", null);
-            await RunCommand(cancellationToken);
+            await RunCommand(ps, cancellationToken);
             _logger.LogInformation("Detached ISO from DVD drive: {MediaPath}", mediaPath);
         }
 
         public async Task SetFirstBootToDvd(VmSettings vmSettings, CancellationToken cancellationToken)
         {
-            _ps.Commands.Clear();
-            _ps.AddCommand("Get-VMDvdDrive")
+            using var ps = CreatePowerShell();
+            ps.AddCommand("Get-VMDvdDrive")
                 .AddParameter("VMName", vmSettings.VMName);
-            var dvdDrive = (await RunCommand(cancellationToken)).FirstOrDefault();
+            var dvdDrive = (await RunCommand(ps, cancellationToken)).FirstOrDefault();
             if (dvdDrive == null)
             {
                 throw new Exception("No DVD drive found for VM. Ensure the cloning ISO is attached.");
             }
-            _ps.Commands.Clear();
-            _ps.AddCommand("Set-VMFirmware")
+            ps.Commands.Clear();
+            ps.AddCommand("Set-VMFirmware")
                 .AddParameter("VMName", vmSettings.VMName)
                 .AddParameter("FirstBootDevice", dvdDrive);
-            await RunCommand(cancellationToken);
+            await RunCommand(ps, cancellationToken);
         }
 
         public async Task SetFirstBootToHardDrive(VmSettings vmSettings, CancellationToken cancellationToken)
         {
-            _ps.Commands.Clear();
-            _ps.AddCommand("Get-VMHardDiskDrive")
+            using var ps = CreatePowerShell();
+            ps.AddCommand("Get-VMHardDiskDrive")
                 .AddParameter("VMName", vmSettings.VMName);
-            var hardDrives = await RunCommand(cancellationToken);
+            var hardDrives = await RunCommand(ps, cancellationToken);
             var firstDrive = hardDrives.FirstOrDefault();
             if (firstDrive == null)
             {
                 throw new Exception("No hard disk drive found for VM. Ensure a VHDX is attached.");
             }
-            _ps.Commands.Clear();
-            _ps.AddCommand("Set-VMFirmware")
+            ps.Commands.Clear();
+            ps.AddCommand("Set-VMFirmware")
                 .AddParameter("VMName", vmSettings.VMName)
                 .AddParameter("FirstBootDevice", firstDrive);
-            await RunCommand(cancellationToken);
+            await RunCommand(ps, cancellationToken);
             _logger.LogInformation("Set first boot device to hard drive for VM: {VMName}", vmSettings.VMName);
         }
 
         public async Task SetCpuCount(VmSettings vmSettings, CancellationToken cancellationToken)
         {
-            _ps.Commands.Clear();
-            _ps.AddCommand("Set-VMProcessor")
+            using var ps = CreatePowerShell();
+            ps.AddCommand("Set-VMProcessor")
                 .AddParameter("VMName", vmSettings.VMName)
                 .AddParameter("Count", vmSettings.CPUCount);
-            await RunCommand(cancellationToken);
+            await RunCommand(ps, cancellationToken);
         }
 
         public async Task SetEnhancedSession(VmSettings vmSettings, CancellationToken cancellationToken)
@@ -309,75 +328,67 @@ namespace VMCreate
                 ? "HvSocket"
                 : vmSettings.EnhancedSessionTransportType;
 
-            _ps.Commands.Clear();
-            _ps.AddCommand("Set-VM")
+            using var ps = CreatePowerShell();
+            ps.AddCommand("Set-VM")
                 .AddParameter("VMName", vmSettings.VMName)
                 .AddParameter("EnhancedSessionTransportType", transportType);
-            await RunCommand(cancellationToken);
+            await RunCommand(ps, cancellationToken);
         }
 
         public async Task SetSecureBoot(VmSettings vmSettings, CancellationToken cancellationToken)
         {
-            _ps.Commands.Clear();
-            _ps.AddCommand("Set-VMFirmware")
+            using var ps = CreatePowerShell();
+            ps.AddCommand("Set-VMFirmware")
                 .AddParameter("VMName", vmSettings.VMName)
                 .AddParameter("EnableSecureBoot", vmSettings.SecureBoot.ToOnOff())
                 .AddParameter("SecureBootTemplate", vmSettings.SecureBootTemplate);
-            await RunCommand(cancellationToken);
+            await RunCommand(ps, cancellationToken);
         }
 
         public async Task StartVM(VmSettings vmSettings, CancellationToken cancellationToken)
         {
-            _ps.Commands.Clear();
-            _ps.AddCommand("Start-VM")
+            using var ps = CreatePowerShell();
+            ps.AddCommand("Start-VM")
                 .AddParameter("VMName", vmSettings.VMName);
-            await RunCommand(cancellationToken);
+            await RunCommand(ps, cancellationToken);
         }
 
         public async Task StartVMConnect(VmSettings vmSettings, CancellationToken cancellationToken)
         {
-            _ps.Commands.Clear();
+            using var ps = CreatePowerShell();
             string escapedVmName = vmSettings.VMName.Replace("'", "''");
             string vmConnectCommand = $"& \"C:\\Windows\\System32\\vmconnect.exe\" localhost \"{escapedVmName}\"";
             _logger.LogDebug("Executing VMConnect command: {Command}", vmConnectCommand);
-            _ps.AddScript(vmConnectCommand);
-            await RunCommand(cancellationToken);
+            ps.AddScript(vmConnectCommand);
+            await RunCommand(ps, cancellationToken);
             _logger.LogInformation($"Successfully launched VMConnect for VM: {vmSettings.VMName}");
         }
 
         public async Task EnableVirtualization(VmSettings vmSettings, CancellationToken cancellationToken)
         {
-            _ps.Commands.Clear();
-            _ps.AddCommand("Set-VMProcessor")
+            using var ps = CreatePowerShell();
+            ps.AddCommand("Set-VMProcessor")
                 .AddParameter("VMName", vmSettings.VMName)
                 .AddParameter("ExposeVirtualizationExtensions", true);
-            await RunCommand(cancellationToken);
+            await RunCommand(ps, cancellationToken);
             _logger.LogInformation($"Enabled virtualization extensions for VM: {vmSettings.VMName}");
         }
 
         public async Task EnableGuestServices(VmSettings vmSettings, CancellationToken cancellationToken)
         {
-            _ps.Commands.Clear();
-            _ps.AddCommand("Enable-VMIntegrationService")
+            using var ps = CreatePowerShell();
+            ps.AddCommand("Enable-VMIntegrationService")
                 .AddParameter("VMName", vmSettings.VMName)
                 .AddParameter("Name", "Guest Service Interface");
-            await RunCommand(cancellationToken);
+            await RunCommand(ps, cancellationToken);
             _logger.LogInformation($"Enabled Guest services for VM: {vmSettings.VMName}");
-        }
-
-        private async Task<System.Collections.ObjectModel.Collection<PSObject>> RunCommand(CancellationToken cancellationToken)
-        {
-            _ps.Streams.Error.Clear();
-            var result = await Task.Run(_ps.Invoke, cancellationToken);
-            if (_ps.HadErrors) throw new Exception(string.Join("; ", _ps.Streams.Error.Select(e => e.ToString())));
-            return result;
         }
 
         public async Task<string[]> FindExistingVmsByBaseNameAsync(string baseName, CancellationToken cancellationToken)
         {
-            _ps.Commands.Clear();
-            _ps.AddCommand("Get-VM");
-            var vms = await RunCommand(cancellationToken);
+            using var ps = CreatePowerShell();
+            ps.AddCommand("Get-VM");
+            var vms = await RunCommand(ps, cancellationToken);
             var matches = vms
                 .Where(vm =>
                 {
@@ -394,10 +405,10 @@ namespace VMCreate
 
         public async Task<string[]> GetVmHardDiskPathsAsync(string vmName, CancellationToken cancellationToken)
         {
-            _ps.Commands.Clear();
-            _ps.AddCommand("Get-VMHardDiskDrive")
+            using var ps = CreatePowerShell();
+            ps.AddCommand("Get-VMHardDiskDrive")
                 .AddParameter("VMName", vmName);
-            var drives = await RunCommand(cancellationToken);
+            var drives = await RunCommand(ps, cancellationToken);
             return drives
                 .Select(d => d.Properties["Path"]?.Value?.ToString())
                 .Where(p => !string.IsNullOrEmpty(p))
@@ -406,28 +417,28 @@ namespace VMCreate
 
         public async Task StopVMAsync(string vmName, CancellationToken cancellationToken)
         {
-            _ps.Commands.Clear();
-            _ps.AddCommand("Stop-VM")
+            using var ps = CreatePowerShell();
+            ps.AddCommand("Stop-VM")
                 .AddParameter("Name", vmName)
                 .AddParameter("Force", true)
                 .AddParameter("TurnOff", true);
-            await Task.Run(_ps.Invoke, cancellationToken);
+            await Task.Run(ps.Invoke, cancellationToken);
             // Ignore errors (VM may already be off)
-            if (_ps.HadErrors)
+            if (ps.HadErrors)
             {
                 _logger.LogWarning("Stop-VM had errors (VM may already be off): {Errors}",
-                    string.Join("; ", _ps.Streams.Error.Select(e => e.ToString())));
-                _ps.Streams.Error.Clear();
+                    string.Join("; ", ps.Streams.Error.Select(e => e.ToString())));
+                ps.Streams.Error.Clear();
             }
         }
 
         public async Task RemoveVMAsync(string vmName, CancellationToken cancellationToken)
         {
-            _ps.Commands.Clear();
-            _ps.AddCommand("Remove-VM")
+            using var ps = CreatePowerShell();
+            ps.AddCommand("Remove-VM")
                 .AddParameter("Name", vmName)
                 .AddParameter("Force", true);
-            await RunCommand(cancellationToken);
+            await RunCommand(ps, cancellationToken);
             _logger.LogInformation("Removed VM: {VMName}", vmName);
         }
     }

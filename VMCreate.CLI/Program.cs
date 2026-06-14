@@ -99,6 +99,14 @@ namespace VMCreate.CLI
             services.AddTransient<IGuestShellFactory, GuestShellFactory>();
             services.AddTransient<PowerShellDirectGuestShellFactory>();
 
+            // ── VM creation services ────────────────────────────────────────
+            services.AddSingleton<IVmPathService, VmPathService>();
+            services.AddSingleton<IHostNetworkService, HostNetworkService>();
+            services.AddTransient<IPostBootCustomizationService, PostBootCustomizationService>();
+            services.AddTransient<IVmCreationStrategy, IsoVmCreationStrategy>();
+            services.AddTransient<IVmCreationStrategy, NativeHyperVVmCreationStrategy>();
+            services.AddTransient<IVmCreationStrategy, DiskImageVmCreationStrategy>();
+
             // ── Disk / media handling ───────────────────────────────────────
             services.AddSingleton<IDiskConverter, DiskConverter>();
             services.AddSingleton<IMediaHandlerFactory, MediaHandlerFactory>();
