@@ -22,14 +22,28 @@ namespace VMCreate
         CustomizationPhase Phase { get; }
 
         /// <summary>
+        /// The guest OS this step targets. The orchestrator only runs a step whose
+        /// <see cref="Platform"/> matches the VM being deployed, so Linux steps never run
+        /// over PowerShell Direct and Windows steps never run over SSH. Required — every
+        /// step must declare its platform.
+        /// </summary>
+        StepPlatform Platform { get; }
+
+        /// <summary>
         /// Execution order within the same phase. Lower values run first.
         /// Suggested ranges: 100 = early generic, 200 = package install, 300 = config deploy, 900 = cleanup.
         /// </summary>
         int Order { get; }
 
         /// <summary>
+        /// Stable identifier used to correlate runtime progress reports with UI phase cards.
+        /// When null or empty, the orchestrator falls back to <see cref="Name"/u003e.
+        /// </summary>
+        string? ProgressPhaseId { get; }
+
+        /// <summary>
         /// Returns true if this step should execute for the given gallery item and customization options.
-        /// Called before <see cref="ExecuteAsync"/> — steps that return false are skipped entirely.
+        /// Called before <see cref="ExecuteAsync"/u003e — steps that return false are skipped entirely.
         /// </summary>
         bool IsApplicable(GalleryItem item, VmCustomizations customizations);
 

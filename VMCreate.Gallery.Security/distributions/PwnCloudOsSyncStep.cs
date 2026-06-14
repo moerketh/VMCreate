@@ -1,3 +1,4 @@
+using System.Linq;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Threading;
@@ -9,17 +10,19 @@ namespace VMCreate.Gallery.distributions
     /// Ensures pwncloudos-sync is installed and runs it to update all
     /// PwnCloudOS security tools to their latest versions.
     /// </summary>
-    public class PwnCloudOsSyncStep : IConfigurableCustomizationStep
+    public class PwnCloudOsSyncStep : IConfigurableCustomizationStep, IDistributionOptionMetadata
     {
         // ── ICustomizationStep ──────────────────────────────────────────
         public string Name => "PwnCloudOS Sync";
         public CustomizationPhase Phase => CustomizationPhase.PostBoot;
-        public int Order => 250;
+        public StepPlatform Platform => StepPlatform.Linux;
+        public int Order => 100;
+
+        public string? ProgressPhaseId => (this as IDistributionOptionMetadata)?.DeployPhaseId;
 
         public bool IsApplicable(GalleryItem item, VmCustomizations customizations)
             => IsVisibleFor(item)
-               && customizations.DistributionOptions.TryGetValue(Name, out bool enabled)
-               && enabled;
+               && customizations.DistributionOptions.Any(o => string.Equals(o.Name, Name, StringComparison.OrdinalIgnoreCase) && o.IsEnabled);
 
         public async Task ExecuteAsync(
             IGuestShell shell, GalleryItem item, VmCustomizations customizations,
@@ -78,6 +81,15 @@ namespace VMCreate.Gallery.distributions
         public string Label => "Update all tools (pwncloudos-sync)";
         public string Tooltip => "Checks if pwncloudos-sync is installed at /opt/pwncloudos-sync and clones it from GitHub if missing, then runs the tool updater to bring all 44 security tools to their latest version.";
         public bool DefaultEnabled => true;
+        public bool IsOptional => true;
+
+        // ── IDistributionOptionMetadata (deploy-phase UI) ───────────────
+        public string DeployTitle => "PwnCloudOS Sync";
+        public string DeployDescription => "Updating PwnCloudOS tools via pwncloudos-sync";
+        public string DeployPhaseId => "Sub_PwnCloudOsSync";
+        public string DeployIconName => "CloudSync24";
+        public int DeployOrder => 100;
+        public string? DeployCompletionInfo => null;
 
         public bool IsVisibleFor(GalleryItem item)
             => string.Equals(item?.Name, "PwnCloudOS", StringComparison.OrdinalIgnoreCase);

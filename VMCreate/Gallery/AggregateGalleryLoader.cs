@@ -30,20 +30,29 @@ namespace VMCreate.Gallery
         }
 
         /// <summary>
-        /// Multiple loaders may return items with the same DiskUri (e.g. the Microsoft gallery URL
-        /// appears both in LoadFromMicrosoftURI and in the registry GalleryLocations). Keep only the
-        /// first occurrence so the UI doesn't show duplicates.
+        /// Multiple loaders may return items with the same (Name, DiskUri) pair
+        /// (e.g. the Microsoft gallery URL appears both in LoadFromMicrosoftURI and
+        /// in the registry GalleryLocations). Keep only the first occurrence so the
+        /// UI doesn't show exact duplicates. Items that share a DiskUri but have
+        /// different Names (e.g. "FLARE VM" and "Windows 11 dev environment") are
+        /// distinct products and both are kept.
         /// </summary>
         private List<GalleryItem> DeduplicateByDiskUri(IEnumerable<GalleryItem> items)
         {
-            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var seen = new HashSet<(string, string)>();
             var result = new List<GalleryItem>();
             foreach (var item in items)
             {
-                if (string.IsNullOrEmpty(item.DiskUri) || seen.Add(item.DiskUri))
+                if (string.IsNullOrEmpty(item.DiskUri) || string.IsNullOrEmpty(item.Name))
+                {
+                    result.Add(item);
+                    continue;
+                }
+
+                if (seen.Add((item.Name, item.DiskUri)))
                     result.Add(item);
                 else
-                    _logger.LogDebug("Skipping duplicate gallery item: {DiskUri}", item.DiskUri);
+                    _logger.LogDebug("Skipping duplicate gallery item: {Name} ({DiskUri})", item.Name, item.DiskUri);
             }
             return result;
         }
@@ -57,7 +66,7 @@ namespace VMCreate.Gallery
             Action<List<GalleryItem>> onBatch,
             CancellationToken cancellationToken = default)
         {
-            var seenUris = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var seenKeys = new HashSet<(string, string)>();
             var pending = _loaders
                 .Select(loader => LoadFromSingleLoader(loader, cancellationToken))
                 .ToList();
@@ -67,8 +76,13 @@ namespace VMCreate.Gallery
                 var completed = await Task.WhenAny(pending).ConfigureAwait(false);
                 pending.Remove(completed);
                 var items = await completed;
-                // Filter out items whose DiskUri was already emitted by a previous batch
-                var unique = items.Where(i => string.IsNullOrEmpty(i.DiskUri) || seenUris.Add(i.DiskUri)).ToList();
+                // Deduplicate by (Name, DiskUri) — items with the same DiskUri but
+                // different Names (e.g. "FLARE VM" vs "Windows 11 dev environment")
+                // are distinct products and both are shown.
+                var unique = items
+                    .Where(i => i.Name != null && i.DiskUri != null
+                        && seenKeys.Add((i.Name, i.DiskUri)))
+                    .ToList();
                 if (unique.Count > 0)
                     onBatch(unique);
             }

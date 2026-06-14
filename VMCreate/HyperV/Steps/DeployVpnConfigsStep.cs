@@ -14,7 +14,9 @@ namespace VMCreate
     {
         public string Name => "Deploy VPN Configs";
         public CustomizationPhase Phase => CustomizationPhase.PostBoot;
+        public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 300;
+        public string? ProgressPhaseId => "Sub_ConfigureVpn";
 
         public bool IsApplicable(GalleryItem item, VmCustomizations customizations)
             => customizations.ConfigureHtbVpn;

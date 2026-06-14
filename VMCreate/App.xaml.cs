@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using CreateVM.HyperV.vmbus;
 using Serilog;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Windows;
@@ -21,6 +22,46 @@ namespace VMCreate
 
         private void App_OnStartup(object sender, StartupEventArgs e)
         {
+            // ── Headless elevated child: --inject-unattend <vhdxPath> ────────
+            // When the GUI spawns itself elevated via ElevatedUnattendInjector,
+            // the child runs only the injection logic and exits — no UI is shown.
+            if (e.Args != null && e.Args.Length >= 2 &&
+                e.Args[0].Equals("--inject-unattend", StringComparison.OrdinalIgnoreCase))
+            {
+                string vhdxPath = e.Args[1];
+                var injectLogPath = Path.Combine(Path.GetTempPath(), "VMCreate.inject.log");
+                var serilogLogger = new Serilog.LoggerConfiguration()
+                    .MinimumLevel.Debug()
+                    .WriteTo.File(injectLogPath, rollingInterval: RollingInterval.Day, shared: true)
+                    .CreateLogger();
+                var loggerFactory = Microsoft.Extensions.Logging.LoggerFactory.Create(builder =>
+                {
+                    builder.ClearProviders();
+                    builder.AddSerilog(serilogLogger, dispose: true);
+                });
+                var injectLogger = loggerFactory.CreateLogger<UnattendInjector>();
+
+                try
+                {
+                    injectLogger.LogInformation("Elevated child: injecting unattend.xml into {VhdxPath}", vhdxPath);
+                    new UnattendInjector(injectLogger).Inject(vhdxPath);
+                    injectLogger.LogInformation("Injection succeeded");
+                    Environment.ExitCode = 0;
+                }
+                catch (Exception ex)
+                {
+                    injectLogger.LogError(ex, "Injection failed: {Message}", ex.Message);
+                    Environment.ExitCode = 1;
+                }
+                finally
+                {
+                    loggerFactory.Dispose();
+                }
+
+                Shutdown();
+                return;
+            }
+
             DemoMode = e.Args != null && e.Args.Any(a =>
                 a.Equals("/demo", StringComparison.OrdinalIgnoreCase)
                 || a.Equals("--demo", StringComparison.OrdinalIgnoreCase));
@@ -54,12 +95,14 @@ namespace VMCreate
 
             // ── Hyper-V / VM plumbing ───────────────────────────────────────
             services.AddSingleton<IHyperVManager, PowerShellHyperVManager>();
+            services.AddSingleton<IUnattendInjector, ElevatedUnattendInjector>();
             services.AddSingleton<ISshKeyManager, SshKeyManager>();
             services.AddTransient<IKvpSender, KvpHostToGuest>();
             services.AddTransient<IKvpPoller, HyperVKVPPoller>();
             services.AddTransient<IVmShutdownWatcher, HyperVKVPPoller>();
             services.AddTransient<IGuestDiagnosticsCollector, GuestDiagnosticsCollector>();
-            services.AddTransient<IGuestShellFactory, SshGuestShellFactory>();
+            services.AddTransient<IGuestShellFactory, GuestShellFactory>();
+            services.AddTransient<PowerShellDirectGuestShellFactory>();
 
             // ── Disk / media handling ───────────────────────────────────────
             services.AddSingleton<IDiskConverter, DiskConverter>();
@@ -116,6 +159,15 @@ namespace VMCreate
             foreach (var stepType in configurableStepTypes)
                 services.AddTransient(typeof(IConfigurableCustomizationStep), stepType);
 
+            // ── Full customization-step lookup for deploy progress mapping ─────
+            services.AddTransient<IReadOnlyDictionary<string, ICustomizationStep>>(sp =>
+            {
+                var allSteps = sp.GetServices<ICustomizationStep>()
+                    .ToLookup(s => s.Name, StringComparer.OrdinalIgnoreCase);
+                // If duplicate names exist, pick the first registered instance.
+                return allSteps.ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+            });
+
             // ── HTB API client (uses IHttpClientFactory) ────────────────────
             services.AddHttpClient<IHtbApiClient, HtbApiClient>();
 
@@ -125,11 +177,17 @@ namespace VMCreate
             services.AddSingleton<IPartitionSchemeDetector, PartitionSchemeDetector>();
 
             // ── UI / pages ──────────────────────────────────────────────────
-            services.AddSingleton<Func<WizardData, DeployPage>>(sp => wizardData =>
-                new DeployPage(
+            services.AddSingleton<Func<WizardData, DeployPage>>((Func<IServiceProvider, Func<WizardData, DeployPage>>)(sp => wizardData =>
+            {
+                var steps = sp.GetRequiredService<IEnumerable<IConfigurableCustomizationStep>>();
+                var allSteps = sp.GetRequiredService<IReadOnlyDictionary<string, ICustomizationStep>>();
+                return new DeployPage(
                     wizardData,
                     sp.GetRequiredService<CreateVM>(),
-                    sp.GetRequiredService<ILoggerFactory>()));
+                    sp.GetRequiredService<ILoggerFactory>(),
+                    steps,
+                    allSteps);
+            }));
             services.AddSingleton<MainWindow>();
 
             _serviceProvider = services.BuildServiceProvider();

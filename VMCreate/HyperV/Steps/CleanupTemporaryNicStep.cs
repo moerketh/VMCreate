@@ -17,7 +17,9 @@ namespace VMCreate
     {
         public string Name => "Cleanup Temporary NIC";
         public CustomizationPhase Phase => CustomizationPhase.PostBoot;
+        public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 830;
+        public string? ProgressPhaseId => null;
 
         public bool IsApplicable(GalleryItem item, VmCustomizations customizations) => true;
 

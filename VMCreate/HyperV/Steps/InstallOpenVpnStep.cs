@@ -13,7 +13,9 @@ namespace VMCreate
     {
         public string Name => "Install OpenVPN";
         public CustomizationPhase Phase => CustomizationPhase.PostBoot;
+        public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 200;
+        public string? ProgressPhaseId => "Sub_ConfigureVpn";
 
         public bool IsApplicable(GalleryItem item, VmCustomizations customizations)
             => customizations.ConfigureHtbVpn;

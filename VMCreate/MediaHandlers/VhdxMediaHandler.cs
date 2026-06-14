@@ -27,6 +27,30 @@ namespace VMCreate.MediaHandlers
         {
             string vhdDestFile = await base.PrepareMediaAsync(sourceFile, destinationPath, vmSettings, item, progressInfo, cancellationToken);
             string mediaPath = Path.Combine(destinationPath, Path.GetFileName(sourceFile));
+
+            // Rename the extracted native VHDX to a VM-specific name so it is not shared
+            // across deployments (e.g. WinDev2407Eval.vhdx → FLARE_VM_20260313.vhdx).
+            string vmSpecificVhdx = Path.Combine(destinationPath, vmSettings.VMName + ".vhdx");
+            if (!string.Equals(mediaPath, vmSpecificVhdx, StringComparison.OrdinalIgnoreCase))
+            {
+                if (File.Exists(vmSpecificVhdx))
+                {
+                    try
+                    {
+                        File.Delete(vmSpecificVhdx);
+                    }
+                    catch (IOException) when (IsVhdxLocked(vmSpecificVhdx))
+                    {
+                        TryDismountVhdx(vmSpecificVhdx);
+                        File.Delete(vmSpecificVhdx);
+                    }
+                }
+                File.Move(mediaPath, vmSpecificVhdx);
+                _logger.LogInformation("Renamed native VHDX to VM-specific path: {Path}", vmSpecificVhdx);
+                mediaPath = vmSpecificVhdx;
+                vhdDestFile = vmSpecificVhdx;
+            }
+
             string partitionScheme = await _partitionSchemeDetector.DetectPartitionSchemeAsync(mediaPath);
             _vmGeneration = partitionScheme == "GPT" ? 2 : 1;
             _logger.LogInformation("Detected {PartitionScheme} partition scheme, setting VM generation to {Generation}", partitionScheme, _vmGeneration);

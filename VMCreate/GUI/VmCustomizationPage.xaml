@@ -6,34 +6,42 @@
       Title="Configure Virtual Machine">
     <Grid Margin="20,10,20,10">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" Padding="0,0,0,4">
-        <StackPanel FocusManager.FocusedElement="{Binding ElementName=XrdpCheckbox}">
-
-            <!-- Selected image summary card -->
-            <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
-                    CornerRadius="8" Padding="16,12" Margin="0,0,0,12"
-                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
-                <StackPanel Orientation="Horizontal">
-                    <Image Source="{Binding SelectedItem.SymbolUri, Converter={StaticResource ImageConverter}}" 
-                           Width="48" Height="48" Margin="0,0,14,0" VerticalAlignment="Center"
-                           RenderOptions.BitmapScalingMode="HighQuality"/>
-                    <StackPanel VerticalAlignment="Center">
-                        <TextBlock Text="{Binding SelectedItem.Name, FallbackValue='No VM selected'}" 
-                                   FontSize="14" FontWeight="SemiBold"
-                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
-                        <TextBlock Text="{Binding SelectedItem.Publisher}" FontSize="12"
-                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,2,0,0"/>
-                    </StackPanel>
+        <!-- Selected image summary card: pinned above scrollable content -->
+        <Border Grid.Row="0" Background="{DynamicResource ControlFillColorDefaultBrush}"
+                CornerRadius="8" Padding="16,12" Margin="0,0,0,12"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
+            <StackPanel Orientation="Horizontal">
+                <Image Source="{Binding SelectedItem.SymbolUri, Converter={StaticResource ImageConverter}}" 
+                       Width="48" Height="48" Margin="0,0,14,0" VerticalAlignment="Center"
+                       RenderOptions.BitmapScalingMode="HighQuality"/>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="{Binding SelectedItem.Name, FallbackValue='No VM selected'}" 
+                               FontSize="14" FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
+                    <TextBlock Text="{Binding SelectedItem.Publisher}" FontSize="12"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,2,0,0"/>
                 </StackPanel>
-            </Border>
+            </StackPanel>
+        </Border>
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="0,0,0,4">
+            <ScrollViewer.Resources>
+                <Style TargetType="{x:Type ScrollBar}" BasedOn="{StaticResource WizardScrollBarStyle}"/>
+            </ScrollViewer.Resources>
+        <StackPanel Margin="0,0,18,0" FocusManager.FocusedElement="{Binding ElementName=XrdpCheckbox}">
 
             <ui:InfoBar Title="Conversion required" Severity="Warning"
                         Message="The selected VM is not in VHDX format. It will be converted to VHDX using QEMU. If the disk is MBR partitioned it will be cloned to a new GPT partitioned disk using a converter DVD on first VM boot."
                         IsOpen="{Binding IsNotVhdx, Mode=OneWay}" IsClosable="False" Margin="0,0,0,8"/>
+
+            <ui:InfoBar Title="Administrator approval required" Severity="Informational"
+                        Message="This Windows image needs to be modified before first boot (to create the user account and enable remote access). You will be prompted for administrator approval at deployment time."
+                        IsOpen="{Binding NeedsUnattendInjection, Mode=OneWay}" IsClosable="False" Margin="0,0,0,8"/>
 
             <!-- Integration Services card -->
             <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
@@ -42,21 +50,22 @@
                 <StackPanel>
                     <TextBlock Text="Integration Services" FontSize="14" FontWeight="SemiBold"
                                Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,0,4"/>
-                    <TextBlock Text="Hyper-V integration services enable clipboard sharing, drive redirection, and automatic IP discovery via Enhanced Session Mode. Disable for maximum isolation when analysing untrusted software."
+                    <TextBlock Text="Hyper-V integration services enable clipboard sharing, drive redirection, and automatic IP discovery via Enhanced Session Mode."
                                FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,10"
                                TextWrapping="Wrap"/>
                     <CheckBox Content="Enable Hyper-V integration services"
                               IsChecked="{Binding EnableIntegrationServices}"
                               FontSize="14"
-                              ToolTip="Controls Guest Service Interface and Enhanced Session Mode (RDP over VMBus). When disabled, the VM runs without clipboard, drive redirection, or IP discovery — useful for malware analysis."
+                              ToolTip="Controls Guest Service Interface and Enhanced Session Mode (RDP over VMBus)."
                               AutomationProperties.Name="Enable Hyper-V integration services"/>
                 </StackPanel>
             </Border>
 
-            <!-- Remote Access card -->
+            <!-- Remote Access card (Linux only) -->
             <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
                     CornerRadius="8" Padding="20,16" Margin="0,0,0,12"
-                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
+                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1"
+                    Visibility="{Binding ShowLinuxOptions, Converter={StaticResource BoolToVis}}">
                 <StackPanel>
                     <TextBlock Text="Remote Access" FontSize="14" FontWeight="SemiBold"
                                Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,0,4"/>
@@ -71,10 +80,11 @@
                 </StackPanel>
             </Border>
 
-            <!-- DNS Configuration card -->
+            <!-- DNS Configuration card (Linux only) -->
             <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
                     CornerRadius="8" Padding="20,16" Margin="0,0,0,12"
-                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
+                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1"
+                    Visibility="{Binding ShowLinuxOptions, Converter={StaticResource BoolToVis}}">
                 <StackPanel>
                     <TextBlock Text="DNS Configuration" FontSize="14" FontWeight="SemiBold"
                                Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,0,4"/>
@@ -185,10 +195,11 @@
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
 
-            <!-- Advanced: SSH Key card -->
+            <!-- Advanced: SSH Key card (Linux only) -->
             <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
                     CornerRadius="8" Padding="20,16" Margin="0,0,0,12"
-                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
+                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1"
+                    Visibility="{Binding ShowLinuxOptions, Converter={StaticResource BoolToVis}}">
                 <StackPanel>
                     <TextBlock Text="Advanced" FontSize="14" FontWeight="SemiBold"
                                Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,0,4"/>
@@ -217,7 +228,7 @@
         </StackPanel>
         </ScrollViewer>
 
-        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
             <Button Content="&lt; Back" Command="{Binding BackCommand}" Style="{StaticResource CommonButton}"
                     AutomationProperties.Name="Go back"/>
             <Button Content="Cancel" Command="{Binding CancelCommand}" Style="{StaticResource CommonButton}" Margin="5,0,0,0"

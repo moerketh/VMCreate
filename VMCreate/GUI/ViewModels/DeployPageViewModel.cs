@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Linq;
@@ -14,6 +15,13 @@ namespace VMCreate
     /// </summary>
     public class DeployPageViewModel : ViewModelBase
     {
+        /// <summary>
+        /// Creates a hidden sub-step (IndentLevel=1) that will become visible
+        /// automatically when its parent phase is activated, consistent with other phases.
+        /// </summary>
+        private static DeploymentPhase NewPostBootSubStep(string id, string name, string description, SymbolRegular icon)
+            => new DeploymentPhase(id, name, description, icon) { IndentLevel = 1, IsVisible = false };
+
         // Well-known phase IDs (must match the strings reported in CreateVMProgressInfo.Phase)
         public const string PhaseDownload   = "Download";
         public const string PhaseExtract    = "Extract";
@@ -51,16 +59,72 @@ namespace VMCreate
         public const string SubAddTempNic   = "Sub_AddTempNic";
         public const string SubWaitForSsh   = "Sub_WaitForSsh";
 
-        // Post-boot sub-step IDs (matched to ICustomizationStep.Name)
-        public const string SubRemoveVBox    = "Sub_RemoveVBox";
-        public const string SubSyncTimezone  = "Sub_SyncTimezone";
-        public const string SubConfigureVpn  = "Sub_ConfigureVpn";
-        public const string SubRestoreSsh    = "Sub_RestoreSsh";
+        // Windows-only post-boot sub-step IDs
+        public const string SubStabilizeVm     = "Sub_StabilizeVm";
+        public const string SubLicenseRearm    = "Sub_LicenseRearm";
+        public const string SubRemoveDefender  = "Sub_RemoveDefender";
+        public const string SubDisableUpdates  = "Sub_DisableUpdates";
+        public const string SubCleanupTasks    = "Sub_CleanupTasks";
+
+        // Linux-only post-boot sub-step IDs
+        public const string SubRemoveVBox      = "Sub_RemoveVBox";
+        public const string SubSyncTimezone    = "Sub_SyncTimezone";
+        public const string SubConfigureVpn    = "Sub_ConfigureVpn";
+        public const string SubRestoreSsh      = "Sub_RestoreSsh";
 
         /// <summary>Generates a sub-card phase ID for a distribution-specific option step.</summary>
         public static string DistOptionSubId(string stepName) => $"Sub_Dist_{stepName}";
 
+        /// <summary>Resolves a string icon name from distribution metadata to a WPF UI SymbolRegular.</summary>
+        public static SymbolRegular ResolveIconName(string iconName)
+        {
+            if (string.IsNullOrWhiteSpace(iconName)) return SymbolRegular.ArrowSync24;
+            return Enum.TryParse<SymbolRegular>(iconName, out var icon) ? icon : SymbolRegular.ArrowSync24;
+        }
+
+        /// <summary>Looks up a step by name and returns its deployment metadata, if available.</summary>
+        private IDistributionOptionMetadata GetStepMetadata(string name)
+        {
+            if (_configurableSteps != null
+                && _configurableSteps.TryGetValue(name, out var step)
+                && step is IDistributionOptionMetadata metadata)
+            {
+                return metadata;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Returns distribution option steps that are visible for the selected item.
+        /// Includes both optional (user-toggled) and required (always-run) steps.
+        /// </summary>
+        private IEnumerable<IConfigurableCustomizationStep> GetApplicableDistributionSteps(VmCustomizations c)
+        {
+            if (SelectedItem == null || _configurableSteps == null) return Enumerable.Empty<IConfigurableCustomizationStep>();
+
+            return _configurableSteps.Values
+                .Where(s => s.IsVisibleFor(SelectedItem))
+                .Where(s =>
+                {
+                    if (s.IsOptional) return c?.DistributionOptions?.Any(o => string.Equals(o.Name, s.Name, StringComparison.OrdinalIgnoreCase) && o.IsEnabled) == true;
+                    return true;
+                })
+                .OrderBy(s => (s as IDistributionOptionMetadata)?.DeployOrder ?? int.MaxValue)
+                .ThenBy(s => s.Name, StringComparer.OrdinalIgnoreCase);
+        }
+
+        /// <summary>Returns enabled distribution options sorted by their deployment order.</summary>
+        private IEnumerable<DistributionOptionSelection> GetEnabledDistributionOptions(VmCustomizations c)
+        {
+            if (c?.DistributionOptions == null) return Enumerable.Empty<DistributionOptionSelection>();
+            return c.DistributionOptions
+                .Where(o => o?.IsEnabled == true)
+                .OrderBy(o => GetStepMetadata(o.Name)?.DeployOrder ?? o.Order)
+                .ThenBy(o => o.Name, StringComparer.OrdinalIgnoreCase);
+        }
+
         private readonly ILogger _logger;
+        private readonly IReadOnlyDictionary<string, IConfigurableCustomizationStep> _configurableSteps;
         private bool _isDeploying;
         private bool _isComplete;
         private bool _hasFailed;
@@ -70,10 +134,12 @@ namespace VMCreate
         public event Action<WizardResult> RequestWizardComplete;
         public event Action RequestCancel;
 
-        public DeployPageViewModel(WizardData wizardData, ILogger logger)
+        public DeployPageViewModel(WizardData wizardData, ILogger logger, IEnumerable<IConfigurableCustomizationStep> configurableSteps = null)
         {
             if (wizardData == null) throw new ArgumentNullException(nameof(wizardData));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _configurableSteps = (configurableSteps ?? Enumerable.Empty<IConfigurableCustomizationStep>())
+                .ToDictionary(s => s.Name, StringComparer.OrdinalIgnoreCase);
 
             VmName = wizardData.Settings?.VMName ?? "VM";
             SelectedItem = wizardData.SelectedItem;
@@ -149,6 +215,14 @@ namespace VMCreate
 
         public bool HasError => !string.IsNullOrEmpty(_errorMessage);
 
+        /// <summary>
+        /// True when the selected image is a native Hyper-V Windows VM that requires
+        /// an elevated unattend injection (UAC prompt) before first boot.
+        /// </summary>
+        public bool ShowUnattendInjectionInfo =>
+            SelectedItem?.IsNativeHyperV == true
+            && SelectedItem?.IsWindows == true;
+
         public ICommand CancelCommand { get; }
         public ICommand ConnectToVmCommand { get; }
         public ICommand OpenHyperVManagerCommand { get; }
@@ -165,6 +239,14 @@ namespace VMCreate
             bool needsConversion = !isNativeHyperV
                 && fileType is "VMDK" or "QCOW2" or "OVA" or "Archive";
             bool nestedVirt = wizardData.Settings?.VirtualizationEnabled ?? true;
+
+            if (ShowUnattendInjectionInfo)
+            {
+                Phases.Add(new DeploymentPhase("Sub_UnattendInfo", "Administrator approval required",
+                    "This Windows image needs to be modified before first boot (to create the user account and enable remote access). You will be prompted for administrator approval at deployment time.",
+                    SymbolRegular.Info24)
+                { Status = DeploymentPhaseStatus.Information });
+            }
 
             Phases.Add(new DeploymentPhase(PhaseDownload, "Download",
                 "Downloading disk image from the internet",
@@ -218,6 +300,20 @@ namespace VMCreate
                         : "Applying post-boot customizations via SSH",
                     SymbolRegular.Settings24));
                 AddPostBootSubSteps(wizardData.Customizations);
+            }
+            else if (wizardData.SelectedItem?.IsWindows == true)
+            {
+                // Windows images are configured post-boot via PowerShell Direct.
+                // Only the distribution option steps apply — no Linux infra steps.
+                var c = wizardData.Customizations;
+                bool hasWindowsPostBoot = GetApplicableDistributionSteps(c).Any();
+                if (hasWindowsPostBoot)
+                {
+                    Phases.Add(new DeploymentPhase(PhasePostBoot, "Post-Boot Config",
+                        "Configuring the VM via PowerShell Direct",
+                        SymbolRegular.Settings24));
+                    AddWindowsPostBootSubSteps(c);
+                }
             }
 
             Phases.Add(new DeploymentPhase(PhaseDone, "Done",
@@ -495,69 +591,112 @@ namespace VMCreate
         /// <summary>Appends post-boot sub-step cards (IndentLevel=1, hidden) to the end of Phases.</summary>
         private void AddPostBootSubSteps(VmCustomizations c)
         {
-            Phases.Add(new DeploymentPhase(SubAddTempNic, "Add Temporary NIC",
-                "Adding temporary network adapter for SSH access", SymbolRegular.PlugConnected24) { IndentLevel = 1, IsVisible = false });
-            Phases.Add(new DeploymentPhase(SubWaitForSsh, "Waiting for SSH",
-                "Waiting for the VM to accept SSH connections", SymbolRegular.PlugConnected24) { IndentLevel = 1, IsVisible = false });
-            Phases.Add(new DeploymentPhase(SubRemoveVBox, "Remove VBox Guest Additions",
-                "Cleaning up VirtualBox artifacts", SymbolRegular.Delete24) { IndentLevel = 1, IsVisible = false });
+            Phases.Add(NewPostBootSubStep(SubAddTempNic, "Add Temporary NIC",
+                "Adding temporary network adapter for SSH access", SymbolRegular.PlugConnected24));
+            Phases.Add(NewPostBootSubStep(SubWaitForSsh, "Waiting for VM",
+                "Waiting for the VM to accept remote management connections", SymbolRegular.PlugConnected24));
+            Phases.Add(NewPostBootSubStep(SubRemoveVBox, "Remove VBox Guest Additions",
+                "Cleaning up VirtualBox artifacts", SymbolRegular.Delete24));
             if (c?.SyncTimezone == true)
             {
-                Phases.Add(new DeploymentPhase(SubSyncTimezone, "Sync Timezone",
-                    "Setting guest timezone to match host", SymbolRegular.Clock24) { IndentLevel = 1, IsVisible = false });
+                Phases.Add(NewPostBootSubStep(SubSyncTimezone, "Sync Timezone",
+                    "Setting guest timezone to match host", SymbolRegular.Clock24));
             }
             if (c?.ConfigureHtbVpn == true)
             {
-                Phases.Add(new DeploymentPhase(SubConfigureVpn, "Configure VPN",
-                    "Installing OpenVPN and deploying VPN configs", SymbolRegular.Globe24) { IndentLevel = 1, IsVisible = false });
+                Phases.Add(NewPostBootSubStep(SubConfigureVpn, "Configure VPN",
+                    "Installing OpenVPN and deploying VPN configs", SymbolRegular.Globe24));
             }
-            if (c?.DistributionOptions != null)
+            AddDistributionOptionSubSteps(c);
+            Phases.Add(NewPostBootSubStep(SubRestoreSsh, "Restore SSH State",
+                "Restoring the original SSH configuration", SymbolRegular.ShieldKeyhole24));
+        }
+
+        /// <summary>Appends Windows post-boot sub-step cards (IndentLevel=1, hidden): a connect
+        /// step plus one per enabled distribution option. No Linux infra steps (NIC/SSH/VBox).</summary>
+        private void AddWindowsPostBootSubSteps(VmCustomizations c)
+        {
+            Phases.Add(NewPostBootSubStep(SubWaitForSsh, "Waiting for VM",
+                "Waiting for the VM to accept remote management connections", SymbolRegular.PlugConnected24));
+            AddDistributionOptionSubSteps(c);
+            AddCompletionInfoCards(c);
+        }
+
+        /// <summary>Adds visible top-level completion/info cards (IndentLevel=0) declared by enabled optional steps.</summary>
+        private void AddCompletionInfoCards(VmCustomizations c)
+        {
+            foreach (var step in GetApplicableDistributionSteps(c).Where(s => s.IsOptional))
             {
-                foreach (var kv in c.DistributionOptions)
+                var metadata = step as IDistributionOptionMetadata;
+                if (string.IsNullOrWhiteSpace(metadata?.DeployCompletionInfo))
+                    continue;
+
+                string id = (metadata.DeployPhaseId ?? DistOptionSubId(step.Name)) + "_Info";
+                if (Phases.Any(p => p.Id == id)) continue;
+                Phases.Add(new DeploymentPhase(id, $"{metadata.DeployTitle} Background Setup",
+                    metadata.DeployCompletionInfo, SymbolRegular.Info24)
                 {
-                    if (kv.Value)
-                    {
-                        Phases.Add(new DeploymentPhase(DistOptionSubId(kv.Key), kv.Key,
-                            "Running distribution-specific tool", SymbolRegular.ArrowSync24) { IndentLevel = 1, IsVisible = false });
-                    }
-                }
+                    IndentLevel = 0,
+                    Status = DeploymentPhaseStatus.Information
+                });
             }
-            Phases.Add(new DeploymentPhase(SubRestoreSsh, "Restore SSH State",
-                "Restoring the original SSH configuration", SymbolRegular.ShieldKeyhole24) { IndentLevel = 1, IsVisible = false });
         }
 
         /// <summary>Inserts post-boot sub-step cards at a given index (hidden). Returns the next free index.</summary>
         private int InsertPostBootSubStepsAt(int index, VmCustomizations c)
         {
-            Phases.Insert(index++, new DeploymentPhase(SubAddTempNic, "Add Temporary NIC",
-                "Adding temporary network adapter for SSH access", SymbolRegular.PlugConnected24) { IndentLevel = 1, IsVisible = false });
-            Phases.Insert(index++, new DeploymentPhase(SubWaitForSsh, "Waiting for SSH",
-                "Waiting for the VM to accept SSH connections", SymbolRegular.PlugConnected24) { IndentLevel = 1, IsVisible = false });
-            Phases.Insert(index++, new DeploymentPhase(SubRemoveVBox, "Remove VBox Guest Additions",
-                "Cleaning up VirtualBox artifacts", SymbolRegular.Delete24) { IndentLevel = 1, IsVisible = false });
+            Phases.Insert(index++, NewPostBootSubStep(SubAddTempNic, "Add Temporary NIC",
+                "Adding temporary network adapter for SSH access", SymbolRegular.PlugConnected24));
+            Phases.Insert(index++, NewPostBootSubStep(SubWaitForSsh, "Waiting for VM",
+                "Waiting for the VM to accept remote management connections", SymbolRegular.PlugConnected24));
+            Phases.Insert(index++, NewPostBootSubStep(SubRemoveVBox, "Remove VBox Guest Additions",
+                "Cleaning up VirtualBox artifacts", SymbolRegular.Delete24));
             if (c?.SyncTimezone == true)
             {
-                Phases.Insert(index++, new DeploymentPhase(SubSyncTimezone, "Sync Timezone",
-                    "Setting guest timezone to match host", SymbolRegular.Clock24) { IndentLevel = 1, IsVisible = false });
+                Phases.Insert(index++, NewPostBootSubStep(SubSyncTimezone, "Sync Timezone",
+                    "Setting guest timezone to match host", SymbolRegular.Clock24));
             }
             if (c?.ConfigureHtbVpn == true)
             {
-                Phases.Insert(index++, new DeploymentPhase(SubConfigureVpn, "Configure VPN",
-                    "Installing OpenVPN and deploying VPN configs", SymbolRegular.Globe24) { IndentLevel = 1, IsVisible = false });
+                Phases.Insert(index++, NewPostBootSubStep(SubConfigureVpn, "Configure VPN",
+                    "Installing OpenVPN and deploying VPN configs", SymbolRegular.Globe24));
             }
-            if (c?.DistributionOptions != null)
+            index = InsertDistributionOptionSubStepsAt(index, c);
+            Phases.Insert(index++, NewPostBootSubStep(SubRestoreSsh, "Restore SSH State",
+                "Restoring the original SSH configuration", SymbolRegular.ShieldKeyhole24));
+            return index;
+        }
+
+        /// <summary>Appends distribution-option sub-steps in deployment order from step metadata.</summary>
+        private void AddDistributionOptionSubSteps(VmCustomizations c)
+        {
+            foreach (var step in GetApplicableDistributionSteps(c))
             {
-                foreach (var kv in c.DistributionOptions)
-                {
-                    if (kv.Value)
-                    {
-                        Phases.Insert(index++, new DeploymentPhase(DistOptionSubId(kv.Key), kv.Key,
-                            "Running distribution-specific tool", SymbolRegular.ArrowSync24) { IndentLevel = 1, IsVisible = false });
-                    }
-                }
+                var metadata = step as IDistributionOptionMetadata;
+                string id = metadata?.DeployPhaseId ?? DistOptionSubId(step.Name);
+                string title = metadata?.DeployTitle ?? step.Name;
+                string description = metadata?.DeployDescription ?? "Running distribution-specific tool";
+                SymbolRegular icon = ResolveIconName(metadata?.DeployIconName);
+
+                if (Phases.Any(p => p.Id == id)) continue;
+                Phases.Add(NewPostBootSubStep(id, title, description, icon));
             }
-            Phases.Insert(index++, new DeploymentPhase(SubRestoreSsh, "Restore SSH State",
-                "Restoring the original SSH configuration", SymbolRegular.ShieldKeyhole24) { IndentLevel = 1, IsVisible = false });
+        }
+
+        /// <summary>Inserts distribution-option sub-steps at a given index. Returns the next free index.</summary>
+        private int InsertDistributionOptionSubStepsAt(int index, VmCustomizations c)
+        {
+            foreach (var step in GetApplicableDistributionSteps(c))
+            {
+                var metadata = step as IDistributionOptionMetadata;
+                string id = metadata?.DeployPhaseId ?? DistOptionSubId(step.Name);
+                string title = metadata?.DeployTitle ?? step.Name;
+                string description = metadata?.DeployDescription ?? "Running distribution-specific tool";
+                SymbolRegular icon = ResolveIconName(metadata?.DeployIconName);
+
+                if (Phases.Any(p => p.Id == id)) continue;
+                Phases.Insert(index++, NewPostBootSubStep(id, title, description, icon));
+            }
             return index;
         }
 

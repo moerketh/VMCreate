@@ -15,5 +15,12 @@ namespace VMCreate
         public VmSettings Settings { get; set; } = new VmSettings();
         public VmCustomizations Customizations { get; set; } = new VmCustomizations();
         public bool DemoMode { get; set; }
+
+        /// <summary>Resets user-modifiable state for a fresh wizard run.</summary>
+        public void ResetForNewWizard()
+        {
+            Settings = new VmSettings();
+            Customizations = new VmCustomizations();
+        }
     }
 }

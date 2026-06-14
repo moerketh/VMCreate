@@ -18,7 +18,9 @@ namespace VMCreate
     {
         public string Name => "Remove Automation User";
         public CustomizationPhase Phase => CustomizationPhase.PostBoot;
+        public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 850;
+        public string? ProgressPhaseId => null;
 
         public bool IsApplicable(GalleryItem item, VmCustomizations customizations) => true;
 

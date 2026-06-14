@@ -151,6 +151,20 @@ namespace VMCreate
             }
         }
 
+        /// <summary>
+        /// Secure Boot template to use when SecureBoot is enabled.
+        /// Defaults to "MicrosoftUEFICertificateAuthority" (Linux-friendly).
+        /// Set to "MicrosoftWindows" for Windows VMs.
+        /// </summary>
+        public string SecureBootTemplate { get; set; }
+
+        /// <summary>
+        /// True when this gallery item represents a Windows VM.
+        /// Used to select PowerShell Direct (instead of SSH) for post-boot
+        /// customization and to attach an unattend.xml floppy for automated install.
+        /// </summary>
+        public bool IsWindows { get; set; }
+
         /// <summary>Returns true when Category is "Security" (case-insensitive).</summary>
         public bool IsSecurity =>
             string.Equals(Category, "Security", StringComparison.OrdinalIgnoreCase);

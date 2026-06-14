@@ -5,6 +5,9 @@ using System.Windows.Data;
 using System.Windows.Media;
 using Wpf.Ui.Controls;
 
+using Wpf.Ui;
+using Wpf.Ui.Appearance;
+
 namespace VMCreate
 {
     /// <summary>Converts <see cref="DeploymentPhaseStatus"/> to a foreground <see cref="Brush"/>.</summary>
@@ -20,12 +23,21 @@ namespace VMCreate
                 DeploymentPhaseStatus.Completed => "SystemFillColorSuccessBrush",
                 DeploymentPhaseStatus.Active    => "AccentTextBrush",
                 DeploymentPhaseStatus.Failed    => "SystemFillColorCriticalBrush",
-                _                               => "TextFillColorSecondaryBrush"
+                _                               => GetIdleBrushKey()
             };
 
             return Application.Current.TryFindResource(resourceKey) as Brush
                 ?? Application.Current.TryFindResource("TextFillColorSecondaryBrush") as Brush
                 ?? Brushes.Gray;
+        }
+
+        private static string GetIdleBrushKey()
+        {
+            // In light mode, TextFillColorSecondaryBrush is too pale on white cards.
+            // In dark mode, TextFillColorSecondaryBrush is the lighter, better-looking shade.
+            return ApplicationThemeManager.GetAppTheme() == ApplicationTheme.Dark
+                ? "TextFillColorSecondaryBrush"
+                : "TextFillColorPrimaryBrush";
         }
 
         public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)

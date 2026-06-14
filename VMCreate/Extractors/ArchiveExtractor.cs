@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using SharpCompress.Archives;
 using SharpCompress.Common;
@@ -19,6 +21,87 @@ namespace VMCreate
     public class ArchiveExtractor : IExtractor
     {
         private readonly ILogger<ArchiveExtractor> _logger;
+
+        /// <summary>
+        /// Synchronous IProgress<T> wrapper for inline callback invocation.
+        /// Unlike Progress<T>, which posts to the synchronization context asynchronously,
+        /// this invokes the handler immediately on the calling thread. This ensures:
+        /// - Progress reports arrive synchronously during extraction (critical for tests)
+        /// </summary>
+        private sealed class ImmediateProgress<T> : IProgress<T>
+        {
+            private readonly Action<T> _handler;
+            public ImmediateProgress(Action<T> handler) => _handler = handler;
+            public void Report(T value) => _handler(value);
+        }
+
+        /// <summary>
+        /// Stream wrapper that throws OperationCanceledException when the token is cancelled.
+        /// This lets cancellation abort entry.WriteTo() from the destination side without
+        /// throwing out of an IProgress<T>.Report callback, which can surface as an unhandled
+        /// exception when SharpCompress invokes it from a background thread.
+        /// </summary>
+        private sealed class CancellationTokenStream : Stream
+        {
+            private readonly Stream _inner;
+            private readonly CancellationToken _cancellationToken;
+
+            public CancellationTokenStream(Stream inner, CancellationToken cancellationToken)
+            {
+                _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+                _cancellationToken = cancellationToken;
+            }
+
+            public override bool CanRead => _inner.CanRead;
+            public override bool CanSeek => _inner.CanSeek;
+            public override bool CanWrite => _inner.CanWrite;
+            public override long Length => _inner.Length;
+            public override long Position
+            {
+                get => _inner.Position;
+                set => _inner.Position = value;
+            }
+
+            public override void Flush()
+            {
+                _cancellationToken.ThrowIfCancellationRequested();
+                _inner.Flush();
+            }
+
+            public override int Read(byte[] buffer, int offset, int count)
+            {
+                _cancellationToken.ThrowIfCancellationRequested();
+                return _inner.Read(buffer, offset, count);
+            }
+
+            public override long Seek(long offset, SeekOrigin origin)
+            {
+                _cancellationToken.ThrowIfCancellationRequested();
+                return _inner.Seek(offset, origin);
+            }
+
+            public override void SetLength(long value)
+            {
+                _cancellationToken.ThrowIfCancellationRequested();
+                _inner.SetLength(value);
+            }
+
+            public override void Write(byte[] buffer, int offset, int count)
+            {
+                _cancellationToken.ThrowIfCancellationRequested();
+                _inner.Write(buffer, offset, count);
+            }
+
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing)
+                {
+                    _inner.Dispose();
+                }
+
+                base.Dispose(disposing);
+            }
+        }
 
         public ArchiveExtractor(ILogger<ArchiveExtractor> logger)
         {
@@ -41,7 +124,7 @@ namespace VMCreate
 
                 using (var archive = ArchiveFactory.OpenArchive(filePath))
                 {
-                    var totalSize = archive.TotalUncompressedSize;
+                    long totalSize = archive.TotalUncompressedSize;
 
                     // Pre-flight: check available disk space before extracting
                     if (totalSize > 0)
@@ -59,58 +142,109 @@ namespace VMCreate
                     }
 
                     long cumulativeBytes = 0;
-
-                    var entryProgress = new Progress<ProgressReport>(report =>
-                    {
-                        if (report.PercentComplete.HasValue)
-                        {
-                            // Estimate overall progress from cumulative bytes + current entry progress
-                            var entryBytes = report.BytesTransferred;
-                            var overall = totalSize > 0
-                                ? ((double)(cumulativeBytes + entryBytes) / totalSize) * 100
-                                : 0;
-                            progressReportInfo.Report(new CreateVMProgressInfo
-                            {
-                                Phase = "Extracting Archive...",
-                                URI = Path.Combine(extractPath, report.EntryPath ?? ""),
-                                DownloadSpeed = -1,
-                                ProgressPercentage = Convert.ToInt32(Math.Min(overall, 100))
-                            });
-                        }
-                        cancellationToken.ThrowIfCancellationRequested();
-                    });
+                    int lastReportedPercentage = -1;
+                    long lastReportTimeTicks = 0;
+                    const long ThrottleIntervalTicks = TimeSpan.TicksPerMillisecond * 200;
 
                     foreach (var entry in archive.Entries)
                     {
-                        if (!entry.IsDirectory)
+                        cancellationToken.ThrowIfCancellationRequested();
+
+                        if (entry.IsDirectory)
                         {
-                            cancellationToken.ThrowIfCancellationRequested();
-
-                            if (entry.Key == null)
-                            {
-                                // Single-file compressors (e.g. gzip) don't store a filename.
-                                // Derive the output name from the archive path by stripping the
-                                // compression extension (e.g. disk.vmdk.gz → disk.vmdk).
-                                string outputName = Path.GetFileNameWithoutExtension(filePath);
-                                string outputPath = Path.Combine(extractPath, outputName);
-                                _logger.LogDebug("Writing keyless archive entry as {OutputPath}", outputPath);
-                                using var entryStream = entry.OpenEntryStream();
-                                using var fileStream = File.Create(outputPath);
-                                entryStream.CopyTo(fileStream);
-                            }
-                            else
-                            {
-                                _logger.LogDebug("Writing archive entry {EntryKey} to {ExtractPath}", entry.Key, extractPath);
-                                entry.WriteToDirectory(extractPath, new ExtractionOptions
-                                {
-                                    ExtractFullPath = true,
-                                    Overwrite = true
-                                });
-                            }
-
-                            cumulativeBytes += entry.Size;
+                            // Create directory entries so nested paths exist before file extraction.
+                            string dirPath = entry.Key != null
+                                ? Path.Combine(extractPath, NormalizePath(entry.Key))
+                                : extractPath;
+                            Directory.CreateDirectory(dirPath);
+                            continue;
                         }
+
+                        string entryName = entry.Key;
+                        string destinationPath;
+
+                        if (entryName == null)
+                        {
+                            // Single-file compressors (e.g. gzip) don't store a filename.
+                            // Derive the output name from the archive path by stripping the
+                            // compression extension (e.g. disk.vmdk.gz → disk.vmdk).
+                            string outputName = Path.GetFileNameWithoutExtension(filePath);
+                            destinationPath = Path.Combine(extractPath, outputName);
+                        }
+                        else
+                        {
+                            destinationPath = Path.Combine(extractPath, NormalizePath(entryName));
+                        }
+
+                        // Ensure parent directory exists (in case directory entries were missing)
+                        string parentDir = Path.GetDirectoryName(destinationPath);
+                        if (!string.IsNullOrEmpty(parentDir))
+                        {
+                            Directory.CreateDirectory(parentDir);
+                        }
+
+                        _logger.LogDebug("Writing archive entry {EntryKey} to {DestinationPath}", entryName ?? "(keyless)", destinationPath);
+
+                        using (var fileStream = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None))
+                        using (var cancellationStream = new CancellationTokenStream(fileStream, cancellationToken))
+                        {
+                            var entryProgress = new ImmediateProgress<ProgressReport>(report =>
+                            {
+                                if (report.PercentComplete.HasValue)
+                                {
+                                    long entryBytes = report.BytesTransferred;
+                                    double overall = totalSize > 0
+                                        ? ((double)(cumulativeBytes + entryBytes) / totalSize) * 100.0
+                                        : 0.0;
+                                    int overallPct = Convert.ToInt32(Math.Min(overall, 100.0));
+
+                                    long now = Stopwatch.GetTimestamp();
+                                    bool shouldReport = overallPct != lastReportedPercentage
+                                        || (now - lastReportTimeTicks) >= ThrottleIntervalTicks;
+
+                                    if (shouldReport)
+                                    {
+                                        lastReportedPercentage = overallPct;
+                                        lastReportTimeTicks = now;
+
+                                        progressReportInfo.Report(new CreateVMProgressInfo
+                                        {
+                                            Phase = "Extracting Archive...",
+                                            URI = destinationPath,
+                                            DownloadSpeed = -1,
+                                            ProgressPercentage = overallPct
+                                        });
+                                    }
+                                }
+                            });
+
+                            entry.WriteTo(cancellationStream, entryProgress);
+                        }
+
+                        // Preserve file time if available
+                        if (entry.LastModifiedTime.HasValue)
+                        {
+                            try
+                            {
+                                File.SetLastWriteTime(destinationPath, entry.LastModifiedTime.Value);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "Failed to set last write time for {DestinationPath}", destinationPath);
+                            }
+                        }
+
+                        cumulativeBytes += entry.Size;
                     }
+
+                    // Report 100% on completion
+                    progressReportInfo.Report(new CreateVMProgressInfo
+                    {
+                        Phase = "Extracting Archive...",
+                        URI = extractPath,
+                        DownloadSpeed = -1,
+                        ProgressPercentage = 100
+                    });
                 }
 
                 _logger.LogInformation("Successfully extracted archive {FilePath} to {ExtractPath}", filePath, extractPath);
@@ -147,6 +281,12 @@ namespace VMCreate
             }
             logger.LogDebug("Creating directory {ExtractPath}", extractPath);
             Directory.CreateDirectory(extractPath);
+        }
+
+        private static string NormalizePath(string path)
+        {
+            // Replace forward slashes with OS-specific separators and trim trailing slashes.
+            return path.Replace('/', Path.DirectorySeparatorChar).TrimEnd(Path.DirectorySeparatorChar);
         }
 
         private static string FormatBytes(long bytes)

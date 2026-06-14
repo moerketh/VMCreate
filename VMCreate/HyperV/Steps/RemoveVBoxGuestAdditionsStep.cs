@@ -16,7 +16,9 @@ namespace VMCreate
     {
         public string Name => "Remove VirtualBox Guest Additions";
         public CustomizationPhase Phase => CustomizationPhase.PostBoot;
+        public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 50; // Run early, before timezone/package steps
+        public string? ProgressPhaseId => "Sub_RemoveVBox";
 
         public bool IsApplicable(GalleryItem item, VmCustomizations customizations) => true;
 

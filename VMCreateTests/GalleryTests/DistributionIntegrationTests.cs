@@ -174,6 +174,10 @@ namespace VMCreate.Tests.GalleryTests
         // ════════════════════════════════════════════════════════════════════════
 
         [TestMethod, Timeout(60_000)]
+        public async Task FlareVm_AllUrisResolve()
+            => await VerifyAllUrisAsync(await new FlareVm().LoadGalleryItems(), nameof(FlareVm));
+
+        [TestMethod, Timeout(60_000)]
         public async Task REMnux_AllUrisResolve()
             => await VerifyAllUrisAsync(await new REMnux().LoadGalleryItems(), nameof(REMnux));
 

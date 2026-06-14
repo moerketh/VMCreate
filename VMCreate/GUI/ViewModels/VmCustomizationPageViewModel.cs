@@ -57,7 +57,7 @@ namespace VMCreate
             var selectedItem = wizardData.SelectedItem;
             if (selectedItem != null && configurableSteps != null)
             {
-                foreach (var step in configurableSteps.Where(s => s.IsVisibleFor(selectedItem)))
+                foreach (var step in configurableSteps.Where(s => s.IsVisibleFor(selectedItem) && s.IsOptional))
                     DistributionOptions.Add(new DistributionOptionItem(step));
             }
 
@@ -135,6 +135,12 @@ namespace VMCreate
             set => SetProperty(ref _enableIntegrationServices, value);
         }
 
+        /// <summary>
+        /// True for non-Windows images. Linux-only cards (Remote Access/xrdp, DNS, SSH key, HTB VPN)
+        /// are hidden for Windows VMs, which are configured via PowerShell Direct rather than SSH.
+        /// </summary>
+        public bool ShowLinuxOptions => SelectedItem?.IsWindows != true;
+
         public bool IsHostDns
         {
             get => !_isCustomDns;
@@ -163,8 +169,9 @@ namespace VMCreate
 
         public bool IsSshKeyPathEnabled => _useCustomSshKey;
 
-        /// <summary>True when the selected image is a security distribution (e.g. Kali, Parrot, PwnCloudOS).</summary>
-        public bool ShowHtbVpn => SelectedItem?.IsSecurity == true;
+        /// <summary>True for security distributions (e.g. Kali, Parrot, PwnCloudOS). Windows
+        /// security distributions are excluded — HTB VPN provisioning is SSH/Linux-based.</summary>
+        public bool ShowHtbVpn => SelectedItem?.IsSecurity == true && SelectedItem?.IsWindows != true;
 
         /// <summary>Distribution-specific options discovered from plugin assemblies.</summary>
         public ObservableCollection<DistributionOptionItem> DistributionOptions { get; } = new();
@@ -174,6 +181,14 @@ namespace VMCreate
         public bool IsNotVhdx =>
             _wizardData.SelectedItem?.IsNativeHyperV != true
             && !string.Equals(_wizardData.SelectedItem?.FileType, "VHDX", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// True when the selected image is a native Hyper-V Windows VM that requires
+        /// an elevated unattend injection (UAC prompt) before first boot.
+        /// </summary>
+        public bool NeedsUnattendInjection =>
+            _wizardData.SelectedItem?.IsNativeHyperV == true
+            && _wizardData.SelectedItem?.IsWindows == true;
 
         public ICommand FinishCommand { get; }
         public ICommand BackCommand { get; }
@@ -195,8 +210,16 @@ namespace VMCreate
             _wizardData.Customizations.DnsMode = _isCustomDns ? DnsMode.Custom : DnsMode.Host;
             _wizardData.Customizations.CustomNameservers = _isCustomDns ? _customNameservers : null;
 
-            foreach (var opt in DistributionOptions)
-                _wizardData.Customizations.DistributionOptions[opt.Name] = opt.IsEnabled;
+            _wizardData.Customizations.DistributionOptions.Clear();
+            foreach (var opt in DistributionOptions.Where(o => o.IsEnabled))
+            {
+                _wizardData.Customizations.DistributionOptions.Add(new DistributionOptionSelection
+                {
+                    Name = opt.Name,
+                    IsEnabled = true,
+                    Order = 0
+                });
+            }
 
             _logger.LogDebug(
                 "Finished customization: ConfigureXrdp={Xrdp}, HtbVpnKeys={KeyCount}, ManualOvpn={ManualPath}, SyncTimezone={Tz}, CustomKey={Key}, IntegrationServices={IntSvc}, DnsMode={DnsMode}, DistOptions={DistOpts}",

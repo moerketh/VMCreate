@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -17,20 +18,25 @@ namespace VMCreate
         private readonly WizardData _wizardData;
         private readonly CreateVM _createVM;
         private readonly ILogger _logger;
+        private readonly IReadOnlyDictionary<string, IConfigurableCustomizationStep> _configurableSteps;
         private CancellationTokenSource _cts;
         private string _activePhaseId;
         private string _activeSubStepId;
         private bool _autoScrollEnabled = true;
+        private readonly IReadOnlyDictionary<string, ICustomizationStep> _allSteps;
         private bool _isScrollingProgrammatically;
 
-        public DeployPage(WizardData wizardData, CreateVM createVM, ILoggerFactory loggerFactory)
+        public DeployPage(WizardData wizardData, CreateVM createVM, ILoggerFactory loggerFactory, IEnumerable<IConfigurableCustomizationStep> configurableSteps, IReadOnlyDictionary<string, ICustomizationStep> allSteps)
         {
             _wizardData = wizardData ?? throw new ArgumentNullException(nameof(wizardData));
             _createVM = createVM ?? throw new ArgumentNullException(nameof(createVM));
             if (loggerFactory == null) throw new ArgumentNullException(nameof(loggerFactory));
 
             _logger = loggerFactory.CreateLogger<DeployPage>();
-            _viewModel = new DeployPageViewModel(wizardData, _logger);
+            _configurableSteps = (configurableSteps ?? Enumerable.Empty<IConfigurableCustomizationStep>())
+                .ToDictionary(s => s.Name, StringComparer.OrdinalIgnoreCase);
+            _allSteps = allSteps ?? throw new ArgumentNullException(nameof(allSteps));
+            _viewModel = new DeployPageViewModel(wizardData, _logger, configurableSteps);
 
             InitializeComponent();
             DataContext = _viewModel;
@@ -360,16 +366,18 @@ namespace VMCreate
             }
         }
 
-        /// <summary>Maps ICustomizationStep.Name to a post-boot sub-step card ID.</summary>
-        private static string MapPostBootStepName(string stepName) => stepName switch
+        /// <summary>Maps ICustomizationStep.Name to a post-boot sub-step card ID using step metadata.</summary>
+        private string MapPostBootStepName(string stepName)
         {
-            "Remove VirtualBox Guest Additions" => DeployPageViewModel.SubRemoveVBox,
-            "Sync Timezone"                     => DeployPageViewModel.SubSyncTimezone,
-            "Install OpenVPN"                   => DeployPageViewModel.SubConfigureVpn,
-            "Deploy VPN Configs"                => DeployPageViewModel.SubConfigureVpn, // collapsed into one card
-            "Restore SSH State"                 => DeployPageViewModel.SubRestoreSsh,
-            _ => DeployPageViewModel.DistOptionSubId(stepName) // distribution-specific steps
-        };
+            if (_allSteps != null
+                && _allSteps.TryGetValue(stepName, out var step)
+                && !string.IsNullOrWhiteSpace(step?.ProgressPhaseId))
+            {
+                return step.ProgressPhaseId;
+            }
+
+            return DeployPageViewModel.DistOptionSubId(stepName);
+        }
 
         /// <summary>Maps KVP WorkflowProgress prefix to a pre-boot sub-step card ID.</summary>
         private static string MapPreBootProgress(string progress)

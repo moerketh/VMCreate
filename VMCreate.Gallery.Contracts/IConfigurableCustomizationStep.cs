@@ -28,6 +28,13 @@ namespace VMCreate
         bool DefaultEnabled { get; }
 
         /// <summary>
+        /// Returns true if this step is an optional add-on that the user can toggle
+        /// on the customization page.  Required infrastructure steps should return
+        /// false so they are always executed without being presented as a checkbox.
+        /// </summary>
+        bool IsOptional { get; }
+
+        /// <summary>
         /// Returns true if this step's UI card should be shown for the given gallery item.
         /// Called once when the customization page loads to filter visible options.
         /// </summary>

@@ -16,7 +16,11 @@
             Remove this element if your application requires this virtualization for backwards
             compatibility.
         -->
-        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
+        <!-- Run as the invoking user (no UAC prompt). The app manages Hyper-V via the
+             user's membership in the "Hyper-V Administrators" group, which covers VM
+             creation, disk attach, integration services and PowerShell Direct
+             (Invoke-Command -VMName). No operation requires a full-Administrator token. -->
+        <requestedExecutionLevel  level="asInvoker" uiAccess="false" />
       </requestedPrivileges>
     </security>
   </trustInfo>

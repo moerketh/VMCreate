@@ -11,7 +11,8 @@
 	<SelfContained>true</SelfContained>
 	<IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
 	<EnableCompressionInSingleFile>false</EnableCompressionInSingleFile>
-	<PublishReadyToRun>true</PublishReadyToRun>
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="App.xaml.cs" />
@@ -52,7 +53,9 @@
     <Compile Include="HyperV\ISshKeyManager.cs" />
     <Compile Include="HyperV\IHtbApiClient.cs" />
     <Compile Include="HyperV\IGuestShellFactory.cs" />
-    <Compile Include="HyperV\SshGuestShellFactory.cs" />
+    <Compile Include="HyperV\GuestShellFactory.cs" />
+    <Compile Include="HyperV\PowerShellDirectGuestShell.cs" />
+    <Compile Include="HyperV\PowerShellDirectGuestShellFactory.cs" />
     <Compile Include="HyperV\vmbus\IKvpSender.cs" />
     <Compile Include="HyperV\vmbus\IKvpPoller.cs" />
     <Compile Include="HyperV\vmbus\IVmShutdownWatcher.cs" />
@@ -80,6 +83,9 @@
     <Compile Include="HyperV\IHyperVManagerRoles.cs" />
     <Compile Include="HyperV\PowerShellHyperVManager.cs" />
     <Compile Include="HyperV\HyperVVmCreator.cs" />
+    <Compile Include="HyperV\IUnattendInjector.cs" />
+    <Compile Include="HyperV\ElevatedUnattendInjector.cs" />
+    <Compile Include="HyperV\UnattendInjector.cs" />
     <Compile Include="GUI\MainWindow.xaml.cs" />
     <Compile Include="MediaHandlers\DeSparcify.cs" />
     <Compile Include="MediaHandlers\DiskConverter.cs" />
@@ -111,6 +117,7 @@
 		<SubType>Code</SubType>
 	</Compile>
     <Compile Include="GUI\WizardData.cs" />
+    <Compile Include="GUI\WizardFlow.cs" />
     <Compile Include="GUI\ViewModels\ViewModelBase.cs" />
     <Compile Include="GUI\ViewModels\RelayCommand.cs" />
     <Compile Include="GUI\ViewModels\SelectImagePageViewModel.cs" />
@@ -130,6 +137,7 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Compile Include="Gallery\GalleryItemsParser.cs" />
+    <Compile Include="Unattend\UnattendFloppyBuilder.cs" />
 
   </ItemGroup>
   <ItemGroup>
@@ -144,6 +152,12 @@
     <EmbeddedResource Include="Icons\linuxmint-logo.svg" />
     <EmbeddedResource Include="Icons\opensuse-logo.svg" />
     <EmbeddedResource Include="Icons\rocky-linux-logo.svg" />
+    <Content Include="Unattend\autounattend.xml">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Unattend\unattend.xml">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
   <ItemGroup>

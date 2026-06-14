@@ -50,8 +50,13 @@
         </Border>
 
         <!-- Phase cards -->
-        <ScrollViewer x:Name="PhaseScrollViewer" Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="0,0,0,4">
-            <StackPanel>
+        <ScrollViewer x:Name="PhaseScrollViewer" Grid.Row="1"
+                      VerticalScrollBarVisibility="Auto"
+                      Padding="0,0,0,4">
+            <ScrollViewer.Resources>
+                <Style TargetType="{x:Type ScrollBar}" BasedOn="{StaticResource WizardScrollBarStyle}"/>
+            </ScrollViewer.Resources>
+            <StackPanel Margin="0,0,18,0">
             <ItemsControl x:Name="PhaseItemsControl" ItemsSource="{Binding Phases}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate DataType="{x:Type local:DeploymentPhase}">
@@ -77,13 +82,51 @@
                                 <!-- Status icon (left) -->
                                 <ui:SymbolIcon Grid.Column="0" Grid.Row="0" Grid.RowSpan="2"
                                                Symbol="{Binding DisplayIcon}"
-                                               FontSize="24" Margin="0,0,14,0" VerticalAlignment="Center"
-                                               Foreground="{Binding Status, Converter={StaticResource StatusToBrush}}"/>
+                                               FontSize="24" Margin="0,0,14,0" VerticalAlignment="Center">
+                                    <ui:SymbolIcon.Style>
+                                        <Style TargetType="{x:Type ui:SymbolIcon}">
+                                                <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Status}" Value="Completed">
+                                                        <Setter Property="Foreground" Value="{DynamicResource SystemFillColorSuccessBrush}"/>
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding Status}" Value="Active">
+                                                        <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}"/>
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding Status}" Value="Failed">
+                                                        <Setter Property="Foreground" Value="{DynamicResource SystemFillColorCriticalBrush}"/>
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding Status}" Value="Information">
+                                                        <Setter Property="Foreground" Value="{DynamicResource SystemFillColorAttentionBrush}"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                    </ui:SymbolIcon.Style>
+                                </ui:SymbolIcon>
 
                                 <!-- Phase name + description -->
                                 <TextBlock Grid.Column="1" Grid.Row="0"
-                                           Text="{Binding Name}" FontSize="14" FontWeight="SemiBold"
-                                           Foreground="{Binding Status, Converter={StaticResource StatusToBrush}}"/>
+                                           Text="{Binding Name}" FontSize="14" FontWeight="SemiBold">
+                                    <TextBlock.Style>
+                                        <Style TargetType="{x:Type TextBlock}">
+                                            <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Status}" Value="Completed">
+                                                    <Setter Property="Foreground" Value="{DynamicResource SystemFillColorSuccessBrush}"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Status}" Value="Active">
+                                                    <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Status}" Value="Failed">
+                                                    <Setter Property="Foreground" Value="{DynamicResource SystemFillColorCriticalBrush}"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding Status}" Value="Information">
+                                                    <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
                                 <TextBlock Grid.Column="1" Grid.Row="1"
                                            Text="{Binding Description}" FontSize="12"
                                            Foreground="{DynamicResource TextFillColorSecondaryBrush}"

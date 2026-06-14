@@ -13,7 +13,9 @@ namespace VMCreate
     {
         public string Name => "Sync Timezone";
         public CustomizationPhase Phase => CustomizationPhase.PostBoot;
+        public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 100;
+        public string? ProgressPhaseId => "Sub_SyncTimezone";
 
         public bool IsApplicable(GalleryItem item, VmCustomizations customizations)
             => customizations.SyncTimezone;

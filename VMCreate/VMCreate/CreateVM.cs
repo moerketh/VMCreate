@@ -70,13 +70,20 @@ namespace VMCreate
                 if (needsExtraction)
                 {
                     createVmProgressInfo.Report(new CreateVMProgressInfo { Phase = "Extract" });
-                    await Task.Run(() => _extractor.Extract(filename, _extractPath, cancellationToken, createVmProgressInfo));
-                    _logger.LogInformation("Extracted file to {ExtractPath}", _extractPath);
+
+                    // Determine the final disk directory so we can extract directly there
+                    // and avoid a wasteful temp→destination copy. Use a per-VM subdirectory
+                    // so previous deployments can't lock or collide with this one.
+                    string extractDest = _vmCreator.GetVirtualHardDiskPath(vmSettings.VMName);
+                    _logger.LogInformation("Extracting directly to per-VM VM disk directory: {Path}", extractDest);
+
+                    await Task.Run(() => _extractor.Extract(filename, extractDest, cancellationToken, createVmProgressInfo));
+                    _logger.LogInformation("Extracted file to {ExtractPath}", extractDest);
 
                     // Auto-detect the disk file inside the extracted directory.
                     // Handles nested archives (e.g. OVA inside ZIP) automatically.
                     string diskFile = await Task.Run(() =>
-                        _diskFileDetector.FindDiskFile(_extractPath, cancellationToken, createVmProgressInfo));
+                        _diskFileDetector.FindDiskFile(extractDest, cancellationToken, createVmProgressInfo));
                     _logger.LogInformation("Detected disk file {DiskFile}", diskFile);
 
                     // Create VM using the detected disk file's actual type
@@ -85,7 +92,7 @@ namespace VMCreate
                 }
                 else
                 {
-                    // Create VM
+                    // Create VM — disk file is already in its final location
                     await _vmCreator.CreateVMAsync(vmSettings, vmCustomizations, filename, galleryItem, cancellationToken, createVmProgressInfo);
                     _logger.LogInformation("Successfully created VM {VMName}", vmSettings.VMName);
                 }
@@ -115,11 +122,6 @@ namespace VMCreate
                     _logger.LogDebug("Keeping temporary file {FileName}", filename);
                 }
 
-                if (Directory.Exists(_extractPath))
-                {
-                    Directory.Delete(_extractPath, true);
-                    _logger.LogDebug("Deleted temporary directory {ExtractPath}", _extractPath);
-                }
             }
             catch (Exception ex)
             {

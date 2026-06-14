@@ -15,11 +15,24 @@ namespace VMCreate
 {
     public interface IVmCreator
     {
+        /// <summary>
+        /// Returns the directory where VM disk files should be created.
+        /// Used by the extraction flow to avoid a wasteful temp→destination copy.
+        /// </summary>
+        string GetVirtualHardDiskPath();
+
+        /// <summary>
+        /// Returns the per-VM subdirectory under GetVirtualHardDiskPath() where archives
+        /// and intermediate disk files for this VM should be extracted.
+        /// </summary>
+        string GetVirtualHardDiskPath(string vmName);
+
         Task CreateVMAsync(VmSettings vmSettings, VmCustomizations vmCustomizations, string extractPath, GalleryItem galleryItem, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo> downloadProgressInfo);
     }
 
     public class HyperVVmCreator : IVmCreator
     {
+        private readonly string _defaultVmPath;
         private readonly string _defaultVhdxPath;
         private readonly IMediaHandlerFactory _mediaHandlerFactory;
         private readonly IHyperVManager _hyperVManager;
@@ -31,6 +44,7 @@ namespace VMCreate
         private readonly IGuestDiagnosticsCollector _diagnosticsCollector;
         private readonly IGuestShellFactory _guestShellFactory;
         private readonly ICloningIsoDownloader _cloningIsoDownloader;
+        private readonly IUnattendInjector _unattendInjector;
         private readonly IEnumerable<ICustomizationStep> _customizationSteps;
         private const int OriginalDiskScsiControllerLocation = 1;
         public HyperVVmCreator(
@@ -44,7 +58,8 @@ namespace VMCreate
             IVmShutdownWatcher shutdownWatcher,
             IGuestDiagnosticsCollector diagnosticsCollector,
             IGuestShellFactory guestShellFactory,
-            ICloningIsoDownloader cloningIsoDownloader)
+            ICloningIsoDownloader cloningIsoDownloader,
+            IUnattendInjector unattendInjector)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _mediaHandlerFactory = mediaHandlerFactory ?? throw new ArgumentNullException(nameof(mediaHandlerFactory));
@@ -57,7 +72,90 @@ namespace VMCreate
             _diagnosticsCollector = diagnosticsCollector ?? throw new ArgumentNullException(nameof(diagnosticsCollector));
             _guestShellFactory = guestShellFactory ?? throw new ArgumentNullException(nameof(guestShellFactory));
             _cloningIsoDownloader = cloningIsoDownloader ?? throw new ArgumentNullException(nameof(cloningIsoDownloader));
+            _unattendInjector = unattendInjector ?? throw new ArgumentNullException(nameof(unattendInjector));
+            _defaultVmPath = GetDefaultVirtualMachinePath();
             _defaultVhdxPath = GetDefaultVirtualHardDiskPath();
+        }
+
+        private string GetDefaultVirtualMachinePath()
+        {
+            string[] defaultPaths = new[]
+            {
+                @"C:\ProgramData\Microsoft\Windows\Hyper-V",
+                @"C:\Users\Public\Documents\Hyper-V\Virtual Machines"
+            };
+
+            string[] registryPaths = new[]
+            {
+                @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Virtualization",
+                @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Virtual Machine Manager"
+            };
+
+            string[] valueNames = new[]
+            { "DefaultExternalDataRoot", "DefaultVirtualMachinePath", "VirtualMachinePath" };
+
+            foreach (string regPath in registryPaths)
+            {
+                try
+                {
+                    using (RegistryKey key = Registry.LocalMachine.OpenSubKey(regPath))
+                    {
+                        if (key == null)
+                        {
+                            _logger.LogDebug("Registry key not found: {Key}", regPath);
+                            continue;
+                        }
+
+                        foreach (string valName in valueNames)
+                        {
+                            object rawValue = key.GetValue(valName);
+                            if (rawValue == null)
+                            {
+                                _logger.LogDebug("Value {ValueName} not found under {Key}", valName, regPath);
+                                continue;
+                            }
+
+                            string path = rawValue.ToString();
+                            _logger.LogDebug("Read {ValueName} from {Key}: '{Path}'", valName, regPath, path);
+
+                            if (string.IsNullOrWhiteSpace(path))
+                            {
+                                _logger.LogDebug("Value {ValueName} is empty under {Key}", valName, regPath);
+                                continue;
+                            }
+
+                            char[] trimChars = { '\\', '/' };
+                            path = path.TrimEnd(trimChars);
+
+                            if (Directory.Exists(path))
+                            {
+                                _logger.LogInformation("Using VM path from registry [{Key} > {ValueName}]: {Path}", regPath, valName, path);
+                                return path;
+                            }
+                            else
+                            {
+                                _logger.LogWarning("Registry path does not exist: {Path} (from {Key} > {ValueName})", path, regPath, valName);
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error reading registry key {Key}: {Message}", regPath, ex.Message);
+                }
+            }
+
+            foreach (string fallback in defaultPaths)
+            {
+                if (Directory.Exists(fallback))
+                {
+                    _logger.LogInformation("Using default VM path: {Path}", fallback);
+                    return fallback;
+                }
+            }
+
+            _logger.LogError("No valid VM path found in registry or default locations. Using last fallback: {Path}", defaultPaths[0]);
+            return defaultPaths[0];
         }
 
         private string GetDefaultVirtualHardDiskPath()
@@ -132,6 +230,19 @@ namespace VMCreate
             return null;
         }
 
+        public string GetVirtualHardDiskPath() => _defaultVhdxPath;
+
+        /// <summary>
+        /// Returns a per-VM subdirectory for extracting archives and intermediate disk files.
+        /// This avoids collisions with disk files still in use by a previously created VM.
+        /// </summary>
+        public string GetVirtualHardDiskPath(string vmName)
+        {
+            if (string.IsNullOrWhiteSpace(vmName))
+                throw new ArgumentException("VM name is required.", nameof(vmName));
+            return Path.Combine(_defaultVhdxPath, vmName);
+        }
+
         public async Task CreateVMAsync(VmSettings vmSettings, VmCustomizations vmCustomizations, string sourceFile, GalleryItem item, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo> createVMProgressInfo)
         {
             bool vmCreated = false;
@@ -176,7 +287,7 @@ namespace VMCreate
                     createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM" });
 
                     createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_CreateVMSkeleton" });
-                    await _hyperVManager.CreateVMAsync(vmSettings, _defaultVhdxPath, targetGeneration, cancellationToken);
+                    await _hyperVManager.CreateVMAsync(vmSettings, _defaultVmPath, targetGeneration, cancellationToken);
                     vmCreated = true;
                     await _hyperVManager.SetVMLoginNotes(vmSettings, item.InitialUsername, item.InitialPassword, cancellationToken);
 
@@ -186,7 +297,13 @@ namespace VMCreate
                     createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_ConfigureHardware" });
                     await _hyperVManager.SetCpuCount(vmSettings, cancellationToken);
                     await _hyperVManager.DisableDynamicMemory(vmSettings, cancellationToken);
+
+                    // Use the SecureBootTemplate from the GalleryItem if specified
+                    // (e.g. "MicrosoftWindows" for Windows VMs), otherwise use the default
+                    if (!string.IsNullOrEmpty(item.SecureBootTemplate))
+                        vmSettings.SecureBootTemplate = item.SecureBootTemplate;
                     await _hyperVManager.SetSecureBoot(vmSettings, cancellationToken);
+
                     if (vmCustomizations.EnableIntegrationServices)
                         await _hyperVManager.EnableGuestServices(vmSettings, cancellationToken);
 
@@ -197,6 +314,29 @@ namespace VMCreate
                     // Attach the ISO as a DVD drive and boot from it
                     createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_AttachBootDvd" });
                     await _hyperVManager.AddBootDvd(vmSettings, mediaPath, cancellationToken);
+
+                    // For Windows ISOs, create and attach an unattend.xml ISO for
+                    // automated installation (no interactive setup required).
+                    string unattendIsoPath = null;
+                    if (item.IsWindows)
+                    {
+                        _logger.LogInformation("Creating unattend.xml ISO for automated Windows installation on VM {VMName}", vmSettings.VMName);
+                        unattendIsoPath = Path.Combine(_defaultVhdxPath, $"{vmSettings.VMName}_unattend.iso");
+                        try
+                        {
+                            UnattendFloppyBuilder.BuildUnattendIsoFromContent(
+                                unattendIsoPath,
+                                File.ReadAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Unattend", "autounattend.xml")),
+                                _logger);
+                            await _hyperVManager.AddBootDvd(vmSettings, unattendIsoPath, cancellationToken);
+                            _logger.LogInformation("Attached unattend.xml ISO to VM {VMName}", vmSettings.VMName);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to create unattend.xml ISO for VM {VMName} — Windows installation will require manual input", vmSettings.VMName);
+                            unattendIsoPath = null;
+                        }
+                    }
 
                     createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_SetBootOrder" });
                     await _hyperVManager.SetFirstBootToDvd(vmSettings, cancellationToken);
@@ -213,15 +353,37 @@ namespace VMCreate
                     if (vmCustomizations.EnableIntegrationServices)
                         await _hyperVManager.SetEnhancedSession(vmSettings, cancellationToken);
 
-                    // ISO flow is done — the user completes the installation interactively.
+                    // ── Windows ISO: post-boot customization via PowerShell Direct ──
+                    // For Windows VMs, wait for the unattended installation to complete,
+                    // then run post-boot customization steps using PowerShell Direct.
+                    if (item.IsWindows)
+                        await RunWindowsPostBootCustomizationAsync(vmSettings, item, vmCustomizations, createVMProgressInfo, cancellationToken);
+
+                    // Clean up unattend ISO if we created one
+                    if (unattendIsoPath != null && File.Exists(unattendIsoPath))
+                    {
+                        try
+                        {
+                            // Detach the unattend DVD first
+                            await _hyperVManager.RemoveBootDvd(vmSettings, unattendIsoPath, cancellationToken);
+                            File.Delete(unattendIsoPath);
+                            _logger.LogInformation("Cleaned up unattend ISO for VM {VMName}", vmSettings.VMName);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to clean up unattend ISO for VM {VMName}", vmSettings.VMName);
+                        }
+                    }
+
+                    // ISO flow is done — the user completes the installation interactively (Linux)
+                    // or the unattended installation + post-boot steps are done (Windows).
                     return;
                 }
 
                 // ── Disk-image flow (VMDK / QCOW2 / VHDX) ────────────────────
 
                 // ── Native Hyper-V image (e.g. Windows 11 dev environment) ────
-                // These images are pre-built for Hyper-V and need no conversion,
-                // no customization ISO, and no post-boot Linux steps.
+                // These images are pre-built for Hyper-V and need no conversion.
                 if (item.IsNativeHyperV)
                 {
                     int detectedGen = mediaHandler.VmGeneration;
@@ -229,13 +391,16 @@ namespace VMCreate
 
                     // Windows native images need the Windows template; Linux images
                     // (SecureBoot = "false") keep the default UEFI CA template.
-                    if (!string.Equals(item.SecureBoot, "false", StringComparison.OrdinalIgnoreCase))
+                    // GalleryItem.SecureBootTemplate takes precedence if set.
+                    if (!string.IsNullOrEmpty(item.SecureBootTemplate))
+                        vmSettings.SecureBootTemplate = item.SecureBootTemplate;
+                    else if (!string.Equals(item.SecureBoot, "false", StringComparison.OrdinalIgnoreCase))
                         vmSettings.SecureBootTemplate = "MicrosoftWindows";
 
                     createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", DetectedGeneration = detectedGen.ToString() });
 
                     createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_CreateVMSkeleton" });
-                    await _hyperVManager.CreateVMAsync(vmSettings, _defaultVhdxPath, targetGenNative, cancellationToken);
+                    await _hyperVManager.CreateVMAsync(vmSettings, _defaultVmPath, targetGenNative, cancellationToken);
                     vmCreated = true;
                     await _hyperVManager.SetVMLoginNotes(vmSettings, item.InitialUsername, item.InitialPassword, cancellationToken);
 
@@ -250,6 +415,31 @@ namespace VMCreate
                         await _hyperVManager.EnableGuestServices(vmSettings, cancellationToken);
 
                     createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_AttachDisk" });
+
+                    // ── Windows native Hyper-V: the "flare" account is provisioned during OOBE by
+                    // the unattend.xml injected into the VHDX below. Mount-VHD requires a full
+                    // Administrator token, so the injection runs in a one-shot elevated child
+                    // process (one UAC prompt). Microsoft dev VHDX files are often read-only —
+                    // clear the attribute (a plain, non-admin file operation) so the guest can
+                    // boot and write to its own disk, and so Mount-VHD can open the VHDX read-write.
+                    if (item.IsWindows)
+                    {
+                        var vhdxInfo = new FileInfo(mediaPath);
+                        if (vhdxInfo.IsReadOnly)
+                        {
+                            _logger.LogInformation("Clearing read-only attribute on VHDX for VM {VMName}: {VhdxPath}", vmSettings.VMName, mediaPath);
+                            vhdxInfo.IsReadOnly = false;
+                        }
+
+                        // Inject unattend.xml into the VHDX (elevated child process).
+                        // This provisions the flare account, auto-logon, and RDP so that
+                        // OOBE runs unattended and PowerShell Direct can connect afterwards.
+                        bool injected = await _unattendInjector.InjectAsync(mediaPath, cancellationToken);
+                        if (!injected)
+                            throw new InvalidOperationException(
+                                "Administrator approval is required to prepare the Windows image (unattend injection). Deployment cancelled.");
+                    }
+
                     await _hyperVManager.AddExistingHardDrive(vmSettings, mediaPath, cancellationToken);
 
                     createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_SetBootOrder" });
@@ -267,9 +457,16 @@ namespace VMCreate
                     if (vmCustomizations.EnableIntegrationServices)
                         await _hyperVManager.SetEnhancedSession(vmSettings, cancellationToken);
 
-                    // Native Hyper-V flow is done — no customization or post-boot needed.
+                    // ── Windows native Hyper-V: post-boot customization via PowerShell Direct ──
+                    // For Windows VMs (e.g. FLARE VM), run post-boot customization steps
+                    // using PowerShell Direct after the VM boots.
+                    if (item.IsWindows)
+                        await RunWindowsPostBootCustomizationAsync(vmSettings, item, vmCustomizations, createVMProgressInfo, cancellationToken);
+
+                    // Native Hyper-V flow is done.
                     return;
                 }
+
 
                 // Await the parallel cloning ISO download (started before PrepareMediaAsync)
                 await ensureIsoTask;
@@ -281,7 +478,7 @@ namespace VMCreate
                 createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", DetectedGeneration = detectedGeneration.ToString() });
 
                 createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_CreateVMSkeleton" });
-                await _hyperVManager.CreateVMAsync(vmSettings, _defaultVhdxPath, targetGen, cancellationToken);
+                await _hyperVManager.CreateVMAsync(vmSettings, _defaultVmPath, targetGen, cancellationToken);
                 vmCreated = true;
                 await _hyperVManager.SetVMLoginNotes(vmSettings, item.InitialUsername, item.InitialPassword, cancellationToken);
 
@@ -359,7 +556,7 @@ namespace VMCreate
                 await _hyperVManager.StartVM(vmSettings, cancellationToken);
 
                 bool needsPostBoot = _customizationSteps
-                    .Any(s => s.Phase == CustomizationPhase.PostBoot && s.IsApplicable(item, vmCustomizations));
+                    .Any(s => s.Phase == CustomizationPhase.PostBoot && s.Platform == StepPlatform.Linux && s.IsApplicable(item, vmCustomizations));
                 bool needsIsoBootCycle = detectedGeneration == 1
                     || (detectedGeneration == 2 && (vmCustomizations.ConfigureXrdp || needsPostBoot));
 
@@ -536,7 +733,7 @@ namespace VMCreate
 
                 // ── Post-boot: collect autorun log + run step pipeline ────
                 var postBootSteps = _customizationSteps
-                    .Where(s => s.Phase == CustomizationPhase.PostBoot && s.IsApplicable(item, vmCustomizations))
+                    .Where(s => s.Phase == CustomizationPhase.PostBoot && s.Platform == StepPlatform.Linux && s.IsApplicable(item, vmCustomizations))
                     .OrderBy(s => s.Order)
                     .ToList();
 
@@ -620,15 +817,89 @@ namespace VMCreate
             catch (OperationCanceledException)
             {
                 _logger.LogWarning("VM creation cancelled for {VMName} — cleaning up", vmSettings.VMName);
-                await CleanupFailedVmAsync(vmSettings, vmCreated);
+                if (!System.Diagnostics.Debugger.IsAttached)
+                    await CleanupFailedVmAsync(vmSettings, vmCreated);
+                else
+                    _logger.LogWarning("Debug mode: skipping cleanup for {VMName} — VM preserved for investigation", vmSettings.VMName);
                 throw;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error creating VM: {Message}", ex.Message);
-                await CleanupFailedVmAsync(vmSettings, vmCreated);
+                if (!System.Diagnostics.Debugger.IsAttached)
+                    await CleanupFailedVmAsync(vmSettings, vmCreated);
+                else
+                    _logger.LogWarning("Debug mode: skipping cleanup for {VMName} — VM preserved for investigation", vmSettings.VMName);
                 throw;
             }
+        }
+
+        /// <summary>
+        /// Runs post-boot customization for a Windows VM over PowerShell Direct: waits for the
+        /// guest to become reachable, then executes the applicable
+        /// <see cref="CustomizationPhase.PostBoot"/> steps in order, reconnecting
+        /// after any reboot a step triggers. Shared by both the Windows ISO and native-VHDX flows.
+        /// No-op unless there is post-boot work to do.
+        /// </summary>
+        private async Task RunWindowsPostBootCustomizationAsync(
+            VmSettings vmSettings, GalleryItem item, VmCustomizations vmCustomizations,
+            IProgress<CreateVMProgressInfo> createVMProgressInfo, CancellationToken cancellationToken)
+        {
+            bool needsPostBoot = _customizationSteps
+                .Any(s => s.Phase == CustomizationPhase.PostBoot && s.Platform == StepPlatform.Windows && s.IsApplicable(item, vmCustomizations));
+
+            if (!needsPostBoot)
+                return;
+
+            createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "PostBoot" });
+
+            // Wait for the VM to finish setup/OOBE and become accessible.
+            _logger.LogInformation("Waiting for Windows VM {VMName} to complete setup and become accessible...", vmSettings.VMName);
+            var shell = _guestShellFactory.CreateForWindows(
+                vmSettings.VMName,
+                item.InitialUsername ?? "flare",
+                item.InitialPassword ?? "flare");
+
+            createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "PostBoot", SubStep = "Sub_WaitForSsh" });
+            await shell.WaitForReadyAsync(cancellationToken);
+
+            // Run post-boot customization steps
+            var postBootSteps = _customizationSteps
+                .Where(s => s.Phase == CustomizationPhase.PostBoot && s.Platform == StepPlatform.Windows && s.IsApplicable(item, vmCustomizations))
+                .OrderBy(s => s.Order)
+                .ToList();
+
+            if (postBootSteps.Count == 0)
+                return;
+
+            int completed = 0;
+            foreach (var step in postBootSteps)
+            {
+                _logger.LogInformation("Running post-boot step: {StepName} (order {Order})", step.Name, step.Order);
+                createVMProgressInfo.Report(new CreateVMProgressInfo
+                {
+                    Phase = "PostBoot",
+                    ProgressPercentage = (int)((double)completed / postBootSteps.Count * 100),
+                    StepName = step.Name
+                });
+
+                await step.ExecuteAsync(shell, item, vmCustomizations, _logger, cancellationToken);
+
+                // After each step, the VM may have rebooted. Re-establish the shell connection.
+                try
+                {
+                    await shell.WaitForReadyAsync(cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "VM {VMName} may not be ready after step {StepName}, attempting to continue", vmSettings.VMName, step.Name);
+                }
+
+                completed++;
+                _logger.LogInformation("Completed post-boot step: {StepName}", step.Name);
+            }
+
+            createVMProgressInfo.Report(new CreateVMProgressInfo { Phase = "PostBoot", ProgressPercentage = 100 });
         }
 
         /// <summary>
@@ -662,6 +933,13 @@ namespace VMCreate
                     try { await _hyperVManager.RemoveVMAsync(vmName, CancellationToken.None); }
                     catch (Exception ex) { _logger.LogWarning(ex, "Failed to remove VM {VMName} during cleanup", vmName); }
 
+                    // Dismount any VHDX files that may still be mounted (e.g. from a
+                    // failed UnattendInjector run) so we can delete them.
+                    foreach (string vhdxPath in vhdxPaths)
+                    {
+                        TryDismountVhdx(vhdxPath);
+                    }
+
                     foreach (string vhdxPath in vhdxPaths)
                     {
                         try
@@ -679,6 +957,7 @@ namespace VMCreate
                 // Delete the converted VHDX that may exist from PrepareMediaAsync
                 // (not yet attached to a VM if vmCreated is false)
                 string convertedVhdx = Path.Combine(_defaultVhdxPath, vmName + ".vhdx");
+                TryDismountVhdx(convertedVhdx);
                 try
                 {
                     if (File.Exists(convertedVhdx))
@@ -690,7 +969,7 @@ namespace VMCreate
                 catch (Exception ex) { _logger.LogWarning(ex, "Cleanup: failed to delete {Path}", convertedVhdx); }
 
                 // Remove the VM configuration folder Hyper-V creates
-                string vmConfigFolder = Path.Combine(_defaultVhdxPath, vmName);
+                string vmConfigFolder = Path.Combine(_defaultVmPath, vmName);
                 try
                 {
                     if (Directory.Exists(vmConfigFolder))
@@ -704,6 +983,34 @@ namespace VMCreate
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Cleanup encountered an unexpected error for {VMName}", vmName);
+            }
+        }
+
+
+
+        /// <summary>
+        /// Best-effort Dismount-VHD for a VHDX file. Used during cleanup to
+        /// release files that may still be mounted from a failed UnattendInjector
+        /// run. Errors are logged and swallowed — the VHDX may not be mounted.
+        /// </summary>
+        private void TryDismountVhdx(string vhdxPath)
+        {
+            try
+            {
+                using var ps = System.Management.Automation.PowerShell.Create();
+                ps.AddCommand("Import-Module").AddParameter("Name", "Hyper-V").Invoke();
+                ps.Commands.Clear();
+                ps.AddCommand("Dismount-VHD").AddParameter("Path", vhdxPath);
+                ps.Invoke();
+                if (ps.HadErrors)
+                    _logger.LogDebug("Dismount-VHD reported errors (VHDX may not have been mounted): {Error}",
+                        string.Join("; ", ps.Streams.Error.Select(e => e.ToString())));
+                else
+                    _logger.LogInformation("Dismounted VHDX during cleanup: {VhdxPath}", vhdxPath);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Dismount-VHD threw (VHDX may not have been mounted)");
             }
         }
 
@@ -760,7 +1067,7 @@ namespace VMCreate
                 }
 
                 // Also try to remove the VM's configuration folder (Hyper-V creates a folder under the VHD path)
-                string vmConfigFolder = Path.Combine(_defaultVhdxPath, existingVmName);
+                string vmConfigFolder = Path.Combine(_defaultVmPath, existingVmName);
                 try
                 {
                     if (Directory.Exists(vmConfigFolder))

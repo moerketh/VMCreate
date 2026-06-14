@@ -90,10 +90,10 @@ namespace VMCreate
         {
             var page = _mainFrame.Content;
 
-            // Hide the Customize step for flows that skip it (ISO installers, native Hyper-V).
+            // Hide the Customize step only for flows that skip it (pre-built native-Hyper-V Linux
+            // images, Linux ISO installers). Windows images and items with distribution options show it.
             bool skipCustomize = _wizardData?.SelectedItem != null
-                && (_wizardData.SelectedItem.IsNativeHyperV
-                    || string.Equals(_wizardData.SelectedItem.FileType, "ISO", StringComparison.OrdinalIgnoreCase));
+                && !WizardFlow.ShowsCustomizePage(_wizardData.SelectedItem, _configurableSteps);
 
             Step3Panel.Visibility = skipCustomize ? Visibility.Collapsed : Visibility.Visible;
             Step3Separator.Visibility = skipCustomize ? Visibility.Collapsed : Visibility.Visible;
@@ -229,6 +229,7 @@ namespace VMCreate
                 if (sender is DeployPage)
                 {
                     _wizardData = new WizardData { GalleryItems = _galleryItems, DemoMode = App.DemoMode };
+                    _wizardData.ResetForNewWizard();
                     var firstPage = new SelectImagePage(_wizardData, _htbApiClient, _configurableSteps, _loggerFactory);
                     firstPage.WizardCompleted += WizardPage_Completed;
                     _mainFrame.Navigate(firstPage);

@@ -11,3 +11,4 @@ using System.Windows;
 )]
 
 [assembly: InternalsVisibleTo("VMCreate.Tests")]
+[assembly: InternalsVisibleTo("VMCreate.CLI")]

@@ -127,8 +127,9 @@ namespace VMCreate
                 {
                     if (obj is not GalleryItem item) return false;
 
-                    // Hide ISO installers unless the user toggled them on
-                    if (hideIso && !item.IsPreInstalled) return false;
+                    // Hide ISO installers unless the user toggled them on,
+                    // but always show recommended items regardless.
+                    if (hideIso && !item.IsPreInstalled && !item.IsRecommended) return false;
 
                     // Text search across name, publisher and description
                     if (hasTextFilter)

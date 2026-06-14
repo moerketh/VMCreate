@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<unattend xmlns="urn:schemas-microsoft-com:unattend"
+          xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <!-- Unattend.xml for injecting into pre-built Windows VHDX images (e.g. Microsoft dev VMs).
+       This file is placed in %WINDIR%\Panther\Unattend\Unattend.xml inside the VHDX.
+       It contains only the oobeSystem pass since the windowsPE pass is not processed
+       during OOBE on an existing Windows installation.
+       Priority in Windows answer file search order: this location (priority 2) takes
+       precedence over removable media (priority 5). -->
+  <settings pass="oobeSystem">
+    <component name="Microsoft-Windows-International-Core"
+               processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35"
+               language="neutral"
+               versionScope="nonSxS">
+      <InputLocale>en-US</InputLocale>
+      <SystemLocale>en-US</SystemLocale>
+      <UILanguage>en-US</UILanguage>
+      <UserLocale>en-US</UserLocale>
+    </component>
+    <component name="Microsoft-Windows-Shell-Setup"
+               processorArchitecture="amd64"
+               publicKeyToken="31bf3856ad364e35"
+               language="neutral"
+               versionScope="nonSxS">
+      <OOBE>
+        <HideEULAPage>true</HideEULAPage>
+        <HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>
+        <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+        <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+        <NetworkLocation>Work</NetworkLocation>
+        <ProtectYourPC>3</ProtectYourPC>
+        <VMModeOptimizations>
+          <SkipAdministratorProfileRemoval>true</SkipAdministratorProfileRemoval>
+          <SkipNotifyUILanguageChange>true</SkipNotifyUILanguageChange>
+          <SkipWinREInitialization>true</SkipWinREInitialization>
+        </VMModeOptimizations>
+      </OOBE>
+      <UserAccounts>
+        <LocalAccounts>
+          <LocalAccount wcm:action="add">
+            <Name>flare</Name>
+            <Group>Administrators</Group>
+            <Password>
+              <Value>flare</Value>
+              <PlainText>true</PlainText>
+            </Password>
+            <DisplayName>flare</DisplayName>
+            <Description>FLARE VM administrator account</Description>
+          </LocalAccount>
+        </LocalAccounts>
+        <AdministratorPassword>
+          <Value>flare</Value>
+          <PlainText>true</PlainText>
+        </AdministratorPassword>
+      </UserAccounts>
+      <AutoLogon>
+        <Username>flare</Username>
+        <Password>
+          <Value>flare</Value>
+          <PlainText>true</PlainText>
+        </Password>
+        <Enabled>true</Enabled>
+        <LogonCount>1</LogonCount>
+      </AutoLogon>
+      <FirstLogonCommands>
+        <!-- Enable PowerShell remoting for PowerShell Direct access -->
+        <SynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <CommandLine>powershell -ExecutionPolicy Bypass -Command "Enable-PSRemoting -Force -SkipNetworkProfileCheck; Set-Item WSMan:\localhost\Service\Auth\Basic -Value $true; Set-Item WSMan:\localhost\Service\AllowUnencrypted -Value $true"</CommandLine>
+          <Description>Enable PowerShell Remoting for PowerShell Direct</Description>
+        </SynchronousCommand>
+        <!-- Enable RDP -->
+        <SynchronousCommand wcm:action="add">
+          <Order>2</Order>
+          <CommandLine>powershell -ExecutionPolicy Bypass -Command "Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name 'fDenyTSConnections' -Value 0; Enable-NetFirewallRule -DisplayGroup 'Remote Desktop'"</CommandLine>
+          <Description>Enable Remote Desktop</Description>
+        </SynchronousCommand>
+        <!-- Set power plan to High Performance -->
+        <SynchronousCommand wcm:action="add">
+          <Order>3</Order>
+          <CommandLine>powershell -ExecutionPolicy Bypass -Command "powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c"</CommandLine>
+          <Description>Set High Performance power plan</Description>
+        </SynchronousCommand>
+        <!-- Re-arm Windows evaluation license silently via WMI (extends 90-day trial) -->
+        <SynchronousCommand wcm:action="add">
+          <Order>4</Order>
+          <CommandLine>powershell -ExecutionPolicy Bypass -Command "$svc = Get-WmiObject -Query 'SELECT * FROM SoftwareLicensingService'; $result = $svc.RearmWindows(); if ($result -eq 0) { Write-Host 'License rearmed successfully'; shutdown /r /t 5 /f /c ''License rearmed'' } else { Write-Host \"Rearm failed with code: $result\" }"</CommandLine>
+          <Description>Re-arm Windows evaluation license silently via WMI and reboot</Description>
+        </SynchronousCommand>
+      </FirstLogonCommands>
+    </component>
+  </settings>
+</unattend>

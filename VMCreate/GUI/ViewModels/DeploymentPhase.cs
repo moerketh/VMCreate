@@ -8,7 +8,8 @@ namespace VMCreate
         Active,
         Completed,
         Failed,
-        Skipped
+        Skipped,
+        Information
     }
 
     /// <summary>
@@ -59,6 +60,7 @@ namespace VMCreate
             DeploymentPhaseStatus.Completed => SymbolRegular.CheckmarkCircle24,
             DeploymentPhaseStatus.Failed    => SymbolRegular.ErrorCircle24,
             DeploymentPhaseStatus.Skipped   => SymbolRegular.SubtractCircle24,
+            DeploymentPhaseStatus.Information => SymbolRegular.Info24,
             _                               => Icon
         };
 

@@ -40,15 +40,47 @@ namespace VMCreate
         {
             _ps.Commands.Clear();
             _ps.Streams.Error.Clear();
+
+            long memBytes = vmSettings.MemoryInMB * 1024L * 1024L;
+            _logger.LogInformation(
+                "Invoking New-VM -Name '{Name}' -Path '{Path}' -Generation {Gen} -MemoryStartupBytes {Mem} -NoVHD",
+                vmSettings.VMName, vmPath, targetGeneration, memBytes);
+
             _ps.AddCommand("New-VM")
                 .AddParameter("Name", vmSettings.VMName)
-                .AddParameter("MemoryStartupBytes", vmSettings.MemoryInMB * 1024L * 1024L)
+                .AddParameter("MemoryStartupBytes", memBytes)
                 .AddParameter("Path", vmPath)
                 .AddParameter("Generation", targetGeneration)
                 .AddParameter("NoVHD", true);
-            await Task.Run(() => _ps.Invoke(), cancellationToken);
-            _logger.LogInformation("Created Gen 2 VM: {VMName}", vmSettings.VMName);
-            if (_ps.HadErrors) throw new Exception(string.Join("; ", _ps.Streams.Error.Select(e => e.ToString())));
+
+            var results = await Task.Run(() => _ps.Invoke(), cancellationToken);
+            _logger.LogInformation("New-VM invoked for {VMName}: {ResultCount} result(s), HadErrors={HadErrors}",
+                vmSettings.VMName, results.Count, _ps.HadErrors);
+
+            if (_ps.HadErrors)
+            {
+                var errors = _ps.Streams.Error.Select(e =>
+                    $"[Category={e.CategoryInfo?.Category}, Reason={e.CategoryInfo?.Reason}, " +
+                    $"Id={e.FullyQualifiedErrorId}, Target={e.TargetObject}, Message={e.Exception?.Message}]");
+                string errorDetail = string.Join("; ", errors);
+                _logger.LogError("New-VM returned errors for {VMName}: {Errors}", vmSettings.VMName, errorDetail);
+
+                // Check if the VM was actually created despite the error stream
+                _ps.Commands.Clear();
+                _ps.AddCommand("Get-VM").AddParameter("Name", vmSettings.VMName);
+                var existing = await Task.Run(() => _ps.Invoke(), cancellationToken);
+                bool vmExists = existing.Count > 0 && !_ps.HadErrors;
+                _logger.LogInformation("Post-New-VM existence check for {VMName}: exists={Exists}", vmSettings.VMName, vmExists);
+
+                if (vmExists)
+                {
+                    _logger.LogWarning("VM {VMName} exists despite New-VM error stream — continuing with warning", vmSettings.VMName);
+                }
+                else
+                {
+                    throw new Exception($"Failed to create a new virtual machine: {errorDetail}");
+                }
+            }
 
             // Disable automatic checkpoints — they create AVHDX differencing disks on
             // every VM start, which breaks SetFirstBootToHardDrive (firmware can't boot

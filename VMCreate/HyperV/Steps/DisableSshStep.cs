@@ -14,7 +14,9 @@ namespace VMCreate
     {
         public string Name => "Restore SSH State";
         public CustomizationPhase Phase => CustomizationPhase.PostBoot;
+        public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 900;
+        public string? ProgressPhaseId => "Sub_RestoreSsh";
 
         public bool IsApplicable(GalleryItem item, VmCustomizations customizations) => true;
 

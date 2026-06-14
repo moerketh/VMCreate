@@ -28,15 +28,14 @@ namespace VMCreate
         /// <summary>
         /// When true (default), enable Hyper-V Guest Service Interface and
         /// Enhanced Session Mode (clipboard, drive redirection, IP discovery).
-        /// Set to false for maximum VM isolation (e.g. malware analysis).
         /// </summary>
         public bool EnableIntegrationServices { get; set; } = true;
 
         /// <summary>
-        /// Per-distribution options populated by <see cref="IConfigurableCustomizationStep"/> UI cards.
-        /// Keys are step names; values indicate whether the user enabled the option.
+        /// Per-distribution options selected by the user on the customization page.
+        /// Order is preserved so the deployment UI can show cards in the intended sequence.
         /// </summary>
-        public Dictionary<string, bool> DistributionOptions { get; set; } = new();
+        public List<DistributionOptionSelection> DistributionOptions { get; set; } = new();
 
         /// <summary>
         /// Returns true if any pre-boot customizations are enabled
@@ -49,6 +48,6 @@ namespace VMCreate
         /// (i.e. options that require SSH into the running VM).
         /// </summary>
         public bool HasPostBootCustomizations =>
-            ConfigureHtbVpn || SyncTimezone || DistributionOptions.Any(kv => kv.Value);
+            ConfigureHtbVpn || SyncTimezone || DistributionOptions.Any(o => o.IsEnabled);
     }
 }
