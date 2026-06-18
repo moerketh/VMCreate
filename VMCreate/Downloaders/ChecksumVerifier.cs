@@ -54,7 +54,7 @@ namespace VMCreate
 
             progress?.Report(new CreateVMProgressInfo
             {
-                Phase = "Checksum",
+                Phase = VmDeploymentPhase.None,
                 ProgressPercentage = 0
             });
 
@@ -79,7 +79,7 @@ namespace VMCreate
 
             progress?.Report(new CreateVMProgressInfo
             {
-                Phase = "Checksum",
+                Phase = VmDeploymentPhase.None,
                 ProgressPercentage = 10
             });
 
@@ -87,7 +87,7 @@ namespace VMCreate
 
             progress?.Report(new CreateVMProgressInfo
             {
-                Phase = "Checksum",
+                Phase = VmDeploymentPhase.None,
                 ProgressPercentage = 100
             });
 
@@ -168,7 +168,7 @@ namespace VMCreate
 
             progress?.Report(new CreateVMProgressInfo
             {
-                Phase = "Checksum",
+                Phase = VmDeploymentPhase.None,
                 ProgressPercentage = 0
             });
 
@@ -179,7 +179,7 @@ namespace VMCreate
 
             progress?.Report(new CreateVMProgressInfo
             {
-                Phase = "Checksum",
+                Phase = VmDeploymentPhase.None,
                 ProgressPercentage = 100
             });
 

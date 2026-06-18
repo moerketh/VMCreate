@@ -17,7 +17,7 @@ namespace VMCreate.HyperV.VmCreation
         string ResolveHostDnsServers();
     }
 
-    internal class HostNetworkService : IHostNetworkService
+    public class HostNetworkService : IHostNetworkService
     {
         public string ResolveHostDnsServers()
         {

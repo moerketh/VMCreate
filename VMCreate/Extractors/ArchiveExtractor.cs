@@ -209,7 +209,7 @@ namespace VMCreate
 
                                         progressReportInfo.Report(new CreateVMProgressInfo
                                         {
-                                            Phase = "Extracting Archive...",
+                                            Phase = VmDeploymentPhase.Extract,
                                             URI = destinationPath,
                                             DownloadSpeed = -1,
                                             ProgressPercentage = overallPct
@@ -240,7 +240,7 @@ namespace VMCreate
                     // Report 100% on completion
                     progressReportInfo.Report(new CreateVMProgressInfo
                     {
-                        Phase = "Extracting Archive...",
+                        Phase = VmDeploymentPhase.Extract,
                         URI = extractPath,
                         DownloadSpeed = -1,
                         ProgressPercentage = 100

@@ -18,7 +18,7 @@ namespace VMCreate
 
         public void UpdateProgress(CreateVMProgressInfo createVMProgressInfo)
         {
-            StatusText.Text = createVMProgressInfo.Phase;
+            StatusText.Text = createVMProgressInfo.Phase.ToString();
             LinkText.Text = createVMProgressInfo.URI;
             ProgressBar.IsIndeterminate = false;
             ProgressBar.Value = Math.Min(createVMProgressInfo.ProgressPercentage, 100);

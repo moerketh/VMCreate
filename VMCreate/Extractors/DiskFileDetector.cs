@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using Microsoft.Extensions.Logging;
+using VMCreate.MediaHandlers;
 
 namespace VMCreate
 {
@@ -78,20 +79,20 @@ namespace VMCreate
         /// <summary>
         /// Determines the media type from an actual file path (by extension).
         /// </summary>
-        public static string DetectFileType(string filePath)
+        public static DiskImageFormat DetectFileType(string filePath)
         {
             if (string.IsNullOrEmpty(filePath))
-                return "Unknown";
+                return DiskImageFormat.Other;
 
             string ext = Path.GetExtension(filePath).ToLowerInvariant();
             return ext switch
             {
-                ".vmdk" => "VMDK",
-                ".qcow2" => "QCOW2",
-                ".vhdx" => "VHDX",
-                ".vhd" => "VHD",
-                ".iso" => "ISO",
-                _ => "Other"
+                ".vmdk" => DiskImageFormat.Vmdk,
+                ".qcow2" => DiskImageFormat.Qcow2,
+                ".vhdx" => DiskImageFormat.Vhdx,
+                ".vhd" => DiskImageFormat.Vhd,
+                ".iso" => DiskImageFormat.Iso,
+                _ => DiskImageFormat.Other
             };
         }
 

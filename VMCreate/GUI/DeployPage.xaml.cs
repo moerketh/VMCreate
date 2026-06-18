@@ -18,12 +18,9 @@ namespace VMCreate
         private readonly WizardData _wizardData;
         private readonly CreateVM _createVM;
         private readonly ILogger _logger;
-        private readonly IReadOnlyDictionary<string, IConfigurableCustomizationStep> _configurableSteps;
+        private readonly IDeploymentProgressPresenter _presenter;
         private CancellationTokenSource _cts;
-        private string _activePhaseId;
-        private string _activeSubStepId;
         private bool _autoScrollEnabled = true;
-        private readonly IReadOnlyDictionary<string, ICustomizationStep> _allSteps;
         private bool _isScrollingProgrammatically;
 
         public DeployPage(WizardData wizardData, CreateVM createVM, ILoggerFactory loggerFactory, IEnumerable<IConfigurableCustomizationStep> configurableSteps, IReadOnlyDictionary<string, ICustomizationStep> allSteps)
@@ -33,10 +30,14 @@ namespace VMCreate
             if (loggerFactory == null) throw new ArgumentNullException(nameof(loggerFactory));
 
             _logger = loggerFactory.CreateLogger<DeployPage>();
-            _configurableSteps = (configurableSteps ?? Enumerable.Empty<IConfigurableCustomizationStep>())
-                .ToDictionary(s => s.Name, StringComparer.OrdinalIgnoreCase);
-            _allSteps = allSteps ?? throw new ArgumentNullException(nameof(allSteps));
             _viewModel = new DeployPageViewModel(wizardData, _logger, configurableSteps);
+            _presenter = new DeploymentProgressPresenter(
+                new DeploymentProgressViewModelAdapter(_viewModel),
+                new WpfDispatcher(),
+                wizardData.SelectedItem,
+                wizardData.Customizations,
+                allSteps,
+                _logger);
 
             InitializeComponent();
             DataContext = _viewModel;
@@ -57,10 +58,6 @@ namespace VMCreate
             };
         }
 
-        /// <summary>
-        /// Cancels any running deployment and disposes resources.
-        /// Called when the page is unloaded (e.g. user navigated away).
-        /// </summary>
         private void Cleanup()
         {
             if (_cts != null && !_cts.IsCancellationRequested)
@@ -86,354 +83,100 @@ namespace VMCreate
             var vmSettings = _wizardData.Settings;
             var vmCustomizations = _wizardData.Customizations;
 
-            // Validation (same guards as the old CreateVMAsync)
             if (galleryItem == null)
             {
-                _viewModel.ErrorMessage = "No gallery item selected.";
-                _viewModel.HasFailed = true;
-                _viewModel.IsDeploying = false;
+                SetError("No gallery item selected.");
                 return;
             }
             if (string.IsNullOrEmpty(vmSettings.VMName))
             {
-                _viewModel.ErrorMessage = "VM Name is required.";
-                _viewModel.HasFailed = true;
-                _viewModel.IsDeploying = false;
+                SetError("VM Name is required.");
                 return;
             }
             if (string.IsNullOrEmpty(galleryItem.DiskUri) || !galleryItem.DiskUri.StartsWith("http"))
             {
-                _viewModel.ErrorMessage = $"Invalid disk URI: {galleryItem.DiskUri}";
-                _viewModel.HasFailed = true;
-                _viewModel.IsDeploying = false;
+                SetError($"Invalid disk URI: {galleryItem.DiskUri}");
                 return;
             }
 
-            // Append timestamp once, just before creation
-            vmSettings.VMName = $"{vmSettings.VMName}_{DateTime.Now:yyyyMMddHHmmss}";
-            _viewModel.VmName = vmSettings.VMName;
-
-            // Activate the first phase
-            ActivateNextPhase(DeployPageViewModel.PhaseDownload);
+            _presenter.CompleteActive();
+            _viewModel.ActivatePhase(DeployPageViewModel.PhaseDownload);
+            ScrollToPhase(DeployPageViewModel.PhaseDownload);
 
             try
             {
                 var progressReport = new Progress<CreateVMProgressInfo>(OnProgressReport);
-                await _createVM.StartCreateVMAsync(vmSettings, vmCustomizations, galleryItem, _cts.Token, progressReport);
+                string effectiveVmName = await _createVM.StartCreateVMAsync(vmSettings, vmCustomizations, galleryItem, _cts.Token, progressReport);
 
-                // Mark any remaining Active phase as Completed
-                CompleteCurrentPhase();
+                _presenter.CompleteActive();
 
-                // Mark Done
                 var donePhase = _viewModel.FindPhase(DeployPageViewModel.PhaseDone);
                 if (donePhase != null)
                 {
                     donePhase.Status = DeploymentPhaseStatus.Completed;
-                    donePhase.ProgressText = $"VM \u2018{vmSettings.VMName}\u2019 created successfully!";
+                    donePhase.ProgressText = $"VM \u2018{effectiveVmName}\u2019 created successfully!";
                 }
 
                 _viewModel.IsComplete = true;
                 _viewModel.IsDeploying = false;
                 BottomSpacer.Height = 0;
                 ScrollToPhase(DeployPageViewModel.PhaseDone);
-                _logger.LogInformation("Deployment completed successfully for {VMName}", vmSettings.VMName);
+                _logger.LogInformation("Deployment completed successfully for {VMName}", effectiveVmName);
             }
             catch (OperationCanceledException)
             {
                 _logger.LogInformation("Deployment cancelled by user.");
-                FailCurrentPhase("Cancelled by user.");
-                _viewModel.ErrorMessage = "Deployment was cancelled.";
-                _viewModel.HasFailed = true;
-                _viewModel.IsDeploying = false;
-                BottomSpacer.Height = 0;
+                _presenter.FailActive("Cancelled by user.");
+                SetError("Deployment was cancelled.");
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Deployment failed for {VMName}", vmSettings.VMName);
-                FailCurrentPhase(ex.Message);
-                _viewModel.ErrorMessage = $"Deployment failed: {ex.Message}";
-                _viewModel.HasFailed = true;
-                _viewModel.IsDeploying = false;
-                BottomSpacer.Height = 0;
+                _presenter.FailActive(ex.Message);
+                SetError($"Deployment failed: {ex.Message}");
             }
         }
 
-        // ── Progress report mapping ──────────────────────────────────────
+        private void SetError(string message)
+        {
+            _viewModel.ErrorMessage = message;
+            _viewModel.HasFailed = true;
+            _viewModel.IsDeploying = false;
+            BottomSpacer.Height = 0;
+        }
 
         private void OnProgressReport(CreateVMProgressInfo info)
         {
-            if (info == null) return;
-
-            // Error reports from guest diagnostics — fail the current phase immediately
-            if (!string.IsNullOrEmpty(info.ErrorMessage))
+            var result = _presenter.Present(info);
+            if (result.IsError)
             {
-                FailCurrentPhase(info.ErrorMessage);
-                _logger.LogError("Deployment error reported: {Error}", info.ErrorMessage);
-                if (!string.IsNullOrEmpty(info.DiagnosticsLog))
-                    _logger.LogError("Full diagnostics:\n{Log}", info.DiagnosticsLog);
+                _viewModel.ErrorMessage = info.ErrorMessage;
+                _viewModel.HasFailed = true;
+                _viewModel.IsDeploying = false;
+                BottomSpacer.Height = 0;
                 return;
             }
 
-            // Dynamically insert phase cards based on detected generation.
-            // This is handled outside the phase-transition guard because the
-            // generation info may arrive on a repeated "CreateVM" report
-            // (the first report activates the phase; the second carries the
-            // DetectedGeneration after partition detection completes).
-            // Skip for native Hyper-V images and ISO installers — they have
-            // no customization phases.
-            if (!string.IsNullOrEmpty(info.DetectedGeneration)
-                && _wizardData.SelectedItem?.IsNativeHyperV != true
-                && !string.Equals(_wizardData.SelectedItem?.FileType, "ISO", StringComparison.OrdinalIgnoreCase))
-            {
-                if (info.DetectedGeneration == "1")
-                {
-                    Application.Current.Dispatcher.Invoke(() =>
-                    {
-                        _viewModel.InsertMbrPhases();
-                        _viewModel.InsertDiskSubSteps(1, needsIsoBoot: true);
-                    });
-                }
-                else if (info.DetectedGeneration == "2")
-                {
-                    bool needsIsoBoot = _wizardData.Customizations?.ConfigureXrdp == true
-                        || _wizardData.Customizations?.ConfigureHtbVpn == true
-                        || _wizardData.Customizations?.SyncTimezone == true;
-                    Application.Current.Dispatcher.Invoke(() =>
-                    {
-                        _viewModel.InsertCustomizePhase();
-                        _viewModel.InsertDiskSubSteps(2, needsIsoBoot);
-                    });
-                }
-            }
+            if (result.ScrollToId != null)
+                ScrollToPhase(result.ScrollToId);
 
-            // Phase transitions
-            if (!string.IsNullOrEmpty(info.Phase))
-            {
-                string targetPhase = MapPhaseString(info.Phase);
-
-                if (targetPhase != null && targetPhase != _activePhaseId)
-                {
-                    // Dynamically insert cards for phases that aren't built upfront
-                    if (targetPhase == DeployPageViewModel.PhaseDownloadCloningIso)
-                    {
-                        Application.Current.Dispatcher.Invoke(() => _viewModel.InsertDownloadCloningIsoPhase());
-                    }
-                    else if (targetPhase == DeployPageViewModel.PhasePostBoot)
-                    {
-                        Application.Current.Dispatcher.Invoke(() => _viewModel.InsertPostBootPhase());
-                    }
-
-                    CompleteCurrentSubStep();
-                    CompleteCurrentPhase();
-                    ActivateNextPhase(targetPhase);
-                }
-            }
-
-            // Sub-step activation for post-boot steps (driven by StepName)
-            if (_activePhaseId == DeployPageViewModel.PhasePostBoot && !string.IsNullOrEmpty(info.StepName))
-            {
-                string subId = MapPostBootStepName(info.StepName);
-                if (subId != null && subId != _activeSubStepId)
-                {
-                    CompleteCurrentSubStep();
-                    _activeSubStepId = subId;
-                    _viewModel.ActivatePhase(subId);
-                    ScrollToPhase(subId);
-                }
-            }
-
-            // Sub-step activation for pre-boot (driven by KVP WorkflowProgress via URI)
-            if (_activePhaseId == DeployPageViewModel.PhaseCustomize && !string.IsNullOrEmpty(info.URI))
-            {
-                string subId = MapPreBootProgress(info.URI);
-                if (subId != null && subId != _activeSubStepId)
-                {
-                    CompleteCurrentSubStep();
-                    _activeSubStepId = subId;
-                    _viewModel.ActivatePhase(subId);
-                    ScrollToPhase(subId);
-                }
-            }
-
-            // Sub-step activation driven by SubStep field (CreateVM sub-steps, CleanupIsoBoot, PostBoot infra)
-            if (!string.IsNullOrEmpty(info.SubStep) && info.SubStep != _activeSubStepId)
-            {
-                // Insert the cleanup card dynamically when first reported
-                if (info.SubStep == DeployPageViewModel.SubCleanupIsoBoot)
-                {
-                    Application.Current.Dispatcher.Invoke(() => _viewModel.InsertCleanupIsoBootPhase());
-                }
-
-                CompleteCurrentSubStep();
-                _activeSubStepId = info.SubStep;
-                _viewModel.ActivatePhase(info.SubStep);
-                ScrollToPhase(info.SubStep);
-            }
-
-            // Update progress on the currently active phase
-            if (_activePhaseId != null)
-            {
-                string progressText = null;
-
-                if (info.DownloadSpeed > 0)
-                    progressText = $"{info.DownloadSpeed:F2} MB/s";
-                else if (!string.IsNullOrEmpty(info.StepName))
-                    progressText = info.StepName;
-                else if (!string.IsNullOrEmpty(info.URI))
-                    progressText = info.URI;
-
-                if (info.ProgressPercentage > 0)
-                {
-                    _viewModel.UpdatePhaseProgress(_activePhaseId, info.ProgressPercentage, progressText);
-                }
-                else if (progressText != null)
-                {
-                    var phase = _viewModel.FindPhase(_activePhaseId);
-                    if (phase != null)
-                        phase.ProgressText = progressText;
-                }
-            }
-        }
-
-        /// <summary>Maps the raw Phase strings from CreateVMProgressInfo to our well-known phase IDs.</summary>
-        private static string MapPhaseString(string phase)
-        {
-            if (string.IsNullOrEmpty(phase)) return null;
-
-            // Exact matches first
-            return phase switch
-            {
-                DeployPageViewModel.PhaseDownload  => DeployPageViewModel.PhaseDownload,
-                DeployPageViewModel.PhaseExtract   => DeployPageViewModel.PhaseExtract,
-                DeployPageViewModel.PhaseConvert   => DeployPageViewModel.PhaseConvert,
-                DeployPageViewModel.PhaseCreateVM  => DeployPageViewModel.PhaseCreateVM,
-                DeployPageViewModel.PhaseStartVM   => DeployPageViewModel.PhaseStartVM,
-                DeployPageViewModel.PhaseCloneDisk => DeployPageViewModel.PhaseCloneDisk,
-                DeployPageViewModel.PhaseDownloadCloningIso => DeployPageViewModel.PhaseDownloadCloningIso,
-                DeployPageViewModel.PhaseCustomize => DeployPageViewModel.PhaseCustomize,
-                DeployPageViewModel.PhasePostBoot  => DeployPageViewModel.PhasePostBoot,
-                _ => phase switch
-                {
-                    // Legacy / descriptive phase strings from existing code
-                    var p when p.Contains("Extracting")   => DeployPageViewModel.PhaseExtract,
-                    var p when p.Contains("Converting")   => DeployPageViewModel.PhaseConvert,
-                    var p when p.Contains("non-sparse")   => DeployPageViewModel.PhaseConvert,
-                    var p when p.Contains("Waiting for VM")      => DeployPageViewModel.PhaseCloneDisk,
-                    var p when p.Contains("disk clone")          => DeployPageViewModel.PhaseCloneDisk,
-                    var p when p.Contains("Cloning")             => DeployPageViewModel.PhaseCloneDisk,
-                    var p when p.Contains("customizations")      => DeployPageViewModel.PhaseCustomize,
-                    _ => null
-                }
-            };
-        }
-
-        private void ActivateNextPhase(string phaseId)
-        {
-            if (phaseId == null) return;
-            _activePhaseId = phaseId;
-            _viewModel.ActivatePhase(phaseId);
-            ScrollToPhase(phaseId);
-
-            // /demo: auto-open VMConnect when the VM first starts
-            if (phaseId == DeployPageViewModel.PhaseStartVM && _wizardData.DemoMode)
+            if (result.ScrollToId == DeployPageViewModel.PhaseStartVM && _wizardData.DemoMode)
                 LaunchVmConnect();
         }
 
-        private void CompleteCurrentPhase()
-        {
-            if (_activePhaseId != null)
-            {
-                // Complete any lingering sub-step along with the parent
-                CompleteCurrentSubStep();
-                _viewModel.CompletePhase(_activePhaseId);
-            }
-        }
-
-        private void CompleteCurrentSubStep()
-        {
-            if (_activeSubStepId != null)
-            {
-                _viewModel.CompletePhase(_activeSubStepId);
-                _activeSubStepId = null;
-            }
-        }
-
-        private void FailCurrentPhase(string message)
-        {
-            if (_activePhaseId != null)
-            {
-                _viewModel.FailPhase(_activePhaseId, message);
-            }
-        }
-
-        /// <summary>Maps ICustomizationStep.Name to a post-boot sub-step card ID using step metadata.</summary>
-        private string MapPostBootStepName(string stepName)
-        {
-            if (_allSteps != null
-                && _allSteps.TryGetValue(stepName, out var step)
-                && !string.IsNullOrWhiteSpace(step?.ProgressPhaseId))
-            {
-                return step.ProgressPhaseId;
-            }
-
-            return DeployPageViewModel.DistOptionSubId(stepName);
-        }
-
-        /// <summary>Maps KVP WorkflowProgress prefix to a pre-boot sub-step card ID.</summary>
-        private static string MapPreBootProgress(string progress)
-        {
-            if (progress.StartsWith("INSTALL_GRUB", StringComparison.OrdinalIgnoreCase))
-                return DeployPageViewModel.SubInstallGrub;
-            if (progress.StartsWith("INSTALL_HYPERV", StringComparison.OrdinalIgnoreCase))
-                return DeployPageViewModel.SubInstallHyperV;
-            if (progress.StartsWith("INSTALL_XRDP", StringComparison.OrdinalIgnoreCase))
-                return DeployPageViewModel.SubInstallXrdp;
-            if (progress.StartsWith("INSTALL_PWSH", StringComparison.OrdinalIgnoreCase))
-                return DeployPageViewModel.SubInstallPwsh;
-            if (progress.StartsWith("SSH_SETUP", StringComparison.OrdinalIgnoreCase))
-                return DeployPageViewModel.SubSshSetup;
-            if (progress.StartsWith("REBOOT", StringComparison.OrdinalIgnoreCase))
-                return DeployPageViewModel.SubReboot;
-            return null;
-        }
-
-        // ── Autoscroll ───────────────────────────────────────────────────
-
-        /// <summary>
-        /// Detects manual (user-initiated) scrolling. When the user drags the
-        /// scrollbar upward, autoscroll is paused. Autoscroll re-enables
-        /// automatically on the next programmatic <see cref="ScrollToPhase"/> call.
-        /// </summary>
         private void OnScrollChanged(object sender, ScrollChangedEventArgs e)
         {
-            // Ignore programmatic scrolls entirely — the flag stays set until
-            // the next Loaded-priority callback resets it, so it covers the
-            // async ScrollChanged that WPF fires after layout.
             if (_isScrollingProgrammatically) return;
-
-            // Ignore scroll events triggered by content size changes (new cards
-            // inserted / visibility toggled). These are NOT user gestures.
             if (e.ExtentHeightChange != 0) return;
-
-            // Ignore events where the viewport changed (window resize / layout).
             if (e.ViewportHeightChange != 0) return;
-
-            // User scrolled UP → pause autoscroll.
             if (e.VerticalChange < 0)
                 _autoScrollEnabled = false;
         }
 
-        /// <summary>
-        /// Scrolls the phase list so that the card for <paramref name="phaseId"/>
-        /// appears at the top of the viewport. Runs asynchronously after layout
-        /// so that newly-inserted cards are measured before we compute offsets.
-        /// </summary>
         private void ScrollToPhase(string phaseId)
         {
             if (!_autoScrollEnabled || phaseId == null) return;
 
-            // Set the flag before dispatching so that any intermediate
-            // ScrollChanged events (from layout) are suppressed.
             _isScrollingProgrammatically = true;
 
             Dispatcher.InvokeAsync(() =>
@@ -446,16 +189,13 @@ namespace VMCreate
                     int index = _viewModel.Phases.IndexOf(phase);
                     if (index < 0) return;
 
-                    // ItemsControl (non-virtualizing) creates a ContentPresenter for each item
                     var container = PhaseItemsControl.ItemContainerGenerator.ContainerFromIndex(index) as FrameworkElement;
                     if (container == null) return;
 
-                    // Compute the container's position relative to the ScrollViewer content
                     var transform = container.TransformToAncestor(PhaseScrollViewer);
                     var point = transform.Transform(new Point(0, 0));
                     double targetOffset = PhaseScrollViewer.VerticalOffset + point.Y;
 
-                    // Keep one completed card visible above the active card
                     if (index > 0)
                     {
                         var prev = PhaseItemsControl.ItemContainerGenerator.ContainerFromIndex(index - 1) as FrameworkElement;
@@ -467,15 +207,10 @@ namespace VMCreate
                 }
                 finally
                 {
-                    // Reset on the next Loaded pass so the flag covers the
-                    // async ScrollChanged WPF fires after our offset change.
-                    Dispatcher.InvokeAsync(() => _isScrollingProgrammatically = false,
-                        DispatcherPriority.Input);
+                    Dispatcher.InvokeAsync(() => _isScrollingProgrammatically = false, DispatcherPriority.Input);
                 }
             }, DispatcherPriority.Loaded);
         }
-
-        // ── Demo mode ────────────────────────────────────────────────────
 
         private void LaunchVmConnect()
         {

@@ -17,6 +17,8 @@ namespace VMCreate.MediaHandlers
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
+        public abstract DiskImageFormat FileType { get; }
+
         public abstract bool RequiresExtraction { get; }
 
         public virtual int VmGeneration => 2; // Default to Gen2 (UEFI/GPT)
@@ -34,7 +36,13 @@ namespace VMCreate.MediaHandlers
             return (int)Math.Ceiling(expanded / (1024.0 * 1024 * 1024));
         }
 
-        public virtual async Task<string> PrepareMediaAsync(string sourceFile, string destinationPath, VmSettings vmSettings, GalleryItem item, IProgress<CreateVMProgressInfo> progressInfo, CancellationToken cancellationToken)
+        public virtual async Task<MediaPreparationResult> PrepareMediaAsync(
+            string sourceFile,
+            string destinationPath,
+            VmDeploymentPlan plan,
+            GalleryItem item,
+            IProgress<CreateVMProgressInfo> progressInfo,
+            CancellationToken cancellationToken)
         {
             _logger.LogDebug("Checking source file: {SourceFile}", sourceFile);
             if (!File.Exists(sourceFile))
@@ -50,7 +58,7 @@ namespace VMCreate.MediaHandlers
             if (string.Equals(sourceFile, destFile, StringComparison.OrdinalIgnoreCase))
             {
                 _logger.LogInformation("Source file is already in the destination directory: {SourceFile}", sourceFile);
-                return sourceFile;
+                return new MediaPreparationResult(sourceFile, VmGeneration);
             }
 
             if (File.Exists(destFile))
@@ -72,7 +80,7 @@ namespace VMCreate.MediaHandlers
             }
             File.Move(sourceFile, destFile);
             _logger.LogInformation("Moved file to: {DestFile}", destFile);
-            return destFile;
+            return new MediaPreparationResult(destFile, VmGeneration);
         }
 
         protected static bool IsVhdxLocked(string path)

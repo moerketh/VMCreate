@@ -19,6 +19,8 @@ namespace VMCreate.MediaHandlers
 
         public override bool RequiresExtraction => false;
 
+        public override DiskImageFormat FileType => DiskImageFormat.Iso;
+
         /// <summary>ISO installers always target Gen 2 (UEFI).</summary>
         public override int VmGeneration => 2;
 
@@ -28,10 +30,10 @@ namespace VMCreate.MediaHandlers
         /// </summary>
         public bool IsIsoMedia => true;
 
-        public override Task<string> PrepareMediaAsync(
+        public override Task<MediaPreparationResult> PrepareMediaAsync(
             string sourceFile,
             string destinationPath,
-            VmSettings vmSettings,
+            VmDeploymentPlan plan,
             GalleryItem item,
             IProgress<CreateVMProgressInfo> progressInfo,
             CancellationToken cancellationToken)
@@ -46,7 +48,7 @@ namespace VMCreate.MediaHandlers
             _logger.LogInformation("ISO media ready at: {SourceFile}", sourceFile);
 
             // Return the ISO path as-is — it will be attached as a DVD drive.
-            return Task.FromResult(sourceFile);
+            return Task.FromResult(new MediaPreparationResult(sourceFile, VmGeneration));
         }
     }
 }

@@ -1,6 +1,5 @@
 using System;
 using System.Threading;
-using System.Threading.Tasks;
 using VMCreate.MediaHandlers;
 
 namespace VMCreate.HyperV.VmCreation
@@ -12,32 +11,49 @@ namespace VMCreate.HyperV.VmCreation
     public class VmCreationContext
     {
         public VmCreationContext(
-            VmSettings settings,
+            VmDeploymentPlan plan,
             VmCustomizations customizations,
             string sourceFile,
             GalleryItem galleryItem,
-            IMediaHandler mediaHandler,
-            string mediaPath,
+            MediaPreparationResult mediaResult,
             CancellationToken cancellationToken,
-            IProgress<CreateVMProgressInfo> progress)
+            IProgress<CreateVMProgressInfo> progress,
+            IDeploymentLogger logger = null)
         {
-            Settings = settings ?? throw new ArgumentNullException(nameof(settings));
+            Plan = plan ?? throw new ArgumentNullException(nameof(plan));
             Customizations = customizations ?? throw new ArgumentNullException(nameof(customizations));
             SourceFile = sourceFile ?? throw new ArgumentNullException(nameof(sourceFile));
             GalleryItem = galleryItem ?? throw new ArgumentNullException(nameof(galleryItem));
-            MediaHandler = mediaHandler ?? throw new ArgumentNullException(nameof(mediaHandler));
-            MediaPath = mediaPath ?? throw new ArgumentNullException(nameof(mediaPath));
+            MediaResult = mediaResult ?? throw new ArgumentNullException(nameof(mediaResult));
             CancellationToken = cancellationToken;
             Progress = progress ?? throw new ArgumentNullException(nameof(progress));
+            Logger = logger ?? new DeploymentLogger(plan.VmName);
         }
 
-        public VmSettings Settings { get; }
+        public VmDeploymentPlan Plan { get; }
         public VmCustomizations Customizations { get; }
+
+        /// <summary>
+        /// The original disk file passed to the creation pipeline (the downloaded
+        /// or extracted file before media preparation moved/converted it).
+        /// </summary>
         public string SourceFile { get; }
+
         public GalleryItem GalleryItem { get; }
-        public IMediaHandler MediaHandler { get; }
-        public string MediaPath { get; }
+
+        /// <summary>
+        /// The canonical prepared media path plus discovered metadata. Callers
+        /// should use <see cref="MediaPreparationResult.FinalMediaPath"/&gt; when
+        /// attaching the disk to the VM.
+        /// </summary>
+        public MediaPreparationResult MediaResult { get; }
+
         public CancellationToken CancellationToken { get; }
         public IProgress<CreateVMProgressInfo> Progress { get; }
+
+        /// <summary>
+        /// Per-deployment log for the current VM. Always non-null.
+        /// </summary>
+        public IDeploymentLogger Logger { get; }
     }
 }

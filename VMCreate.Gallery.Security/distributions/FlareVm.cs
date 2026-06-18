@@ -61,6 +61,7 @@ namespace VMCreate.Gallery
                 Category = "Security",
                 IsRecommended = true,
                 IsWindows = true,
+                Tags = new() { "flare-vm", "windows", "malware-analysis" },
             };
 
             return new List<GalleryItem> { item };

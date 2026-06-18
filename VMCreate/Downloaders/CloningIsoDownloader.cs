@@ -13,16 +13,20 @@ namespace VMCreate
     public interface ICloningIsoDownloader
     {
         /// <summary>
-        /// Ensures the cloning ISO is present at <see cref="VmSettings.CloningIsoPath"/>.
+        /// Ensures the cloning ISO is present at <see cref="VmDeploymentPlan.CloningIsoPath"/>.
         /// Downloads the latest release from GitHub if the file is missing.
         /// </summary>
-        Task EnsureIsoAsync(VmSettings vmSettings, CancellationToken cancellationToken,
+        Task EnsureIsoAsync(VmDeploymentPlan plan, CancellationToken cancellationToken,
                             IProgress<CreateVMProgressInfo> progress);
     }
 
     public class CloningIsoDownloader : ICloningIsoDownloader
     {
         private const string GitHubApiUrl = "https://api.github.com/repos/moerketh/hyperv-convert-iso/releases/latest";
+        private const int MaxRetries = 3;
+        private static readonly TimeSpan HttpTimeout = TimeSpan.FromMinutes(5);
+        private static readonly TimeSpan[] RetryDelays = { TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(4) };
+
         private readonly IDownloader _downloader;
         private readonly IChecksumVerifier _checksumVerifier;
         private readonly IHttpClientFactory _clientFactory;
@@ -40,10 +44,13 @@ namespace VMCreate
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
-        public async Task EnsureIsoAsync(VmSettings vmSettings, CancellationToken cancellationToken,
+        public async Task EnsureIsoAsync(VmDeploymentPlan plan, CancellationToken cancellationToken,
                                          IProgress<CreateVMProgressInfo> progress)
         {
-            string isoPath = vmSettings.CloningIsoPath;
+            if (plan == null) throw new ArgumentNullException(nameof(plan));
+            cancellationToken.ThrowIfCancellationRequested();
+
+            string isoPath = plan.CloningIsoPath;
 
             if (File.Exists(isoPath))
             {
@@ -55,7 +62,7 @@ namespace VMCreate
 
             var (isoUrl, checksumUrl) = await GetLatestReleaseUrlsAsync(cancellationToken);
 
-            progress?.Report(new CreateVMProgressInfo { Phase = "DownloadCloningIso" });
+            progress?.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.DownloadCloningIso));
 
             string tempPath = await _downloader.DownloadFileAsync(isoUrl, cancellationToken, progress, useCache: false);
 
@@ -85,34 +92,55 @@ namespace VMCreate
 
         private async Task<(string IsoUrl, string ChecksumUrl)> GetLatestReleaseUrlsAsync(CancellationToken cancellationToken)
         {
-            var client = _clientFactory.CreateClient();
-            client.DefaultRequestHeaders.Add("User-Agent", ProductInfo.UserAgent);
+            HttpRequestException lastError = null;
 
-            string json = await client.GetStringAsync(GitHubApiUrl, cancellationToken);
-            using var doc = JsonDocument.Parse(json);
-            var assets = doc.RootElement.GetProperty("assets").EnumerateArray().ToList();
-
-            string isoUrl = null;
-            string checksumUrl = null;
-
-            foreach (var asset in assets)
+            for (int attempt = 0; attempt < MaxRetries; attempt++)
             {
-                string name = asset.GetProperty("name").GetString();
-                string url = asset.GetProperty("browser_download_url").GetString();
+                cancellationToken.ThrowIfCancellationRequested();
 
-                if (name.EndsWith(".iso", StringComparison.OrdinalIgnoreCase))
-                    isoUrl = url;
-                else if (name.EndsWith(".sha256", StringComparison.OrdinalIgnoreCase))
-                    checksumUrl = url;
+                try
+                {
+                    using var client = _clientFactory.CreateClient();
+                    client.Timeout = HttpTimeout;
+                    client.DefaultRequestHeaders.Add("User-Agent", ProductInfo.UserAgent);
+
+                    string json = await client.GetStringAsync(GitHubApiUrl, cancellationToken);
+                    using var doc = JsonDocument.Parse(json);
+                    var assets = doc.RootElement.GetProperty("assets").EnumerateArray().ToList();
+
+                    string isoUrl = null;
+                    string checksumUrl = null;
+
+                    foreach (var asset in assets)
+                    {
+                        string name = asset.GetProperty("name").GetString();
+                        string url = asset.GetProperty("browser_download_url").GetString();
+
+                        if (name.EndsWith(".iso", StringComparison.OrdinalIgnoreCase))
+                            isoUrl = url;
+                        else if (name.EndsWith(".sha256", StringComparison.OrdinalIgnoreCase))
+                            checksumUrl = url;
+                    }
+
+                    if (isoUrl == null)
+                        throw new InvalidOperationException(
+                            "No .iso asset found in the latest hyperv-convert-iso release. " +
+                            "Check https://github.com/moerketh/hyperv-convert-iso/releases");
+
+                    _logger.LogInformation("Latest hyperv-convert-iso release: {IsoUrl}", isoUrl);
+                    return (isoUrl, checksumUrl);
+                }
+                catch (HttpRequestException ex)
+                {
+                    lastError = ex;
+                    _logger.LogWarning(ex, "GitHub API attempt {Attempt} failed", attempt + 1);
+
+                    if (attempt < MaxRetries - 1)
+                        await Task.Delay(RetryDelays[attempt], cancellationToken);
+                }
             }
 
-            if (isoUrl == null)
-                throw new InvalidOperationException(
-                    "No .iso asset found in the latest hyperv-convert-iso release. " +
-                    "Check https://github.com/moerketh/hyperv-convert-iso/releases");
-
-            _logger.LogInformation("Latest hyperv-convert-iso release: {IsoUrl}", isoUrl);
-            return (isoUrl, checksumUrl);
+            throw new Exception($"Failed to query the latest hyperv-convert-iso release after {MaxRetries} attempts: {lastError?.Message}", lastError);
         }
     }
 }

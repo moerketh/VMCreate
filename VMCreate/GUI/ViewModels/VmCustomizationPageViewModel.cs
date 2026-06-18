@@ -5,6 +5,7 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading;
 using System.Windows.Input;
+using VMCreate.MediaHandlers;
 
 namespace VMCreate
 {
@@ -180,7 +181,7 @@ namespace VMCreate
         /// Native Hyper-V images (e.g. Windows) are already in VHDX format and need no conversion.</summary>
         public bool IsNotVhdx =>
             _wizardData.SelectedItem?.IsNativeHyperV != true
-            && !string.Equals(_wizardData.SelectedItem?.FileType, "VHDX", StringComparison.OrdinalIgnoreCase);
+            && DiskFileDetector.DetectFileType(_wizardData.SelectedItem?.DiskUri) != DiskImageFormat.Vhdx;
 
         /// <summary>
         /// True when the selected image is a native Hyper-V Windows VM that requires

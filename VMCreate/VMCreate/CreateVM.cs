@@ -4,6 +4,8 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using VMCreate.HyperV.VmCreation;
+using VMCreate.MediaHandlers;
 
 namespace VMCreate
 {
@@ -16,37 +18,66 @@ namespace VMCreate
         private readonly IExtractor _extractor;
         private readonly DiskFileDetector _diskFileDetector;
         private readonly IVmCreator _vmCreator;
+        private readonly IVmPathService _pathService;
         private readonly ILogger<CreateVM> _logger;
         private bool _useCache = true;
 
-        public CreateVM(IDownloader downloader, IChecksumVerifier checksumVerifier, IExtractor extractor, DiskFileDetector diskFileDetector, IVmCreator vmCreator, ILogger<CreateVM> logger, IOptions<AppSettings> options)
+        public CreateVM(
+            IDownloader downloader,
+            IChecksumVerifier checksumVerifier,
+            IExtractor extractor,
+            DiskFileDetector diskFileDetector,
+            IVmCreator vmCreator,
+            IVmPathService pathService,
+            ILogger<CreateVM> logger,
+            IOptions<AppSettings> options)
         {
             _downloader = downloader ?? throw new ArgumentNullException(nameof(downloader));
             _checksumVerifier = checksumVerifier ?? throw new ArgumentNullException(nameof(checksumVerifier));
             _extractor = extractor ?? throw new ArgumentNullException(nameof(extractor));
             _diskFileDetector = diskFileDetector ?? throw new ArgumentNullException(nameof(diskFileDetector));
             _vmCreator = vmCreator ?? throw new ArgumentNullException(nameof(vmCreator));
+            _pathService = pathService ?? throw new ArgumentNullException(nameof(pathService));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             var settings = options?.Value ?? new AppSettings();
             _qemuFileLocation = settings.QemuImgPath;
             _extractPath = settings.ExtractPath;
         }
 
-        public async Task StartCreateVMAsync(VmSettings vmSettings, VmCustomizations vmCustomizations, GalleryItem galleryItem, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo> createVmProgressInfo)
+        public async Task<string> StartCreateVMAsync(
+            VmSettings vmSettings,
+            VmCustomizations vmCustomizations,
+            GalleryItem galleryItem,
+            CancellationToken cancellationToken,
+            IProgress<CreateVMProgressInfo> createVmProgressInfo)
         {
             string filename = string.Empty;
             try
             {
+                var format = DiskFileDetector.DetectFileType(galleryItem.DiskUri);
                 if(!galleryItem.IsNativeHyperV
-                    && !galleryItem.FileType.StartsWith("vhd", StringComparison.OrdinalIgnoreCase)
-                    && galleryItem.FileType != "ISO"
+                    && format != DiskImageFormat.Vhdx
+                    && format != DiskImageFormat.Vhd
+                    && format != DiskImageFormat.Iso
                     && !File.Exists(_qemuFileLocation))
                 {
                     throw new Exception("Please install QEMU to support disk image conversion.");
                 }
 
+                // Compute the effective, timestamped VM name once and freeze it into an
+                // immutable plan. The wizard's VmSettings are never mutated.
+                string baseName = vmSettings.VMName;
+                string effectiveVmName = $"{baseName}_{DateTime.Now:yyyyMMddHHmmss}";
+                VmDeploymentPlan plan = VmDeploymentPlan.FromSettings(vmSettings)
+                    .WithVmName(effectiveVmName);
+
+                createVmProgressInfo?.Report(CreateVMProgressInfo.ForPhase(
+                    VmDeploymentPhase.None,
+                    VmDeploymentSubStep.None,
+                    effectiveVmName));
+
                 // Download file
-                createVmProgressInfo.Report(new CreateVMProgressInfo { Phase = "Download" });
+                createVmProgressInfo.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.Download));
                 filename = await _downloader.DownloadFileAsync(galleryItem.DiskUri, cancellationToken, createVmProgressInfo, _useCache);
                 _logger.LogInformation("Downloaded file {FileName}", filename);
 
@@ -67,14 +98,15 @@ namespace VMCreate
                 // Extract if needed — archives (OVA, ZIP, 7Z, etc.) and compressed disks
                 // (vmdk.xz, vhdx.zip) need extraction. Bare ISO/QCOW2/VHDX/VHD are used directly.
                 bool needsExtraction = galleryItem.NeedsExtraction;
+                string sourceFile;
                 if (needsExtraction)
                 {
-                    createVmProgressInfo.Report(new CreateVMProgressInfo { Phase = "Extract" });
+                    createVmProgressInfo.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.Extract));
 
                     // Determine the final disk directory so we can extract directly there
                     // and avoid a wasteful temp→destination copy. Use a per-VM subdirectory
                     // so previous deployments can't lock or collide with this one.
-                    string extractDest = _vmCreator.GetVirtualHardDiskPath(vmSettings.VMName);
+                    string extractDest = _pathService.GetVirtualHardDiskPath(plan.VmName);
                     _logger.LogInformation("Extracting directly to per-VM VM disk directory: {Path}", extractDest);
 
                     await Task.Run(() => _extractor.Extract(filename, extractDest, cancellationToken, createVmProgressInfo));
@@ -82,20 +114,26 @@ namespace VMCreate
 
                     // Auto-detect the disk file inside the extracted directory.
                     // Handles nested archives (e.g. OVA inside ZIP) automatically.
-                    string diskFile = await Task.Run(() =>
+                    sourceFile = await Task.Run(() =>
                         _diskFileDetector.FindDiskFile(extractDest, cancellationToken, createVmProgressInfo));
-                    _logger.LogInformation("Detected disk file {DiskFile}", diskFile);
-
-                    // Create VM using the detected disk file's actual type
-                    await _vmCreator.CreateVMAsync(vmSettings, vmCustomizations, diskFile, galleryItem, cancellationToken, createVmProgressInfo);
-                    _logger.LogInformation("Successfully created VM {VMName}", vmSettings.VMName);
+                    _logger.LogInformation("Detected disk file {DiskFile}", sourceFile);
                 }
                 else
                 {
-                    // Create VM — disk file is already in its final location
-                    await _vmCreator.CreateVMAsync(vmSettings, vmCustomizations, filename, galleryItem, cancellationToken, createVmProgressInfo);
-                    _logger.LogInformation("Successfully created VM {VMName}", vmSettings.VMName);
+                    sourceFile = filename;
                 }
+
+                // Create VM from the prepared source file using the immutable plan.
+                VmDeploymentResult result = await _vmCreator.CreateAsync(plan, vmCustomizations, galleryItem, cancellationToken, createVmProgressInfo, sourceFile);
+                if (!result.Success)
+                {
+                    throw new InvalidOperationException(
+                        $"VM creation failed for {result.VmName}: {result.ErrorMessage}");
+                }
+
+                _logger.LogInformation("Successfully created VM {VMName}", result.VmName);
+
+                return result.VmName;
             }
             catch (Exception ex)
             {

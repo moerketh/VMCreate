@@ -6,9 +6,20 @@ namespace VMCreate.MediaHandlers
 {
     public interface IMediaHandler
     {
+        /// <summary>
+        /// Canonical file type this handler represents (ISO, VHDX, VMDK, QCOW2).
+        /// </summary>
+        DiskImageFormat FileType { get; }
+
         bool RequiresExtraction { get; }
         int VmGeneration { get; }
         long DetectedVirtualSizeBytes { get; }
-        Task<string> PrepareMediaAsync(string sourceFile, string destinationPath, VmSettings vmSettings, GalleryItem item, IProgress<CreateVMProgressInfo> progressInfo, CancellationToken cancellationToken);
+        Task<MediaPreparationResult> PrepareMediaAsync(
+            string sourceFile,
+            string destinationPath,
+            VmDeploymentPlan plan,
+            GalleryItem item,
+            IProgress<CreateVMProgressInfo> progressInfo,
+            CancellationToken cancellationToken);
     }
 }

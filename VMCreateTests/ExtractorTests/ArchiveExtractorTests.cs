@@ -74,7 +74,7 @@ namespace VMCreate.Tests
                 _extractor.Extract(archivePath, extractPath, CancellationToken.None, progress);
 
                 Assert.IsTrue(reports.Count > 0, "Expected at least one progress report");
-                Assert.IsTrue(reports.Any(r => r.Phase.Contains("Extracting")), "Expected phase to contain 'Extracting'");
+                Assert.IsTrue(reports.Any(r => r.Phase == VmDeploymentPhase.Extract), "Expected phase to be Extract");
                 Assert.IsTrue(reports.Any(r => r.ProgressPercentage > 0), "Expected intermediate progress > 0");
                 Assert.AreEqual(100, reports.Last().ProgressPercentage, "Expected final report to be 100%");
 

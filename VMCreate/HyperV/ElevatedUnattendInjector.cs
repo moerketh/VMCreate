@@ -2,29 +2,43 @@ using Microsoft.Extensions.Logging;
 using System;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using VMCreate.HyperV.Unattend;
 
 namespace VMCreate
 {
     /// <summary>
-    /// Spawns the same executable elevated (UAC prompt) with the
-    /// <c>--inject-unattend</c> flag so that <see cref="UnattendInjector"/>
-    /// runs with a full-Administrator token. The GUI itself stays un-elevated.
+    /// Spawns the current executable elevated with the <c>--inject-unattend</c> switch
+    /// and delegates the actual injection to <see cref="UnattendInjector"/...gt;.
     /// </summary>
     public class ElevatedUnattendInjector : IUnattendInjector
     {
+        private readonly UnattendInjector _injector;
         private readonly ILogger<ElevatedUnattendInjector> _logger;
 
-        public ElevatedUnattendInjector(ILogger<ElevatedUnattendInjector> logger)
+        public ElevatedUnattendInjector(UnattendInjector injector, ILogger<ElevatedUnattendInjector> logger)
         {
+            _injector = injector ?? throw new ArgumentNullException(nameof(injector));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
         public async Task<bool> InjectAsync(string vhdxPath, CancellationToken cancellationToken)
         {
-            _logger.LogInformation("Spawning elevated child to inject unattend.xml into {VhdxPath}", vhdxPath);
+            if (!File.Exists(vhdxPath))
+            {
+                _logger.LogError("VHDX not found for unattend injection: {VhdxPath}", vhdxPath);
+                return false;
+            }
 
+            if (IsCurrentProcessElevated())
+            {
+                _logger.LogInformation("Already elevated; performing injection in-process for {VhdxPath}", vhdxPath);
+                return await _injector.InjectAsync(vhdxPath, cancellationToken);
+            }
+
+            _logger.LogInformation("Spawning elevated child to inject unattend.xml into {VhdxPath}", vhdxPath);
             var psi = new ProcessStartInfo
             {
                 FileName = Environment.ProcessPath,
@@ -45,7 +59,6 @@ namespace VMCreate
             }
             catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
             {
-                // ERROR_CANCELLED — the user declined the UAC prompt
                 _logger.LogWarning("User declined UAC prompt for unattend injection");
                 return false;
             }
@@ -62,7 +75,7 @@ namespace VMCreate
             catch (OperationCanceledException)
             {
                 _logger.LogWarning("Unattend injection cancelled while waiting for elevated child");
-                try { process.Kill(); } catch { /* best effort */ }
+                try { process.Kill(); } catch { }
                 return false;
             }
 
@@ -73,6 +86,13 @@ namespace VMCreate
                 _logger.LogError("Elevated unattend injection failed (exit code {ExitCode}) for {VhdxPath}", process.ExitCode, vhdxPath);
 
             return success;
+        }
+
+        private static bool IsCurrentProcessElevated()
+        {
+            using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+            var principal = new System.Security.Principal.WindowsPrincipal(identity);
+            return principal.IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
         }
     }
 }

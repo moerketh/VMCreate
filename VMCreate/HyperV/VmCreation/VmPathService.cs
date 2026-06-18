@@ -6,7 +6,7 @@ using System.Linq;
 
 namespace VMCreate.HyperV.VmCreation
 {
-    internal class VmPathService : IVmPathService
+    public class VmPathService : IVmPathService
     {
         private readonly ILogger<VmPathService> _logger;
 

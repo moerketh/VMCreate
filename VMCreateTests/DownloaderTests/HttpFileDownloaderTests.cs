@@ -10,7 +10,7 @@ namespace VMCreate.Tests
         private Mock<ILogger<HttpFileDownloader>> _mockLogger;
         private Mock<IHttpStreamProvider> _mockStreamProvider;
         private Mock<IFileStreamProvider> _mockFileStreamProvider;
-        private Mock<StreamCopierWithProgress> _mockStreamCopier;
+        private Mock<IStreamCopierWithProgress> _mockStreamCopier;
         private HttpFileDownloader _downloader;
 
         [TestInitialize]
@@ -19,7 +19,7 @@ namespace VMCreate.Tests
             _mockLogger = new Mock<ILogger<HttpFileDownloader>>();
             _mockStreamProvider = new Mock<IHttpStreamProvider>();
             _mockFileStreamProvider = new Mock<IFileStreamProvider>();
-            _mockStreamCopier = new Mock<StreamCopierWithProgress>();
+            _mockStreamCopier = new Mock<IStreamCopierWithProgress>();
             _downloader = new HttpFileDownloader(_mockLogger.Object, _mockStreamProvider.Object, _mockFileStreamProvider.Object, _mockStreamCopier.Object);
         }
 

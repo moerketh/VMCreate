@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 
 namespace VMCreate
@@ -157,6 +158,12 @@ namespace VMCreate
         /// Set to "MicrosoftWindows" for Windows VMs.
         /// </summary>
         public string SecureBootTemplate { get; set; }
+
+        /// <summary>
+        /// Optional tags that describe the distribution's role or family (e.g. "flare-vm", "pwncloudos").
+        /// Customization steps can use these to decide visibility without coupling to the display name.
+        /// </summary>
+        public List<string> Tags { get; set; } = new();
 
         /// <summary>
         /// True when this gallery item represents a Windows VM.

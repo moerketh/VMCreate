@@ -88,7 +88,7 @@ namespace VMCreate
                         var progress = estimatedUncompressedSize > 0 ? (totalBytesWritten / (double)estimatedUncompressedSize) * 100 : 0;
                         progressReportInfo.Report(new CreateVMProgressInfo
                         {
-                            Phase = "Extracting XZ...",
+                            Phase = VmDeploymentPhase.Extract,
                             URI = outputPath,
                             DownloadSpeed = -1,
                             ProgressPercentage = Math.Min(Convert.ToInt32(progress), 99)
@@ -101,7 +101,7 @@ namespace VMCreate
                 }
                 progressReportInfo.Report(new CreateVMProgressInfo
                 {
-                    Phase = "Extracting XZ...",
+                    Phase = VmDeploymentPhase.Extract,
                     URI = outputPath,
                     DownloadSpeed = -1,
                     ProgressPercentage = 100

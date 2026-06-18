@@ -10,7 +10,7 @@ namespace VMCreate
     /// main app required.
     /// </para>
     /// </summary>
-    public interface IConfigurableCustomizationStep : ICustomizationStep
+    public interface IConfigurableCustomizationStep : ICustomizationStep, IStepVisibility
     {
         /// <summary>Card header shown above the checkbox (e.g. "PwnCloudOS Tools").</summary>
         string CardTitle { get; }
@@ -33,11 +33,5 @@ namespace VMCreate
         /// false so they are always executed without being presented as a checkbox.
         /// </summary>
         bool IsOptional { get; }
-
-        /// <summary>
-        /// Returns true if this step's UI card should be shown for the given gallery item.
-        /// Called once when the customization page loads to filter visible options.
-        /// </summary>
-        bool IsVisibleFor(GalleryItem item);
     }
 }

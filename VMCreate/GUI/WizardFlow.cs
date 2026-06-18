@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using VMCreate.MediaHandlers;
 
 namespace VMCreate
 {
@@ -32,7 +33,7 @@ namespace VMCreate
 
             // Linux disk-image flow (the original behavior): convertible images get the page;
             // pre-built native-Hyper-V images and ISO installers don't.
-            bool isIso = string.Equals(item.FileType, "ISO", StringComparison.OrdinalIgnoreCase);
+            bool isIso = DiskFileDetector.DetectFileType(item.DiskUri) == DiskImageFormat.Iso;
             return !item.IsNativeHyperV && !isIso;
         }
     }

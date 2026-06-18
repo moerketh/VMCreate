@@ -7,30 +7,25 @@ namespace VMCreate.MediaHandlers
     {
         private readonly ILoggerFactory _loggerFactory;
         private readonly IDiskConverter _diskConverter;
-        private readonly IPartitionSchemeDetector _partitionSchemeDetector;
+        private readonly IVmGenerationResolver _generationResolver;
 
-        public MediaHandlerFactory(ILoggerFactory loggerFactory, IDiskConverter diskConverter, IPartitionSchemeDetector partitionSchemeDetector)
+        public MediaHandlerFactory(ILoggerFactory loggerFactory, IDiskConverter diskConverter, IVmGenerationResolver generationResolver)
         {
             _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
             _diskConverter = diskConverter ?? throw new ArgumentNullException(nameof(diskConverter));
-            _partitionSchemeDetector = partitionSchemeDetector ?? throw new ArgumentNullException(nameof(partitionSchemeDetector));
+            _generationResolver = generationResolver ?? throw new ArgumentNullException(nameof(generationResolver));
         }
 
-        public IMediaHandler CreateHandler(string fileType)
+        public IMediaHandler CreateHandler(DiskImageFormat format)
         {
-            switch (fileType.ToUpper())
+            return format switch
             {
-                case "VMDK":
-                    return new VmdkMediaHandler(_loggerFactory.CreateLogger<VmdkMediaHandler>(), _diskConverter, _partitionSchemeDetector);
-                case "QCOW2":
-                    return new Qcow2MediaHandler(_loggerFactory.CreateLogger<Qcow2MediaHandler>(), _diskConverter, _partitionSchemeDetector);
-                case "VHDX":
-                    return new VhdxMediaHandler(_loggerFactory.CreateLogger<VhdxMediaHandler>(), _partitionSchemeDetector, _diskConverter);
-                case "ISO":
-                    return new IsoMediaHandler(_loggerFactory.CreateLogger<IsoMediaHandler>());
-                default:
-                    throw new NotSupportedException($"Unsupported file type: {fileType}");
-            }
+                DiskImageFormat.Vmdk => new VmdkMediaHandler(_loggerFactory.CreateLogger<VmdkMediaHandler>(), _diskConverter, _generationResolver),
+                DiskImageFormat.Qcow2 => new Qcow2MediaHandler(_loggerFactory.CreateLogger<Qcow2MediaHandler>(), _diskConverter, _generationResolver),
+                DiskImageFormat.Vhdx => new VhdxMediaHandler(_loggerFactory.CreateLogger<VhdxMediaHandler>(), _generationResolver, _diskConverter),
+                DiskImageFormat.Iso => new IsoMediaHandler(_loggerFactory.CreateLogger<IsoMediaHandler>()),
+                _ => throw new NotSupportedException($"Unsupported file type: {format}")
+            };
         }
     }
 }

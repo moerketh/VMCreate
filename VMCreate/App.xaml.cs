@@ -7,8 +7,12 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
+using VMCreate;
 using VMCreate.Gallery;
+using VMCreate.HyperV.Unattend;
 using VMCreate.HyperV.VmCreation;
 using VMCreate.MediaHandlers;
 
@@ -21,7 +25,7 @@ namespace VMCreate
         /// <summary>When true, VMConnect is launched automatically after the VM starts.</summary>
         internal static bool DemoMode { get; private set; }
 
-        private void App_OnStartup(object sender, StartupEventArgs e)
+        private async void App_OnStartup(object sender, StartupEventArgs e)
         {
             // ── Headless elevated child: --inject-unattend <vhdxPath> ────────
             // When the GUI spawns itself elevated via ElevatedUnattendInjector,
@@ -30,24 +34,31 @@ namespace VMCreate
                 e.Args[0].Equals("--inject-unattend", StringComparison.OrdinalIgnoreCase))
             {
                 string vhdxPath = e.Args[1];
-                var injectLogPath = Path.Combine(Path.GetTempPath(), "VMCreate.inject.log");
-                var serilogLogger = new Serilog.LoggerConfiguration()
+                string injectLogPath = Path.Combine(Path.GetTempPath(), "VMCreate.inject.log");
+                var injectSerilog = new Serilog.LoggerConfiguration()
                     .MinimumLevel.Debug()
                     .WriteTo.File(injectLogPath, rollingInterval: RollingInterval.Day, shared: true)
                     .CreateLogger();
-                var loggerFactory = Microsoft.Extensions.Logging.LoggerFactory.Create(builder =>
+
+                var injectServices = new ServiceCollection();
+                injectServices.AddLogging(b =>
                 {
-                    builder.ClearProviders();
-                    builder.AddSerilog(serilogLogger, dispose: true);
+                    b.ClearProviders();
+                    b.AddSerilog(injectSerilog, dispose: true);
                 });
-                var injectLogger = loggerFactory.CreateLogger<UnattendInjector>();
+                injectServices.AddTransient<VMCreate.HyperV.Unattend.IPowerShellExecutor, VMCreate.HyperV.Unattend.PowerShellExecutor>();
+                injectServices.AddTransient<IOfflineRegistryEditor, OfflineRegistryEditor>();
+                injectServices.AddTransient<UnattendInjector>();
+                var sp = injectServices.BuildServiceProvider();
+                var injector = sp.GetRequiredService<UnattendInjector>();
+                var injectLogger = sp.GetRequiredService<ILogger<UnattendInjector>>();
 
                 try
                 {
                     injectLogger.LogInformation("Elevated child: injecting unattend.xml into {VhdxPath}", vhdxPath);
-                    new UnattendInjector(injectLogger).Inject(vhdxPath);
-                    injectLogger.LogInformation("Injection succeeded");
-                    Environment.ExitCode = 0;
+                    bool ok = await injector.InjectAsync(vhdxPath, CancellationToken.None);
+                    injectLogger.LogInformation("Injection result: {Result}", ok ? "succeeded" : "failed");
+                    Environment.ExitCode = ok ? 0 : 1;
                 }
                 catch (Exception ex)
                 {
@@ -56,7 +67,7 @@ namespace VMCreate
                 }
                 finally
                 {
-                    loggerFactory.Dispose();
+                    (sp as IDisposable)?.Dispose();
                 }
 
                 Shutdown();
@@ -95,8 +106,18 @@ namespace VMCreate
             services.AddTransient<ICloningIsoDownloader, CloningIsoDownloader>();
 
             // ── Hyper-V / VM plumbing ───────────────────────────────────────
-            services.AddSingleton<IHyperVManager, PowerShellHyperVManager>();
+            // Fully-qualified because VMCreate.HyperV.Unattend also defines IPowerShellExecutor.
+            services.AddSingleton<VMCreate.HyperV.IPowerShellExecutor, VMCreate.HyperV.PowerShellExecutor>();
+            services.AddTransient<VMCreate.HyperV.Unattend.IPowerShellExecutor, VMCreate.HyperV.Unattend.PowerShellExecutor>();
+            services.AddSingleton<IVmLifecycleManager, PowerShellVmLifecycleManager>();
+            services.AddSingleton<IVmDiskManager, PowerShellVmDiskManager>();
+            services.AddSingleton<IVmBootManager, PowerShellVmBootManager>();
+            services.AddSingleton<IVmNetworkManager, PowerShellVmNetworkManager>();
+            services.AddSingleton<IVmConfigManager, PowerShellVmConfigManager>();
+            services.AddSingleton<IHyperVManager, PowerShellHyperVManagerFacade>();
             services.AddSingleton<IUnattendInjector, ElevatedUnattendInjector>();
+            services.AddTransient<IOfflineRegistryEditor, OfflineRegistryEditor>();
+            services.AddTransient<UnattendInjector>();
             services.AddSingleton<ISshKeyManager, SshKeyManager>();
             services.AddTransient<IKvpSender, KvpHostToGuest>();
             services.AddTransient<IKvpPoller, HyperVKVPPoller>();
@@ -109,6 +130,7 @@ namespace VMCreate
             services.AddSingleton<IVmPathService, VmPathService>();
             services.AddSingleton<IHostNetworkService, HostNetworkService>();
             services.AddTransient<IPostBootCustomizationService, PostBootCustomizationService>();
+            services.AddTransient<IIsoBootCycleRunner, IsoBootCycleRunner>();
             services.AddTransient<IVmCreationStrategy, IsoVmCreationStrategy>();
             services.AddTransient<IVmCreationStrategy, NativeHyperVVmCreationStrategy>();
             services.AddTransient<IVmCreationStrategy, DiskImageVmCreationStrategy>();
@@ -181,9 +203,11 @@ namespace VMCreate
             services.AddHttpClient<IHtbApiClient, HtbApiClient>();
 
             // ── VM creation orchestrator ────────────────────────────────────
+            services.AddTransient<IVmDeploymentOrchestrator, VmDeploymentOrchestrator>();
             services.AddTransient<IVmCreator, HyperVVmCreator>();
             services.AddTransient<CreateVM>();
             services.AddSingleton<IPartitionSchemeDetector, PartitionSchemeDetector>();
+            services.AddSingleton<IVmGenerationResolver, VmGenerationResolver>();
 
             // ── UI / pages ──────────────────────────────────────────────────
             services.AddSingleton<Func<WizardData, DeployPage>>((Func<IServiceProvider, Func<WizardData, DeployPage>>)(sp => wizardData =>

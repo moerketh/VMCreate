@@ -6,8 +6,8 @@ namespace VMCreate.MediaHandlers
     public interface IMediaHandlerFactory
     {
         /// <summary>
-        /// Returns an <see cref="IMediaHandler"/> for the specified file type (VMDK, QCOW2, VHDX, etc.).
+        /// Returns an <see cref="IMediaHandler"/> for the specified file type.
         /// </summary>
-        IMediaHandler CreateHandler(string fileType);
+        IMediaHandler CreateHandler(DiskImageFormat format);
     }
 }

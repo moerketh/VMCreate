@@ -199,6 +199,7 @@ namespace VMCreate.Gallery
         public string? DeployCompletionInfo => "Please allow at least one hour for the FLARE VM scripts to finish configuring the machine";
 
         public bool IsVisibleFor(GalleryItem item)
-            => string.Equals(item?.Name, "FLARE VM", StringComparison.OrdinalIgnoreCase);
+            => item.HasTag("flare-vm")
+               || string.Equals(item?.Name, "FLARE VM", StringComparison.OrdinalIgnoreCase);
     }
 }

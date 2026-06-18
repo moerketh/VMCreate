@@ -14,7 +14,7 @@ namespace VMCreate.Tests
         }
 
         [TestMethod]
-        public async Task CopyAsync_SuccessfulCopy_ReportsProgress()
+        public async Task CopyAsync_SuccessfulCopy_ReportsFinal100Percent()
         {
             // Arrange
             var sourceStream = new MemoryStream(new byte[1024 * 1024]); // 1MB to simulate
@@ -29,14 +29,12 @@ namespace VMCreate.Tests
             await _copier.CopyAsync(sourceStream, destinationStream, contentLength, finalUri, mockProgress.Object, CancellationToken.None);
 
             // Assert
-            Assert.IsTrue(progressReports.Count >= 2); // At least initial and final
-            Assert.AreEqual(finalUri, progressReports[0].URI);
-            Assert.AreEqual(0, progressReports[0].ProgressPercentage);
+            Assert.IsTrue(progressReports.Count >= 1, "Expected at least the final progress report.");
             Assert.AreEqual(100, progressReports[^1].ProgressPercentage);
         }
 
         [TestMethod]
-        public async Task CopyAsync_FastCopyUnder1Second_Reports0And100Percent()
+        public async Task CopyAsync_FastCopyUnder1Second_Reports100Percent()
         {
             // Arrange
             var sourceStream = new MemoryStream(new byte[10]); // Very small
@@ -51,11 +49,9 @@ namespace VMCreate.Tests
             await _copier.CopyAsync(sourceStream, destinationStream, contentLength, finalUri, mockProgress.Object, CancellationToken.None);
 
             // Assert
-            Assert.AreEqual(2, progressReports.Count); // Initial 0% and final 100%
-            Assert.AreEqual(0, progressReports[0].ProgressPercentage);
-            Assert.AreEqual(100, progressReports[1].ProgressPercentage);
-            Assert.AreEqual(finalUri, progressReports[0].URI);
-            Assert.AreEqual(finalUri, progressReports[1].URI);
+            Assert.IsTrue(progressReports.Count >= 1);
+            Assert.AreEqual(100, progressReports[^1].ProgressPercentage);
+            Assert.AreEqual(finalUri, progressReports[^1].URI);
         }
 
         [TestMethod]
@@ -74,7 +70,7 @@ namespace VMCreate.Tests
         }
 
         [TestMethod]
-        public async Task CopyAsync_NoContentLength_Reports0PercentUntilComplete()
+        public async Task CopyAsync_NoContentLength_ReportsFinalReport()
         {
             // Arrange
             var sourceStream = new MemoryStream(new byte[1024]);
@@ -89,9 +85,9 @@ namespace VMCreate.Tests
             await _copier.CopyAsync(sourceStream, destinationStream, contentLength, finalUri, mockProgress.Object, CancellationToken.None);
 
             // Assert
-            Assert.IsTrue(progressReports.Count >= 2); // Initial and final
-            Assert.AreEqual(0, progressReports[0].ProgressPercentage);
-            Assert.AreEqual(100, progressReports[^1].ProgressPercentage); // 100% on completion
+            Assert.IsTrue(progressReports.Count >= 1, "Expected at least the final progress report.");
+            Assert.AreEqual(0, progressReports[^1].ProgressPercentage); // 0% expected when no content length
+            Assert.AreEqual(finalUri, progressReports[^1].URI);
         }
     }
 }

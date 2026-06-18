@@ -118,10 +118,10 @@ namespace VMCreate
                     var progressInfo = new CreateVMProgressInfo()
                     {
                         ProgressPercentage = 0,
-                        Phase = "Converting to VHDX...",
+                        Phase = VmDeploymentPhase.Convert,
                         URI = $"Starting conversion of {sourcePath}",
                         DownloadSpeed = -1,
-                        
+
                     };
                     progress.Report(progressInfo);
                 }
@@ -167,7 +167,7 @@ namespace VMCreate
                             {
                                 if (progress != null)
                                 {
-                                    progress.Report(new CreateVMProgressInfo() { ProgressPercentage = Convert.ToInt32(percentage), Phase = "Converting to VHDX...", URI = $"Converting from {sourcePath} to {destinationPath}", DownloadSpeed = -1 });
+                                    progress.Report(new CreateVMProgressInfo() { ProgressPercentage = Convert.ToInt32(percentage), Phase = VmDeploymentPhase.Convert, URI = $"Converting from {sourcePath} to {destinationPath}", DownloadSpeed = -1 });
                                 }
                                 _logger.LogDebug("qemu-img progress: {Percentage}%", Convert.ToInt32(percentage));
                             }
@@ -199,7 +199,7 @@ namespace VMCreate
 
                     if (progress != null)
                     {
-                        progress.Report(new CreateVMProgressInfo() { ProgressPercentage = 100, Phase = "Converting to VHDX...", URI = $"Completed conversion of {sourcePath}", DownloadSpeed = -1 });
+                        progress.Report(new CreateVMProgressInfo() { ProgressPercentage = 100, Phase = VmDeploymentPhase.Convert, URI = $"Completed conversion of {sourcePath}", DownloadSpeed = -1 });
                     }
                     _logger.LogInformation("Successfully converted {SourcePath} to {DestinationPath}", sourcePath, destinationPath);
                 }
@@ -218,7 +218,7 @@ namespace VMCreate
                 _logger.LogInformation("De-sparsifying VHDX: {Path}", destinationPath);
                 if (progress != null)
                 {
-                    progress.Report(new CreateVMProgressInfo() { ProgressPercentage = 0, Phase = "Making file non-sparse...", URI = $"{destinationPath}" });
+                    progress.Report(new CreateVMProgressInfo() { ProgressPercentage = 0, Phase = VmDeploymentPhase.Convert, URI = $"{destinationPath}" });
                 }
 
                 await Task.Run(() =>
@@ -235,7 +235,7 @@ namespace VMCreate
 
                 if (progress != null)
                 {
-                    progress.Report(new CreateVMProgressInfo() { ProgressPercentage = 100, Phase = "Making file non-sparse...", URI = $"{destinationPath}" });
+                    progress.Report(new CreateVMProgressInfo() { ProgressPercentage = 100, Phase = VmDeploymentPhase.Convert, URI = $"{destinationPath}" });
                 }
                 //File.Delete(tmpDestinationPath);
                 _logger.LogInformation("Successfully created non-sparse file: {DestinationPath}", destinationPath);

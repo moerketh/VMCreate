@@ -1,4 +1,5 @@
 using System.Threading.Tasks;
+using VMCreate.MediaHandlers;
 
 namespace VMCreate.HyperV.VmCreation
 {
@@ -11,7 +12,7 @@ namespace VMCreate.HyperV.VmCreation
         /// <summary>
         /// Returns true if this strategy can handle the supplied gallery item and actual file type.
         /// </summary>
-        bool CanHandle(GalleryItem item, string actualFileType);
+        bool CanHandle(GalleryItem item, DiskImageFormat actualFileType);
 
         /// <summary>
         /// Creates the VM described by the context. Implementations report progress,

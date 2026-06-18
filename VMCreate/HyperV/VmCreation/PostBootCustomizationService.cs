@@ -27,7 +27,7 @@ namespace VMCreate.HyperV.VmCreation
         /// </summary>
         Task RunLinuxPostBootAsync(
             IGuestShell shell,
-            VmSettings vmSettings,
+            VmDeploymentPlan plan,
             GalleryItem item,
             VmCustomizations customizations,
             IProgress<CreateVMProgressInfo> progress,
@@ -38,14 +38,14 @@ namespace VMCreate.HyperV.VmCreation
         /// </summary>
         Task RunWindowsPostBootAsync(
             IGuestShell shell,
-            VmSettings vmSettings,
+            VmDeploymentPlan plan,
             GalleryItem item,
             VmCustomizations customizations,
             IProgress<CreateVMProgressInfo> progress,
             CancellationToken cancellationToken);
     }
 
-    internal class PostBootCustomizationService : IPostBootCustomizationService
+    public class PostBootCustomizationService : IPostBootCustomizationService
     {
         private readonly IEnumerable<ICustomizationStep> _customizationSteps;
         private readonly ILogger<PostBootCustomizationService> _logger;
@@ -66,7 +66,7 @@ namespace VMCreate.HyperV.VmCreation
 
         public async Task RunLinuxPostBootAsync(
             IGuestShell shell,
-            VmSettings vmSettings,
+            VmDeploymentPlan plan,
             GalleryItem item,
             VmCustomizations customizations,
             IProgress<CreateVMProgressInfo> progress,
@@ -86,7 +86,7 @@ namespace VMCreate.HyperV.VmCreation
                 _logger.LogInformation("Running Linux post-boot step: {StepName} (order {Order})", step.Name, step.Order);
                 progress.Report(new CreateVMProgressInfo
                 {
-                    Phase = "PostBoot",
+                    Phase = VmDeploymentPhase.PostBoot,
                     ProgressPercentage = (int)((double)completed / steps.Count * 100),
                     StepName = step.Name
                 });
@@ -97,12 +97,12 @@ namespace VMCreate.HyperV.VmCreation
                 _logger.LogInformation("Completed Linux post-boot step: {StepName}", step.Name);
             }
 
-            progress.Report(new CreateVMProgressInfo { Phase = "PostBoot", ProgressPercentage = 100 });
+            progress.Report(CreateVMProgressInfo.ForProgress(VmDeploymentPhase.PostBoot, 100));
         }
 
         public async Task RunWindowsPostBootAsync(
             IGuestShell shell,
-            VmSettings vmSettings,
+            VmDeploymentPlan plan,
             GalleryItem item,
             VmCustomizations customizations,
             IProgress<CreateVMProgressInfo> progress,
@@ -122,28 +122,27 @@ namespace VMCreate.HyperV.VmCreation
                 _logger.LogInformation("Running Windows post-boot step: {StepName} (order {Order})", step.Name, step.Order);
                 progress.Report(new CreateVMProgressInfo
                 {
-                    Phase = "PostBoot",
+                    Phase = VmDeploymentPhase.PostBoot,
                     ProgressPercentage = (int)((double)completed / steps.Count * 100),
                     StepName = step.Name
                 });
 
                 await step.ExecuteAsync(shell, item, customizations, _logger, cancellationToken);
 
-                // After each step, the VM may have rebooted. Re-establish the shell connection.
                 try
                 {
                     await shell.WaitForReadyAsync(cancellationToken);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "VM {VMName} may not be ready after step {StepName}, attempting to continue", vmSettings.VMName, step.Name);
+                    _logger.LogWarning(ex, "VM {VMName} may not be ready after step {StepName}, attempting to continue", plan.VmName, step.Name);
                 }
 
                 completed++;
                 _logger.LogInformation("Completed Windows post-boot step: {StepName}", step.Name);
             }
 
-            progress.Report(new CreateVMProgressInfo { Phase = "PostBoot", ProgressPercentage = 100 });
+            progress.Report(CreateVMProgressInfo.ForProgress(VmDeploymentPhase.PostBoot, 100));
         }
     }
 }

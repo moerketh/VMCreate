@@ -27,8 +27,8 @@ namespace VMCreate
             var initialInfo = new CreateVMProgressInfo
             {
                 ProgressPercentage = 0,
-                Phase = "Waiting for VM...",
-                URI = string.Empty,
+                Phase = VmDeploymentPhase.CreateVM,
+                URI = "Waiting for VM...",
                 DownloadSpeed = -1
             };
             progressReporter.Report(initialInfo);
@@ -43,8 +43,8 @@ namespace VMCreate
             var vmRunningInfo = new CreateVMProgressInfo
             {
                 ProgressPercentage = 0,
-                Phase = $"VM {vmName} running. Waiting for disk clone...",
-                URI = $"VM GUID: {vmGuid}",
+                Phase = VmDeploymentPhase.CreateVM,
+                URI = $"VM {vmName} running. Waiting for disk clone... (GUID: {vmGuid})",
                 DownloadSpeed = -1
             };
             progressReporter.Report(vmRunningInfo);
@@ -120,7 +120,7 @@ namespace VMCreate
                         lastProgress = progress;
                         progressReporter.Report(new CreateVMProgressInfo
                         {
-                            Phase = "Customize",
+                            Phase = VmDeploymentPhase.Customize,
                             URI = progress
                         });
                     }
@@ -190,12 +190,8 @@ namespace VMCreate
         /// <returns></returns>
         private CreateVMProgressInfo ParseProgressValue(string progressValue)
         {
-            var info = new CreateVMProgressInfo
-            {
-                Phase = "Cloning disk...",
-                URI = string.Empty,
-                DownloadSpeed = -1
-            };
+            int progressPercentage = 0;
+            double downloadSpeed = -1;
 
             // Split parts (e.g., "Progress: 50% | Rate: 10 GB/min | Blocks: 1000/2000")
             string[] parts = progressValue.Split('|', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
@@ -207,7 +203,7 @@ namespace VMCreate
                     string percentStr = part.Split(':')[1].Trim().Replace("%", "");
                     if (double.TryParse(percentStr, new CultureInfo("en-US"), out double percent))
                     {
-                        info.ProgressPercentage = Convert.ToInt32(percent);
+                        progressPercentage = Convert.ToInt32(percent);
                     }
                 }
                 else if (part.StartsWith("Rate: "))
@@ -218,7 +214,7 @@ namespace VMCreate
                     if (rateMatch.Success
                         && double.TryParse(rateMatch.Groups[1].Value, CultureInfo.InvariantCulture, out double rateValue))
                     {
-                        info.DownloadSpeed = rateMatch.Groups[2].Value switch
+                        downloadSpeed = rateMatch.Groups[2].Value switch
                         {
                             "GB" => rateValue * 1000 / 60,   // GB/min → MB/s
                             "MB" => rateValue / 60,           // MB/min → MB/s
@@ -229,7 +225,13 @@ namespace VMCreate
                 }
             }
 
-            return info;
+            return new CreateVMProgressInfo
+            {
+                Phase = VmDeploymentPhase.Customize,
+                URI = progressValue,
+                ProgressPercentage = progressPercentage,
+                DownloadSpeed = downloadSpeed
+            };
         }
     }
 }

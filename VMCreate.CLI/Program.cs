@@ -28,24 +28,31 @@ namespace VMCreate.CLI
                 args[0].Equals("--inject-unattend", StringComparison.OrdinalIgnoreCase))
             {
                 string vhdxPath = args[1];
-                var injectLogPath = Path.Combine(Path.GetTempPath(), "VMCreate.inject.log");
-                var serilogLogger = new Serilog.LoggerConfiguration()
+                string injectLogPath = Path.Combine(Path.GetTempPath(), "VMCreate.inject.log");
+                var injectSerilog = new Serilog.LoggerConfiguration()
                     .MinimumLevel.Debug()
                     .WriteTo.File(injectLogPath, rollingInterval: RollingInterval.Day, shared: true)
                     .CreateLogger();
-                var loggerFactory = Microsoft.Extensions.Logging.LoggerFactory.Create(builder =>
+
+                var services = new ServiceCollection();
+                services.AddLogging(b =>
                 {
-                    builder.ClearProviders();
-                    builder.AddSerilog(serilogLogger, dispose: true);
+                    b.ClearProviders();
+                    b.AddSerilog(injectSerilog, dispose: true);
                 });
-                var injectLogger = loggerFactory.CreateLogger<UnattendInjector>();
+                services.AddTransient<VMCreate.HyperV.Unattend.IPowerShellExecutor, VMCreate.HyperV.Unattend.PowerShellExecutor>();
+                services.AddTransient<IOfflineRegistryEditor, OfflineRegistryEditor>();
+                services.AddTransient<UnattendInjector>();
+                var sp = services.BuildServiceProvider();
+                var injector = sp.GetRequiredService<UnattendInjector>();
+                var injectLogger = sp.GetRequiredService<ILogger<UnattendInjector>>();
 
                 try
                 {
                     injectLogger.LogInformation("Elevated child: injecting unattend.xml into {VhdxPath}", vhdxPath);
-                    new UnattendInjector(injectLogger).Inject(vhdxPath);
-                    injectLogger.LogInformation("Injection succeeded");
-                    return 0;
+                    bool ok = await injector.InjectAsync(vhdxPath, CancellationToken.None);
+                    injectLogger.LogInformation("Injection result: {Result}", ok ? "succeeded" : "failed");
+                    return ok ? 0 : 1;
                 }
                 catch (Exception ex)
                 {
@@ -54,7 +61,7 @@ namespace VMCreate.CLI
                 }
                 finally
                 {
-                    loggerFactory.Dispose();
+                    (sp as IDisposable)?.Dispose();
                 }
             }
 
@@ -87,9 +94,18 @@ namespace VMCreate.CLI
             services.AddTransient<IChecksumVerifier, ChecksumVerifier>();
             services.AddTransient<ICloningIsoDownloader, CloningIsoDownloader>();
 
-            // ── Hyper-V / VM plumbing ───────────────────────────────────────
+            // Hyper-V / VM plumbing
             services.AddSingleton<IHyperVManager, PowerShellHyperVManager>();
+            services.AddSingleton<IVmLifecycleManager>(s => s.GetRequiredService<IHyperVManager>());
+            services.AddSingleton<IVmDiskManager>(s => s.GetRequiredService<IHyperVManager>());
+            services.AddSingleton<IVmBootManager>(s => s.GetRequiredService<IHyperVManager>());
+            services.AddSingleton<IVmNetworkManager>(s => s.GetRequiredService<IHyperVManager>());
+            services.AddSingleton<IVmConfigManager>(s => s.GetRequiredService<IHyperVManager>());
             services.AddSingleton<IUnattendInjector, ElevatedUnattendInjector>();
+            // Fully-qualified because VMCreate.HyperV.Unattend also defines IPowerShellExecutor.
+            services.AddTransient<VMCreate.HyperV.IPowerShellExecutor, VMCreate.HyperV.PowerShellExecutor>();
+            services.AddTransient<VMCreate.HyperV.Unattend.IPowerShellExecutor, VMCreate.HyperV.Unattend.PowerShellExecutor>();
+            services.AddTransient<IOfflineRegistryEditor, OfflineRegistryEditor>();
             services.AddTransient<UnattendInjector>();
             services.AddSingleton<ISshKeyManager, SshKeyManager>();
             services.AddTransient<IKvpSender, KvpHostToGuest>();
@@ -103,6 +119,7 @@ namespace VMCreate.CLI
             services.AddSingleton<IVmPathService, VmPathService>();
             services.AddSingleton<IHostNetworkService, HostNetworkService>();
             services.AddTransient<IPostBootCustomizationService, PostBootCustomizationService>();
+            services.AddTransient<IIsoBootCycleRunner, IsoBootCycleRunner>();
             services.AddTransient<IVmCreationStrategy, IsoVmCreationStrategy>();
             services.AddTransient<IVmCreationStrategy, NativeHyperVVmCreationStrategy>();
             services.AddTransient<IVmCreationStrategy, DiskImageVmCreationStrategy>();

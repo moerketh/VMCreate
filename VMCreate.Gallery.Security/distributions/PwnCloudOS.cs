@@ -39,7 +39,8 @@ namespace VMCreate.Gallery.distributions
                 InitialUsername = "pwnedlabs",
                 InitialPassword = "pwnedlabs",
                 Category = "Security",
-                IsRecommended = true
+                IsRecommended = true,
+                Tags = new() { "pwncloudos", "linux", "cloud-security" },
             };
 
             // Best-effort: fetch the published SHA256 from the download page

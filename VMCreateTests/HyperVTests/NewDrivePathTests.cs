@@ -1,4 +1,5 @@
 using VMCreate;
+using VMCreate.HyperV;
 
 namespace VMCreate.Tests
 {
@@ -25,7 +26,7 @@ namespace VMCreate.Tests
             string convertedSourcePath = System.IO.Path.Combine(vmPath, $"{vmName}.vhdx");
 
             // This is the path AddNewHardDrive uses for the new boot drive
-            string newDrivePath = PowerShellHyperVManager.GetNewDrivePath(vmPath, vmName);
+            string newDrivePath = PowerShellVmDiskManager.GetNewDrivePath(vmPath, vmName);
 
             Assert.AreNotEqual(
                 convertedSourcePath,
@@ -39,7 +40,7 @@ namespace VMCreate.Tests
             string vmPath = @"C:\Hyper-V\Virtual hard disks";
             string vmName = "TestVM";
 
-            string result = PowerShellHyperVManager.GetNewDrivePath(vmPath, vmName);
+            string result = PowerShellVmDiskManager.GetNewDrivePath(vmPath, vmName);
 
             Assert.IsTrue(
                 result.EndsWith("_boot.vhdx"),
@@ -52,7 +53,7 @@ namespace VMCreate.Tests
             string vmPath = @"C:\Hyper-V\Virtual hard disks";
             string vmName = "MyVM_20260101120000";
 
-            string result = PowerShellHyperVManager.GetNewDrivePath(vmPath, vmName);
+            string result = PowerShellVmDiskManager.GetNewDrivePath(vmPath, vmName);
 
             Assert.IsTrue(
                 result.StartsWith(vmPath),

@@ -92,6 +92,7 @@ namespace VMCreate.Gallery.distributions
         public string? DeployCompletionInfo => null;
 
         public bool IsVisibleFor(GalleryItem item)
-            => string.Equals(item?.Name, "PwnCloudOS", StringComparison.OrdinalIgnoreCase);
+            => item.HasTag("pwncloudos")
+               || string.Equals(item?.Name, "PwnCloudOS", StringComparison.OrdinalIgnoreCase);
     }
 }

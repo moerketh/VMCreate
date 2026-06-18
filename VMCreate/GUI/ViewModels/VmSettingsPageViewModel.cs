@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using System;
 using System.Windows.Input;
+using VMCreate.MediaHandlers;
 
 namespace VMCreate
 {
@@ -122,7 +123,7 @@ namespace VMCreate
         /// <summary>True for disk-based images (VMDK, QCOW2, VHD, OVA) that are not ISO installers and not already VHDX/native.</summary>
         public bool IsDiskImage =>
             IsNotVhdx
-            && !string.Equals(_wizardData.SelectedItem?.FileType, "ISO", StringComparison.OrdinalIgnoreCase);
+            && DetectFormat() != DiskImageFormat.Iso;
 
         /// <summary>Show the manual textbox when the user opts out of auto-detection, or for ISO installs.</summary>
         public bool ShowManualDiskSize => IsNotVhdx && !_autoDetectDiskSize;
@@ -134,7 +135,10 @@ namespace VMCreate
         /// Native Hyper-V images (e.g. Windows) are already in VHDX format and need no conversion.</summary>
         public bool IsNotVhdx =>
             _wizardData.SelectedItem?.IsNativeHyperV != true
-            && !string.Equals(_wizardData.SelectedItem?.FileType, "VHDX", StringComparison.OrdinalIgnoreCase);
+            && DetectFormat() != DiskImageFormat.Vhdx;
+
+        private DiskImageFormat DetectFormat()
+            => DiskFileDetector.DetectFileType(_wizardData.SelectedItem?.DiskUri);
 
         public string ValidationError
         {

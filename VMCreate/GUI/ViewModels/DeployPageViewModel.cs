@@ -5,6 +5,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Linq;
 using System.Windows.Input;
+using VMCreate.MediaHandlers;
 using Wpf.Ui.Controls;
 
 namespace VMCreate
@@ -232,12 +233,12 @@ namespace VMCreate
 
         private void BuildPhaseList(WizardData wizardData)
         {
-            string fileType = wizardData.SelectedItem?.FileType ?? "Unknown";
+            DiskImageFormat format = DiskFileDetector.DetectFileType(wizardData.SelectedItem?.DiskUri);
             bool isNativeHyperV = wizardData.SelectedItem?.IsNativeHyperV == true;
-            bool isIso = string.Equals(fileType, "ISO", StringComparison.OrdinalIgnoreCase);
-            bool needsExtraction = fileType is not ("ISO" or "QCOW2" or "VHDX" or "VHD");
+            bool isIso = format == DiskImageFormat.Iso;
+            bool needsExtraction = format is not DiskImageFormat.Iso and not DiskImageFormat.Qcow2 and not DiskImageFormat.Vhdx and not DiskImageFormat.Vhd;
             bool needsConversion = !isNativeHyperV
-                && fileType is "VMDK" or "QCOW2" or "OVA" or "Archive";
+                && format is DiskImageFormat.Vmdk or DiskImageFormat.Qcow2 or DiskImageFormat.Ova or DiskImageFormat.Archive;
             bool nestedVirt = wizardData.Settings?.VirtualizationEnabled ?? true;
 
             if (ShowUnattendInjectionInfo)
@@ -477,7 +478,7 @@ namespace VMCreate
         private void AddCreateVMSubSteps(WizardData wizardData)
         {
             bool nestedVirt = wizardData.Settings?.VirtualizationEnabled ?? true;
-            bool isIso = (wizardData.SelectedItem?.FileType ?? "Unknown") == "ISO";
+            bool isIso = DiskFileDetector.DetectFileType(wizardData.SelectedItem?.DiskUri) == DiskImageFormat.Iso;
 
             Phases.Add(new DeploymentPhase(SubCreateVMSkeleton, "Create Hyper-V VM",
                 "Creating the virtual machine shell", SymbolRegular.Desktop24) { IndentLevel = 1, IsVisible = false });

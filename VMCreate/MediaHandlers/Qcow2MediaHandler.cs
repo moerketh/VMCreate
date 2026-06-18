@@ -2,8 +2,6 @@
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
-using System.Management.Automation;
-using VMCreate;
 using System;
 
 namespace VMCreate.MediaHandlers
@@ -11,59 +9,43 @@ namespace VMCreate.MediaHandlers
     public class Qcow2MediaHandler : MediaHandler
     {
         private readonly IDiskConverter _diskConverter;
-        private readonly IPartitionSchemeDetector _partitionSchemeDetector;
+        private readonly IVmGenerationResolver _generationResolver;
         private int _vmGeneration;
-        private string _vhdDestFile = null;
 
-        public Qcow2MediaHandler(ILogger<Qcow2MediaHandler> logger, IDiskConverter diskConverter, IPartitionSchemeDetector partitionSchemeDetector)
+        public Qcow2MediaHandler(
+            ILogger<Qcow2MediaHandler> logger,
+            IDiskConverter diskConverter,
+            IVmGenerationResolver generationResolver)
             : base(logger)
         {
             _diskConverter = diskConverter ?? throw new ArgumentNullException(nameof(diskConverter));
-            _partitionSchemeDetector = partitionSchemeDetector ?? throw new ArgumentNullException(nameof(partitionSchemeDetector));
+            _generationResolver = generationResolver ?? throw new ArgumentNullException(nameof(generationResolver));
         }
 
         public override bool RequiresExtraction => false;
 
+        public override DiskImageFormat FileType => DiskImageFormat.Qcow2;
+
         public override int VmGeneration => _vmGeneration;
 
-        public override async Task<string> PrepareMediaAsync(string sourceFile, string destinationPath, VmSettings vmSettings, GalleryItem item, IProgress<CreateVMProgressInfo> progressInfo, CancellationToken cancellationToken)
+        public override async Task<MediaPreparationResult> PrepareMediaAsync(
+            string sourceFile,
+            string destinationPath,
+            VmDeploymentPlan plan,
+            GalleryItem item,
+            IProgress<CreateVMProgressInfo> progressInfo,
+            CancellationToken cancellationToken)
         {
-            progressInfo.Report(new CreateVMProgressInfo { Phase = "Convert" });
-            _vhdDestFile = Path.Combine(destinationPath, vmSettings.VMName + ".vhdx");
-            _logger.LogInformation("Converting Qcow2 to VHDX: {VhdDestFile}", _vhdDestFile);
-            string convertedFile = await _diskConverter.ConvertToVhdxAsync(sourceFile, _vhdDestFile, progressInfo, cancellationToken);
+            progressInfo.Report(new CreateVMProgressInfo { Phase = VmDeploymentPhase.Convert });
+            string vhdDestFile = Path.Combine(destinationPath, plan.VmName + ".vhdx");
+            _logger.LogInformation("Converting Qcow2 to VHDX: {VhdDestFile}", vhdDestFile);
+            string convertedFile = await _diskConverter.ConvertToVhdxAsync(sourceFile, vhdDestFile, progressInfo, cancellationToken);
             _logger.LogInformation("Converted Qcow2 to VHDX: {ConvertedFile}", convertedFile);
 
-            string partitionScheme = await _partitionSchemeDetector.DetectPartitionSchemeAsync(convertedFile);
-            _vmGeneration = partitionScheme == "GPT" ? 2 : 1;
-            _logger.LogInformation("Detected {PartitionScheme} partition scheme, setting VM generation to {Generation}", partitionScheme, _vmGeneration);
+            var resolution = await _generationResolver.ResolveAsync(convertedFile, plan, cancellationToken);
+            _vmGeneration = resolution.VmGeneration;
 
-            if (_vmGeneration == 1)
-            {
-                long virtualSizeBytes = await _diskConverter.GetVirtualSizeAsync(convertedFile, cancellationToken);
-                DetectedVirtualSizeBytes = virtualSizeBytes;
-
-                if (vmSettings.AutoDetectDiskSize)
-                {
-                    int autoGB = ComputeAutoDriveSizeGB(virtualSizeBytes);
-                    vmSettings.NewDriveSizeInGB = autoGB;
-                    _logger.LogInformation("Auto-detected disk size: source={SourceGB:F1} GB, target={TargetGB} GB",
-                        virtualSizeBytes / (1024.0 * 1024 * 1024), autoGB);
-                }
-                else
-                {
-                    long newDriveSizeBytes = vmSettings.NewDriveSizeInGB * 1024L * 1024L * 1024L;
-                    if (newDriveSizeBytes < virtualSizeBytes)
-                    {
-                        long minimumGB = (long)Math.Ceiling((double)virtualSizeBytes / (1024 * 1024 * 1024));
-                        throw new InvalidOperationException(
-                            $"New drive size ({vmSettings.NewDriveSizeInGB} GB) is too small for the source disk ({minimumGB} GB). " +
-                            $"The new drive must be at least {minimumGB} GB for MBR-to-GPT cloning.");
-                    }
-                }
-            }
-
-            return _vhdDestFile;
+            return new MediaPreparationResult(vhdDestFile, _vmGeneration, resolution.DetectedVirtualSizeBytes);
         }
     }
 }

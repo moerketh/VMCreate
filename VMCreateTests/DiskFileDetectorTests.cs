@@ -4,6 +4,7 @@ using System.Threading;
 using Microsoft.Extensions.Logging;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Moq;
+using VMCreate.MediaHandlers;
 
 namespace VMCreate.Tests
 {
@@ -125,15 +126,15 @@ namespace VMCreate.Tests
         // ── DetectFileType static method ─────────────────────────────────
 
         [TestMethod]
-        [DataRow("C:\\temp\\disk.vmdk", "VMDK")]
-        [DataRow("/tmp/disk.qcow2", "QCOW2")]
-        [DataRow("C:\\img\\disk.vhdx", "VHDX")]
-        [DataRow("disk.vhd", "VHD")]
-        [DataRow("install.iso", "ISO")]
-        [DataRow("readme.txt", "Other")]
-        [DataRow("", "Unknown")]
-        [DataRow(null, "Unknown")]
-        public void DetectFileType_VariousExtensions_ReturnsExpected(string path, string expected)
+        [DataRow("C:\\temp\\disk.vmdk", DiskImageFormat.Vmdk)]
+        [DataRow("/tmp/disk.qcow2", DiskImageFormat.Qcow2)]
+        [DataRow("C:\\img\\disk.vhdx", DiskImageFormat.Vhdx)]
+        [DataRow("disk.vhd", DiskImageFormat.Vhd)]
+        [DataRow("install.iso", DiskImageFormat.Iso)]
+        [DataRow("readme.txt", DiskImageFormat.Other)]
+        [DataRow("", DiskImageFormat.Other)]
+        [DataRow(null, DiskImageFormat.Other)]
+        public void DetectFileType_VariousExtensions_ReturnsExpected(string path, DiskImageFormat expected)
         {
             Assert.AreEqual(expected, DiskFileDetector.DetectFileType(path));
         }

@@ -12,9 +12,13 @@ namespace VMCreate.HyperV.VmCreation
     /// via an elevated child process before first boot, then optional post-boot
     /// customization steps run over PowerShell Direct.
     /// </summary>
-    internal class NativeHyperVVmCreationStrategy : IVmCreationStrategy
+    public class NativeHyperVVmCreationStrategy : IVmCreationStrategy
     {
-        private readonly IHyperVManager _hyperVManager;
+        private readonly IVmLifecycleManager _lifecycleManager;
+        private readonly IVmDiskManager _diskManager;
+        private readonly IVmBootManager _bootManager;
+        private readonly IVmNetworkManager _networkManager;
+        private readonly IVmConfigManager _configManager;
         private readonly IGuestShellFactory _guestShellFactory;
         private readonly IUnattendInjector _unattendInjector;
         private readonly IPostBootCustomizationService _postBootService;
@@ -22,14 +26,22 @@ namespace VMCreate.HyperV.VmCreation
         private readonly IVmPathService _pathService;
 
         public NativeHyperVVmCreationStrategy(
-            IHyperVManager hyperVManager,
+            IVmLifecycleManager lifecycleManager,
+            IVmDiskManager diskManager,
+            IVmBootManager bootManager,
+            IVmNetworkManager networkManager,
+            IVmConfigManager configManager,
             IGuestShellFactory guestShellFactory,
             IUnattendInjector unattendInjector,
             IPostBootCustomizationService postBootService,
             ILogger<NativeHyperVVmCreationStrategy> logger,
             IVmPathService pathService)
         {
-            _hyperVManager = hyperVManager ?? throw new ArgumentNullException(nameof(hyperVManager));
+            _lifecycleManager = lifecycleManager ?? throw new ArgumentNullException(nameof(lifecycleManager));
+            _diskManager = diskManager ?? throw new ArgumentNullException(nameof(diskManager));
+            _bootManager = bootManager ?? throw new ArgumentNullException(nameof(bootManager));
+            _networkManager = networkManager ?? throw new ArgumentNullException(nameof(networkManager));
+            _configManager = configManager ?? throw new ArgumentNullException(nameof(configManager));
             _guestShellFactory = guestShellFactory ?? throw new ArgumentNullException(nameof(guestShellFactory));
             _unattendInjector = unattendInjector ?? throw new ArgumentNullException(nameof(unattendInjector));
             _postBootService = postBootService ?? throw new ArgumentNullException(nameof(postBootService));
@@ -37,47 +49,49 @@ namespace VMCreate.HyperV.VmCreation
             _pathService = pathService ?? throw new ArgumentNullException(nameof(pathService));
         }
 
-        public bool CanHandle(GalleryItem item, string actualFileType)
+        public bool CanHandle(GalleryItem item, DiskImageFormat actualFileType)
             => item.IsNativeHyperV;
 
         public async Task CreateVMAsync(VmCreationContext ctx)
         {
-            VmSettings vmSettings = ctx.Settings;
+            VmDeploymentPlan plan = ctx.Plan;
             VmCustomizations vmCustomizations = ctx.Customizations;
             GalleryItem item = ctx.GalleryItem;
-            string mediaPath = ctx.MediaPath;
+            string mediaPath = ctx.MediaResult.FinalMediaPath;
+            int detectedGeneration = ctx.MediaResult.VmGeneration;
             var cancellationToken = ctx.CancellationToken;
             var progress = ctx.Progress;
 
-            const int targetGeneration = 2;
-
+            string secureBootTemplate;
             if (!string.IsNullOrEmpty(item.SecureBootTemplate))
-                vmSettings.SecureBootTemplate = item.SecureBootTemplate;
+                secureBootTemplate = item.SecureBootTemplate;
             else if (!string.Equals(item.SecureBoot, "false", StringComparison.OrdinalIgnoreCase))
-                vmSettings.SecureBootTemplate = "MicrosoftWindows";
+                secureBootTemplate = "MicrosoftWindows";
+            else
+                secureBootTemplate = plan.SecureBootTemplate;
 
-            progress.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_CreateVMSkeleton" });
-            await _hyperVManager.CreateVMAsync(vmSettings, _pathService.DefaultVmPath, targetGeneration, cancellationToken);
-            await _hyperVManager.SetVMLoginNotes(vmSettings, item.InitialUsername, item.InitialPassword, cancellationToken);
+            progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.CreateVMSkeleton));
+            await _lifecycleManager.CreateVMAsync(plan, _pathService.DefaultVmPath, detectedGeneration, cancellationToken);
+            await _configManager.SetVMLoginNotes(plan, item.InitialUsername, item.InitialPassword, cancellationToken);
 
-            progress.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_ConnectNic" });
-            await _hyperVManager.ConnectNetworkAdapter(vmSettings, cancellationToken);
+            progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.ConnectNic));
+            await _networkManager.ConnectNetworkAdapter(plan, cancellationToken);
 
-            progress.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_ConfigureHardware" });
-            await _hyperVManager.SetCpuCount(vmSettings, cancellationToken);
-            await _hyperVManager.DisableDynamicMemory(vmSettings, cancellationToken);
-            await _hyperVManager.SetSecureBoot(vmSettings, cancellationToken);
+            progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.ConfigureHardware));
+            await _configManager.SetCpuCount(plan, cancellationToken);
+            await _configManager.DisableDynamicMemory(plan, cancellationToken);
+            await _bootManager.SetSecureBoot(plan, secureBootTemplate, cancellationToken);
             if (vmCustomizations.EnableIntegrationServices)
-                await _hyperVManager.EnableGuestServices(vmSettings, cancellationToken);
+                await _configManager.EnableGuestServices(plan, cancellationToken);
 
-            progress.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_AttachDisk" });
+            progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.AttachDisk));
 
             if (item.IsWindows)
             {
                 var vhdxInfo = new FileInfo(mediaPath);
                 if (vhdxInfo.IsReadOnly)
                 {
-                    _logger.LogInformation("Clearing read-only attribute on VHDX for VM {VMName}: {VhdxPath}", vmSettings.VMName, mediaPath);
+                    _logger.LogInformation("Clearing read-only attribute on VHDX for VM {VMName}: {VhdxPath}", plan.VmName, mediaPath);
                     vhdxInfo.IsReadOnly = false;
                 }
 
@@ -87,22 +101,22 @@ namespace VMCreate.HyperV.VmCreation
                         "Administrator approval is required to prepare the Windows image (unattend injection). Deployment cancelled.");
             }
 
-            await _hyperVManager.AddExistingHardDrive(vmSettings, mediaPath, cancellationToken);
+            await _diskManager.AddExistingHardDrive(plan, mediaPath, cancellationToken);
 
-            progress.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_SetBootOrder" });
-            await _hyperVManager.SetFirstBootToHardDrive(vmSettings, cancellationToken);
+            progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.SetBootOrder));
+            await _bootManager.SetFirstBootToHardDrive(plan, cancellationToken);
 
-            if (vmSettings.VirtualizationEnabled)
+            if (plan.VirtualizationEnabled)
             {
-                progress.Report(new CreateVMProgressInfo { Phase = "CreateVM", SubStep = "Sub_EnableNestedVirt" });
-                await _hyperVManager.EnableVirtualization(vmSettings, cancellationToken);
+                progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.EnableNestedVirt));
+                await _configManager.EnableVirtualization(plan, cancellationToken);
             }
 
-            progress.Report(new CreateVMProgressInfo { Phase = "StartVM" });
-            await _hyperVManager.StartVM(vmSettings, cancellationToken);
+            progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.StartVM));
+            await _lifecycleManager.StartVM(plan, cancellationToken);
 
             if (vmCustomizations.EnableIntegrationServices)
-                await _hyperVManager.SetEnhancedSession(vmSettings, cancellationToken);
+                await _configManager.SetEnhancedSession(plan, cancellationToken);
 
             if (item.IsWindows)
                 await RunWindowsPostBootAsync(ctx);
@@ -111,15 +125,15 @@ namespace VMCreate.HyperV.VmCreation
         private async Task RunWindowsPostBootAsync(VmCreationContext ctx)
         {
             var shell = _guestShellFactory.CreateForWindows(
-                ctx.Settings.VMName,
+                ctx.Plan.VmName,
                 ctx.GalleryItem.InitialUsername ?? "flare",
                 ctx.GalleryItem.InitialPassword ?? "flare");
 
-            ctx.Progress.Report(new CreateVMProgressInfo { Phase = "PostBoot", SubStep = "Sub_WaitForSsh" });
+            ctx.Progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.PostBoot, VmDeploymentSubStep.WaitForSsh));
             await shell.WaitForReadyAsync(ctx.CancellationToken);
 
             await _postBootService.RunWindowsPostBootAsync(
-                shell, ctx.Settings, ctx.GalleryItem, ctx.Customizations, ctx.Progress, ctx.CancellationToken);
+                shell, ctx.Plan, ctx.GalleryItem, ctx.Customizations, ctx.Progress, ctx.CancellationToken);
         }
     }
 }
