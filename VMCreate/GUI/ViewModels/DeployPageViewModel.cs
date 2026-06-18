@@ -233,10 +233,13 @@ namespace VMCreate
 
         private void BuildPhaseList(WizardData wizardData)
         {
-            DiskImageFormat format = DiskFileDetector.DetectFileType(wizardData.SelectedItem?.DiskUri);
+            // Use GalleryItem.FileType, not DiskFileDetector, because the gallery item
+            // peels off compression wrappers (e.g. .vmdk.xz -> VMDK) so the UI can show
+            // the correct phases before extraction reveals the real disk file.
+            DiskImageFormat format = DiskImageFormatExtensions.FromExtension(wizardData.SelectedItem?.FileType);
             bool isNativeHyperV = wizardData.SelectedItem?.IsNativeHyperV == true;
             bool isIso = format == DiskImageFormat.Iso;
-            bool needsExtraction = format is not DiskImageFormat.Iso and not DiskImageFormat.Qcow2 and not DiskImageFormat.Vhdx and not DiskImageFormat.Vhd;
+            bool needsExtraction = wizardData.SelectedItem?.NeedsExtraction ?? false;
             bool needsConversion = !isNativeHyperV
                 && format is DiskImageFormat.Vmdk or DiskImageFormat.Qcow2 or DiskImageFormat.Ova or DiskImageFormat.Archive;
             bool nestedVirt = wizardData.Settings?.VirtualizationEnabled ?? true;

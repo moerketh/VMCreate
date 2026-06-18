@@ -22,6 +22,7 @@ namespace VMCreate
         private CancellationTokenSource _cts;
         private bool _autoScrollEnabled = true;
         private bool _isScrollingProgrammatically;
+        private string _effectiveVmName;
 
         public DeployPage(WizardData wizardData, CreateVM createVM, ILoggerFactory loggerFactory, IEnumerable<IConfigurableCustomizationStep> configurableSteps, IReadOnlyDictionary<string, ICustomizationStep> allSteps)
         {
@@ -107,6 +108,7 @@ namespace VMCreate
             {
                 var progressReport = new Progress<CreateVMProgressInfo>(OnProgressReport);
                 string effectiveVmName = await _createVM.StartCreateVMAsync(vmSettings, vmCustomizations, galleryItem, _cts.Token, progressReport);
+                _effectiveVmName = effectiveVmName;
 
                 _presenter.CompleteActive();
 
@@ -147,6 +149,9 @@ namespace VMCreate
 
         private void OnProgressReport(CreateVMProgressInfo info)
         {
+            if (!string.IsNullOrEmpty(info.VmName))
+                _effectiveVmName = info.VmName;
+
             var result = _presenter.Present(info);
             if (result.IsError)
             {
@@ -216,7 +221,7 @@ namespace VMCreate
         {
             try
             {
-                var vmName = _wizardData.Settings?.VMName;
+                var vmName = _effectiveVmName ?? _wizardData.Settings?.VMName;
                 if (string.IsNullOrEmpty(vmName)) return;
 
                 _logger.LogInformation("Demo mode: launching VMConnect for {VMName}", vmName);
