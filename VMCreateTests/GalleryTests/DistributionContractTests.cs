@@ -169,6 +169,48 @@ namespace VMCreate.Tests.GalleryTests
         }
 
         [TestMethod]
+        public async Task LoadKaliWeekly_MeetsContract()
+        {
+            // Kali makes two HTTP requests: stable (/current/) then weekly (/kali-weekly/).
+            // We mock both with distinct directory listings.
+            const string stableHtml =
+                @"<a href=""kali-linux-2024.3-hyperv-amd64.7z"">kali-linux-2024.3-hyperv-amd64.7z</a>
+                   <td class=""size"">3.5G</td>
+                   <td class=""date"">2024-09-11</td>";
+            const string weeklyHtml =
+                @"<a href=""kali-linux-2024-W37-hyperv-amd64.7z"">kali-linux-2024-W37-hyperv-amd64.7z</a>
+                   <td class=""size"">3.6G</td>
+                   <td class=""date"">2024-09-11</td>
+                   <a href=""kali-linux-2024-W38-hyperv-amd64.7z"">kali-linux-2024-W38-hyperv-amd64.7z</a>
+                   <td class=""size"">3.6G</td>
+                   <td class=""date"">2024-09-18</td>";
+
+            var factory = FactoryFor(req =>
+            {
+                var content = req.RequestUri?.AbsolutePath?.Contains("/kali-weekly/") == true
+                    ? weeklyHtml
+                    : stableHtml;
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(content)
+                };
+            });
+
+            var items = await new Kali(factory).LoadGalleryItems();
+
+            AssertContractInvariants(items, nameof(Kali));
+            Assert.AreEqual(2, items.Count);
+
+            // Stable item is first, weekly second
+            Assert.AreEqual("2024.3", items[0].Version);
+            Assert.IsTrue(items[0].IsRecommended, "Stable release should be recommended");
+
+            Assert.AreEqual("2024-W38", items[1].Version);
+            Assert.IsFalse(items[1].IsRecommended, "Weekly build should not be recommended");
+            StringAssert.Contains(items[1].Name, "Weekly", StringComparison.OrdinalIgnoreCase);
+        }
+
+        [TestMethod]
         public async Task LoadParrot_MeetsContract()
         {
             // Parrot makes two HTTP requests: first to the index page to discover the version,

@@ -136,7 +136,7 @@ namespace VMCreate.Tests.GalleryTests
                 nameof(BlackArch));
 
         [TestMethod, Timeout(120_000)]
-        public async Task LoadKaliCurrent_AllUrisResolve()
+        public async Task LoadKali_AllUrisResolve()
             => await VerifyAllUrisAsync(
                 await new Kali(_factory).LoadGalleryItems(),
                 nameof(Kali));
