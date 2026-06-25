@@ -170,7 +170,8 @@ namespace VMCreate.Gallery
                     InitialUsername = "user",
                     InitialPassword = "parrot",
                     Category = "Security",
-                    IsRecommended = isRecommended
+                    // ISO installers are never recommended — only pre-installed disk images are.
+                    IsRecommended = false
                 });
             }
 
