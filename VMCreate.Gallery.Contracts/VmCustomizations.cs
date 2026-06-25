@@ -49,7 +49,14 @@ namespace VMCreate
         /// </summary>
         public string CustomNameservers { get; set; }
 
-        /// <summary>When true, install OpenVPN and deploy VPN configs to the VM.</summary>
+        /// <summary>
+        /// When true (default), install OpenVPN and the NetworkManager OpenVPN plugin
+        /// on Linux guests. Independent of <see cref="ConfigureHtbVpn"/> so the user can
+        /// still install OpenVPN manually later even when no HTB config is supplied.
+        /// </summary>
+        public bool InstallOpenVpn { get; set; } = true;
+
+        /// <summary>When true, deploy VPN configs to the VM (requires an .ovpn source).</summary>
         public bool ConfigureHtbVpn { get; set; }
 
         /// <summary>Host path to a manually selected .ovpn file (fallback).</summary>
@@ -90,6 +97,6 @@ namespace VMCreate
         /// (i.e. options that require SSH into the running VM).
         /// </summary>
         public bool HasPostBootCustomizations =>
-            ConfigureHtbVpn || SyncTimezone || DistributionOptions.Any(o => o.IsEnabled);
+            InstallOpenVpn || ConfigureHtbVpn || SyncTimezone || DistributionOptions.Any(o => o.IsEnabled);
     }
 }

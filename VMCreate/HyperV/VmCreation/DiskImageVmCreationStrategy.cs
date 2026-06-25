@@ -118,8 +118,8 @@ namespace VMCreate.HyperV.VmCreation
                 await _diskManager.AddExistingHardDrive(plan, mediaPath, cancellationToken);
 
                 bool needsIsoBoot = vmCustomizations.ConfigureXrdp
-                    || vmCustomizations.ConfigureHtbVpn
-                    || vmCustomizations.SyncTimezone;
+                    || vmCustomizations.SyncTimezone
+                    || _postBootService.HasLinuxPostBootSteps(item, vmCustomizations);
 
                 if (needsIsoBoot)
                 {

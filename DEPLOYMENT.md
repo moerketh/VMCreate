@@ -350,7 +350,7 @@ if (postBootSteps.Count > 0)
 | Step | Order | Condition | Description |
 |------|-------|-----------|-------------|
 | `SyncTimezoneStep` | 100 | `SyncTimezone == true` | Maps host Windows TZ to IANA via `TimeZoneInfo.TryConvertWindowsIdToIanaId`, applies with `timedatectl set-timezone` |
-| `InstallOpenVpnStep` | 200 | `ConfigureHtbVpn == true` | Installs `openvpn` + `network-manager-openvpn` + `network-manager-openvpn-gnome` (auto-detects apt/dnf/yum/pacman/zypper), restarts NetworkManager |
+| `InstallOpenVpnStep` | 200 | `InstallOpenVpn == true` (default) | Installs `openvpn` + `network-manager-openvpn` + `network-manager-openvpn-gnome` (auto-detects apt/dnf/yum/pacman/zypper), restarts NetworkManager |
 | `DeployVpnConfigsStep` | 300 | `ConfigureHtbVpn == true` | Deploys `.ovpn` files to `/etc/openvpn/client/`, imports each into NetworkManager via `nmcli connection import` so VPNs appear in the system tray |
 
 ### Progress Reporting

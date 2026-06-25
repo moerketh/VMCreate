@@ -150,6 +150,8 @@ namespace VMCreate.Tests.HyperV.VmCreation
         public async Task CreateVMAsync_Gen2_NoIsoBoot_WhenNoCustomizationNeeded()
         {
             _customizations.ConfigureXrdp = false;
+            _customizations.InstallOpenVpn = false;
+            _postBootService.Setup(s => s.HasLinuxPostBootSteps(_item, _customizations)).Returns(false);
 
             await ExecuteAsync(generation: 2);
 
@@ -162,6 +164,21 @@ namespace VMCreate.Tests.HyperV.VmCreation
                 It.IsAny<CancellationToken>()), Times.Never);
             _bootManager.Verify(h => h.AddBootDvd(_plan, _cloningIsoPath, It.IsAny<CancellationToken>()), Times.Never);
             _bootManager.Verify(h => h.SetFirstBootToHardDrive(_plan, It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [TestMethod]
+        public async Task CreateVMAsync_Gen2_AttachesBootDvd_WhenOnlyDefaultPostBootStepsApply()
+        {
+            _customizations.ConfigureXrdp = false;
+            _customizations.InstallOpenVpn = true;
+            _postBootService.Setup(s => s.HasLinuxPostBootSteps(_item, _customizations)).Returns(true);
+
+            await ExecuteAsync(generation: 2);
+
+            _bootManager.Verify(h => h.AddBootDvd(_plan, _cloningIsoPath, It.IsAny<CancellationToken>()), Times.Once);
+            _isoBootRunner.Verify(r => r.RunAsync(
+                It.IsAny<VmCreationContext>(), 2, _mediaPath, _customizations,
+                It.IsAny<IProgress<CreateVMProgressInfo>>(), It.IsAny<CancellationToken>()), Times.Once);
         }
 
         [TestMethod]

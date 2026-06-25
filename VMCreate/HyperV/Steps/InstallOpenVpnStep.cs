@@ -15,10 +15,10 @@ namespace VMCreate
         public CustomizationPhase Phase => CustomizationPhase.PostBoot;
         public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 200;
-        public string? ProgressPhaseId => "Sub_ConfigureVpn";
+        public string? ProgressPhaseId => "Sub_InstallOpenVpn";
 
         public bool IsApplicable(GalleryItem item, VmCustomizations customizations)
-            => customizations.ConfigureHtbVpn;
+            => customizations.InstallOpenVpn;
 
         public async Task ExecuteAsync(IGuestShell shell, GalleryItem item, VmCustomizations customizations, ILogger logger, CancellationToken ct)
         {

@@ -30,20 +30,20 @@ namespace VMCreate.Tests.HyperV.Steps
             Assert.AreEqual(CustomizationPhase.PostBoot, _step.Phase);
             Assert.AreEqual(StepPlatform.Linux, _step.Platform);
             Assert.AreEqual(200, _step.Order);
-            Assert.AreEqual("Sub_ConfigureVpn", _step.ProgressPhaseId);
+            Assert.AreEqual("Sub_InstallOpenVpn", _step.ProgressPhaseId);
         }
 
         [TestMethod]
-        public void IsApplicable_WhenConfigureHtbVpnTrue_ReturnsTrue()
+        public void IsApplicable_WhenInstallOpenVpnTrue_ReturnsTrue()
         {
-            var customizations = new VmCustomizations { ConfigureHtbVpn = true };
+            var customizations = new VmCustomizations { InstallOpenVpn = true };
             Assert.IsTrue(_step.IsApplicable(new GalleryItem(), customizations));
         }
 
         [TestMethod]
-        public void IsApplicable_WhenConfigureHtbVpnFalse_ReturnsFalse()
+        public void IsApplicable_WhenInstallOpenVpnFalse_ReturnsFalse()
         {
-            var customizations = new VmCustomizations { ConfigureHtbVpn = false };
+            var customizations = new VmCustomizations { InstallOpenVpn = false };
             Assert.IsFalse(_step.IsApplicable(new GalleryItem(), customizations));
         }
 
@@ -69,7 +69,7 @@ namespace VMCreate.Tests.HyperV.Steps
             await _step.ExecuteAsync(
                 _shellMock.Object,
                 new GalleryItem(),
-                new VmCustomizations { ConfigureHtbVpn = true },
+                new VmCustomizations { InstallOpenVpn = true },
                 _loggerMock.Object,
                 CancellationToken.None);
 

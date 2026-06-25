@@ -113,6 +113,11 @@ namespace VMCreate.CLI.Commands
                 "--ovpn",
                 description: "Path to a manually downloaded .ovpn file.");
 
+            var noOpenVpnOpt = new Option<bool>(
+                "--no-openvpn",
+                getDefaultValue: () => false,
+                description: "Skip installing OpenVPN and the NetworkManager OpenVPN plugin.");
+
             // ── Distribution-specific ──────────────────────────────────────────
             var optionOpt = new Option<string[]>(
                 "--option",
@@ -161,6 +166,7 @@ namespace VMCreate.CLI.Commands
             cmd.AddOption(htbTokenOpt);
             cmd.AddOption(htbVpnOpt);
             cmd.AddOption(ovpnOpt);
+            cmd.AddOption(noOpenVpnOpt);
             cmd.AddOption(optionOpt);
             cmd.AddOption(formatOpt);
             cmd.AddOption(quietOpt);
@@ -193,6 +199,7 @@ namespace VMCreate.CLI.Commands
                     HtbToken = r.GetValueForOption(htbTokenOpt),
                     HtbVpn = r.GetValueForOption(htbVpnOpt),
                     OvpnPath = r.GetValueForOption(ovpnOpt),
+                    NoOpenVpn = r.GetValueForOption(noOpenVpnOpt),
                     Options = r.GetValueForOption(optionOpt) ?? Array.Empty<string>(),
                     Format = r.GetValueForOption(formatOpt),
                     Quiet = r.GetValueForOption(quietOpt),
@@ -288,6 +295,7 @@ namespace VMCreate.CLI.Commands
                 CustomNameservers = args.Nameservers,
                 CustomSshPublicKeyPath = args.SshKeyPath,
                 SyncTimezone = !args.NoTimezoneSync,
+                InstallOpenVpn = !args.NoOpenVpn,
                 ConfigureHtbVpn = hasHtbVpn,
                 OvpnFilePath = args.OvpnPath,
                 HtbVpnKeys = new List<HtbVpnKey>(),
@@ -510,6 +518,7 @@ namespace VMCreate.CLI.Commands
         public string HtbToken { get; set; }
         public string HtbVpn { get; set; }
         public string OvpnPath { get; set; }
+        public bool NoOpenVpn { get; set; }
         public string[] Options { get; set; }
         public string Format { get; set; }
         public bool Quiet { get; set; }

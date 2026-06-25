@@ -70,6 +70,7 @@ namespace VMCreate
         // Linux-only post-boot sub-step IDs
         public const string SubRemoveVBox      = "Sub_RemoveVBox";
         public const string SubSyncTimezone    = "Sub_SyncTimezone";
+        public const string SubInstallOpenVpn  = "Sub_InstallOpenVpn";
         public const string SubConfigureVpn    = "Sub_ConfigureVpn";
         public const string SubRestoreSsh      = "Sub_RestoreSsh";
 
@@ -463,6 +464,7 @@ namespace VMCreate
         {
             var parts = new System.Collections.Generic.List<string>();
             if (c.SyncTimezone) parts.Add("timezone sync");
+            if (c.InstallOpenVpn) parts.Add("OpenVPN install");
             if (c.ConfigureHtbVpn) parts.Add("HTB VPN deployment");
             return parts.Count > 0
                 ? "SSH into VM to apply: " + string.Join(", ", parts)
@@ -606,10 +608,15 @@ namespace VMCreate
                 Phases.Add(NewPostBootSubStep(SubSyncTimezone, "Sync Timezone",
                     "Setting guest timezone to match host", SymbolRegular.Clock24));
             }
+            if (c?.InstallOpenVpn == true)
+            {
+                Phases.Add(NewPostBootSubStep(SubInstallOpenVpn, "Install OpenVPN",
+                    "Installing OpenVPN and NetworkManager plugin", SymbolRegular.Globe24));
+            }
             if (c?.ConfigureHtbVpn == true)
             {
                 Phases.Add(NewPostBootSubStep(SubConfigureVpn, "Configure VPN",
-                    "Installing OpenVPN and deploying VPN configs", SymbolRegular.Globe24));
+                    "Deploying VPN configs", SymbolRegular.Globe24));
             }
             AddDistributionOptionSubSteps(c);
             Phases.Add(NewPostBootSubStep(SubRestoreSsh, "Restore SSH State",
@@ -660,10 +667,15 @@ namespace VMCreate
                 Phases.Insert(index++, NewPostBootSubStep(SubSyncTimezone, "Sync Timezone",
                     "Setting guest timezone to match host", SymbolRegular.Clock24));
             }
+            if (c?.InstallOpenVpn == true)
+            {
+                Phases.Insert(index++, NewPostBootSubStep(SubInstallOpenVpn, "Install OpenVPN",
+                    "Installing OpenVPN and NetworkManager plugin", SymbolRegular.Globe24));
+            }
             if (c?.ConfigureHtbVpn == true)
             {
                 Phases.Insert(index++, NewPostBootSubStep(SubConfigureVpn, "Configure VPN",
-                    "Installing OpenVPN and deploying VPN configs", SymbolRegular.Globe24));
+                    "Deploying VPN configs", SymbolRegular.Globe24));
             }
             index = InsertDistributionOptionSubStepsAt(index, c);
             Phases.Insert(index++, NewPostBootSubStep(SubRestoreSsh, "Restore SSH State",

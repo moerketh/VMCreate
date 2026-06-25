@@ -364,3 +364,6 @@ FodyWeavers.xsd
 
 #Claude AI
 .claude/
+
+#Hermes
+.hermes/
