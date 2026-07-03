@@ -145,6 +145,37 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
+        public async Task ExecuteAsync_ScriptInstallsDbusX11()
+        {
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("");
+
+            await _step.ExecuteAsync(_shell.Object, _item, _customizations, _logger.Object, CancellationToken.None);
+
+            _shell.Verify(s => s.CopyContentAsync(
+                It.Is<string>(content =>
+                    content.Contains("dbus-x11") &&
+                    content.Contains("apt-get install -y dbus-x11")),
+                "/tmp/force_x11.sh",
+                It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_ScriptFixesXwrapperConfig()
+        {
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("");
+
+            await _step.ExecuteAsync(_shell.Object, _item, _customizations, _logger.Object, CancellationToken.None);
+
+            _shell.Verify(s => s.CopyContentAsync(
+                It.Is<string>(content =>
+                    content.Contains("/etc/X11/Xwrapper.config") &&
+                    content.Contains("allowed_users=anybody") &&
+                    content.Contains("Xwrapper.config.bak")),
+                "/tmp/force_x11.sh",
+                It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [TestMethod]
         public async Task ExecuteAsync_ScriptDoesNotContainExtractedSteps()
         {
             _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("");

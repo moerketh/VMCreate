@@ -5,9 +5,10 @@ using System.Threading.Tasks;
 namespace VMCreate
 {
     /// <summary>
-    /// Forces the X11 display server on the guest VM by restoring previously
-    /// disabled Wayland sessions, detecting available X11 sessions, and
-    /// configuring SDDM, LightDM, and GDM to use X11.
+    /// Forces the X11 display server on the guest VM by installing X11 runtime
+    /// prerequisites (dbus-x11, Xwrapper.config), restoring previously disabled
+    /// Wayland sessions, detecting available X11 sessions, and configuring SDDM,
+    /// LightDM, and GDM to use X11.
     /// <para>
     /// Wayland on Hyper-V is unstable and can cause crashes or blank screens
     /// because the <c>hyperv_drm</c> driver (the synthetic graphics driver
@@ -62,6 +63,27 @@ namespace VMCreate
         private const string X11Script = @"#!/bin/bash
 set -o pipefail
 
+# -- Install dbus-x11 (required for X11 desktop sessions) ------------------
+# dbus-x11 provides dbus-launch, which every X11 desktop session needs to
+# start a D-Bus session bus.  Without it, startplasma-x11, gnome-session,
+# and other X11 sessions silently fail.  This is a deterministic failure on
+# fresh installs where the distro shipped Wayland and never pulled in dbus-x11.
+if ! dpkg -l dbus-x11 >/dev/null 2>&1; then
+    apt-get update
+    apt-get install -y dbus-x11
+fi
+
+# -- Fix Xwrapper.config (allow non-console Xorg wrapper launches) ---------
+# If anything routes through the Xorg wrapper launcher, restrictive defaults
+# will block non-console users.  Allow anybody so X11 sessions started by
+# display managers or xrdp can launch X.
+if [ -d /etc/X11 ]; then
+    if [ -f /etc/X11/Xwrapper.config ]; then
+        cp /etc/X11/Xwrapper.config /etc/X11/Xwrapper.config.bak
+    fi
+    echo ""allowed_users=anybody"" > /etc/X11/Xwrapper.config
+fi
+
 # =========================================================================
 # CRITICAL ORDERING NOTE
 # =========================================================================
@@ -70,10 +92,11 @@ set -o pipefail
 # LightDM may try to start the cached session which no longer exists.
 #
 # Therefore the correct sequence is:
-#   1. RESTORE any previously disabled Wayland session files
-#   2. DETECT available X11 sessions
-#   3. WRITE display manager configs that pin X11 as the default
-#   4. (FixXrdpStep handles xrdp xorg.conf and startwm.sh)
+#   1. INSTALL X11 runtime prerequisites (dbus-x11, Xwrapper.config)
+#   2. RESTORE any previously disabled Wayland session files
+#   3. DETECT available X11 sessions
+#   4. WRITE display manager configs that pin X11 as the default
+#   5. (FixXrdpStep handles xrdp xorg.conf and startwm.sh)
 #   5. (DisableKwinCompositingStep handles kwinrc for all users)
 #   6. (FixAccountsServiceStep handles XSession overrides)
 #   7. (DisableWaylandSessionsStep disables Wayland session files)
