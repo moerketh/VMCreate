@@ -48,7 +48,14 @@ namespace VMCreate
                         await shell.RunCommandAsync(
                             $"sudo nmcli connection modify '{safeConnName}' connection.id '{safeHtbName}' 2>&1", ct);
 
-                        logger.LogInformation("Imported {Name} VPN as '{HtbName}' into NetworkManager on VM {VMName}",
+                        // Enable split tunneling: HTB VPNs only provide access to lab networks,
+                        // never general internet. Without never-default, NetworkManager
+                        // assigns the VPN a default route (metric 50) that hijacks all traffic
+                        // through the tunnel, breaking connectivity.
+                        await shell.RunCommandAsync(
+                            $"sudo nmcli connection modify '{safeHtbName}' ipv4.never-default yes ipv6.never-default yes 2>&1", ct);
+
+                        logger.LogInformation("Imported {Name} VPN as '{HtbName}' into NetworkManager (split tunneling enabled) on VM {VMName}",
                             key.Name, htbName, shell.VmName);
                     }
                     else
@@ -74,7 +81,11 @@ namespace VMCreate
                     // Rename manual import to "HTB Manual" for consistency
                     await shell.RunCommandAsync(
                         "sudo nmcli connection modify 'manual' connection.id 'HTB Manual' 2>&1", ct);
-                    logger.LogInformation("Imported manual .ovpn as 'HTB Manual' into NetworkManager on VM {VMName}", shell.VmName);
+
+                    // Enable split tunneling for the manual import as well (see HTB-key branch).
+                    await shell.RunCommandAsync(
+                        "sudo nmcli connection modify 'HTB Manual' ipv4.never-default yes ipv6.never-default yes 2>&1", ct);
+                    logger.LogInformation("Imported manual .ovpn as 'HTB Manual' into NetworkManager (split tunneling enabled) on VM {VMName}", shell.VmName);
                 }
                 else
                     logger.LogWarning("NetworkManager import failed for manual .ovpn: {Output}", importResult?.Trim());

@@ -100,6 +100,10 @@ namespace VMCreate.Tests.HyperV.Steps
             _shellMock.Verify(s => s.RunCommandAsync(
                 "sudo nmcli connection modify 'lab' connection.id 'HTB Lab' 2>&1",
                 It.IsAny<CancellationToken>()), Times.Once);
+
+            _shellMock.Verify(s => s.RunCommandAsync(
+                "sudo nmcli connection modify 'HTB Lab' ipv4.never-default yes ipv6.never-default yes 2>&1",
+                It.IsAny<CancellationToken>()), Times.Once);
         }
 
         [TestMethod]
@@ -148,6 +152,14 @@ namespace VMCreate.Tests.HyperV.Steps
 
                 _shellMock.Verify(s => s.RunCommandAsync(
                     "sudo nmcli connection import type openvpn file '/etc/openvpn/client/manual.ovpn' 2>&1",
+                    It.IsAny<CancellationToken>()), Times.Once);
+
+                _shellMock.Verify(s => s.RunCommandAsync(
+                    "sudo nmcli connection modify 'manual' connection.id 'HTB Manual' 2>&1",
+                    It.IsAny<CancellationToken>()), Times.Once);
+
+                _shellMock.Verify(s => s.RunCommandAsync(
+                    "sudo nmcli connection modify 'HTB Manual' ipv4.never-default yes ipv6.never-default yes 2>&1",
                     It.IsAny<CancellationToken>()), Times.Once);
             }
             finally
