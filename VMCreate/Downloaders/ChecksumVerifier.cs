@@ -52,10 +52,13 @@ namespace VMCreate
         {
             algorithm ??= "sha256";
 
+            // Download is complete; jump to 80% and show what we're actually doing.
+            // StepName becomes the Download card's subtext via DeploymentProgressPresenter.UpdateProgress.
             progress?.Report(new CreateVMProgressInfo
             {
                 Phase = VmDeploymentPhase.None,
-                ProgressPercentage = 0
+                ProgressPercentage = 80,
+                StepName = "Verifying checksum…"
             });
 
             _logger.LogInformation("Downloading checksum file from {ChecksumUri}", checksumUri);
@@ -80,7 +83,8 @@ namespace VMCreate
             progress?.Report(new CreateVMProgressInfo
             {
                 Phase = VmDeploymentPhase.None,
-                ProgressPercentage = 10
+                ProgressPercentage = 90,
+                StepName = "Verifying checksum…"
             });
 
             var actualHash = await ComputeHashAsync(filePath, algorithm, cancellationToken);
@@ -88,7 +92,8 @@ namespace VMCreate
             progress?.Report(new CreateVMProgressInfo
             {
                 Phase = VmDeploymentPhase.None,
-                ProgressPercentage = 100
+                ProgressPercentage = 100,
+                StepName = "Verifying checksum…"
             });
 
             if (!string.Equals(expectedHash, actualHash, StringComparison.OrdinalIgnoreCase))
@@ -166,10 +171,13 @@ namespace VMCreate
         {
             algorithm ??= "sha256";
 
+            // Download is complete; jump to 80% and show what we're actually doing.
+            // StepName becomes the Download card's subtext via DeploymentProgressPresenter.UpdateProgress.
             progress?.Report(new CreateVMProgressInfo
             {
                 Phase = VmDeploymentPhase.None,
-                ProgressPercentage = 0
+                ProgressPercentage = 80,
+                StepName = "Verifying checksum…"
             });
 
             var fileName = Path.GetFileName(filePath);
@@ -180,7 +188,8 @@ namespace VMCreate
             progress?.Report(new CreateVMProgressInfo
             {
                 Phase = VmDeploymentPhase.None,
-                ProgressPercentage = 100
+                ProgressPercentage = 100,
+                StepName = "Verifying checksum…"
             });
 
             if (!string.Equals(expectedHash, actualHash, StringComparison.OrdinalIgnoreCase))
