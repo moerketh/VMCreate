@@ -120,6 +120,7 @@
     <Compile Include="HyperV\Unattend\IOfflineRegistryEditor.cs" />
     <Compile Include="HyperV\ElevatedUnattendInjector.cs" />
     <Compile Include="HyperV\UnattendInjector.cs" />
+    <Compile Include="HyperV\HyperVPermissionException.cs" />
     <Compile Include="GUI\MainWindow.xaml.cs" />
     <Compile Include="MediaHandlers\DeSparcify.cs" />
     <Compile Include="MediaHandlers\DiskConverter.cs" />

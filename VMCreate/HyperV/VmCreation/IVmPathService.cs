@@ -19,5 +19,12 @@ namespace VMCreate.HyperV.VmCreation
         /// Returns the per-VM subdirectory under <see cref="DefaultVhdxPath"/>.
         /// </summary>
         string GetVirtualHardDiskPath(string vmName);
+
+        /// <summary>
+        /// Checks whether the current user is a member of the local
+        /// "Hyper-V Administrators" group (well-known SID S-1-5-32-578).
+        /// This group grants WMI namespace access required for VM creation.
+        /// </summary>
+        bool IsHyperVAdministrator();
     }
 }

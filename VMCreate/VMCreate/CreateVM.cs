@@ -4,6 +4,7 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using VMCreate.HyperV;
 using VMCreate.HyperV.VmCreation;
 using VMCreate.MediaHandlers;
 
@@ -75,6 +76,19 @@ namespace VMCreate
                     VmDeploymentPhase.None,
                     VmDeploymentSubStep.None,
                     effectiveVmName));
+
+                // Preflight: verify the user has Hyper-V Administrators group membership,
+                // which is required for WMI namespace access (New-VM, New-VHD, etc.).
+                // Check before the download to avoid wasting a large download on a user
+                // who will inevitably fail at VM creation.
+                if (!_pathService.IsHyperVAdministrator())
+                {
+                    var userName = Environment.UserName;
+                    throw new HyperVPermissionException(
+                        $"You must be a member of the 'Hyper-V Administrators' group to create VMs.\n" +
+                        $"Run the following command as Administrator, then log out and back in:\n" +
+                        $"    Add-LocalGroupMember -Group 'Hyper-V Administrators' -Member '{userName}'");
+                }
 
                 // Download file
                 createVmProgressInfo.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.Download));

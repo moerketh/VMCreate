@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
+using VMCreate.HyperV;
 
 namespace VMCreate
 {
@@ -130,6 +131,12 @@ namespace VMCreate
                 _logger.LogInformation("Deployment cancelled by user.");
                 _presenter.FailActive("Cancelled by user.");
                 SetError("Deployment was cancelled.");
+            }
+            catch (HyperVPermissionException ex)
+            {
+                _logger.LogError("Deployment failed — user not in Hyper-V Administrators group");
+                _presenter.FailActive(ex.Message);
+                SetError(ex.Message);
             }
             catch (Exception ex)
             {

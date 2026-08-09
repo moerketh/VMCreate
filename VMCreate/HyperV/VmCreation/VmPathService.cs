@@ -3,6 +3,7 @@ using Microsoft.Win32;
 using System;
 using System.IO;
 using System.Linq;
+using System.Security.Principal;
 
 namespace VMCreate.HyperV.VmCreation
 {
@@ -103,9 +104,29 @@ namespace VMCreate.HyperV.VmCreation
             return defaultPaths[0];
         }
 
+        /// <summary>
+        /// Well-known SID for the local "Hyper-V Administrators" group.
+        /// </summary>
+        private static readonly SecurityIdentifier HyperVAdministratorsSid =
+            new SecurityIdentifier("S-1-5-32-578");
+
+        public bool IsHyperVAdministrator()
+        {
+            using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+            var principal = new System.Security.Principal.WindowsPrincipal(identity);
+            return principal.IsInRole(HyperVAdministratorsSid);
+        }
+
         private string ResolveDefaultVhdxPath()
         {
-            string defaultPath = @"C:\ProgramData\Microsoft\Windows\Virtual Hard Disks";
+            // Fall back to a user-writable location so that a non-elevated Hyper-V
+            // Administrator can extract/convert disks without needing write access
+            // to the ACL-protected C:\ProgramData\...\Virtual Hard Disks folder.
+            // If the registry value is set (by Hyper-V Manager or the user), it is
+            // respected — the fallback only applies when the registry key is absent.
+            string defaultPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                "Hyper-V", "Virtual Hard Disks");
             try
             {
                 string registryPath = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Virtualization";
@@ -119,7 +140,7 @@ namespace VMCreate.HyperV.VmCreation
                         return path;
                     }
                 }
-                _logger.LogInformation("DefaultVirtualHardDiskPath not found or invalid. Using default: {DefaultPath}", defaultPath);
+                _logger.LogInformation("DefaultVirtualHardDiskPath not found or invalid. Using user-writable default: {DefaultPath}", defaultPath);
             }
             catch (Exception ex)
             {
