@@ -29,6 +29,14 @@ namespace VMCreate
     /// This step is a safe no-op when no Wayland sessions exist.
     /// </para>
     /// <para>
+    /// LightDM autologin is gated on <see cref="VmCustomizations.ConfigureXrdp"/>:
+    /// when xRDP/Enhanced Session is enabled, autologin is omitted so display :0
+    /// sits at the LightDM greeter and xRDP owns the user's session on :10,
+    /// matching the autologin-disable in <c>install_xrdp.sh</c> and avoiding the
+    /// dual-session D-Bus reboot hang. When xRDP is disabled, autologin is kept
+    /// so the headless Hyper-V console does not hang at the greeter.
+    /// </para>
+    /// <para>
     /// Runs at Order 240, after <see cref="RemoveVmwareToolsStep"/> (230)
     /// and before <see cref="FixXrdpStep"/> (245).
     /// </para>
@@ -51,7 +59,21 @@ namespace VMCreate
             // quoting issues from nested bash -c layers in the SSH pipeline.
             // Normalize to LF -- CopyContentAsync base64-encodes the string as-is,
             // and the C# verbatim literal contains Windows CRLF line endings.
-            string script = X11Script.Replace("\r\n", "\n");
+            //
+            // Gate LightDM autologin on whether xRDP/Enhanced Session is enabled.
+            // When ConfigureXrdp is true, the ISO installs xRDP (install_xrdp.sh)
+            // which deliberately disables display-manager autologin to avoid a
+            // dual-session D-Bus conflict: with autologin on, LightDM logs the
+            // user into display :0 while xRDP opens a session on :10, and both
+            // share one D-Bus user bus. Clicking Reboot from the xRDP desktop
+            // then kills Plasma across both displays while systemd-logind
+            // refuses to reboot because the LightDM session is still active --
+            // black screen with cursor, reboot never happens. With autologin off,
+            // :0 sits at the greeter and the xRDP session is the only active one.
+            // When ConfigureXrdp is false, the Hyper-V console is the access
+            // path, so keep autologin to avoid a hung greeter on a headless box.
+            bool enableAutologin = !customizations.ConfigureXrdp;
+            string script = X11Script.Replace("\r\n", "\n").Replace("__ENABLE_AUTOLOGIN__", enableAutologin ? "1" : "0");
             await shell.CopyContentAsync(script, "/tmp/force_x11.sh", ct);
 
             string result = await shell.RunCommandAsync(
@@ -155,26 +177,48 @@ echo ""SDDM configured for X11""
 # -- Step 4: Configure LightDM (XFCE/Mate/Cinnamon/Plasma) -----------------
 # Uses [Seat:*] which is the modern equivalent of [SeatDefaults].
 # The 91- prefix ensures it sorts after any distro-provided drop-in configs.
-# autologin-user is set to the default 'user' account so the greeter does not
-# hang waiting for manual login on a headless Hyper-V console.
+#
+# autologin-user is set to the default 'user' account ONLY when xRDP/Enhanced
+# Session is disabled (__ENABLE_AUTOLOGIN__=1). When xRDP is enabled
+# (__ENABLE_AUTOLOGIN__=0), autologin is omitted so display :0 sits at the
+# LightDM greeter while xRDP owns the user's session on :10 -- this matches
+# install_xrdp.sh's deliberate autologin-disable and avoids the dual-session
+# D-Bus reboot hang (see the Phase 2 rationale in the xrdp-display-conflict
+# memory note). LightDM doesn't use Wayland by default, so this drop-in only
+# pins the X11 session and (optionally) the autologin account.
 mkdir -p /etc/lightdm/lightdm.conf.d
 if [ -n ""$x11_session"" ]; then
-    cat > /etc/lightdm/lightdm.conf.d/91-hyperv-x11.conf << LIGHTDM_EOF
+    if [ ""__ENABLE_AUTOLOGIN__"" = ""1"" ]; then
+        cat > /etc/lightdm/lightdm.conf.d/91-hyperv-x11.conf << LIGHTDM_EOF
 [Seat:*]
 user-session=$x11_session
 autologin-user=user
 autologin-user-timeout=0
 LIGHTDM_EOF
-    echo ""LightDM configured for X11 session: $x11_session""
+        echo ""LightDM configured for X11 session with autologin: $x11_session""
+    else
+        cat > /etc/lightdm/lightdm.conf.d/91-hyperv-x11.conf << LIGHTDM_EOF
+[Seat:*]
+user-session=$x11_session
+LIGHTDM_EOF
+        echo ""LightDM configured for X11 session (autologin disabled for xRDP): $x11_session""
+    fi
 else
     # No X11 session detected -- write a minimal config that at least
     # avoids Wayland (LightDM doesn't use Wayland by default anyway).
-    cat > /etc/lightdm/lightdm.conf.d/91-hyperv-x11.conf << LIGHTDM_FALLBACK_EOF
+    if [ ""__ENABLE_AUTOLOGIN__"" = ""1"" ]; then
+        cat > /etc/lightdm/lightdm.conf.d/91-hyperv-x11.conf << LIGHTDM_FALLBACK_EOF
 [Seat:*]
 autologin-user=user
 autologin-user-timeout=0
 LIGHTDM_FALLBACK_EOF
-    echo ""LightDM drop-in created (no specific X11 session detected)""
+        echo ""LightDM drop-in created with autologin (no specific X11 session detected)""
+    else
+        cat > /etc/lightdm/lightdm.conf.d/91-hyperv-x11.conf << LIGHTDM_FALLBACK_EOF
+[Seat:*]
+LIGHTDM_FALLBACK_EOF
+        echo ""LightDM drop-in created (no specific X11 session, autologin disabled for xRDP)""
+    fi
 fi
 
 # -- Step 5: Configure GDM (GNOME/Fedora/Ubuntu) ---------------------------
