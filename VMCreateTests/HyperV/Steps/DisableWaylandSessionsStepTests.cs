@@ -145,10 +145,14 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
-        public void IsApplicable_AlwaysReturnsTrue()
+        public void IsApplicable_TrueExceptForLamcoBackend()
         {
+            // Wayland sessions are disabled for the xrdp/X11 path; Lamco (Wayland-native) keeps them.
             Assert.IsTrue(_step.IsApplicable(null, null));
             Assert.IsTrue(_step.IsApplicable(new GalleryItem(), new VmCustomizations()));
+            Assert.IsTrue(_step.IsApplicable(new GalleryItem(), new VmCustomizations { RdpBackend = RdpBackend.Xrdp }));
+            Assert.IsTrue(_step.IsApplicable(new GalleryItem(), new VmCustomizations { RdpBackend = RdpBackend.None }));
+            Assert.IsFalse(_step.IsApplicable(new GalleryItem(), new VmCustomizations { RdpBackend = RdpBackend.Lamco }));
         }
     }
 }

@@ -34,7 +34,7 @@ namespace VMCreate
             await shell.CopyContentAsync(script, "/tmp/remove_vbox.sh", ct);
 
             string result = await shell.RunCommandAsync(
-                "sudo bash /tmp/remove_vbox.sh; sudo rm -f /tmp/remove_vbox.sh", ct);
+                "sudo bash /tmp/remove_vbox.sh && sudo rm -f /tmp/remove_vbox.sh", ct);
 
             logger.LogInformation("VBox removal result on VM {VMName}: {Result}", shell.VmName, result.Trim());
         }

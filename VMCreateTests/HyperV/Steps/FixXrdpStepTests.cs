@@ -123,10 +123,14 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
-        public void IsApplicable_AlwaysReturnsTrue()
+        public void IsApplicable_TrueExceptForLamcoBackend()
         {
+            // xrdp-fix steps only apply to the xrdp path; Lamco (Wayland-native) skips them.
             Assert.IsTrue(_step.IsApplicable(null, null));
             Assert.IsTrue(_step.IsApplicable(new GalleryItem(), new VmCustomizations()));
+            Assert.IsTrue(_step.IsApplicable(new GalleryItem(), new VmCustomizations { RdpBackend = RdpBackend.Xrdp }));
+            Assert.IsTrue(_step.IsApplicable(new GalleryItem(), new VmCustomizations { RdpBackend = RdpBackend.None }));
+            Assert.IsFalse(_step.IsApplicable(new GalleryItem(), new VmCustomizations { RdpBackend = RdpBackend.Lamco }));
         }
     }
 }

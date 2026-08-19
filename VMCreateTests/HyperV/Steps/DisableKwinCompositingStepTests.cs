@@ -116,10 +116,14 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
-        public void IsApplicable_AlwaysReturnsTrue()
+        public void IsApplicable_TrueExceptForLamcoBackend()
         {
+            // KWin compositing is disabled for the xrdp software-renderer path; Lamco (Wayland-native, hardware encoding) skips it.
             Assert.IsTrue(_step.IsApplicable(null, null));
             Assert.IsTrue(_step.IsApplicable(new GalleryItem(), new VmCustomizations()));
+            Assert.IsTrue(_step.IsApplicable(new GalleryItem(), new VmCustomizations { RdpBackend = RdpBackend.Xrdp }));
+            Assert.IsTrue(_step.IsApplicable(new GalleryItem(), new VmCustomizations { RdpBackend = RdpBackend.None }));
+            Assert.IsFalse(_step.IsApplicable(new GalleryItem(), new VmCustomizations { RdpBackend = RdpBackend.Lamco }));
         }
     }
 }

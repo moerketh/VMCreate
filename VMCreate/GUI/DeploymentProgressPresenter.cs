@@ -216,9 +216,15 @@ namespace VMCreate
 
         private void HandleDetectedGeneration(int generation)
         {
+            // needsIsoBoot mirrors DiskImageVmCreationStrategy: the cloning ISO boot
+            // cycle runs when xrdp is selected (pre-boot install) OR any post-boot
+            // customization is enabled (timezone/VPN/Lamco, which need the SSH path
+            // the ISO boot cycle sets up). ConfigureXrdp is the shim over RdpBackend
+            // (true only for Xrdp; Lamco installs post-boot, not via the ISO chroot).
             bool needsIsoBoot = _customizations?.ConfigureXrdp == true
                 || _customizations?.ConfigureHtbVpn == true
-                || _customizations?.SyncTimezone == true;
+                || _customizations?.SyncTimezone == true
+                || _customizations?.RdpBackend == RdpBackend.Lamco;
 
             if (generation == 1)
             {

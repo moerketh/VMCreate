@@ -59,7 +59,8 @@ namespace VMCreate.Gallery
                 SecureBoot   = "false",
                 EnhancedSessionTransportType = "HvSocket",
                 Version      = version,
-                LastUpdated  = lastUpdated.ToString("o")
+                LastUpdated  = lastUpdated.ToString("o"),
+                LinuxDistro  = LinuxDistro.Debian
             };
 
             return new List<GalleryItem> { item };

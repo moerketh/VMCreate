@@ -71,12 +71,27 @@
                                Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,0,4"/>
                     <TextBlock Text="Configure remote desktop access for the virtual machine."
                                FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,10"/>
-                    <CheckBox x:Name="XrdpCheckbox"
-                              Content="Enable xrdp for Hyper-V Enhanced Session support"
-                              IsChecked="{Binding ConfigureXrdp}"
-                              FontSize="14"
-                              ToolTip="Installs and configures xrdp so Enhanced Session mode works with this Linux VM. A helper DVD will boot once to install xrdp, then the VM restarts normally."
-                              AutomationProperties.Name="Configure xrdp for enhanced session"/>
+                    <RadioButton x:Name="XrdpCheckbox"
+                                 Content="xrdp — Hyper-V Enhanced Session (disables Wayland, forces X11)"
+                                 GroupName="RdpBackend" FontSize="14"
+                                 IsChecked="{Binding IsRdpBackendXrdp}"
+                                 ToolTip="Installs and configures xrdp so Enhanced Session mode works with this Linux VM. A helper DVD will boot once to install xrdp, then the VM restarts normally. Disables Wayland and forces X11 for maximum compatibility."
+                                 AutomationProperties.Name="Configure xrdp for enhanced session"/>
+                    <RadioButton Content="Lamco RDP Server — Wayland-native (preserves Wayland)"
+                                 GroupName="RdpBackend" FontSize="14" Margin="0,4,0,0"
+                                 IsChecked="{Binding IsRdpBackendLamco}"
+                                 Visibility="{Binding LamcoOptionVisible, Converter={StaticResource BoolToVis}}"
+                                 ToolTip="Installs Lamco RDP Server, a Wayland-native RDP server built on IronRDP with XDG Desktop Portal + PipeWire. Keeps Wayland enabled. Installs post-boot over SSH (no helper DVD). After first boot, log in at the console once and run 'lamco-rdp-server --grant-permission' to authorize screen sharing (one-time, interactive)."
+                                 AutomationProperties.Name="Configure Lamco RDP Server"/>
+                    <ui:InfoBar Title="Lamco: one-time permission grant required" Severity="Informational"
+                                Message="After the VM first boots, log in at the Hyper-V console once and run 'lamco-rdp-server --grant-permission', then click Allow to authorize screen sharing. This is an interactive Portal dialog that cannot be run over SSH. The server auto-starts on subsequent boots via graphical autologin."
+                                IsOpen="{Binding IsRdpBackendLamco, Mode=OneWay}" IsClosable="False" Margin="0,8,0,0"
+                                Visibility="{Binding LamcoOptionVisible, Converter={StaticResource BoolToVis}}"/>
+                    <RadioButton Content="None — no remote desktop (console/SSH only)"
+                                 GroupName="RdpBackend" FontSize="14" Margin="0,4,0,0"
+                                 IsChecked="{Binding IsRdpBackendNone}"
+                                 ToolTip="No RDP server is installed. Access the VM via the Hyper-V console or SSH only."
+                                 AutomationProperties.Name="No remote desktop"/>
                 </StackPanel>
             </Border>
 

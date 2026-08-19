@@ -35,7 +35,29 @@ namespace VMCreate
 
     public class VmCustomizations
     {
-        public bool ConfigureXrdp { get; set; }
+        /// <summary>
+        /// The RDP server backend to install on Linux guests. Default is
+        /// <see cref="RdpBackend.Xrdp"/> for maximum compatibility. When set to
+        /// <see cref="RdpBackend.Lamco"/>, the Wayland-disable / X11-force steps
+        /// are skipped (Lamco is Wayland-native) and graphical autologin is
+        /// enabled instead so Lamco has a live session to share.
+        /// </summary>
+        public RdpBackend RdpBackend { get; set; } = RdpBackend.Xrdp;
+
+        /// <summary>
+        /// Backward-compatible view over <see cref="RdpBackend"/>: true when the
+        /// xrdp backend is selected, false otherwise. The setter maps
+        /// true → <see cref="RdpBackend.Xrdp"/> and false → <see cref="RdpBackend.None"/>,
+        /// preserving the behavior of existing call sites (CLI <c>--no-xrdp</c>,
+        /// persisted settings, KVP sender, ISO-boot trigger, deploy UI) without
+        /// requiring them to know about <see cref="RdpBackend"/>. New code should
+        /// read/write <see cref="RdpBackend"/> directly.
+        /// </summary>
+        public bool ConfigureXrdp
+        {
+            get => RdpBackend == RdpBackend.Xrdp;
+            set => RdpBackend = value ? RdpBackend.Xrdp : RdpBackend.None;
+        }
 
         /// <summary>
         /// DNS configuration mode. Default is <see cref="DnsMode.Host"/>
@@ -89,8 +111,10 @@ namespace VMCreate
         /// <summary>
         /// Returns true if any pre-boot customizations are enabled
         /// (i.e. options applied during ISO customization before first boot).
+        /// Only xrdp uses the pre-boot (cloning-ISO) path. Lamco installs
+        /// post-boot over SSH, so it does not trigger the ISO boot cycle.
         /// </summary>
-        public bool HasPreBootCustomizations => ConfigureXrdp;
+        public bool HasPreBootCustomizations => RdpBackend == RdpBackend.Xrdp;
 
         /// <summary>
         /// Returns true if any post-boot customizations are enabled

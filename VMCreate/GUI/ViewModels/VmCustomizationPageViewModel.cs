@@ -29,7 +29,7 @@ namespace VMCreate
         private readonly ILogger _logger;
         private readonly IHtbApiClient _htbApiClient;
         private readonly List<HtbVpnKey> _downloadedKeys = new();
-        private bool _configureXrdp = true;
+        private RdpBackend _selectedRdpBackend = RdpBackend.Xrdp;
         private string _htbApiToken;
         private bool _isDownloading;
         private string _ovpnFilePath;
@@ -74,10 +74,50 @@ namespace VMCreate
 
         public GalleryItem SelectedItem => _wizardData.SelectedItem;
 
+        /// <summary>
+        /// The RDP server backend selected by the user: xrdp (default, disables
+        /// Wayland), Lamco (Wayland-native), or None. Bound to a 3-way radio group
+        /// in the Remote Access card. <see cref="LamcoOptionVisible"/> hides the
+        /// Lamco radio on unsupported distros.
+        /// </summary>
+        public RdpBackend SelectedRdpBackend
+        {
+            get => _selectedRdpBackend;
+            set => SetProperty(ref _selectedRdpBackend, value);
+        }
+
+        // Back-compat boolean view over SelectedRdpBackend for the xrdp radio.
+        public bool IsRdpBackendXrdp
+        {
+            get => _selectedRdpBackend == RdpBackend.Xrdp;
+            set { if (value) SelectedRdpBackend = RdpBackend.Xrdp; }
+        }
+
+        public bool IsRdpBackendLamco
+        {
+            get => _selectedRdpBackend == RdpBackend.Lamco;
+            set { if (value) SelectedRdpBackend = RdpBackend.Lamco; }
+        }
+
+        public bool IsRdpBackendNone
+        {
+            get => _selectedRdpBackend == RdpBackend.None;
+            set { if (value) SelectedRdpBackend = RdpBackend.None; }
+        }
+
+        /// <summary>
+        /// True when the selected gallery item supports the Lamco RDP Server
+        /// backend (Ubuntu, Fedora, Debian, openSUSE Tumbleweed, Parrot). Hides
+        /// the Lamco radio on unsupported distros. Evaluated from the
+        /// <see cref="GalleryItem.LinuxDistro"/> metadata hint (no live shell yet).
+        /// </summary>
+        public bool LamcoOptionVisible => SelectedItem.SupportsLamco();
+
+        // Legacy binding kept for any XAML still referencing ConfigureXrdp.
         public bool ConfigureXrdp
         {
-            get => _configureXrdp;
-            set => SetProperty(ref _configureXrdp, value);
+            get => _selectedRdpBackend == RdpBackend.Xrdp;
+            set => SelectedRdpBackend = value ? RdpBackend.Xrdp : RdpBackend.None;
         }
 
         public string HtbApiToken
@@ -200,7 +240,7 @@ namespace VMCreate
 
         private void OnFinish()
         {
-            _wizardData.Customizations.ConfigureXrdp = _configureXrdp;
+            _wizardData.Customizations.RdpBackend = _selectedRdpBackend;
             _wizardData.Customizations.HtbVpnKeys = new List<HtbVpnKey>(_downloadedKeys);
             _wizardData.Customizations.OvpnFilePath = _ovpnFilePath;
             _wizardData.Customizations.ConfigureHtbVpn =
@@ -223,8 +263,8 @@ namespace VMCreate
             }
 
             _logger.LogDebug(
-                "Finished customization: ConfigureXrdp={Xrdp}, HtbVpnKeys={KeyCount}, ManualOvpn={ManualPath}, SyncTimezone={Tz}, CustomKey={Key}, IntegrationServices={IntSvc}, DnsMode={DnsMode}, DistOptions={DistOpts}",
-                _configureXrdp, _downloadedKeys.Count, _ovpnFilePath, _syncTimezone, _useCustomSshKey, _enableIntegrationServices,
+                "Finished customization: RdpBackend={RdpBackend}, HtbVpnKeys={KeyCount}, ManualOvpn={ManualPath}, SyncTimezone={Tz}, CustomKey={Key}, IntegrationServices={IntSvc}, DnsMode={DnsMode}, DistOptions={DistOpts}",
+                _selectedRdpBackend, _downloadedKeys.Count, _ovpnFilePath, _syncTimezone, _useCustomSshKey, _enableIntegrationServices,
                 _isCustomDns ? "Custom" : "Host",
                 string.Join(", ", DistributionOptions.Select(o => $"{o.Name}={o.IsEnabled}")));
 

@@ -49,33 +49,10 @@ namespace VMCreate
         /// <summary>
         /// Waits until PowerShell Direct can successfully connect to the VM.
         /// Polls every 5 seconds until the VM is ready or the timeout is reached.
-        /// Skips the initial 60-second sleep if the VM is already responsive.
         /// </summary>
         public async Task WaitForReadyAsync(CancellationToken ct)
         {
             _logger.LogInformation("Waiting for PowerShell Direct to become available on VM {VMName}...", _vmName);
-
-            // Try an immediate probe first — if the VM is already up and responsive
-            // (e.g. after a post-boot step that didn't reboot), skip the 60-second sleep.
-            try
-            {
-                string probe = await RunCommandInternalAsync("Write-Output 'ps-direct-ready'", TimeSpan.FromSeconds(10), ct);
-                if (probe != null && probe.Contains("ps-direct-ready"))
-                {
-                    _logger.LogInformation("PowerShell Direct is ready on VM {VMName} (no wait needed)", _vmName);
-                    return;
-                }
-            }
-            catch (Exception ex) when (ex.Message?.Contains("remote session might have ended") == true
-                                    || ex.Message?.Contains("cannot handle") == true
-                                    || ex.Message?.Contains("not yet available") == true)
-            {
-                _logger.LogDebug("VM {VMName} not yet ready, beginning initial wait...", _vmName);
-            }
-            catch
-            {
-                _logger.LogDebug("VM {VMName} probe failed, beginning initial wait...", _vmName);
-            }
 
             // Give the VM time to complete OOBE before starting to poll.
             // OOBE on a large VHDX can take several minutes, including reboots.

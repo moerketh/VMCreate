@@ -38,7 +38,7 @@ namespace VMCreate
             await shell.CopyContentAsync(script, "/tmp/install_hyperv_daemons.sh", ct);
 
             string result = await shell.RunCommandAsync(
-                "sudo bash /tmp/install_hyperv_daemons.sh; sudo rm -f /tmp/install_hyperv_daemons.sh", ct);
+                "sudo bash /tmp/install_hyperv_daemons.sh && sudo rm -f /tmp/install_hyperv_daemons.sh", ct);
 
             logger.LogInformation("hyperv-daemons install result on VM {VMName}: {Result}", shell.VmName, result.Trim());
         }

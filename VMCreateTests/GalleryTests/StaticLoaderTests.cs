@@ -32,6 +32,47 @@ namespace VMCreate.Tests.GalleryTests
                 });
         }
 
+        // ── openSUSE Tumbleweed (KDE) ─────────────────────────────────────────────
+
+        [TestMethod]
+        public async Task OpenSuseTumbleweed_LoadGalleryItems_ReturnsSingleItem()
+        {
+            var result = await new OpenSuseTumbleweed().LoadGalleryItems();
+
+            Assert.AreEqual(1, result.Count);
+        }
+
+        [TestMethod]
+        public async Task OpenSuseTumbleweed_LoadGalleryItems_ItemHasRequiredFields()
+        {
+            var item = (await new OpenSuseTumbleweed().LoadGalleryItems())[0];
+
+            Assert.IsFalse(string.IsNullOrEmpty(item.Name));
+            Assert.IsFalse(string.IsNullOrEmpty(item.DiskUri), "DiskUri must not be empty");
+            Assert.AreEqual("HvSocket", item.EnhancedSessionTransportType);
+            Assert.AreEqual("false", item.SecureBoot);
+        }
+
+        [TestMethod]
+        public async Task OpenSuseTumbleweed_LoadGalleryItems_SetsOpenSuseDistroHint()
+        {
+            // The LinuxDistro hint lets the pre-deployment UI show the Lamco RDP Server
+            // option for openSUSE without a live SSH shell.
+            var item = (await new OpenSuseTumbleweed().LoadGalleryItems())[0];
+
+            Assert.AreEqual(LinuxDistro.OpenSuse, item.LinuxDistro);
+            Assert.IsTrue(item.SupportsLamco());
+        }
+
+        [TestMethod]
+        public async Task OpenSuseTumbleweed_LoadGalleryItems_DiskUriIsIso()
+        {
+            var item = (await new OpenSuseTumbleweed().LoadGalleryItems())[0];
+
+            Assert.IsTrue(item.DiskUri.EndsWith(".iso", StringComparison.OrdinalIgnoreCase),
+                $"Expected .iso URI for the KDE Live spin, got: {item.DiskUri}");
+        }
+
         // ── Arch ─────────────────────────────────────────────────────────────────
 
         [TestMethod]

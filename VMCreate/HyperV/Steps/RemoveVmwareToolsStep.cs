@@ -40,7 +40,7 @@ namespace VMCreate
             await shell.CopyContentAsync(script, "/tmp/remove_vmware.sh", ct);
 
             string result = await shell.RunCommandAsync(
-                "sudo bash /tmp/remove_vmware.sh; sudo rm -f /tmp/remove_vmware.sh", ct);
+                "sudo bash /tmp/remove_vmware.sh && sudo rm -f /tmp/remove_vmware.sh", ct);
 
             logger.LogInformation("VMware removal result on VM {VMName}: {Result}", shell.VmName, result.Trim());
         }

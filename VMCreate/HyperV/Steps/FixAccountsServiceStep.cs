@@ -40,7 +40,8 @@ namespace VMCreate
         public int Order => 255;
         public string? ProgressPhaseId => "Sub_FixAccountsService";
 
-        public bool IsApplicable(GalleryItem item, VmCustomizations customizations) => true;
+        public bool IsApplicable(GalleryItem item, VmCustomizations customizations)
+            => customizations?.RdpBackend != RdpBackend.Lamco;
 
         public async Task ExecuteAsync(IGuestShell shell, GalleryItem item, VmCustomizations customizations, ILogger logger, CancellationToken ct)
         {
@@ -50,7 +51,7 @@ namespace VMCreate
             await shell.CopyContentAsync(script, "/tmp/fix_accounts.sh", ct);
 
             string result = await shell.RunCommandAsync(
-                "sudo bash /tmp/fix_accounts.sh; sudo rm -f /tmp/fix_accounts.sh", ct);
+                "sudo bash /tmp/fix_accounts.sh && sudo rm -f /tmp/fix_accounts.sh", ct);
 
             logger.LogInformation("AccountsService fix result on VM {VMName}: {Result}", shell.VmName, result.Trim());
         }

@@ -50,7 +50,7 @@ namespace VMCreate.Tests.HyperV.Steps
 
             _shellMock
                 .Setup(s => s.RunCommandAsync(
-                    "sudo bash /tmp/remove_vbox.sh; sudo rm -f /tmp/remove_vbox.sh",
+                    "sudo bash /tmp/remove_vbox.sh && sudo rm -f /tmp/remove_vbox.sh",
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync("No VirtualBox Guest Additions found");
 
@@ -72,7 +72,7 @@ namespace VMCreate.Tests.HyperV.Steps
                 It.IsAny<CancellationToken>()), Times.Once);
 
             _shellMock.Verify(s => s.RunCommandAsync(
-                "sudo bash /tmp/remove_vbox.sh; sudo rm -f /tmp/remove_vbox.sh",
+                "sudo bash /tmp/remove_vbox.sh && sudo rm -f /tmp/remove_vbox.sh",
                 It.IsAny<CancellationToken>()), Times.Once);
         }
     }

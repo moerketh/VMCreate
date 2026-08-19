@@ -35,7 +35,8 @@ namespace VMCreate.Gallery
                 SecureBoot   = "false",
                 EnhancedSessionTransportType = "HvSocket",
                 Version      = ReleaseVersion,
-                LastUpdated  = DateTime.UtcNow.ToString("o")
+                LastUpdated  = DateTime.UtcNow.ToString("o"),
+                LinuxDistro  = LinuxDistro.Fedora
             };
             return new List<GalleryItem> { item };
         }

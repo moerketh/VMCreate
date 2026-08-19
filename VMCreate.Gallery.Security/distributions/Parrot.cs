@@ -170,6 +170,7 @@ namespace VMCreate.Gallery
                     InitialUsername = "user",
                     InitialPassword = "parrot",
                     Category = "Security",
+                    LinuxDistro = LinuxDistro.Parrot,
                     // ISO installers are never recommended — only pre-installed disk images are.
                     IsRecommended = false
                 });
@@ -196,6 +197,7 @@ namespace VMCreate.Gallery
                     InitialUsername = "user",
                     InitialPassword = "parrot",
                     Category = "Security",
+                    LinuxDistro = LinuxDistro.Parrot,
                     IsRecommended = isRecommended
                 });
             }

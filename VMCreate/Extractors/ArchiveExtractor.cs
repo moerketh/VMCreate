@@ -23,6 +23,13 @@ namespace VMCreate
         private readonly ILogger<ArchiveExtractor> _logger;
 
         /// <summary>
+        /// Returns the available free space (in bytes) for the drive containing the
+        /// given path. Defaults to <see cref="DriveInfo.AvailableFreeSpace"/>; injected
+        /// so unit tests can simulate a low-space drive without allocating huge files.
+        /// </summary>
+        private readonly Func<string, (long AvailableFreeSpace, string DriveName)> _getAvailableFreeSpace;
+
+        /// <summary>
         /// Synchronous IProgress<T> wrapper for inline callback invocation.
         /// Unlike Progress<T>, which posts to the synchronization context asynchronously,
         /// this invokes the handler immediately on the calling thread. This ensures:
@@ -104,8 +111,27 @@ namespace VMCreate
         }
 
         public ArchiveExtractor(ILogger<ArchiveExtractor> logger)
+            : this(logger, GetAvailableFreeSpaceDefault)
+        {
+        }
+
+        /// <summary>
+        /// Test-friendly constructor that overrides the disk-space lookup so the
+        /// pre-flight check can be exercised without actually exhausting a drive.
+        /// </summary>
+        /// <param name="getAvailableFreeSpace">Given the extraction path, returns the
+        /// (availableFreeSpace, driveName) tuple the pre-flight check should use.</param>
+        public ArchiveExtractor(ILogger<ArchiveExtractor> logger,
+            Func<string, (long AvailableFreeSpace, string DriveName)> getAvailableFreeSpace)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _getAvailableFreeSpace = getAvailableFreeSpace ?? throw new ArgumentNullException(nameof(getAvailableFreeSpace));
+        }
+
+        private static (long AvailableFreeSpace, string DriveName) GetAvailableFreeSpaceDefault(string path)
+        {
+            var driveInfo = new DriveInfo(Path.GetPathRoot(path));
+            return (driveInfo.AvailableFreeSpace, driveInfo.Name);
         }
 
         public void Extract(string filePath, string extractPath, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo> progressReportInfo)
@@ -129,12 +155,12 @@ namespace VMCreate
                     // Pre-flight: check available disk space before extracting
                     if (totalSize > 0)
                     {
-                        var driveInfo = new DriveInfo(Path.GetPathRoot(extractPath));
-                        if (driveInfo.AvailableFreeSpace < totalSize)
+                        var (availableFreeSpace, driveName) = _getAvailableFreeSpace(extractPath);
+                        if (availableFreeSpace < totalSize)
                         {
                             string needed = FormatBytes(totalSize);
-                            string available = FormatBytes(driveInfo.AvailableFreeSpace);
-                            string msg = $"Not enough disk space on {driveInfo.Name} to extract the archive. " +
+                            string available = FormatBytes(availableFreeSpace);
+                            string msg = $"Not enough disk space on {driveName} to extract the archive. " +
                                          $"Need {needed}, only {available} available. Free up space and try again.";
                             _logger.LogError(msg);
                             throw new IOException(msg);

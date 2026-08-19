@@ -43,7 +43,7 @@ namespace VMCreate
             await shell.CopyContentAsync(script, "/tmp/disable_suspend_btrfs.sh", ct);
 
             string result = await shell.RunCommandAsync(
-                "sudo bash /tmp/disable_suspend_btrfs.sh; sudo rm -f /tmp/disable_suspend_btrfs.sh", ct);
+                "sudo bash /tmp/disable_suspend_btrfs.sh && sudo rm -f /tmp/disable_suspend_btrfs.sh", ct);
 
             logger.LogInformation("btrfs suspend-disable result on VM {VMName}: {Result}", shell.VmName, result.Trim());
         }

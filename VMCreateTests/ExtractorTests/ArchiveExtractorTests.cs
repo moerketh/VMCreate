@@ -345,5 +345,96 @@ namespace VMCreate.Tests
                 if (Directory.Exists(extractPath)) Directory.Delete(extractPath, true);
             }
         }
+
+        /// <summary>
+        /// Regression guard for the disk-space pre-flight check: extracting an archive
+        /// whose uncompressed size exceeds the available free space on the destination
+        /// drive must throw <see cref="IOException"/> with a clear, actionable message
+        /// before writing any files. This catches the failure the user hit when the D:
+        /// drive ran out of space during a Parrot qcow2 extraction (needed 15.2 GB, only
+        /// 6.4 GB available).
+        /// </summary>
+        /// <remarks>
+        /// Uses the test-friendly <see cref="ArchiveExtractor"/> constructor that injects
+        /// a fake disk-space lookup, so the test is fully deterministic and fast: it
+        /// creates a tiny archive (a few KB) but reports the destination drive as having
+        /// only 1 byte free. No multi-GB allocation is needed.
+        /// </remarks>
+        [TestMethod]
+        public void Extract_InsufficientDiskSpace_ThrowsIOExceptionWithClearMessage()
+        {
+            // A small, real archive — its uncompressed size is ~3 KB, which exceeds the
+            // fake 1-byte free space, exercising the pre-flight check without big allocs.
+            byte[] data = new byte[1024];
+            new Random(7).NextBytes(data);
+            string archivePath = CreateZipArchive(new Dictionary<string, byte[]> { { "small.bin", data } });
+            string extractPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+
+            const string fakeDriveName = @"D:\";
+            const long fakeFreeSpace = 1L; // 1 byte — always less than the archive's size
+            var lowSpaceExtractor = new ArchiveExtractor(_mockLogger.Object,
+                _ => (fakeFreeSpace, fakeDriveName));
+
+            try
+            {
+                var ex = Assert.Throws<IOException>(() =>
+                    lowSpaceExtractor.Extract(archivePath, extractPath, CancellationToken.None,
+                        new ImmediateProgress<CreateVMProgressInfo>(_ => { })));
+
+                StringAssert.Contains(ex.Message, "Not enough disk space",
+                    "The error message must explain the disk-space problem so the user can act on it.");
+                StringAssert.Contains(ex.Message, fakeDriveName,
+                    "The error message must identify which drive is short of space.");
+                StringAssert.Contains(ex.Message, "Free up space",
+                    "The error message must tell the user how to recover.");
+                StringAssert.Contains(ex.Message, "Need",
+                    "The error message must state how much space is needed.");
+                StringAssert.Contains(ex.Message, "only",
+                    "The error message must state how much space is available.");
+
+                // No partial files should be left behind — the pre-flight check runs
+                // before any entry is written, so the extract directory should be empty
+                // (or not exist beyond what SetupExtractDirectory created).
+                Assert.IsFalse(Directory.Exists(extractPath) && Directory.EnumerateFiles(extractPath, "*", SearchOption.AllDirectories).Any(),
+                    "No files should be extracted when the pre-flight disk-space check fails.");
+            }
+            finally
+            {
+                File.Delete(archivePath);
+                if (Directory.Exists(extractPath)) Directory.Delete(extractPath, true);
+            }
+        }
+
+        /// <summary>
+        /// Sanity check that the pre-flight check does NOT trip when there is ample
+        /// free space — guards against a bug where the injected space lookup is
+        /// compared the wrong way around.
+        /// </summary>
+        [TestMethod]
+        public void Extract_SufficientDiskSpace_ProceedsWithoutIOException()
+        {
+            byte[] data = System.Text.Encoding.UTF8.GetBytes("plenty of space");
+            string archivePath = CreateZipArchive(new Dictionary<string, byte[]> { { "ok.txt", data } });
+            string extractPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+
+            // Report a generous 1 TB free so the ~20-byte archive always fits.
+            var ampleSpaceExtractor = new ArchiveExtractor(_mockLogger.Object,
+                _ => (1_000_000_000_000L, @"C:\"));
+
+            try
+            {
+                ampleSpaceExtractor.Extract(archivePath, extractPath, CancellationToken.None,
+                    new ImmediateProgress<CreateVMProgressInfo>(_ => { }));
+
+                string extractedFile = Path.Combine(extractPath, "ok.txt");
+                Assert.IsTrue(File.Exists(extractedFile), "File should extract when there is enough space.");
+                Assert.AreEqual("plenty of space", File.ReadAllText(extractedFile));
+            }
+            finally
+            {
+                File.Delete(archivePath);
+                if (Directory.Exists(extractPath)) Directory.Delete(extractPath, true);
+            }
+        }
     }
 }

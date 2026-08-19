@@ -36,7 +36,8 @@ namespace VMCreate
         public int Order => 250;
         public string? ProgressPhaseId => "Sub_DisableKwinCompositing";
 
-        public bool IsApplicable(GalleryItem item, VmCustomizations customizations) => true;
+        public bool IsApplicable(GalleryItem item, VmCustomizations customizations)
+            => customizations?.RdpBackend != RdpBackend.Lamco;
 
         public async Task ExecuteAsync(IGuestShell shell, GalleryItem item, VmCustomizations customizations, ILogger logger, CancellationToken ct)
         {
@@ -46,7 +47,7 @@ namespace VMCreate
             await shell.CopyContentAsync(script, "/tmp/disable_kwin_compositing.sh", ct);
 
             string result = await shell.RunCommandAsync(
-                "sudo bash /tmp/disable_kwin_compositing.sh; sudo rm -f /tmp/disable_kwin_compositing.sh", ct);
+                "sudo bash /tmp/disable_kwin_compositing.sh && sudo rm -f /tmp/disable_kwin_compositing.sh", ct);
 
             logger.LogInformation("KWin compositing disable result on VM {VMName}: {Result}", shell.VmName, result.Trim());
         }

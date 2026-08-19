@@ -30,7 +30,8 @@ namespace VMCreate
         public int Order => 245;
         public string? ProgressPhaseId => "Sub_FixXrdp";
 
-        public bool IsApplicable(GalleryItem item, VmCustomizations customizations) => true;
+        public bool IsApplicable(GalleryItem item, VmCustomizations customizations)
+            => customizations?.RdpBackend != RdpBackend.Lamco;
 
         public async Task ExecuteAsync(IGuestShell shell, GalleryItem item, VmCustomizations customizations, ILogger logger, CancellationToken ct)
         {
@@ -40,7 +41,7 @@ namespace VMCreate
             await shell.CopyContentAsync(script, "/tmp/fix_xrdp.sh", ct);
 
             string result = await shell.RunCommandAsync(
-                "sudo bash /tmp/fix_xrdp.sh; sudo rm -f /tmp/fix_xrdp.sh", ct);
+                "sudo bash /tmp/fix_xrdp.sh && sudo rm -f /tmp/fix_xrdp.sh", ct);
 
             logger.LogInformation("xrdp fix result on VM {VMName}: {Result}", shell.VmName, result.Trim());
         }

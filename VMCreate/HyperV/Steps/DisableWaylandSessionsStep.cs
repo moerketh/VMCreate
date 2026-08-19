@@ -35,7 +35,8 @@ namespace VMCreate
         public int Order => 270;
         public string? ProgressPhaseId => "Sub_DisableWaylandSessions";
 
-        public bool IsApplicable(GalleryItem item, VmCustomizations customizations) => true;
+        public bool IsApplicable(GalleryItem item, VmCustomizations customizations)
+            => customizations?.RdpBackend != RdpBackend.Lamco;
 
         public async Task ExecuteAsync(IGuestShell shell, GalleryItem item, VmCustomizations customizations, ILogger logger, CancellationToken ct)
         {
@@ -45,7 +46,7 @@ namespace VMCreate
             await shell.CopyContentAsync(script, "/tmp/disable_wayland.sh", ct);
 
             string result = await shell.RunCommandAsync(
-                "sudo bash /tmp/disable_wayland.sh; sudo rm -f /tmp/disable_wayland.sh", ct);
+                "sudo bash /tmp/disable_wayland.sh && sudo rm -f /tmp/disable_wayland.sh", ct);
 
             logger.LogInformation("Wayland disable result on VM {VMName}: {Result}", shell.VmName, result.Trim());
         }

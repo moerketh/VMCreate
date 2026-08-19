@@ -49,7 +49,8 @@ namespace VMCreate
         public int Order => 240;
         public string? ProgressPhaseId => "Sub_ForceX11";
 
-        public bool IsApplicable(GalleryItem item, VmCustomizations customizations) => true;
+        public bool IsApplicable(GalleryItem item, VmCustomizations customizations)
+            => customizations?.RdpBackend != RdpBackend.Lamco;
 
         public async Task ExecuteAsync(IGuestShell shell, GalleryItem item, VmCustomizations customizations, ILogger logger, CancellationToken ct)
         {
@@ -77,7 +78,7 @@ namespace VMCreate
             await shell.CopyContentAsync(script, "/tmp/force_x11.sh", ct);
 
             string result = await shell.RunCommandAsync(
-                "sudo bash /tmp/force_x11.sh; sudo rm -f /tmp/force_x11.sh", ct);
+                "sudo bash /tmp/force_x11.sh && sudo rm -f /tmp/force_x11.sh", ct);
 
             logger.LogInformation("X11 enforcement result on VM {VMName}: {Result}", shell.VmName, result.Trim());
         }

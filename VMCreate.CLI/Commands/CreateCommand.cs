@@ -75,7 +75,12 @@ namespace VMCreate.CLI.Commands
             var noXrdpOpt = new Option<bool>(
                 "--no-xrdp",
                 getDefaultValue: () => false,
-                description: "Disable xRDP / Enhanced Session setup.");
+                description: "Disable xRDP / Enhanced Session setup. (Deprecated alias for --rdp-backend none.)");
+
+            var rdpBackendOpt = new Option<string>(
+                "--rdp-backend",
+                getDefaultValue: () => "xrdp",
+                description: "RDP server backend: xrdp (default, disables Wayland), lamco (Wayland-native Lamco RDP Server), or none.");
 
             var noIntegrationSvcOpt = new Option<bool>(
                 "--no-integration-services",
@@ -158,6 +163,7 @@ namespace VMCreate.CLI.Commands
             cmd.AddOption(noNestedVirtOpt);
             cmd.AddOption(replaceOpt);
             cmd.AddOption(noXrdpOpt);
+            cmd.AddOption(rdpBackendOpt);
             cmd.AddOption(noIntegrationSvcOpt);
             cmd.AddOption(dnsModeOpt);
             cmd.AddOption(nameserversOpt);
@@ -191,6 +197,7 @@ namespace VMCreate.CLI.Commands
                     NoNestedVirt = r.GetValueForOption(noNestedVirtOpt),
                     Replace = r.GetValueForOption(replaceOpt),
                     NoXrdp = r.GetValueForOption(noXrdpOpt),
+                    RdpBackend = r.GetValueForOption(rdpBackendOpt),
                     NoIntegrationServices = r.GetValueForOption(noIntegrationSvcOpt),
                     DnsMode = r.GetValueForOption(dnsModeOpt),
                     Nameservers = r.GetValueForOption(nameserversOpt),
@@ -210,6 +217,26 @@ namespace VMCreate.CLI.Commands
             });
 
             return cmd;
+        }
+
+        /// <summary>
+        /// Resolves the RDP backend from --rdp-backend, with --no-xrdp as a
+        /// deprecated back-compat alias for --rdp-backend none. --no-xrdp only
+        /// takes effect when --rdp-backend is left at its default (xrdp).
+        /// </summary>
+        private static RdpBackend ResolveRdpBackend(string rdpBackend, bool noXrdp)
+        {
+            if (!string.IsNullOrEmpty(rdpBackend)
+                && !string.Equals(rdpBackend, "xrdp", StringComparison.OrdinalIgnoreCase))
+            {
+                return rdpBackend.ToLowerInvariant() switch
+                {
+                    "lamco" => RdpBackend.Lamco,
+                    "none" => RdpBackend.None,
+                    _ => RdpBackend.Xrdp
+                };
+            }
+            return noXrdp ? RdpBackend.None : RdpBackend.Xrdp;
         }
 
         private static async Task<int> RunAsync(IServiceProvider services, CreateArgs args, CancellationToken ct)
@@ -287,7 +314,7 @@ namespace VMCreate.CLI.Commands
 
             var vmCustomizations = new VmCustomizations
             {
-                ConfigureXrdp = !args.NoXrdp,
+                RdpBackend = ResolveRdpBackend(args.RdpBackend, args.NoXrdp),
                 EnableIntegrationServices = !args.NoIntegrationServices,
                 DnsMode = string.Equals(args.DnsMode, "custom", StringComparison.OrdinalIgnoreCase)
                     ? DnsMode.Custom
@@ -510,6 +537,7 @@ namespace VMCreate.CLI.Commands
         public bool NoNestedVirt { get; set; }
         public bool Replace { get; set; }
         public bool NoXrdp { get; set; }
+        public string RdpBackend { get; set; }
         public bool NoIntegrationServices { get; set; }
         public string DnsMode { get; set; }
         public string Nameservers { get; set; }

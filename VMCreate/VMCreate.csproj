@@ -83,10 +83,13 @@
     <Compile Include="HyperV\Steps\DisableSshStep.cs" />
     <Compile Include="HyperV\Steps\DisableSuspendOnBtrfsStep.cs" />
     <Compile Include="HyperV\Steps\DisableWaylandSessionsStep.cs" />
+    <Compile Include="HyperV\Steps\DistroDetector.cs" />
+    <Compile Include="HyperV\Steps\EnableGraphicalAutologinStep.cs" />
     <Compile Include="HyperV\Steps\FixAccountsServiceStep.cs" />
     <Compile Include="HyperV\Steps\FixXrdpStep.cs" />
     <Compile Include="HyperV\Steps\ForceX11Step.cs" />
     <Compile Include="HyperV\Steps\InstallHypervDaemonsStep.cs" />
+    <Compile Include="HyperV\Steps\InstallLamcoRdpStep.cs" />
     <Compile Include="HyperV\Steps\InstallOpenVpnStep.cs" />
     <Compile Include="HyperV\Steps\RemoveAutomationUserStep.cs" />
     <Compile Include="HyperV\Steps\RemoveVBoxGuestAdditionsStep.cs" />
