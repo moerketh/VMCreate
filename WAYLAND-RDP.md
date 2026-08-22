@@ -555,3 +555,35 @@ export KWIN_SCREENCAST_FORCE_SHM=1
 ```
 
 This produces ~17-21 FPS via MemFd shared memory buffers.
+
+## Performance & UX Hardening (2026-08-21/22)
+
+The SHM capture above is the base layer; the end-to-end Enhanced Session
+pipeline was then brought to production quality. Full narrative in
+`KDE-SCREENCAST-STACK.md` ("Findings and Solutions 2026-08-21/22");
+quick reference:
+
+| Area | Root cause | Fix |
+|---|---|---|
+| Encode 48→5 ms | CRF 1 mapping; wasteful BGRA→I420; PipeWire 3-buffer starvation | CRF clamp 15-30; `bgra_to_i420` integer converter; buffer_count 5 |
+| Persistent artifacts | compositor damage hints under-report (≤25.8 pp); skipped frames' hints discarded | pixel-diff primary (~1.9 ms) + damage accumulation |
+| Grey blacks | mstsc doesn't expand limited-range Y16 | full-range BT.601 + VUI behind `egfx.color_range` |
+| Two cursors | llvmpipe KWin bakes cursor into video (no portal mode removes it) | transparent guest XCursor theme + ColorPointer PDU |
+| Cursor "glitch" | alpha>128 dropped 85 anti-aliased pixels | a>0 draws; only a==0 punches through |
+| Session drop at connect | `Vec::with_capacity` → 0-byte WriteCursor → encode error killed client loop | allocate-encode-truncate (ironrdp fork `ServerEvent::Pointer`) |
+
+Operational gotchas (all reproducible):
+
+- **Portal dialog dance**: blind input injection (ydotool) is unreliable;
+  the reliable sequence is unlock sessions → center-screen click → Enter,
+  or a manual "Share" click on the Hyper-V console. Restore tokens die
+  with SIGKILL (use `sudo killall -x`).
+- **Log parsing**: tracing embeds ANSI codes between key and value —
+  strip `\x1b\[[0-9;]*m` before regexing (helper scripts under
+  `TestResults/`). VM clock is UTC; local `date` cutoffs mis-slice logs.
+- **Cargo test caches** in git checkouts run stale binaries ("Finished in
+  0.26s" + 0 tests = cached); `touch` the source and check the checkout
+  glob actually matches the pinned rev.
+- **IronRDP fork pin**: `lamco-rdp-server/Cargo.toml` pins all 23 ironrdp
+  crates by full SHA. Bump with a literal string replace + count check —
+  a scripted replace once blanked every rev to `""` (caught by the count).

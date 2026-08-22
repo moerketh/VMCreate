@@ -310,11 +310,90 @@ But the failure triggers the -EIO path before fallback can happen.
 | hyperv_drm DRIVER_RENDER | ✅ Patched | renderD128 exists |
 | libdrm VMBus bus type | ✅ Patched | drmGetDevice2() works |
 | KWin OpenGL compositing | ✅ Working | kms_swrast on card0 |
-| KWin ScreenCast SHM | ✅ Working | ~17-21 FPS via MemFd |
+| KWin ScreenCast SHM | ✅ Working | originally ~17-21 FPS; now 48+ (see 2026-08-21) |
 | GBM DMA-BUF allocation | ✅ Works on card0 | Fails on renderD128 |
 | EGL DMA-BUF import | ✅ Works | eglCreateImageKHR succeeds |
 | PipeWire DmaBuf negotiation | ❌ Broken | Renegotiation -EIO |
 | Zero-copy DMA-BUF ScreenCast | ❌ Blocked | PipeWire negotiation failure |
+| Enhanced Session (vsock+PCB) | ✅ Working | server-side ironrdp fork; see 2026-08-2x findings |
+| x264 AVC420 encode pipeline | ✅ Working | zero-copy BGRA→I420, ~5 ms/frame (was 48 ms) |
+| RDP pointer parity (xrdp) | ✅ Working | ColorPointer PDU; single cursor, zero lag |
+
+---
+
+## Findings and Solutions (2026-08-21/22): Enhanced Session hardening
+
+The Enhanced Session pipeline went end-to-end in this window. Key results
+and root causes, in causal order:
+
+### Encode performance: 48 ms → 5 ms/frame (3 independent causes)
+
+1. **CRF mapping**: configured `qp_min=1` mapped to x264 CRF 1 (near-lossless
+   ⇒ ~10× encode time). Clamped to 15..30 in the C shim — screen content is
+   visually lossless around CRF 15.
+2. **Conversion waste**: BGRA→I420 went through openh264's f32 per-pixel
+   path + a fresh 3 MB buffer per frame + three plane copies. Replaced with
+   `bgra_to_i420` (integer BT.601, one reusable contiguous buffer, plane
+   pointers handed straight to the x264 C shim).
+3. **PipeWire buffer starvation**: 3 buffers at 67% queue pressure. Raised
+   `buffer_count` to 5 in all three `StreamConfig` sites.
+   Measured: convert 2.4 ms, encode 3.0 ms, total p50 = 4.0 ms;
+   motion FPS 38 → 48; FrameAck p50 1.2 ms.
+
+### Damage-tracking artifacts ("stuff stays until drawn over")
+
+Compositor damage hints under-reported real change by up to 25.8 pp on
+individual frames (hint 0.1% vs pixel-diff 25.9%) — trusted hints → stale
+regions never re-sent. Pipes now: **pixel-diff is primary** (SIMD, ~1.9 ms),
+and any consumed-but-unsent frame's regions accumulate into the next frame.
+
+### Color: grey blacks over RDP
+
+mstsc does **not** expand limited-range (Y16) to full — limited black
+renders RGB(16,16,16). Fix: full-range BT.601 encode (black ⇒ Y0) + VUI
+flags, behind the existing `egfx.color_range` config knob. Encode got
+*slightly faster* (all 256 luma codes ⇒ better rate-distortion).
+
+### Cursor: two pointers + trailing glitch (3 bugs, final state: xrdp parity)
+
+Goal: mstsc must show **one** Parrot cursor, client-rendered (zero lag),
+like xrdp. Achieved via a one-per-connection RDP ColorPointer PDU
+(IronRDP fork `ServerEvent::Pointer` + lamco `cursor_pdu.rs`):
+XCursor → andMask(1bpp)/xorMask(32bpp BGRx), bottom-up scanlines.
+
+Bugs found on the way (each with a committed regression test):
+
+1. **Double cursor** — KWin (no GPU cursor plane, llvmpipe) renders the
+   cursor as a workspace scene item: **no portal cursor mode can remove it
+   from the video**. Fix: transparent XCursor theme for the guest
+   (`/usr/share/icons/transparent`, generator `genxcursor2.py`; XCursor
+   binary layout verified against a real breeze file: magic 0x72756358,
+   version 0x00010000, 9-field/36-byte image chunks).
+2. **Session kill 47 µs after connect** — `Vec::with_capacity` does not
+   resize; `WriteCursor` got a 0-byte slice; `FastPathHeader::encode`
+   errored and took the client loop down. Fix: allocate-encode-truncate.
+   (A second latent bug — 2 stray zero bytes after the frame, client
+   protocol desync — was exposed by the new framing tests; same fix.)
+3. **Speckle "glitch" around the cursor** — alpha>128 threshold dropped the
+   breeze arrow's 85 anti-aliased pixels to transparent. Fix: a>0 draws
+   (only a==0 is punch-through).
+
+Also: pointer-shape PDUs sent at pipeline reset are **discarded by mstsc**
+(output PDUs racing activation); send after the first video frame
+(`egfx_frames_sent == 1`).
+
+### Not-yet-productized
+
+- **Tests**: lamco cursor tests green (6); the 2 fork framing tests have
+  assertion drift vs. the PER length encoding — pending a data-derived fix
+  (the production path is byte-verified against ironrdp's own encoder).
+- Console caveat: guest console has an invisible pointer while the
+  transparent theme is active (inherent; flip `cursorTheme` back for
+  console work).
+- The two systematic memory docs (`full-range-color.md`,
+  `double-cursor-fix.md`, `pointer-pdu-tests.md`) hold the detailed
+  recipes (dialog dance, ydotool, rollback commands).
+
 
 ---
 
