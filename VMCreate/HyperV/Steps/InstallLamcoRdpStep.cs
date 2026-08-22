@@ -625,7 +625,7 @@ def make_xcursor():
     return data
 
 blob = make_xcursor()
-names = [
+fallback_names = [
     'left_ptr', 'right_ptr', 'cross', 'circle', 'xxx_authentication',
     'wait', 'left_ptr_watch', 'sb_h_double_arrow', 'sb_v_double_arrow',
     'bottom_left_corner', 'bottom_right_corner', 'top_left_corner',
@@ -640,7 +640,22 @@ names = [
     'ew-resize', 'ns-resize', 'cell', 'color-picker', 'zoom-in',
     'zoom-out',
 ]
-for n in names:
+# CRITICAL (2026-08-22 wallpaper-ghost fix): shadow EVERY cursor name of
+# an installed real theme, not just the list above. XCursor themes
+# INHERIT the parent theme for any name they lack - and Plasma's desktop
+# background uses the ""default"" role, which is NOT in the fallback list.
+# Result was: transparent cursor over windows (text role covered) but a
+# visible lagging breeze arrow over the desktop background only.
+names = set(fallback_names)
+for theme_dir in ('/usr/share/icons/breeze_cursors/cursors',
+                  '/usr/share/icons/Adwaita/cursors',
+                  '/usr/share/icons/whiteglass/cursors',
+                  '/usr/share/icons/default/cursors'):
+    try:
+        names.update(os.listdir(theme_dir))
+    except OSError:
+        continue
+for n in sorted(names):
     with open(os.path.join(d, n), 'wb') as f:
         f.write(blob)
 with open(os.path.join(work, 'transparent', 'index.theme'), 'w') as f:

@@ -162,6 +162,13 @@ namespace VMCreate.Tests.HyperV.Steps
             // The names list must include the core cursor roles
             StringAssert.Contains(captured, "left_ptr", "arrow cursor role");
             StringAssert.Contains(captured, "watch", "busy cursor role");
+            // The generator shadows EVERY name from installed themes
+            // (wallpaper-ghost fix: the desktop uses the "default" role,
+            // which is absent from the hardcoded fallback list; XCursor
+            // inheritance made the wallpaper show a visible breeze arrow
+            // while windows were clean).
+            StringAssert.Contains(captured, "breeze_cursors/cursors", "scan source theme dir");
+            StringAssert.Contains(captured, "names.update(os.listdir(theme_dir))", "dynamic name shadowing");
         }
 
         [TestMethod]
