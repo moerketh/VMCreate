@@ -217,17 +217,13 @@ else
     echo ""kscreen-doctor not found — KWin will use DRM default (1024x768).""
 fi
 
-# -- Load vgem module for virtual GPU render node -------------------------
-# KWin's ScreenCast uses DMA-BUF buffers which require /dev/dri/renderD128.
-# The hyperv_drm driver does not expose a render node. The vgem (Virtual GEM)
-# module creates a dummy /dev/dri/renderD128. mutter/GNOME uses MemFd and does
-# not need this, but we load it unconditionally for KDE compositors.
-if command -v modprobe >/dev/null 2>&1; then
-    modprobe vgem 2>/dev/null || true
-    echo ""vgem"" > /etc/modules-load.d/vgem.conf 2>/dev/null || true
-    echo 'KERNEL==""renderD128"", GROUP=""video"", MODE=""0660""' > /etc/udev/rules.d/99-vgem-render.rules 2>/dev/null || true
-    echo ""Loaded vgem module for virtual GPU render node.""
-fi
+# -- Retired: vgem dummy render node ---------------------------------------
+# The RDP capture path is all-software (MemFd buffers, llvmpipe on card0);
+# no render node or DMA-BUF is needed. Remove any vgem artifacts left by
+# older deployments - vgem racing the real DRM node for the renderD128
+# name is worse than having no render node at all. The software-render
+# env vars live in InstallLamcoRdpStep (kwin-software-render.sh).
+rm -f /etc/modules-load.d/vgem.conf /etc/udev/rules.d/99-vgem-render.rules 2>/dev/null || true
 
 echo ""=== graphical Wayland autologin configured for $USER ===""
 exit 0

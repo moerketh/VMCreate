@@ -359,7 +359,8 @@ flags, behind the existing `egfx.color_range` config knob. Encode got
 Goal: mstsc must show **one** Parrot cursor, client-rendered (zero lag),
 like xrdp. Achieved via a one-per-connection RDP ColorPointer PDU
 (IronRDP fork `ServerEvent::Pointer` + lamco `cursor_pdu.rs`):
-XCursor → andMask(1bpp)/xorMask(32bpp BGRx), bottom-up scanlines.
+XCursor → andMask(1bpp)/xorMask(24bpp BGR, scanlines padded to even
+bytes), bottom-up scanlines.
 
 Bugs found on the way (each with a committed regression test):
 
@@ -377,6 +378,14 @@ Bugs found on the way (each with a committed regression test):
 3. **Speckle "glitch" around the cursor** — alpha>128 threshold dropped the
    breeze arrow's 85 anti-aliased pixels to transparent. Fix: a>0 draws
    (only a==0 is punch-through).
+4. **"Three side-by-side contour cursors"** — the xor mask was packed at
+   32bpp (4 B/px) into `TS_COLORPOINTERATTRIBUTE`, which every client
+   decodes at 24bpp (3 B/px + even-byte row pad). Each scanline sheared
+   left by the cursor width, smearing one arrow into three ghosts.
+   Fix: 24bpp xor (xrdp's legacy color-pointer layout), guarded by a
+   round-trip decode test through IronRDP's own client decoder
+   (`decodes_via_ironrdp_client_decoder`). Alpha flattens to opaque in
+   24bpp — the same tradeoff xrdp makes on this path.
 
 Also: pointer-shape PDUs sent at pipeline reset are **discarded by mstsc**
 (output PDUs racing activation); send after the first video frame

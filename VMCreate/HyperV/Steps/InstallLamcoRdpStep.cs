@@ -565,16 +565,104 @@ PATCH_EOF
             fi
         fi
     fi
-    # KWin's ScreenCast uses DMA-BUF buffers which require /dev/dri/renderD128.
-    # The hyperv_drm driver does not expose a render node. The vgem (Virtual
-    # GEM) module creates a dummy /dev/dri/renderD128 so KWin can at least
-    # allocate DMA-BUFs. (mutter/GNOME uses MemFd and does not need this, but
-    # we load it unconditionally as a best-effort for KDE compositors.)
-    if command -v modprobe >/dev/null 2>&1; then
-        modprobe vgem 2>/dev/null || true
-        echo ""vgem"" > /etc/modules-load.d/vgem.conf 2>/dev/null || true
-        # udev rule so renderD128 is group-accessible
-        echo 'KERNEL==""renderD128"", GROUP=""video"", MODE=""0660""' > /etc/udev/rules.d/99-vgem-render.rules 2>/dev/null || true
+    # -- Software render + SHM screencast env (KWin) -----------------------
+    # The capture path is all-software: hyperv_drm has no real GPU and the
+    # RDP stream negotiates MemFd buffers end to end (lamco logs
+    # Buffer type: 2 = MemFd). DMA-BUF was a dead end on Hyper-V - the
+    # vgem dummy render node and the hyperv_drm DRIVER_RENDER kernel +
+    # libdrm VMBus patches are retired. KWin composites on llvmpipe via
+    # card0 only; these env vars force the Mesa software loader and SHM
+    # screencast formats (the patched screencast.so above honors
+    # KWIN_SCREENCAST_FORCE_SHM=1; without it KWin advertises DMA-BUF
+    # formats and the stream can stall when allocation fails).
+    mkdir -p /etc/xdg/plasma-workspace/env
+    cat > /etc/xdg/plasma-workspace/env/kwin-software-render.sh << 'KWENV_EOF'
+#!/bin/bash
+export LIBGL_ALWAYS_SOFTWARE=1
+export MESA_LOADER_DRIVER_OVERRIDE=kms_swrast
+export KWIN_SCREENCAST_FORCE_SHM=1
+KWENV_EOF
+    chmod 755 /etc/xdg/plasma-workspace/env/kwin-software-render.sh
+    # Best-effort removal of retired vgem artifacts from older deployments
+    # (a loaded vgem would race the real DRM node for the renderD128 name).
+    rm -f /etc/modules-load.d/vgem.conf /etc/udev/rules.d/99-vgem-render.rules 2>/dev/null || true
+    echo ""Software render + SHM screencast env installed (vgem/DMA-BUF path retired).""
+
+    # -- Transparent cursor theme (KDE) ------------------------------------
+    # KWin composites the cursor sprite into the framebuffer on Hyper-V
+    # (hyperv_drm has no GPU cursor plane), which bakes the guest cursor
+    # into the RDP video stream a frame or two behind the client-side
+    # pointer — a lagging ghost arrow. Installing a fully transparent
+    # XCursor theme removes it from the capture; the pointer shape PDU
+    # (lamco cursor_pdu.rs reads breeze_cursors directly, not the active
+    # theme) still delivers the real arrow to mstsc, so exactly one
+    # client-rendered zero-lag pointer remains (xrdp parity).
+    # XCursor binary layout was verified against a genuine breeze file
+    # (magic 0x72756358 LE, version 0x00010000, 36-byte image chunks).
+    # KDE/KWin only — GNOME/mutter deferred pending Hidden-mode
+    # verification. Trade-off: guest console shows no local cursor.
+    if command -v kwriteconfig6 >/dev/null 2>&1 || command -v kwriteconfig5 >/dev/null 2>&1; then
+        KW=kwriteconfig6
+        command -v kwriteconfig6 >/dev/null 2>&1 || KW=kwriteconfig5
+        if command -v python3 >/dev/null 2>&1; then
+            python3 - << 'PYEOF' || echo ""WARNING: transparent cursor theme generation failed.""
+import os, struct
+
+work = '/tmp/lamco-transparent-theme'
+d = os.path.join(work, 'transparent', 'cursors')
+os.makedirs(d, exist_ok=True)
+
+def make_xcursor():
+    # 1x1 fully transparent image, nominal size 24 (libXcursor picks nearest)
+    HEADER = 16; TOC = 12; CHUNK = 36; PIXELS = 4
+    SUBTYPE = 24
+    pos = HEADER + TOC
+    header = struct.pack('<IIII', 0x72756358, HEADER, 0x00010000, 1)
+    toc = struct.pack('<III', 0xFFFD0002, SUBTYPE, pos)
+    chunk = struct.pack('<IIIIIIIII', CHUNK, 0xFFFD0002, SUBTYPE, 1, 1, 1, 0, 0, 1)
+    data = header + toc + chunk + b'\x00\x00\x00\x00'
+    assert len(data) == HEADER + TOC + CHUNK + PIXELS, len(data)
+    return data
+
+blob = make_xcursor()
+names = [
+    'left_ptr', 'right_ptr', 'cross', 'circle', 'xxx_authentication',
+    'wait', 'left_ptr_watch', 'sb_h_double_arrow', 'sb_v_double_arrow',
+    'bottom_left_corner', 'bottom_right_corner', 'top_left_corner',
+    'top_right_corner', 'grab', 'grabbing', 'hand', 'hand2', 'pointer',
+    'question_arrow', 'text', 'watch', 'half-busy', 'openhand',
+    'closedhand', 'fcfz', 'left_side', 'right_side', 'top_side',
+    'bottom_side', 'center_ptr', 'crosshair', 'dot', 'dot_box_mask',
+    'icon', 'menu', 'pencil', 'pirate', 'plus', 'trek', 'ul_angle',
+    'ur_angle', 'll_angle', 'lr_angle', 'move', 'all-scroll',
+    'vertical-text', 'context-menu', 'copy', 'progress', 'not-allowed',
+    'no-drop', 'col-resize', 'row-resize', 'nesw-resize', 'nwse-resize',
+    'ew-resize', 'ns-resize', 'cell', 'color-picker', 'zoom-in',
+    'zoom-out',
+]
+for n in names:
+    with open(os.path.join(d, n), 'wb') as f:
+        f.write(blob)
+with open(os.path.join(work, 'transparent', 'index.theme'), 'w') as f:
+    f.write('[Icon Theme]\nInherits=breeze_cursors\n')
+print('generated', len(names), 'transparent cursor files')
+PYEOF
+            if [ -d /tmp/lamco-transparent-theme/transparent ]; then
+                rm -rf /usr/share/icons/transparent
+                cp -r /tmp/lamco-transparent-theme/transparent /usr/share/icons/transparent
+                rm -rf /tmp/lamco-transparent-theme
+                echo ""Installed transparent cursor theme to /usr/share/icons/transparent.""
+            fi
+        else
+            echo ""python3 not found - skipping transparent cursor theme install.""
+        fi
+        # Activate for the autologin user: kcminputrc is authoritative for
+        # KDE; the environment.d file covers other Wayland contexts.
+        sudo -u ""$AUTOLOGIN_USER"" ""$KW"" --file kcminputrc --group Mouse --key cursorTheme transparent 2>/dev/null || true
+        mkdir -p ""$USER_HOME/.config/environment.d""
+        printf 'XCURSOR_THEME=transparent\n' > ""$USER_HOME/.config/environment.d/90-lamco-cursor.conf""
+        chown ""$AUTOLOGIN_USER"" ""$USER_HOME/.config/environment.d/90-lamco-cursor.conf""
+        echo ""Cursor theme set to transparent for $AUTOLOGIN_USER (applies at next login).""
     fi
 
     # linger + enable (the service starts on next graphical-session target)

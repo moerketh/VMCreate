@@ -120,5 +120,79 @@ namespace VMCreate.Tests.HyperV.Steps
             await Assert.ThrowsAsync<Exception>(() =>
                 _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None));
         }
+
+        [TestMethod]
+        public async Task ExecuteAsync_ProvisionsTransparentCursorTheme_ForKde()
+        {
+            // xrdp-parity: the guest cursor must never be composited into the
+            // captured video (KWin bakes it in on Hyper-V's software cursor
+            // plane, creating a lagging "ghost" arrow behind the client-side
+            // pointer). The install script must generate + install the
+            // transparent XCursor theme and activate it for the autologin user.
+            string? captured = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("done");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(captured);
+            // Generated + installed under the system icon path (KDE-gated by kwriteconfig presence)
+            StringAssert.Contains(captured, "kwriteconfig6", "KDE detection gate");
+            StringAssert.Contains(captured, "/usr/share/icons/transparent", "theme install target");
+            StringAssert.Contains(captured, "0x72756358", "verified XCursor magic");
+            StringAssert.Contains(captured, "0x00010000", "verified XCursor version");
+            // Activated for the autologin user (kcminputrc + environment.d fallback)
+            StringAssert.Contains(captured, "cursorTheme transparent", "kcminputrc activation");
+            StringAssert.Contains(captured, "90-lamco-cursor.conf", "environment.d fallback file");
+            StringAssert.Contains(captured, "XCURSOR_THEME=transparent", "environment variable");
+            // The names list must include the core cursor roles
+            StringAssert.Contains(captured, "left_ptr", "arrow cursor role");
+            StringAssert.Contains(captured, "watch", "busy cursor role");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_RetiresVgem_AndProvisionsSoftwareRenderEnv()
+        {
+            // The capture path is all-software (MemFd + llvmpipe on card0): the
+            // script must NOT load vgem for a fake renderD128 (DMA-BUF dead
+            // end), must clean up vgem artifacts from older deployments, and
+            // must install the KWin software-render/SHM env that the patched
+            // screencast.so needs (KWIN_SCREENCAST_FORCE_SHM was previously
+            // only present on the hand-tuned test VM, never provisioned).
+            string? captured = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("done");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(captured);
+            Assert.IsFalse(System.Text.RegularExpressions.Regex.IsMatch(captured, "modprobe\\s+vgem"),
+                "vgem must not be loaded (DMA-BUF path retired)");
+            StringAssert.Contains(captured, "rm -f /etc/modules-load.d/vgem.conf", "old vgem artifacts cleaned");
+            StringAssert.Contains(captured, "kwin-software-render.sh", "software render env file");
+            StringAssert.Contains(captured, "LIBGL_ALWAYS_SOFTWARE=1", "Mesa software GL");
+            StringAssert.Contains(captured, "MESA_LOADER_DRIVER_OVERRIDE=kms_swrast", "kms_swrast loader override");
+            StringAssert.Contains(captured, "KWIN_SCREENCAST_FORCE_SHM=1", "force SHM screencast formats");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_ThemeProvision_IsIdempotentSafe_BashShaped()
+        {
+            // The script must not fail if the theme already exists: it uses
+            // rm -rf before cp -r (not a bare cp that errors on existing dirs)
+            // and guards the python generator with || warning rather than set -e death.
+            string? captured = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("done");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(captured);
+            StringAssert.Contains(captured, "rm -rf /usr/share/icons/transparent");
+            StringAssert.Contains(captured, "rm -rf /tmp/lamco-transparent-theme");
+        }
     }
 }
