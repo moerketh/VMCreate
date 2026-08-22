@@ -656,12 +656,50 @@ PYEOF
         else
             echo ""python3 not found - skipping transparent cursor theme install.""
         fi
-        # Activate for the autologin user: kcminputrc is authoritative for
-        # KDE; the environment.d file covers other Wayland contexts.
+        # Activate for the autologin user — LAYERED persistence, because any
+        # single mechanism can silently lose to another:
+        #   1. kcminputrc (KDE-native setting)
+        #   2. ~/.config/environment.d (systemd user session env; covers
+        #      non-KDE Wayland contexts and beats DM-leaked XCURSOR_*)
+        #   3. /etc/xdg/plasma-workspace/env script (runs at Plasma start,
+        #      the LAST word on XCURSOR_* inside the session)
+        # GOTCHA (verified 2026-08-22): writing kcminputrc alone does NOT
+        # change the sprite of an already-running session. Even
+        # `plasma-apply-cursortheme transparent` no-ops with ""already set""
+        # when config already names transparent - it only reads config, the
+        # live sprite keeps whatever it loaded. The ONLY reliable live-apply
+        # is TOGGLING: apply a real theme (breeze_cursors) first, then
+        # transparent; the second apply performs an actual sprite swap.
         sudo -u ""$AUTOLOGIN_USER"" ""$KW"" --file kcminputrc --group Mouse --key cursorTheme transparent 2>/dev/null || true
         mkdir -p ""$USER_HOME/.config/environment.d""
-        printf 'XCURSOR_THEME=transparent\n' > ""$USER_HOME/.config/environment.d/90-lamco-cursor.conf""
+        printf 'XCURSOR_THEME=transparent\nXCURSOR_SIZE=24\n' > ""$USER_HOME/.config/environment.d/90-lamco-cursor.conf""
         chown ""$AUTOLOGIN_USER"" ""$USER_HOME/.config/environment.d/90-lamco-cursor.conf""
+        mkdir -p /etc/xdg/plasma-workspace/env
+        printf '#!/bin/bash\n# Lamco: invisible guest cursor (RDP client renders its own).\nexport XCURSOR_THEME=transparent\nexport XCURSOR_SIZE=24\n' > /etc/xdg/plasma-workspace/env/40-lamco-cursor.sh
+        chmod 755 /etc/xdg/plasma-workspace/env/40-lamco-cursor.sh
+        # Disable the Shake Cursor effect: with a transparent sprite the
+        # shake animation is pointless (and on Plasma 6.3 the Plugins key
+        # alone can leave the effect loaded; a runtime unload is attempted
+        # below when a session is up).
+        sudo -u ""$AUTOLOGIN_USER"" ""$KW"" --file kwinrc --group Plugins --key shakecursorEnabled false 2>/dev/null || true
+        # Live-apply to a running session (best-effort; no-op at install
+        # time when no graphical session exists yet): toggle via a real
+        # theme so the second apply performs a genuine sprite reload, then
+        # reconfigure KWin (picks up the shakecursor disable) and unload
+        # the effect if it stays loaded.
+        SESS_ENV=""DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u ""$AUTOLOGIN_USER"")/bus XDG_RUNTIME_DIR=/run/user/$(id -u ""$AUTOLOGIN_USER"")""
+        if sudo -u ""$AUTOLOGIN_USER"" env $SESS_ENV pgrep -x kwin_wayland >/dev/null 2>&1 && command -v plasma-apply-cursortheme >/dev/null 2>&1; then
+            sudo -u ""$AUTOLOGIN_USER"" env $SESS_ENV LC_ALL=C.UTF-8 \
+                plasma-apply-cursortheme breeze_cursors >/dev/null 2>&1 || true
+            sleep 1
+            sudo -u ""$AUTOLOGIN_USER"" env $SESS_ENV LC_ALL=C.UTF-8 \
+                plasma-apply-cursortheme transparent >/dev/null 2>&1 || true
+            sudo -u ""$AUTOLOGIN_USER"" env $SESS_ENV DISPLAY=:0 WAYLAND_DISPLAY=wayland-0 \
+                qdbus6 org.kde.KWin /KWin reconfigure >/dev/null 2>&1 || true
+            sudo -u ""$AUTOLOGIN_USER"" env $SESS_ENV DISPLAY=:0 WAYLAND_DISPLAY=wayland-0 \
+                qdbus6 org.kde.KWin /Effects org.kde.kwin.Effects.unloadEffect shakecursor >/dev/null 2>&1 || true
+            echo ""Cursor theme live-applied to running session (toggle + reconfigure).""
+        fi
         echo ""Cursor theme set to transparent for $AUTOLOGIN_USER (applies at next login).""
     fi
 

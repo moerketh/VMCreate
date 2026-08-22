@@ -146,6 +146,19 @@ namespace VMCreate.Tests.HyperV.Steps
             StringAssert.Contains(captured, "cursorTheme transparent", "kcminputrc activation");
             StringAssert.Contains(captured, "90-lamco-cursor.conf", "environment.d fallback file");
             StringAssert.Contains(captured, "XCURSOR_THEME=transparent", "environment variable");
+            // Layered persistence (plasma env script) + XCURSOR_SIZE pinning
+            StringAssert.Contains(captured, "/etc/xdg/plasma-workspace/env/40-lamco-cursor.sh", "plasma env script");
+            StringAssert.Contains(captured, "XCURSOR_SIZE=24", "cursor size pinned");
+            // Live-apply uses the TOGGLE trick (breeze_cursors first, then
+            // transparent): plasma-apply-cursortheme alone no-ops with
+            // "already set" when config already names transparent - it never
+            // swaps the live sprite (verified 2026-08-22 on Parrot 7 / Plasma 6.3).
+            StringAssert.Contains(captured, "plasma-apply-cursortheme breeze_cursors", "toggle step 1: real theme");
+            StringAssert.Contains(captured, "plasma-apply-cursortheme transparent", "toggle step 2: transparent");
+            // Shake Cursor effect disabled (grows the sprite on wiggle —
+            // leaks the guest cursor into the video even when transparent)
+            StringAssert.Contains(captured, "shakecursorEnabled false", "shakecursor plugin key");
+            StringAssert.Contains(captured, "unloadEffect shakecursor", "shakecursor runtime unload");
             // The names list must include the core cursor roles
             StringAssert.Contains(captured, "left_ptr", "arrow cursor role");
             StringAssert.Contains(captured, "watch", "busy cursor role");
