@@ -546,15 +546,6 @@ MONITORS_EOF
     else
         echo ""WARNING: could not clone the fork — keeping the release binary."" >&2
     fi
-    # KWin's ScreenCast uses DMA-BUF buffers which require /dev/dri/renderD128.
-    # The hyperv_drm driver does not expose a render node. The vgem (Virtual
-    # GEM) module creates a dummy renderD128 as a best-effort fallback.
-    if command -v modprobe >/dev/null 2>&1; then
-        modprobe vgem 2>/dev/null || true
-        echo ""vgem"" > /etc/modules-load.d/vgem.conf 2>/dev/null || true
-        # udev rule so renderD128 is group-accessible
-        echo 'KERNEL==""renderD128"", GROUP=""video"", MODE=""0660""' > /etc/udev/rules.d/99-vgem-render.rules 2>/dev/null || true
-    fi
 
     # linger + enable (the service starts on next graphical-session target)
     loginctl enable-linger ""$AUTOLOGIN_USER"" 2>/dev/null || true
