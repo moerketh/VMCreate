@@ -178,8 +178,8 @@ and attributed it to a "dumb buffer pitch mismatch" (pitch 3072 vs 4096).
 - The `no buffer object handle for plane 0` error was also a **test
   struct-packing bug**: `struct drm_mode_fb_cmd2` has a `flags` field
   between `pixel_format` and `handles[4]`. Omitting it shifts `handles`
-  to where `flags` lives, so `drm_gem_object_lookup(file, 0)` fails.
-  See `patches/hyperv-drm-render/README.md` for the correct packing.
+  to where `flags` lives, so `drm_gem_object_lookup(file, 0)` fails:
+  pack as `struct.pack("=IIIIIIq", height, width, 32, 0,0,0,0)`.
 
 hyperv_drm's dumb_create (via `DRM_GEM_SHMEM_DRIVER_OPS` →
 `drm_mode_size_dumb`) computes pitch = `width * cpp` correctly. **No
@@ -424,7 +424,8 @@ negotiation between KWin (producer) and lamco (consumer).
 
 ### Test tools
 
-Standalone test tools in `patches/hyperv-drm-render-node/`:
+Standalone test tools used during diagnosis (historically kept under
+`patches/hyperv-drm-render-node/`, removed since):
 
 - **`dmabuf_egl_test.c`**: Tests the full DMA-BUF → EGL import → GL texture →
   FBO pipeline. Must run within the Wayland session:

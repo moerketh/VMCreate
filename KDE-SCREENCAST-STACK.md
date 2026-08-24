@@ -422,26 +422,24 @@ mstsc → TCP:3389 → TLS → IronRDP (lamco) → XDG Desktop Portal → KWin S
 
 **Performance:** ~21 FPS at 1920x1080 (2 vCPUs, software encoding, MemFd buffers)
 
-### Critical KWin Patch Required
+### Capture fixes live in the lamco fork (no KWin patch)
 
-**`screencast-shm-fallback.patch`** — KWin's `newStreamParams()` advertises only
-DmaBuf as the buffer type when DmaBuf is negotiated. On Hyper-V's virtual GPU
-(llvmpipe software renderer), `DmaBufScreenCastBuffer::create()` fails at EGL
-import time. Without MemFd in the advertised types, `onStreamAddBuffer` cannot
-fall back, leaving `pwBuffer->user_data` null and causing an infinite
-format-negotiation loop.
+The original plan patched KWin's `newStreamParams()` to advertise MemFd
+alongside DmaBuf. That turned out to be mis-motivated: on Hyper-V's virtual
+GPU, DmaBuf allocation and EGL import both **succeed** — create() never
+fails. The real defect is that the DmaBuf capture path delivers zero frames
+on virtual GPUs, and the software EGFX paths dropped `FrameBuffer::DmaBuf`
+frames regardless.
 
-**Fix:** Change `buffertypes` to include both DmaBuf and MemFd:
-```cpp
-// Before (broken on virtual GPUs):
-const int buffertypes = m_dmabufParams ? (1 << SPA_DATA_DmaBuf) : (1 << SPA_DATA_MemFd);
+**Fix (in the lamco fork, `feature/hyperv-enhanced-session`):** bracket
+DMA-BUF CPU reads with `DMA_BUF_IOCTL_SYNC`, materialize DmaBuf frames to
+CPU memory before the frame cache, and fall back to MemFd + rebind the
+stream when DmaBuf negotiation yields no frames for 10s. Stock KWin works
+with no patches; VMCreate deploys the fork via `InstallLamcoRdpStep.cs`
+(builds from fork source; a CI-produced fork deb can replace that).
 
-// After (falls back to MemFd when DmaBuf fails):
-const int buffertypes = m_dmabufParams ? ((1 << SPA_DATA_DmaBuf) | (1 << SPA_DATA_MemFd)) : (1 << SPA_DATA_MemFd);
-```
-
-**Upstream status:** Patch prepared in `c:\repos\kwin` for submission to KDE.
-VMCreate deploys it via `InstallLamcoRdpStep.cs` (builds patched screencast plugin).
+(KWin 6.3.6 still has a separate modifier-livelock bug — CPU burn only,
+not a functional blocker — noted here for a possible upstream MR later.)
 
 ### DmaBuf Not Available on Hyper-V
 

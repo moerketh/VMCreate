@@ -1,0 +1,518 @@
+[package]
+name = "lamco-rdp-server"
+version = "1.4.4"
+edition = "2024"
+rust-version = "1.89"
+authors = ["Greg Lamberson <greg@lamco.io>"]
+description = "Wayland RDP server - Portal mode for Linux desktop sharing"
+license = "BUSL-1.1"
+repository = "https://github.com/lamco-admin/lamco-rdp-server"
+homepage = "https://www.lamco.ai"
+keywords = ["rdp", "wayland", "remote-desktop", "linux", "screen-sharing"]
+categories = ["network-programming", "multimedia"]
+
+[[bin]]
+name = "lamco-rdp-server"
+path = "src/main.rs"
+
+[[bin]]
+name = "lamco-rdp-server-gui"
+path = "src/gui/main.rs"
+required-features = ["gui"]
+
+[lib]
+name = "lamco_rdp_server"
+path = "src/lib.rs"
+
+# =============================================================================
+# Dependencies
+# =============================================================================
+
+[build-dependencies]
+cc = "1"
+
+[dependencies]
+# -----------------------------------------------------------------------------
+# Lamco crates (published to crates.io)
+# -----------------------------------------------------------------------------
+# Clipboard crates use crates.io releases. Their ironrdp-cliprdr/core deps are
+# redirected to the same patched IronRDP git rev as the rest of the binary via
+# [patch.crates-io], and the versions are aligned (lamco-rdp-clipboard 0.4
+# requires ironrdp-cliprdr 0.6, which the patch supplies), so there is no
+# trait-diamond conflict.
+lamco-rdp = "0.6.3"
+lamco-portal = { version = "0.4.1", features = ["dbus-clipboard"] }
+lamco-pipewire = { version = "0.5.1", features = ["audio", "damage"] }
+lamco-video = "0.2.0"
+lamco-rdp-input = "0.1.5"
+lamco-clipboard-core = { version = "0.6.1", features = ["image"] }
+lamco-rdp-clipboard = "0.4.2"
+
+# -----------------------------------------------------------------------------
+# Async runtime
+# -----------------------------------------------------------------------------
+tokio = { version = "1.35", features = ["full"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+futures = "0.3"
+futures-util = "0.3"
+async-trait = "0.1"
+
+# -----------------------------------------------------------------------------
+# Configuration and CLI
+# -----------------------------------------------------------------------------
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "1.0"
+clap = { version = "4.4", features = ["derive", "env"] }
+
+# -----------------------------------------------------------------------------
+# Logging and tracing
+# -----------------------------------------------------------------------------
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+tracing-appender = "0.2"
+
+# -----------------------------------------------------------------------------
+# Error handling
+# -----------------------------------------------------------------------------
+anyhow = "1.0"
+subtle = "2"  # constant-time comparison for proxy_auth shared secret
+thiserror = "2"
+
+# getsockname() on systemd-passed listening fds (fail-closed exposure guard)
+socket2 = "0.6"
+
+# -----------------------------------------------------------------------------
+# Networking and protocols
+# -----------------------------------------------------------------------------
+bytes = "1.5"
+rustls-pemfile = "2.2"
+x509-cert = "0.2.5"
+x509-parser = "0.18"
+
+# -----------------------------------------------------------------------------
+# RDP protocol (IronRDP)
+# Git deps required: ironrdp-egfx is not published to crates.io yet
+# (publish = false in upstream Cargo.toml)
+#
+# IronRDP — lamco-admin fork, branch feat/lamco-combined.
+# Rebased onto upstream/master 2026-07-03 (was 38 commits behind); most prior
+# fork-local patches are now upstream-merged and were dropped rather than
+# replayed. Combines: diagnostic logging for backpressure/dispatch/outbound
+# timing (unsubmitted), mid-session CapsAdvertise re-advertise handling for
+# mstsc/macOS decoder recovery (unsubmitted), NetworkAutoDetect over the MCS
+# message channel (PR #1348, open upstream), and a dispatch_pdu stall-warning
+# split (unsubmitted).
+# Based on picky rc.20 / sspi 0.18 — upstream master blocked by
+# picky rc.22 / rand_core RC conflict with ashpd's getrandom 0.4.
+# Drop fork when picky ships with stable RustCrypto deps.
+# See: docs/analysis/UNIFIED-ARCHITECTURE-RESEARCH-2026-04-05.md
+# -----------------------------------------------------------------------------
+ironrdp = { git = "https://github.com/moerketh/IronRDP", rev = "", default-features = false, features = ["server"] }
+ironrdp-server = { git = "https://github.com/moerketh/IronRDP", rev = "", features = ["egfx", "helper"] }
+ironrdp-pdu = { git = "https://github.com/moerketh/IronRDP", rev = "" }
+ironrdp-displaycontrol = { git = "https://github.com/moerketh/IronRDP", rev = "" }
+ironrdp-cliprdr = { git = "https://github.com/moerketh/IronRDP", rev = "" }
+ironrdp-core = { git = "https://github.com/moerketh/IronRDP", rev = "" }
+ironrdp-dvc = { git = "https://github.com/moerketh/IronRDP", rev = "" }
+ironrdp-svc = { git = "https://github.com/moerketh/IronRDP", rev = "" }
+ironrdp-egfx = { git = "https://github.com/moerketh/IronRDP", rev = "" }
+ironrdp-graphics = { git = "https://github.com/moerketh/IronRDP", rev = "" }
+ironrdp-rdpsnd = { git = "https://github.com/moerketh/IronRDP", rev = "" }
+
+# -----------------------------------------------------------------------------
+# Wayland and Portal integration
+# -----------------------------------------------------------------------------
+wayland-client = { version = "0.31", optional = true }
+wayland-protocols = { version = "0.32", features = ["client", "staging"], optional = true }
+wayland-protocols-misc = { version = "0.3", features = ["client"], optional = true }
+wayland-protocols-wlr = { version = "0.3", features = ["client"], optional = true }
+ashpd = { version = "0.13.7", features = ["remote_desktop", "screencast", "clipboard", "notification", "background", "secret"] }
+zbus = "5"
+enumflags2 = "0.7"
+
+# Standalone Wayland clipboard (ext-data-control / wlr-data-control protocol)
+# Composable with any session strategy, not tied to portal-generic
+wl-clipboard-rs = { version = "0.9.3", optional = true }
+
+# Embedded portal backend for wlroots compositors (screencopy + input + clipboard)
+# Provides video capture, input injection, and clipboard via native Wayland protocols
+# without requiring xdg-desktop-portal-wlr or any external portal daemon
+xdg-desktop-portal-generic = { version = "0.5.0", optional = true }
+# Kernel pointer injection for COSMIC-class compositors (no wlr-virtual-pointer).
+# Application-owned last-resort path; see session/strategies/uinput_pointer.rs.
+evdev = { version = "0.13", optional = true }
+
+# libei/EIS protocol for Flatpak-compatible wlroots input
+# Pure Rust implementation used by Smithay/COSMIC
+reis = { version = "0.6", features = ["tokio"], optional = true }
+
+# -----------------------------------------------------------------------------
+# PipeWire integration (via lamco-pipewire, no direct dependency needed)
+# -----------------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------
+# Audio encoding (RDPSND)
+# -----------------------------------------------------------------------------
+# OPUS codec - royalty-free, low latency, high quality
+opus2 = { version = "0.3", features = ["bundled"] }
+# Byte slice casting for audio sample conversion
+bytemuck = "1.14"
+
+# -----------------------------------------------------------------------------
+# Input handling
+# -----------------------------------------------------------------------------
+xkbcommon = "0.9"
+
+# -----------------------------------------------------------------------------
+# Image processing
+# -----------------------------------------------------------------------------
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp"] }
+percent-encoding = "2.3"
+sha2 = "0.10"
+hkdf = "0.12"
+
+# -----------------------------------------------------------------------------
+# H.264 encoding (optional, for EGFX)
+# -----------------------------------------------------------------------------
+# Dynamic loading of Cisco's precompiled OpenH264 binary (patent-covered).
+# NEVER use features = ["source"] in shipped builds — zero patent coverage.
+# See docs/decisions/H264-CODEC-STRATEGY.md
+openh264 = { version = "0.9.2", optional = true, default-features = false, features = ["libloading"] }
+openh264-sys2 = { version = "0.9.1", default-features = false, features = ["libloading"], optional = true }
+libloading = { version = "0.8", optional = true }
+
+# x264: faster software H.264 encoder (AVC420 only).
+# Loaded dynamically at runtime via libloading, linking against system libx264.so.
+# Requires libx264-dev (or libx264-164) installed on the target system.
+# x264 is ~2-3× faster than OpenH264 for real-time encoding with ultrafast/zerolatency.
+# Only used for AVC420; AVC444 falls back to OpenH264 (x264 doesn't support 4:4:4).
+
+# -----------------------------------------------------------------------------
+# Hardware-accelerated encoding (optional)
+# -----------------------------------------------------------------------------
+# VA-API: Intel/AMD GPU encoding (ChromeOS bindings)
+# Requires libva-dev 1.20.0+ installed
+cros-libva = { version = "0.0.13", optional = true }
+
+# NVENC: NVIDIA GPU encoding (Video Codec SDK bindings)
+# Requires NVIDIA driver with libnvidia-encode.so AND CUDA toolkit
+# Using lamco-admin fork until upstream merges cudarc 0.19 (PR #28)
+nvidia-video-codec-sdk = { git = "https://github.com/lamco-admin/nvidia-video-codec-sdk", branch = "feat/cudarc-0.19", optional = true }
+# CUDA runtime bindings for NVENC
+cudarc = { version = "0.19", optional = true, default-features = false, features = ["driver", "cuda-version-from-build-system"] }
+
+# Vulkan Video: cross-vendor GPU encoding via VK_KHR_video_encode_h264
+# Works with NVIDIA, Intel, AMD GPUs that support Vulkan Video extensions
+# default-features = false excludes wgpu (can be added via vulkan-video-wgpu feature)
+vk-video = { version = "0.3", optional = true, default-features = false }
+
+# AF_VSOCK transport for Hyper-V Enhanced Session Mode. Linux-only. Gated
+# behind the `vsock` Cargo feature.
+tokio-vsock = { version = "0.7", optional = true }
+
+# WebSocket transport for browser/WASM clients via RDCleanPath. Gated behind
+# the `websocket` Cargo feature.
+tokio-tungstenite = { version = "0.29", optional = true, default-features = false, features = ["handshake"] }
+ironrdp-rdcleanpath = { git = "https://github.com/moerketh/IronRDP", rev = "", optional = true }
+
+# -----------------------------------------------------------------------------
+# System and utilities
+# -----------------------------------------------------------------------------
+nix = { version = "0.30", features = ["signal", "process", "mman"] }
+libc = "0.2"
+fuser = "0.17"  # FUSE filesystem for clipboard file transfer
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.6", features = ["v4", "serde"] }
+sysinfo = { version = "0.38", default-features = false, features = ["system"] }
+hostname = "0.4"
+dirs = "6.0"
+
+# -----------------------------------------------------------------------------
+# Cryptography (for session token encryption)
+# -----------------------------------------------------------------------------
+aes-gcm = "0.10"
+
+# -----------------------------------------------------------------------------
+# Credential Storage Backends
+# -----------------------------------------------------------------------------
+# Secret Service API for GNOME Keyring, KWallet, KeePassXC
+# Using v5.x with tokio async runtime and pure Rust crypto
+secret-service = { version = "5.1", features = ["rt-tokio-crypto-rust"] }
+# zeroize for secure memory handling of tokens
+zeroize = "1.7"
+
+# -----------------------------------------------------------------------------
+# Memory management
+# -----------------------------------------------------------------------------
+memmap2 = "0.9"
+crossbeam-channel = "0.5"
+parking_lot = "0.12"
+
+# -----------------------------------------------------------------------------
+# Certificate generation
+# -----------------------------------------------------------------------------
+rcgen = { version = "0.14", features = ["zeroize", "x509-parser"] }
+time = { version = "0.3", features = ["formatting", "macros"] }
+
+# -----------------------------------------------------------------------------
+# Authentication (optional)
+# -----------------------------------------------------------------------------
+nonstick = { version = "0.1", optional = true }
+
+# -----------------------------------------------------------------------------
+# GUI (optional - for configuration GUI)
+# -----------------------------------------------------------------------------
+iced = { version = "0.14", optional = true, features = ["tokio", "advanced", "canvas", "lazy", "svg", "image"] }
+rfd = { version = "0.17", optional = true, default-features = false, features = ["xdg-portal", "wayland"] }
+
+# -----------------------------------------------------------------------------
+# HTTP metrics server (optional - Prometheus + /health endpoint)
+# -----------------------------------------------------------------------------
+tiny_http = { version = "0.12", optional = true }
+
+# =============================================================================
+# Dev Dependencies
+# =============================================================================
+
+[dev-dependencies]
+criterion = { version = "0.8", features = ["html_reports"] }
+tempfile = "3.8"
+proptest = "1.4"
+
+# =============================================================================
+# Features
+# =============================================================================
+
+[features]
+default = ["pam-auth", "h264", "wayland", "wl-clipboard", "portal-generic", "libei", "gui"]
+
+# GUI for configuration (optional, adds ~40MB to binary)
+gui = ["iced", "rfd"]
+wayland = ["dep:wayland-client", "wayland-protocols", "wayland-protocols-misc", "wayland-protocols-wlr"]
+# libei sources its clipboard via Wayland data-control (the second Portal
+# session was retired), so it always needs wl-clipboard compiled in.
+libei = ["reis", "wl-clipboard"]
+portal-generic = ["xdg-desktop-portal-generic", "dep:evdev", "dep:wayland-client"]
+
+# Standalone Wayland data-control clipboard (ext-data-control / wlr-data-control)
+# Works with any session strategy. Native-only (blocked by security-context-v1 in Flatpak).
+wl-clipboard = ["wl-clipboard-rs"]
+pam-auth = ["nonstick"]
+
+# H.264 software encoding via EGFX channel (dynamic loading)
+# Loads Cisco's precompiled OpenH264 binary at runtime for patent compliance.
+# The binary must be installed separately (e.g., libopenh264-7 on Debian).
+# See docs/decisions/H264-CODEC-STRATEGY.md
+h264 = ["openh264", "openh264-sys2", "libloading"]
+
+# Development/testing only: compile OpenH264 from source (NO patent coverage).
+# NEVER enable in any shipped binary.
+h264-source = ["openh264", "openh264-sys2", "libloading", "openh264/source", "openh264-sys2/source"]
+
+# x264 software encoding: faster alternative to OpenH264 for AVC420.
+# Loaded dynamically via libloading (same pattern as OpenH264).
+# Requires libx264.so (libx264-dev / libx264-164) on the target system.
+# When enabled, the encoder backend selection config can choose "x264" or "openh264".
+# Depends on h264 for the shared BGRA->I420 conversion path (bgra_to_i420) and
+# the encoder-selection tests.
+x264 = ["libloading", "h264"]
+
+# Hardware-accelerated H.264 encoding (premium feature)
+# VA-API: Intel (iHD/i965) and AMD (radeonsi) GPU encoding
+# Requires libva-dev and GPU drivers
+vaapi = ["cros-libva"]
+
+# NVENC: NVIDIA GPU encoding via Video Codec SDK
+# Requires NVIDIA driver with libnvidia-encode.so AND CUDA toolkit
+nvenc = ["nvidia-video-codec-sdk", "cudarc"]
+
+# Vulkan Video: cross-vendor GPU encoding (NVIDIA, Intel, AMD)
+# Requires Vulkan driver with VK_KHR_video_encode_h264 support
+vulkan-video = ["vk-video"]
+
+# Convenience: enable all hardware backends
+hardware-encoding = ["vaapi", "nvenc", "vulkan-video"]
+
+# AF_VSOCK transport listener (Linux-only). Enables Hyper-V Enhanced Session
+# Mode. See
+# docs/design/transport/TRANSPORT-PHASE-3A-SDS-2026-05-16.md
+vsock = ["tokio-vsock"]
+
+# WebSocket + RDCleanPath transport listener — eliminates ws-rdp-proxy from
+# production for browser/WASM clients (lamco-rdp-wasm and any other
+# RDCleanPath-aware client). Requires our IronRDP fork at 6fa2bf5f+ for
+# RdpServer::run_connection_pre_authenticated. Vanilla RDP clients (mstsc,
+# xfreerdp) must continue to use the TCP path. See
+# docs/design/transport/TRANSPORT-PHASE-3B-SDS-2026-05-16.md
+websocket = ["tokio-tungstenite", "ironrdp-rdcleanpath"]
+
+# HTTP metrics server (Prometheus /metrics + JSON /health)
+# Adds tiny-http for lightweight synchronous HTTP serving.
+metrics-server = ["tiny_http"]
+
+# RDPDR (MS-RDPEFS) server-side drive redirection — NOT YET AVAILABLE.
+# Server-side RDPDR (RdpdrServerBackend / RdpdrServerFactory) exists in neither
+# upstream IronRDP nor our fork; the ironrdp-rdpdr crate is client-side only.
+# The rdpdr feature is design scaffolding written against the planned API
+# (docs/analysis/spec/MS-RDPEFS/, the 2026-03-10 "RDPDR Server Spec v2"). This
+# empty-stub feature only keeps the #[cfg(feature = "rdpdr")] gates valid;
+# nothing enables it. Add the ironrdp-rdpdr server dependency here once the
+# upstream/fork server-side support lands.
+rdpdr = []
+
+# Future features (not yet implemented)
+# multimon = []       # Multi-monitor support
+
+# =============================================================================
+# Profiles
+# =============================================================================
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+# Benchmark profile - optimized for accurate measurements
+[profile.bench]
+opt-level = 3
+debug = false
+lto = "thin"
+
+# =============================================================================
+# Benchmarks
+# =============================================================================
+
+[[bench]]
+name = "video_encoding"
+harness = false
+
+[[bench]]
+name = "color_conversion"
+harness = false
+
+[[bench]]
+name = "damage_detection"
+harness = false
+
+# =============================================================================
+# Lints
+# =============================================================================
+
+[lints.rust]
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+elided_lifetimes_in_paths = "warn"
+unreachable_pub = "warn"
+# Misnamed feature gates (e.g. file-transfer/rdpdr drift from the
+# 2026-04 unification) silently disable code. Fail the build on any cfg that
+# references an undeclared feature.
+unexpected_cfgs = "deny"
+
+[lints.clippy]
+pedantic = { priority = -1, level = "deny" }
+allow_attributes = "deny"
+
+# Selective allows for false-positive-prone or low-value pedantic lints
+missing_errors_doc = "allow"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+doc_markdown = "allow"
+similar_names = "allow"
+items_after_statements = "allow"
+redundant_else = "allow"
+match_same_arms = "allow"
+single_match_else = "allow"
+return_self_not_must_use = "allow"
+unused_self = "allow"
+unused_async = "allow"
+too_many_lines = "allow"
+manual_is_variant_and = "allow"
+bool_to_int_with_if = "allow"
+struct_excessive_bools = "allow"
+if_not_else = "allow"
+manual_let_else = "allow"
+missing_panics_doc = "allow"
+unnecessary_wraps = "allow"
+trivially_copy_pass_by_ref = "allow"
+needless_pass_by_value = "allow"
+manual_midpoint = "allow"
+match_wildcard_for_single_variants = "allow"
+ptr_as_ptr = "allow"
+cast_ptr_alignment = "allow"
+explicit_iter_loop = "allow"
+format_push_string = "allow"
+used_underscore_binding = "allow"
+used_underscore_items = "allow"
+struct_field_names = "allow"
+missing_fields_in_debug = "allow"
+unreadable_literal = "allow"
+
+# Functional lints
+wildcard_imports = "deny"
+large_futures = "warn"
+
+# Progressive (upgrade to "deny" when codebase is clean)
+unwrap_used = "warn"
+expect_used = "warn"
+
+# Coordinate/graphics code requires numeric casting
+as_conversions = "allow"
+cast_lossless = "allow"
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_sign_loss = "allow"
+cast_precision_loss = "allow"
+
+# =============================================================================
+# Patches - Override transitive dependencies
+# =============================================================================
+#
+# IronRDP upstream. Git deps required because ironrdp-egfx is not
+# published to crates.io (publish = false in upstream Cargo.toml).
+# All lamco contributions merged upstream via PRs #1057, #1063-1066,
+# #1076, #1091-1093, #1096-1100, #1110, #1125.
+#
+# To eliminate this [patch] section:
+# 1. Wait for Devolutions to publish ironrdp-egfx to crates.io
+# 2. Remove this [patch] section
+# 3. Update ironrdp-* direct deps to crates.io versions
+# 4. Switch clipboard crates from bundled path deps to crates.io versions
+# =============================================================================
+
+[patch.crates-io]
+# Local development overrides (uncomment to use in-tree versions)
+# lamco-video = { path = "/home/greg/lamco-workspaces/lamco-wayland/crates/lamco-video" }
+# lamco-portal = { path = "/home/greg/lamco-workspaces/lamco-wayland/crates/lamco-portal" }
+# lamco-wayland = { path = "/home/greg/lamco-workspaces/lamco-wayland" }
+
+# IronRDP lamco-admin fork — used by lamco-rdp-server.
+# Pinned to an IMMUTABLE rev so switching branches in the local IronRDP
+# checkout for upstream-PR work never breaks this build. The rev is
+# feat/lamco-combined rebased onto upstream master 90461444 (2026-06-09,
+# post-#1172/#1345 merges; prior head archived as
+# archive/lamco-combined-pre-rebase-2026-06-09). lamco-rdp-clipboard 0.4
+# (crates.io) requires
+# ironrdp-cliprdr 0.6, which these patches supply from the same rev, so there
+# is no trait-diamond conflict. Drop the whole IronRDP [patch] once Devolutions
+# publishes ironrdp-egfx to crates.io.
+#
+# To hack on IronRDP locally against this server, temporarily swap the
+# `git`/`rev` entries below for `path = "/home/greg/IronRDP/crates/<crate>"`
+# (do NOT commit the path form — it couples the build to the working tree).
+ironrdp = { git = "https://github.com/moerketh/IronRDP", rev = "" }
+ironrdp-pdu = { git = "https://github.com/moerketh/IronRDP", rev = "" }
+ironrdp-server = { git = "https://github.com/moerketh/IronRDP", rev = "" }
+ironrdp-graphics = { git = "https://github.com/moerketh/IronRDP", rev = "" }
+ironrdp-cliprdr = { git = "https://github.com/moerketh/IronRDP", rev = "" }
+ironrdp-svc = { git = "https://github.com/moerketh/IronRDP", rev = "" }
+ironrdp-dvc = { git = "https://github.com/moerketh/IronRDP", rev = "" }
+ironrdp-core = { git = "https://github.com/moerketh/IronRDP", rev = "" }
+ironrdp-displaycontrol = { git = "https://github.com/moerketh/IronRDP", rev = "" }
+ironrdp-egfx = { git = "https://github.com/moerketh/IronRDP", rev = "" }
+ironrdp-rdpsnd = { git = "https://github.com/moerketh/IronRDP", rev = "" }
