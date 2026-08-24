@@ -421,10 +421,6 @@ ConditionEnvironment=WAYLAND_DISPLAY
 [Service]
 Type=simple
 ExecStart=/usr/bin/lamco-rdp-server --config /etc/lamco-rdp-server/config.toml
-# Safety net: if the service dies while the guest cursor is transparent
-# (RDP session active), restore the visible console cursor on the way
-# down so the console is never left pointerless after a crash.
-ExecStopPost=bash -c 'kwriteconfig6 --file kcminputrc --group Mouse --key cursorTheme breeze_cursors && DISPLAY=:0 WAYLAND_DISPLAY=wayland-0 plasma-apply-cursortheme breeze_cursors || true'
 Restart=on-failure
 RestartSec=5
 Environment=RUST_LOG=info
@@ -499,199 +495,65 @@ MONITORS_EOF
         echo ""kscreen-doctor not found — KWin will use DRM default (1024x768).""
     fi
 
-    # -- Patch KWin ScreenCast to fall back to MemFd on virtual GPUs -------
-    # On Hyper-V (hyperv_drm + Mesa software rendering), DmaBuf buffer creation
-    # fails at EGL import time. Without this patch, KWin's ScreenCast hangs in
-    # an infinite format-negotiation loop because onStreamAddBuffer cannot fall
-    # back to MemFd when only DmaBuf is advertised.
-    #
-    # This patch changes newStreamParams() to advertise both DmaBuf and MemFd
-    # as buffer types, allowing onStreamAddBuffer to fall through to MemFd when
-    # DmaBufScreenCastBuffer::create() fails.
-    #
-    # Only applies to KDE/KWin (GNOME/mutter already uses MemFd by default).
-    # Upstream patch submitted to KDE — once merged, this step can be removed.
-    KWIN_VERSION=$(dpkg-query -W -f='${Version}' kwin-wayland 2>/dev/null | head -1)
-    if [ -n ""$KWIN_VERSION"" ]; then
-        SCREENCAST_SO=""/usr/lib/x86_64-linux-gnu/qt6/plugins/kwin/plugins/screencast.so""
-        if [ -f ""$SCREENCAST_SO"" ] && [ ! -f ""$SCREENCAST_SO.orig"" ]; then
-            # Check if the patch is already applied (look for our warning string)
-            if ! strings ""$SCREENCAST_SO"" 2>/dev/null | grep -q ""falling back to MemFd""; then
-                echo ""Patching KWin ScreenCast for MemFd fallback on virtual GPUs...""
-                # Install build dependencies
-                apt-get install -y -q kwin-wayland-dev libpipewire-0.3-dev libspa-0.2-dev \
-                    extra-cmake-modules qt6-base-dev cmake build-essential 2>/dev/null || true
-                # Download and patch KWin source
-                KWIN_SRC_DIR=$(mktemp -d)
-                if apt-get source kwin-wayland ""$KWIN_SRC_DIR"" 2>/dev/null; then
-                    KWIN_DIR=$(find ""$KWIN_SRC_DIR"" -maxdepth 1 -type d -name ""kwin-*"" | head -1)
-                    if [ -n ""$KWIN_DIR"" ]; then
-                        # Apply the SHM fallback patch
-                        PATCH_FILE=""/tmp/kwin-screencast-shm-fallback.patch""
-                        cat > ""$PATCH_FILE"" << 'PATCH_EOF'
---- a/src/plugins/screencast/screencaststream.cpp
-+++ b/src/plugins/screencast/screencaststream.cpp
-@@ -149,7 +149,12 @@
-     qCDebug(KWIN_SCREENCAST) << objectName() << ""announcing stream params. with dmabuf:"" << m_dmabufParams.has_value();
--    const int buffertypes = m_dmabufParams ? (1 << SPA_DATA_DmaBuf) : (1 << SPA_DATA_MemFd);
-+    // When DmaBuf is negotiated, also advertise MemFd as a fallback buffer type.
-+    // On virtual GPUs, DmaBufScreenCastBuffer::create() can fail at EGL import
-+    // time. Without MemFd in the advertised types, onStreamAddBuffer cannot
-+    // fall back, leaving pwBuffer->user_data null and causing an infinite loop.
-+    const int buffertypes = m_dmabufParams ? ((1 << SPA_DATA_DmaBuf) | (1 << SPA_DATA_MemFd)) : (1 << SPA_DATA_MemFd);
-@@ -292,6 +297,8 @@
-             pwBuffer->user_data = dmabuf;
-             m_allBuffers.push_back(dmabuf);
-             return;
-+        } else {
-+            qCWarning(KWIN_SCREENCAST) << objectName() << ""DmaBuf buffer creation failed, falling back to MemFd"";
-         }
-PATCH_EOF
-                        cd ""$KWIN_DIR""
-                        patch -p1 < ""$PATCH_FILE"" 2>/dev/null || true
-                        # Build just the screencast plugin
-                        mkdir -p build && cd build
-                        cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
-                            -DKWIN_BUILD_X11=OFF -DKWIN_BUILD_KSMS=OFF \
-                            -DKWIN_BUILD_SCREENCAST=ON 2>/dev/null
-                        if make screencast -j$(nproc) 2>/dev/null; then
-                            cp ""$SCREENCAST_SO"" ""$SCREENCAST_SO.orig""
-                            cp src/plugins/screencast/screencast.so ""$SCREENCAST_SO""
-                            echo ""KWin ScreenCast patched with MemFd fallback successfully.""
-                        else
-                            echo ""WARNING: KWin screencast plugin build failed — using unpatched version.""
-                        fi
-                    fi
-                fi
-                rm -rf ""$KWIN_SRC_DIR"" ""$PATCH_FILE""
-            else
-                echo ""KWin ScreenCast already patched with MemFd fallback.""
-            fi
-        fi
+    # -- Build lamco-rdp-server from the vmcreate fork --------------------
+    # The stock release binary black-screens on virtual GPUs (hyperv_drm /
+    # virtio + software GL): PipeWire negotiates DMA-BUF, the capture never
+    # delivers a frame on that path, and the software EGFX paths drop
+    # FrameBuffer::DmaBuf anyway. The fork (feature/hyperv-enhanced-session)
+    # fixes it entirely server-side:
+    #   1. DMA-BUF CPU reads use the DMA_BUF_IOCTL_SYNC bracket, correct
+    #      mmap pgoff, and reject non-linear modifiers.
+    #   2. DmaBuf frames are materialized to CPU memory before caching.
+    #   3. One-shot probe: DmaBuf negotiated but zero frames for 10s ->
+    #      flip to MemFd and rebind the stream (measurement-driven, no
+    #      driver-name allowlist).
+    # No KWin patch is required: stock KWin works once the consumer side
+    # handles the negotiated buffer types correctly.
+    LAMCO_FORK_REPO=""moerketh/lamco-rdp-server""
+    LAMCO_FORK_BRANCH=""feature/hyperv-enhanced-session""
+    LAMCO_FORK_COMMIT=""""   # empty = branch head; pin a SHA for reproducible builds
+    FORK_DIR=""/opt/lamco-fork""
+    if [ ! -d ""$FORK_DIR/.git"" ]; then
+        git clone --depth 1 --branch ""$LAMCO_FORK_BRANCH"" \
+            ""https://github.com/${LAMCO_FORK_REPO}.git"" ""$FORK_DIR"" 2>/dev/null || true
     fi
-    # -- Software render + SHM screencast env (KWin) -----------------------
-    # The capture path is all-software: hyperv_drm has no real GPU and the
-    # RDP stream negotiates MemFd buffers end to end (lamco logs
-    # Buffer type: 2 = MemFd). DMA-BUF was a dead end on Hyper-V - the
-    # vgem dummy render node and the hyperv_drm DRIVER_RENDER kernel +
-    # libdrm VMBus patches are retired. KWin composites on llvmpipe via
-    # card0 only; these env vars force the Mesa software loader and SHM
-    # screencast formats (the patched screencast.so above honors
-    # KWIN_SCREENCAST_FORCE_SHM=1; without it KWin advertises DMA-BUF
-    # formats and the stream can stall when allocation fails).
-    mkdir -p /etc/xdg/plasma-workspace/env
-    cat > /etc/xdg/plasma-workspace/env/kwin-software-render.sh << 'KWENV_EOF'
-#!/bin/bash
-export LIBGL_ALWAYS_SOFTWARE=1
-export MESA_LOADER_DRIVER_OVERRIDE=kms_swrast
-export KWIN_SCREENCAST_FORCE_SHM=1
-KWENV_EOF
-    chmod 755 /etc/xdg/plasma-workspace/env/kwin-software-render.sh
-    # Best-effort removal of retired vgem artifacts from older deployments
-    # (a loaded vgem would race the real DRM node for the renderD128 name).
-    rm -f /etc/modules-load.d/vgem.conf /etc/udev/rules.d/99-vgem-render.rules 2>/dev/null || true
-    echo ""Software render + SHM screencast env installed (vgem/DMA-BUF path retired).""
-
-    # -- Transparent cursor theme (KDE) ------------------------------------
-    # KWin composites the cursor sprite into the framebuffer on Hyper-V
-    # (hyperv_drm has no GPU cursor plane), which bakes the guest cursor
-    # into the RDP video stream a frame or two behind the client-side
-    # pointer — a lagging ghost arrow. Installing a fully transparent
-    # XCursor theme removes it from the capture; the pointer shape PDU
-    # (lamco cursor_pdu.rs reads breeze_cursors directly, not the active
-    # theme) still delivers the real arrow to mstsc, so exactly one
-    # client-rendered zero-lag pointer remains (xrdp parity).
-    # XCursor binary layout was verified against a genuine breeze file
-    # (magic 0x72756358 LE, version 0x00010000, 36-byte image chunks).
-    # KDE/KWin only — GNOME/mutter deferred pending Hidden-mode
-    # verification. Trade-off: guest console shows no local cursor.
-    if command -v kwriteconfig6 >/dev/null 2>&1 || command -v kwriteconfig5 >/dev/null 2>&1; then
-        KW=kwriteconfig6
-        command -v kwriteconfig6 >/dev/null 2>&1 || KW=kwriteconfig5
-        if command -v python3 >/dev/null 2>&1; then
-            python3 - << 'PYEOF' || echo ""WARNING: transparent cursor theme generation failed.""
-import os, struct
-
-work = '/tmp/lamco-transparent-theme'
-d = os.path.join(work, 'transparent', 'cursors')
-os.makedirs(d, exist_ok=True)
-
-def make_xcursor():
-    # 1x1 fully transparent image, nominal size 24 (libXcursor picks nearest)
-    HEADER = 16; TOC = 12; CHUNK = 36; PIXELS = 4
-    SUBTYPE = 24
-    pos = HEADER + TOC
-    header = struct.pack('<IIII', 0x72756358, HEADER, 0x00010000, 1)
-    toc = struct.pack('<III', 0xFFFD0002, SUBTYPE, pos)
-    chunk = struct.pack('<IIIIIIIII', CHUNK, 0xFFFD0002, SUBTYPE, 1, 1, 1, 0, 0, 1)
-    data = header + toc + chunk + b'\x00\x00\x00\x00'
-    assert len(data) == HEADER + TOC + CHUNK + PIXELS, len(data)
-    return data
-
-blob = make_xcursor()
-fallback_names = [
-    'left_ptr', 'right_ptr', 'cross', 'circle', 'xxx_authentication',
-    'wait', 'left_ptr_watch', 'sb_h_double_arrow', 'sb_v_double_arrow',
-    'bottom_left_corner', 'bottom_right_corner', 'top_left_corner',
-    'top_right_corner', 'grab', 'grabbing', 'hand', 'hand2', 'pointer',
-    'question_arrow', 'text', 'watch', 'half-busy', 'openhand',
-    'closedhand', 'fcfz', 'left_side', 'right_side', 'top_side',
-    'bottom_side', 'center_ptr', 'crosshair', 'dot', 'dot_box_mask',
-    'icon', 'menu', 'pencil', 'pirate', 'plus', 'trek', 'ul_angle',
-    'ur_angle', 'll_angle', 'lr_angle', 'move', 'all-scroll',
-    'vertical-text', 'context-menu', 'copy', 'progress', 'not-allowed',
-    'no-drop', 'col-resize', 'row-resize', 'nesw-resize', 'nwse-resize',
-    'ew-resize', 'ns-resize', 'cell', 'color-picker', 'zoom-in',
-    'zoom-out',
-]
-# CRITICAL (2026-08-22 wallpaper-ghost fix): shadow EVERY cursor name of
-# an installed real theme, not just the list above. XCursor themes
-# INHERIT the parent theme for any name they lack - and Plasma's desktop
-# background uses the ""default"" role, which is NOT in the fallback list.
-# Result was: transparent cursor over windows (text role covered) but a
-# visible lagging breeze arrow over the desktop background only.
-names = set(fallback_names)
-for theme_dir in ('/usr/share/icons/breeze_cursors/cursors',
-                  '/usr/share/icons/Adwaita/cursors',
-                  '/usr/share/icons/whiteglass/cursors',
-                  '/usr/share/icons/default/cursors'):
-    try:
-        names.update(os.listdir(theme_dir))
-    except OSError:
-        continue
-for n in sorted(names):
-    with open(os.path.join(d, n), 'wb') as f:
-        f.write(blob)
-with open(os.path.join(work, 'transparent', 'index.theme'), 'w') as f:
-    f.write('[Icon Theme]\nInherits=breeze_cursors\n')
-print('generated', len(names), 'transparent cursor files')
-PYEOF
-            if [ -d /tmp/lamco-transparent-theme/transparent ]; then
-                rm -rf /usr/share/icons/transparent
-                cp -r /tmp/lamco-transparent-theme/transparent /usr/share/icons/transparent
-                rm -rf /tmp/lamco-transparent-theme
-                echo ""Installed transparent cursor theme to /usr/share/icons/transparent.""
-            fi
-        else
-            echo ""python3 not found - skipping transparent cursor theme install.""
+    if [ -d ""$FORK_DIR"" ]; then
+        if ! command -v cargo >/dev/null 2>&1; then
+            echo ""Installing Rust toolchain (minimal profile)...""
+            curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal 2>/dev/null || true
         fi
-        # Activate for the autologin user — SESSION-SCOPED from here on.
-        # The lamco server makes the cursor transparent only while an RDP
-        # client is connected and restores it on disconnect + ExecStopPost
-        # (see cursor_theme.rs in the lamco fork; needs the transparent
-        # theme INSTALLED but not active). Provisioning therefore leaves
-        # kcminputrc on a VISIBLE theme (breeze_cursors) so the console
-        # always has a pointer at boot — xrdp-parity console behavior.
-        # GOTCHA (verified 2026-08-22): plasma-apply-cursortheme only
-        # swaps the live sprite when config differs — lamco's apply uses
-        # the breeze_cursors→transparent toggle to force a real reload.
-        sudo -u ""$AUTOLOGIN_USER"" ""$KW"" --file kcminputrc --group Mouse --key cursorTheme breeze_cursors 2>/dev/null || true
-        # Disable the Shake Cursor effect: pointless compositing churn on
-        # an invisible sprite, and wiggle-scaling was the visual tell of
-        # the wallpaper ghost. Runtime-unloaded by lamco per session.
-        sudo -u ""$AUTOLOGIN_USER"" ""$KW"" --file kwinrc --group Plugins --key shakecursorEnabled false 2>/dev/null || true
-        sudo -u ""$AUTOLOGIN_USER"" env SESS_ENV=""XDG_RUNTIME_DIR=/run/user/$(id -u ""$AUTOLOGIN_USER"")"" DISPLAY=:0 WAYLAND_DISPLAY=wayland-0 qdbus6 org.kde.KWin /KWin reconfigure 2>/dev/null || true
-        echo ""Cursor setup: transparent theme installed, console on breeze_cursors (lamco toggles per RDP session).""
+        export PATH=""$HOME/.cargo/bin:$PATH""
+        if command -v cargo >/dev/null 2>&1; then
+            apt-get install -y -q build-essential pkg-config 2>/dev/null || true
+            cd ""$FORK_DIR"" || exit 1
+            if [ -n ""$LAMCO_FORK_COMMIT"" ]; then
+                git fetch --depth 1 origin ""$LAMCO_FORK_COMMIT"" 2>/dev/null || true
+                git checkout ""$LAMCO_FORK_COMMIT"" 2>/dev/null || true
+            else
+                git fetch --depth 1 origin ""$LAMCO_FORK_BRANCH"" 2>/dev/null || true
+                git reset --hard FETCH_HEAD 2>/dev/null || true
+            fi
+            if cargo build --release --features x264,vsock; then
+                install -m 0755 target/release/lamco-rdp-server /usr/bin/lamco-rdp-server
+                echo ""Installed fork-built lamco-rdp-server (DMA-BUF capture fixes included).""
+            else
+                echo ""WARNING: fork build failed — keeping the release binary (expect a black screen on virtual GPUs)."" >&2
+            fi
+            cd / || exit 1
+        else
+            echo ""WARNING: Rust toolchain unavailable — keeping the release binary."" >&2
+        fi
+    else
+        echo ""WARNING: could not clone the fork — keeping the release binary."" >&2
+    fi
+    # KWin's ScreenCast uses DMA-BUF buffers which require /dev/dri/renderD128.
+    # The hyperv_drm driver does not expose a render node. The vgem (Virtual
+    # GEM) module creates a dummy renderD128 as a best-effort fallback.
+    if command -v modprobe >/dev/null 2>&1; then
+        modprobe vgem 2>/dev/null || true
+        echo ""vgem"" > /etc/modules-load.d/vgem.conf 2>/dev/null || true
+        # udev rule so renderD128 is group-accessible
+        echo 'KERNEL==""renderD128"", GROUP=""video"", MODE=""0660""' > /etc/udev/rules.d/99-vgem-render.rules 2>/dev/null || true
     fi
 
     # linger + enable (the service starts on next graphical-session target)
