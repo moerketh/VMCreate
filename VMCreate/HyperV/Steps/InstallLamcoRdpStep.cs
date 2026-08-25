@@ -528,7 +528,10 @@ MONITORS_EOF
         fi
         export PATH=""$HOME/.cargo/bin:$PATH""
         if command -v cargo >/dev/null 2>&1; then
-            apt-get install -y -q build-essential pkg-config 2>/dev/null || true
+            # libpipewire/libspa dev headers: libspa-sys's build script probes
+            # them via pkg-config; without it the build dies at that crate.
+            apt-get install -y -q build-essential pkg-config \
+                libpipewire-0.3-dev libspa-0.2-dev 2>/dev/null || true
             cd ""$FORK_DIR"" || exit 1
             if [ -n ""$LAMCO_FORK_COMMIT"" ]; then
                 git fetch --depth 1 origin ""$LAMCO_FORK_COMMIT"" 2>/dev/null || true
