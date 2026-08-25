@@ -529,13 +529,15 @@ MONITORS_EOF
         export PATH=""$HOME/.cargo/bin:$PATH""
         if command -v cargo >/dev/null 2>&1; then
             # Build toolchain for the crates with native build scripts:
-            # cmake (libopus_sys), plus pkg-config -dev headers probed by
+            # cmake (libopus_sys), pkg-config -dev headers probed by
             # libspa-sys/libpipewire (pipewire/spa), libopus_sys (opus),
-            # zbus (dbus), and the x264 feature. A vanilla server install
-            # only pulls runtime libs, not these.
-            apt-get install -y -q build-essential pkg-config cmake \
+            # zbus (dbus), the x264 feature, and the link-stage libs for
+            # pam-auth (libpam) and the gui dev (libxkbcommon). A vanilla
+            # server install only pulls runtime libs, not these.
+            apt-get install -y -q build-essential pkg-config cmake ninja-build \
                 libpipewire-0.3-dev libspa-0.2-dev libopus-dev \
-                libdbus-1-dev libudev-dev libx264-dev 2>/dev/null || true
+                libdbus-1-dev libudev-dev libx264-dev \
+                libpam0g-dev libxkbcommon-dev 2>/dev/null || true
             cd ""$FORK_DIR"" || exit 1
             if [ -n ""$LAMCO_FORK_COMMIT"" ]; then
                 git fetch --depth 1 origin ""$LAMCO_FORK_COMMIT"" 2>/dev/null || true
@@ -543,6 +545,18 @@ MONITORS_EOF
             else
                 git fetch --depth 1 origin ""$LAMCO_FORK_BRANCH"" 2>/dev/null || true
                 git reset --hard FETCH_HEAD 2>/dev/null || true
+            fi
+            # The fork's licenses/ dir is not in git (packaging artifact), but
+            # third_party.rs include_str!()s OpenH264 license texts at build
+            # time. Fetch the genuine Cisco texts into the checkout.
+            if [ ! -s ""$FORK_DIR/licenses/OpenH264-BINARY_LICENSE.txt"" ]; then
+                mkdir -p ""$FORK_DIR/licenses""
+                curl -fsSL https://raw.githubusercontent.com/cisco/openh264/master/LICENSE \
+                    -o ""$FORK_DIR/licenses/OpenH264-BINARY_LICENSE.txt"" 2>/dev/null || true
+                # The repo has no standalone PATENTS file; the LICENSE text
+                # carries the patent grant. Use it for both required files.
+                cp ""$FORK_DIR/licenses/OpenH264-BINARY_LICENSE.txt"" \
+                   ""$FORK_DIR/licenses/OpenH264-PATENT.txt"" 2>/dev/null || true
             fi
             # A cold release build (LTO) takes longer than the deployment
             # step's command timeout, so run it DETACHED (survives this
