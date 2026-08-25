@@ -513,6 +513,10 @@ MONITORS_EOF
     LAMCO_FORK_BRANCH=""feature/hyperv-enhanced-session""
     LAMCO_FORK_COMMIT=""""   # empty = branch head; pin a SHA for reproducible builds
     FORK_DIR=""/opt/lamco-fork""
+    FORK_BUILD_LOG=""/tmp/lamco-fork-build.log""
+    FORK_DONE_MARKER=""/opt/lamco-fork/.fork-installed""
+    FORK_WAIT_INTERVAL=10
+    FORK_WAIT_LOOPS=45   # 7.5 min poll inside this step; build self-completes if longer
     if [ ! -d ""$FORK_DIR/.git"" ]; then
         git clone --depth 1 --branch ""$LAMCO_FORK_BRANCH"" \
             ""https://github.com/${LAMCO_FORK_REPO}.git"" ""$FORK_DIR"" 2>/dev/null || true
@@ -533,12 +537,32 @@ MONITORS_EOF
                 git fetch --depth 1 origin ""$LAMCO_FORK_BRANCH"" 2>/dev/null || true
                 git reset --hard FETCH_HEAD 2>/dev/null || true
             fi
-            if cargo build --release --features x264,vsock; then
-                install -m 0755 target/release/lamco-rdp-server /usr/bin/lamco-rdp-server
-                echo ""Installed fork-built lamco-rdp-server (DMA-BUF capture fixes included).""
-            else
-                echo ""WARNING: fork build failed — keeping the release binary (expect a black screen on virtual GPUs)."" >&2
-            fi
+            # A cold release build (LTO) takes longer than the deployment
+            # step's command timeout, so run it DETACHED (survives this
+            # shell) and poll here instead of blocking. The marker file
+            # makes the build idempotent: a re-run of this script (or a
+            # retry after a timeout kill) picks up where it left off —
+            # cargo reuses target/ artifacts, so only the final link runs.
+            rm -f ""$FORK_BUILD_LOG"" ""$FORK_DONE_MARKER""
+            nohup bash -c ""cd '$FORK_DIR' && PATH='$HOME/.cargo/bin':\$PATH \
+                cargo build --release --features x264,vsock \
+                && install -m 0755 target/release/lamco-rdp-server /usr/bin/lamco-rdp-server \
+                && touch '$FORK_DONE_MARKER'"" >""$FORK_BUILD_LOG"" 2>&1 &
+            echo ""Fork build detached (log: $FORK_BUILD_LOG); waiting...""
+            for i in $(seq 1 $FORK_WAIT_LOOPS); do
+                if [ -f ""$FORK_DONE_MARKER"" ]; then
+                    echo ""Installed fork-built lamco-rdp-server (DMA-BUF capture fixes included).""
+                    break
+                fi
+                if ! pgrep -f ""cargo build --release"" >/dev/null 2>&1; then
+                    # Build process died without the marker: real failure.
+                    echo ""WARNING: fork build failed — keeping the release binary (expect a black screen on virtual GPUs)."" >&2
+                    tail -5 ""$FORK_BUILD_LOG"" >&2 || true
+                    break
+                fi
+                sleep $FORK_WAIT_INTERVAL
+            done
+            [ -f ""$FORK_DONE_MARKER"" ] || echo ""WARNING: fork build still running after ${FORK_WAIT_LOOPS}x${FORK_WAIT_INTERVAL}s — it installs itself on completion; rerun this step (or wait) to pick up the fixed binary."" >&2
             cd / || exit 1
         else
             echo ""WARNING: Rust toolchain unavailable — keeping the release binary."" >&2
