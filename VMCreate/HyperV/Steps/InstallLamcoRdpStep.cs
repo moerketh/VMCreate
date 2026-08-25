@@ -528,10 +528,14 @@ MONITORS_EOF
         fi
         export PATH=""$HOME/.cargo/bin:$PATH""
         if command -v cargo >/dev/null 2>&1; then
-            # libpipewire/libspa dev headers: libspa-sys's build script probes
-            # them via pkg-config; without it the build dies at that crate.
-            apt-get install -y -q build-essential pkg-config \
-                libpipewire-0.3-dev libspa-0.2-dev 2>/dev/null || true
+            # Build toolchain for the crates with native build scripts:
+            # cmake (libopus_sys), plus pkg-config -dev headers probed by
+            # libspa-sys/libpipewire (pipewire/spa), libopus_sys (opus),
+            # zbus (dbus), and the x264 feature. A vanilla server install
+            # only pulls runtime libs, not these.
+            apt-get install -y -q build-essential pkg-config cmake \
+                libpipewire-0.3-dev libspa-0.2-dev libopus-dev \
+                libdbus-1-dev libudev-dev libx264-dev 2>/dev/null || true
             cd ""$FORK_DIR"" || exit 1
             if [ -n ""$LAMCO_FORK_COMMIT"" ]; then
                 git fetch --depth 1 origin ""$LAMCO_FORK_COMMIT"" 2>/dev/null || true
