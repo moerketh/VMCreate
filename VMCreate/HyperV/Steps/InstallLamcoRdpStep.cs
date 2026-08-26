@@ -335,33 +335,208 @@ if [ ! -f /etc/lamco-rdp-server/cert.pem ] || [ ! -f /etc/lamco-rdp-server/key.p
 fi
 echo ""TLS certificates present: /etc/lamco-rdp-server/cert.pem""
 
-# -- Write config.toml (TLS security, no auth, listen on all interfaces) ----
-# security_mode=tls + auth_method=none: the working combination for Lamco
-# with standard RDP clients (mstsc, FreeRDP). No credssp_credentials --
-# including that section causes IronRDP acceptor to reject connections with
-# invalid credentials even when auth_method=none.
+# -- Write config.toml (full tuned profile, hybrid security, no auth) ------
+# Verbatim port of the hand-tuned config from the reference test VM
+# (TEST_20260817213920) — the profile with verified deep blacks, 60fps and
+# a single client-side pointer. Key quality switches vs the naive minimum:
+#   [egfx]: qp 1-10 + color_range=""full"" + color_matrix=""identity""  -> full
+#           0-255 range (deep black, no washed-out 16-235), 50 Mbps x264.
+#   [video]: target_fps=60 + cursor_mode=""hidden""; [cursor] metadata mode
+#           with the predictor -> one zero-lag client-rendered pointer.
+#   [performance]/[video_pipeline.*]: zero-copy + buffers + backpressure.
+# security_mode=hybrid + auth_method=none: the proven combination for Lamco
+# with standard RDP clients (mstsc, FreeRDP). In ""tls""-only mode mstsc
+# negotiates standard RDP security without a TLS layer, and the TLS
+# acceptor then rejects the stream (""corrupt message"" spam, client never
+# connects). Hybrid lets the server accept the CredSSP-free standard path.
+# No [security.credssp_credentials] — including it makes IronRDP require
+# credentials even with auth_method=none. [gui_state]/[diagnostics] from
+# the reference VM are GUI/debug state and stay out of the template.
 #
 # NOTE: Hyper-V Enhanced Session (vmconnect.exe with HvSocket/VMBus transport)
 # does NOT work with Lamco/IronRDP because Hyper-V uses a proprietary pre-RDP
 # greeting protocol that IronRDP does not implement. Users must connect via
 # standard RDP (mstsc to VM-IP:3389) instead of Enhanced Session.
 cat > /etc/lamco-rdp-server/config.toml << 'CONFIG_EOF'
+config_version = 1
+
 [server]
-listen_addr = ""0.0.0.0:3389""
+listen_addr = ""[::]:3389""
 max_connections = 10
 session_timeout = 0
 use_portals = true
+view_only = false
+
+[server.transports]
+[server.transports.tcp]
+listen_addr = ""0.0.0.0:3389""
+[server.transports.vsock]
+port = 3389
 
 [security]
 cert_path = ""/etc/lamco-rdp-server/cert.pem""
 key_path = ""/etc/lamco-rdp-server/key.pem""
-security_mode = ""tls""
+enable_nla = false
+security_mode = ""hybrid""
 auth_method = ""none""
 require_tls_13 = false
 
 [video]
-target_fps = 30
-cursor_mode = ""embedded""
+target_fps = 60
+cursor_mode = ""hidden""
+
+[video_pipeline.processor]
+target_fps = 60
+max_queue_depth = 30
+adaptive_quality = true
+damage_threshold = 0.05
+drop_on_full_queue = true
+enable_metrics = true
+
+[video_pipeline.dispatcher]
+channel_size = 30
+priority_dispatch = true
+max_frame_age_ms = 150
+enable_backpressure = true
+high_water_mark = 0.8
+low_water_mark = 0.5
+load_balancing = true
+
+[video_pipeline.converter]
+buffer_pool_size = 8
+enable_simd = true
+damage_threshold = 0.75
+enable_statistics = true
+
+[capture]
+protocol = ""auto""
+allow_fallback = true
+handshake_timeout_ms = 5000
+
+[input]
+input_protocol = ""auto""
+keyboard_layout = ""auto""
+enable_touch = false
+
+[clipboard]
+enabled = true
+max_size = 10485760
+rate_limit_ms = 200
+allowed_types = []
+protocol = ""auto""
+allow_fallback = true
+kde_syncselection_hint = false
+
+[multimon]
+enabled = true
+max_monitors = 4
+
+[performance]
+encoder_threads = 0
+network_threads = 0
+buffer_pool_size = 16
+zero_copy = true
+
+[performance.adaptive_fps]
+enabled = false
+min_fps = 5
+max_fps = 60
+high_activity_threshold = 0.3
+medium_activity_threshold = 0.1
+low_activity_threshold = 0.01
+
+[performance.latency]
+mode = ""interactive""
+interactive_max_delay_ms = 16
+balanced_max_delay_ms = 33
+quality_max_delay_ms = 100
+balanced_damage_threshold = 0.02
+quality_damage_threshold = 0.05
+
+[logging]
+level = ""info""
+metrics = true
+
+[egfx]
+enabled = true
+h264_level = ""auto""
+h264_bitrate = 50000
+zgfx_compression = ""never""
+max_frames_in_flight = 2
+frame_ack_timeout = 5000
+periodic_idr_interval = 5
+codec = ""avc420""
+encoder_backend = ""x264""
+qp_min = 1
+qp_max = 10
+qp_default = 1
+avc444_aux_bitrate_ratio = 1.0
+color_matrix = ""identity""
+color_range = ""full""
+avc444_enabled = true
+avc444_enable_aux_omission = true
+avc444_max_aux_interval = 30
+avc444_aux_change_threshold = 0.05
+avc444_force_aux_idr_on_return = false
+
+[egfx.encoding_adaptation]
+enabled = false
+base_qp = 22
+min_qp = 18
+max_qp = 42
+evaluation_interval_ms = 500
+moderate_queue_threshold = 3
+severe_queue_threshold = 6
+
+[damage_tracking]
+enabled = true
+method = ""diff""
+tile_size = 16
+diff_threshold = 0.01
+pixel_threshold = 1
+merge_distance = 16
+min_region_area = 64
+
+[hardware_encoding]
+enabled = false
+vaapi_device = ""/dev/dri/renderD128""
+enable_dmabuf_zerocopy = true
+fallback_to_software = true
+quality_preset = ""balanced""
+prefer_nvenc = true
+backend_priority = [
+    ""vulkan-video"",
+    ""nvenc"",
+    ""vaapi"",
+]
+vulkan_device = ""auto""
+
+[display]
+allow_resize = true
+allowed_resolutions = []
+dpi_aware = false
+frame_transform = ""auto""
+
+[advanced_video]
+enable_frame_skip = true
+scene_change_threshold = 0.7
+intra_refresh_interval = 300
+enable_adaptive_quality = false
+
+[cursor]
+mode = ""metadata""
+auto_mode = true
+predictive_latency_threshold_ms = 0
+cursor_update_fps = 60
+
+[cursor.predictor]
+history_size = 8
+lookahead_ms = 50.0
+velocity_smoothing = 0.4
+acceleration_smoothing = 0.2
+max_prediction_distance = 100
+min_velocity_threshold = 50.0
+stop_convergence_rate = 0.5
 
 [audio]
 enabled = true
@@ -371,15 +546,14 @@ channels = 2
 frame_ms = 20
 opus_bitrate = 64000
 
-[display]
-allow_resize = true
-allowed_resolutions = []
-dpi_aware = false
-frame_transform = ""auto""
+[notifications]
+on_error = true
+on_cert_expiry = true
 
-[capture]
-protocol = ""auto""
-allow_fallback = true
+[monitoring]
+enabled = true
+snapshot_interval_secs = 5
+metrics_bind = ""127.0.0.1:9100""
 CONFIG_EOF
 chmod 644 /etc/lamco-rdp-server/config.toml
 
@@ -421,6 +595,10 @@ ConditionEnvironment=WAYLAND_DISPLAY
 [Service]
 Type=simple
 ExecStart=/usr/bin/lamco-rdp-server --config /etc/lamco-rdp-server/config.toml
+# Safety net: if the service dies while the guest cursor is transparent
+# (RDP session active), restore the visible console cursor on the way
+# down so the console is never left pointerless after a crash.
+ExecStopPost=bash -c 'kwriteconfig6 --file kcminputrc --group Mouse --key cursorTheme breeze_cursors && DISPLAY=:0 WAYLAND_DISPLAY=wayland-0 plasma-apply-cursortheme breeze_cursors || true'
 Restart=on-failure
 RestartSec=5
 Environment=RUST_LOG=info
@@ -590,6 +768,115 @@ MONITORS_EOF
         fi
     else
         echo ""WARNING: could not clone the fork — keeping the release binary."" >&2
+    fi
+
+    # -- Retire vgem artifacts from older deployments ---------------------
+    # vgem was a DMA-BUF experiment leftover (a fake renderD128 racing the
+    # real DRM node for the name). The fork needs no extra render node and
+    # no KWin env overrides — stock KWin + materialize/fallback in lamco is
+    # the shipping path. Clean up any artifacts old deployments left.
+    rm -f /etc/modules-load.d/vgem.conf /etc/udev/rules.d/99-vgem-render.rules 2>/dev/null || true
+
+    # -- Transparent cursor theme (KDE) ------------------------------------
+    # KWin composites the cursor sprite into the framebuffer on Hyper-V
+    # (hyperv_drm has no GPU cursor plane), which bakes the guest cursor
+    # into the RDP video stream a frame or two behind the client-side
+    # pointer — a lagging ghost arrow. Installing a fully transparent
+    # XCursor theme removes it from the capture; the pointer shape PDU
+    # (lamco cursor_pdu.rs reads breeze_cursors directly, not the active
+    # theme) still delivers the real arrow to mstsc, so exactly one
+    # client-rendered zero-lag pointer remains (xrdp parity).
+    # XCursor binary layout was verified against a genuine breeze file
+    # (magic 0x72756358 LE, version 0x00010000, 36-byte image chunks).
+    # KDE/KWin only — GNOME/mutter deferred pending Hidden-mode
+    # verification.
+    if command -v kwriteconfig6 >/dev/null 2>&1 || command -v kwriteconfig5 >/dev/null 2>&1; then
+        KW=kwriteconfig6
+        command -v kwriteconfig6 >/dev/null 2>&1 || KW=kwriteconfig5
+        if command -v python3 >/dev/null 2>&1; then
+            python3 - << 'PYEOF' || echo ""WARNING: transparent cursor theme generation failed.""
+import os, struct
+
+work = '/tmp/lamco-transparent-theme'
+d = os.path.join(work, 'transparent', 'cursors')
+os.makedirs(d, exist_ok=True)
+
+def make_xcursor():
+    # 1x1 fully transparent image, nominal size 24 (libXcursor picks nearest)
+    HEADER = 16; TOC = 12; CHUNK = 36; PIXELS = 4
+    SUBTYPE = 24
+    pos = HEADER + TOC
+    header = struct.pack('<IIII', 0x72756358, HEADER, 0x00010000, 1)
+    toc = struct.pack('<III', 0xFFFD0002, SUBTYPE, pos)
+    chunk = struct.pack('<IIIIIIIII', CHUNK, 0xFFFD0002, SUBTYPE, 1, 1, 1, 0, 0, 1)
+    data = header + toc + chunk + b'\x00\x00\x00\x00'
+    assert len(data) == HEADER + TOC + CHUNK + PIXELS, len(data)
+    return data
+
+blob = make_xcursor()
+fallback_names = [
+    'left_ptr', 'right_ptr', 'cross', 'circle', 'xxx_authentication',
+    'wait', 'left_ptr_watch', 'sb_h_double_arrow', 'sb_v_double_arrow',
+    'bottom_left_corner', 'bottom_right_corner', 'top_left_corner',
+    'top_right_corner', 'grab', 'grabbing', 'hand', 'hand2', 'pointer',
+    'question_arrow', 'text', 'watch', 'half-busy', 'openhand',
+    'closedhand', 'fcfz', 'left_side', 'right_side', 'top_side',
+    'bottom_side', 'center_ptr', 'crosshair', 'dot', 'dot_box_mask',
+    'icon', 'menu', 'pencil', 'pirate', 'plus', 'trek', 'ul_angle',
+    'ur_angle', 'll_angle', 'lr_angle', 'move', 'all-scroll',
+    'vertical-text', 'context-menu', 'copy', 'progress', 'not-allowed',
+    'no-drop', 'col-resize', 'row-resize', 'nesw-resize', 'nwse-resize',
+    'ew-resize', 'ns-resize', 'cell', 'color-picker', 'zoom-in',
+    'zoom-out',
+]
+# CRITICAL (2026-08-22 wallpaper-ghost fix): shadow EVERY cursor name of
+# an installed real theme, not just the list above. XCursor themes
+# INHERIT the parent theme for any name they lack - and Plasma's desktop
+# background uses the ""default"" role, which is NOT in the fallback list.
+# Result was: transparent cursor over windows (text role covered) but a
+# visible lagging breeze arrow over the desktop background only.
+names = set(fallback_names)
+for theme_dir in ('/usr/share/icons/breeze_cursors/cursors',
+                  '/usr/share/icons/Adwaita/cursors',
+                  '/usr/share/icons/whiteglass/cursors',
+                  '/usr/share/icons/default/cursors'):
+    try:
+        names.update(os.listdir(theme_dir))
+    except OSError:
+        continue
+for n in sorted(names):
+    with open(os.path.join(d, n), 'wb') as f:
+        f.write(blob)
+with open(os.path.join(work, 'transparent', 'index.theme'), 'w') as f:
+    f.write('[Icon Theme]\nInherits=breeze_cursors\n')
+print('generated', len(names), 'transparent cursor files')
+PYEOF
+            if [ -d /tmp/lamco-transparent-theme/transparent ]; then
+                rm -rf /usr/share/icons/transparent
+                cp -r /tmp/lamco-transparent-theme/transparent /usr/share/icons/transparent
+                rm -rf /tmp/lamco-transparent-theme
+                echo ""Installed transparent cursor theme to /usr/share/icons/transparent.""
+            fi
+        else
+            echo ""python3 not found - skipping transparent cursor theme install.""
+        fi
+        # Activate for the autologin user — SESSION-SCOPED from here on.
+        # The lamco server makes the cursor transparent only while an RDP
+        # client is connected and restores it on disconnect + ExecStopPost
+        # (see cursor_theme.rs in the lamco fork; needs the transparent
+        # theme INSTALLED but not active). Provisioning therefore leaves
+        # kcminputrc on a VISIBLE theme (breeze_cursors) so the console
+        # always has a pointer at boot — xrdp-parity console behavior.
+        # GOTCHA (verified 2026-08-22): plasma-apply-cursortheme only
+        # swaps the live sprite when config differs — lamco's apply uses
+        # the breeze_cursors→transparent toggle to force a real reload.
+        sudo -u ""$AUTOLOGIN_USER"" ""$KW"" --file kcminputrc --group Mouse --key cursorTheme breeze_cursors 2>/dev/null || true
+        # Disable the Shake Cursor effect: pointless compositing churn on
+        # an invisible sprite, and wiggle-scaling was the visual tell of
+        # the wallpaper ghost. Runtime-unloaded by lamco per session.
+        sudo -u ""$AUTOLOGIN_USER"" ""$KW"" --file kwinrc --group Plugins --key shakecursorEnabled false 2>/dev/null || true
+        sudo -u ""$AUTOLOGIN_USER"" XDG_RUNTIME_DIR=/run/user/$(id -u ""$AUTOLOGIN_USER"") DISPLAY=:0 WAYLAND_DISPLAY=wayland-0 qdbus6 org.kde.KWin /KWin reconfigure 2>/dev/null || true
+        echo ""Cursor setup: transparent theme installed, console on breeze_cursors (lamco toggles per RDP session).""
     fi
 
     # linger + enable (the service starts on next graphical-session target)

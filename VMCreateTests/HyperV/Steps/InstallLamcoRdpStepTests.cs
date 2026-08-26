@@ -164,14 +164,15 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
-        public async Task ExecuteAsync_RetiresVgem_AndProvisionsSoftwareRenderEnv()
+        public async Task ExecuteAsync_RetiresVgem_AndTrustsStockKWin()
         {
-            // The capture path is all-software (MemFd + llvmpipe on card0): the
-            // script must NOT load vgem for a fake renderD128 (DMA-BUF dead
-            // end), must clean up vgem artifacts from older deployments, and
-            // must install the KWin software-render/SHM env that the patched
-            // screencast.so needs (KWIN_SCREENCAST_FORCE_SHM was previously
-            // only present on the hand-tuned test VM, never provisioned).
+            // The capture path is fixed entirely server-side by the lamco fork
+            // (DMA-BUF materialize + zero-frame fallback to MemFd): the script
+            // must NOT load vgem for a fake renderD128 (DMA-BUF dead end),
+            // must clean up vgem artifacts from older deployments, and must
+            // NOT force any KWin software-render/SHM env overrides — stock
+            // KWin + the fork binary is the shipping path (patches/ removed;
+            // KWIN_SCREENCAST_FORCE_SHM was a hand-tuned-VM-only crutch).
             string? captured = null;
             _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                   .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
@@ -183,10 +184,8 @@ namespace VMCreate.Tests.HyperV.Steps
             Assert.IsFalse(System.Text.RegularExpressions.Regex.IsMatch(captured, "modprobe\\s+vgem"),
                 "vgem must not be loaded (DMA-BUF path retired)");
             StringAssert.Contains(captured, "rm -f /etc/modules-load.d/vgem.conf", "old vgem artifacts cleaned");
-            StringAssert.Contains(captured, "kwin-software-render.sh", "software render env file");
-            StringAssert.Contains(captured, "LIBGL_ALWAYS_SOFTWARE=1", "Mesa software GL");
-            StringAssert.Contains(captured, "MESA_LOADER_DRIVER_OVERRIDE=kms_swrast", "kms_swrast loader override");
-            StringAssert.Contains(captured, "KWIN_SCREENCAST_FORCE_SHM=1", "force SHM screencast formats");
+            Assert.IsFalse(System.Text.RegularExpressions.Regex.IsMatch(captured, "KWIN_SCREENCAST_FORCE_SHM"),
+                "stock KWin screencast must not be overridden (fork handles buffer types)");
         }
 
         [TestMethod]
