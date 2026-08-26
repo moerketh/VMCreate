@@ -164,6 +164,24 @@ namespace VMCreate.Tests.GUI
             Assert.IsTrue(_viewModel.CompletedPhases.Contains(DeployPageViewModel.PhaseCreateVM));
         }
 
+        [TestMethod]
+        public void LamcoSteps_ReportPhaseIds_WithMatchingViewModelConstants()
+        {
+            // Regression guard for the invisible Lamco rollout steps: the steps report
+            // ProgressPhaseId ("Sub_InstallLamcoRdp"/"Sub_EnableAutologin") and the
+            // presenter activates the card with that ID — if DeployPageViewModel has no
+            // matching constant/card, the step runs entirely invisibly (GUI shows only
+            // the parent PostBoot spinner). The constants AND the step IDs must stay
+            // in lockstep; this pins both sides of the contract.
+            var lamcoStep = new InstallLamcoRdpStep();
+            var autologinStep = new EnableGraphicalAutologinStep();
+
+            Assert.AreEqual(DeployPageViewModel.SubInstallLamcoRdp, lamcoStep.ProgressPhaseId,
+                "InstallLamcoRdpStep.ProgressPhaseId must match a DeployPageViewModel card constant");
+            Assert.AreEqual(DeployPageViewModel.SubEnableAutologin, autologinStep.ProgressPhaseId,
+                "EnableGraphicalAutologinStep.ProgressPhaseId must match a DeployPageViewModel card constant");
+        }
+
         private sealed class FakeViewModel : IDeploymentProgressViewModel
         {
             public string VmName { get; set; }

@@ -74,6 +74,11 @@ namespace VMCreate
         public const string SubConfigureVpn    = "Sub_ConfigureVpn";
         public const string SubRestoreSsh      = "Sub_RestoreSsh";
 
+        // Lamco (Wayland-native RDP) post-boot sub-step IDs — matched by
+        // InstallLamcoRdpStep/EnableGraphicalAutologinStep ProgressPhaseId.
+        public const string SubInstallLamcoRdp  = "Sub_InstallLamcoRdp";
+        public const string SubEnableAutologin  = "Sub_EnableAutologin";
+
         /// <summary>Generates a sub-card phase ID for a distribution-specific option step.</summary>
         public static string DistOptionSubId(string stepName) => $"Sub_Dist_{stepName}";
 
@@ -618,6 +623,13 @@ namespace VMCreate
                 Phases.Add(NewPostBootSubStep(SubConfigureVpn, "Configure VPN",
                     "Deploying VPN configs", SymbolRegular.Globe24));
             }
+            if (c?.RdpBackend == RdpBackend.Lamco)
+            {
+                Phases.Add(NewPostBootSubStep(SubInstallLamcoRdp, "Install Lamco RDP Server",
+                    "Installing the Wayland-native RDP server (packages, TLS, fork build)", SymbolRegular.Desktop24));
+                Phases.Add(NewPostBootSubStep(SubEnableAutologin, "Enable Graphical Autologin",
+                    "Configuring automatic desktop login for the RDP session", SymbolRegular.Person24));
+            }
             AddDistributionOptionSubSteps(c);
             Phases.Add(NewPostBootSubStep(SubRestoreSsh, "Restore SSH State",
                 "Restoring the original SSH configuration", SymbolRegular.ShieldKeyhole24));
@@ -676,6 +688,13 @@ namespace VMCreate
             {
                 Phases.Insert(index++, NewPostBootSubStep(SubConfigureVpn, "Configure VPN",
                     "Deploying VPN configs", SymbolRegular.Globe24));
+            }
+            if (c?.RdpBackend == RdpBackend.Lamco)
+            {
+                Phases.Insert(index++, NewPostBootSubStep(SubInstallLamcoRdp, "Install Lamco RDP Server",
+                    "Installing the Wayland-native RDP server (packages, TLS, fork build)", SymbolRegular.Desktop24));
+                Phases.Insert(index++, NewPostBootSubStep(SubEnableAutologin, "Enable Graphical Autologin",
+                    "Configuring automatic desktop login for the RDP session", SymbolRegular.Person24));
             }
             index = InsertDistributionOptionSubStepsAt(index, c);
             Phases.Insert(index++, NewPostBootSubStep(SubRestoreSsh, "Restore SSH State",
