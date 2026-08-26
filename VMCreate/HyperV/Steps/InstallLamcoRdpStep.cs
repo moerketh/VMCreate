@@ -312,10 +312,9 @@ fi
 mkdir -p /etc/lamco-rdp-server
 if command -v lamco-rdp-server-setup-certs >/dev/null 2>&1; then
     lamco-rdp-server-setup-certs /etc/lamco-rdp-server ""$(hostname)"" 2>&1 || true
-    # Ensure the key is readable by the unprivileged user service (the helper
-    # may default to 600 root-only, which blocks the user service from loading it).
-    chmod 644 /etc/lamco-rdp-server/cert.pem 2>/dev/null || true
-    chmod 644 /etc/lamco-rdp-server/key.pem 2>/dev/null || true
+    # Permissions are finalized after the autologin user is resolved below
+    # (key.pem gets root:<user> 640 — group read for the user service, never
+    # world-readable).
 fi
 # If the helper did not produce both files (or was absent), generate them now.
 if [ ! -f /etc/lamco-rdp-server/cert.pem ] || [ ! -f /etc/lamco-rdp-server/key.pem ]; then
@@ -325,13 +324,10 @@ if [ ! -f /etc/lamco-rdp-server/cert.pem ] || [ ! -f /etc/lamco-rdp-server/key.p
         -out /etc/lamco-rdp-server/cert.pem \
         -days 365 -subj ""/CN=$(hostname)"" \
         -addext ""subjectAltName=DNS:$(hostname),DNS:localhost,IP:127.0.0.1"" 2>&1
-    # The cert + key must be readable by the unprivileged autologin user whose
-    # systemd user service loads them. This is a local single-user VM, so 644
-    # on the key is acceptable (the cert is self-signed, not a production
-    # secret). Without this, the user service fails with Failed to load TLS
-    # certificates because a root-owned 600 key.pem is inaccessible.
-    chmod 644 /etc/lamco-rdp-server/cert.pem
-    chmod 644 /etc/lamco-rdp-server/key.pem
+    # Permissions are finalized after the autologin user is resolved below:
+    # the key must be readable by the unprivileged user service, but that is
+    # granted via group ownership (root:<user>, 640) instead of making the
+    # private key world-readable.
 fi
 # Final guard: if certs are STILL missing, the server cannot start.
 if [ ! -f /etc/lamco-rdp-server/cert.pem ] || [ ! -f /etc/lamco-rdp-server/key.pem ]; then
@@ -578,6 +574,19 @@ fi
 
 if [ -n ""$AUTOLOGIN_USER"" ]; then
     USER_HOME=$(getent passwd ""$AUTOLOGIN_USER"" | cut -d: -f6)
+
+    # -- Finalize TLS key permissions ---------------------------------------
+    # The unprivileged user service loads key.pem, but a self-signed key is
+    # still a private key: 644 made it world-readable. Grant the autologin
+    # user's login group read access instead — root:<user>, 640. Same
+    # service-readability, no other-user access. cert.pem is public material
+    # (it is sent to every client during the handshake) and stays 644.
+    chown root:""$AUTOLOGIN_USER"" /etc/lamco-rdp-server/key.pem 2>/dev/null || true
+    chmod 640 /etc/lamco-rdp-server/key.pem
+    chown root:root /etc/lamco-rdp-server/cert.pem 2>/dev/null || true
+    chmod 644 /etc/lamco-rdp-server/cert.pem
+    echo ""TLS key restricted: /etc/lamco-rdp-server/key.pem root:$AUTOLOGIN_USER 640 (group read for the user service).""
+
     mkdir -p ""$USER_HOME/.config/systemd/user""
     # Create the ReadWritePaths directories referenced by the systemd unit below.
     # systemd requires every path in ReadWritePaths to exist when it sets up the
