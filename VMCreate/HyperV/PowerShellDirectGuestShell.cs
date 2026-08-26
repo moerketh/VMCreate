@@ -129,6 +129,18 @@ namespace VMCreate
         }
 
         /// <summary>
+        /// Executes a PowerShell command with an explicit timeout. PowerShell Direct has no
+        /// command-line length cap, so the timeout is the only relevant bound.
+        /// </summary>
+        public async Task<string> RunCommandAsync(string command, TimeSpan timeout, CancellationToken ct)
+        {
+            _logger.LogDebug("Running PowerShell Direct command on VM {VMName}: {Command}", _vmName, Truncate(command, 200));
+            string result = await RunCommandInternalAsync(command, timeout, ct);
+            _logger.LogDebug("PowerShell Direct command completed on VM {VMName} ({Length} chars)", _vmName, result?.Length ?? 0);
+            return result;
+        }
+
+        /// <summary>
         /// Writes string content to a file on the guest VM via PowerShell Direct.
         /// </summary>
         public async Task CopyContentAsync(string content, string guestPath, CancellationToken ct)

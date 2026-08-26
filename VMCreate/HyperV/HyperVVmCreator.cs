@@ -56,11 +56,25 @@ namespace VMCreate
 
             try
             {
-                await _orchestrator.DeployAsync(plan, vmCustomizations, galleryItem, cancellationToken, progress, effectiveSourceFile);
-                return new VmDeploymentResult(plan.VmName, success: true);
+                // The orchestrator reports failures via VmDeploymentResult (it catches
+                // internally and returns success:false) — it does NOT throw. Returning
+                // a fabricated success here would mask real deployment failures: the
+                // 2026-08-26 rollout failed in InstallLamcoRdpStep yet the GUI showed
+                // a green "created successfully" card because this return used to
+                // ignore the orchestrator's result.
+                VmDeploymentResult result = await _orchestrator.DeployAsync(
+                    plan, vmCustomizations, galleryItem, cancellationToken, progress, effectiveSourceFile);
+                if (!result.Success)
+                {
+                    _logger.LogError(
+                        "VM deployment for {VmName} failed: {Error}",
+                        plan.VmName, result.ErrorMessage ?? "unknown error");
+                }
+                return result;
             }
             catch (Exception ex)
             {
+                _logger.LogError(ex, "VM deployment for {VmName} threw: {Message}", plan.VmName, ex.Message);
                 return new VmDeploymentResult(plan.VmName, success: false, errorMessage: ex.Message);
             }
         }

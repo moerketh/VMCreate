@@ -1,3 +1,4 @@
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -18,6 +19,14 @@ namespace VMCreate
         /// Throws on non-zero exit code or transport failure.
         /// </summary>
         Task<string> RunCommandAsync(string bashCommand, CancellationToken ct);
+
+        /// <summary>
+        /// Executes a bash command on the guest with an explicit timeout,
+        /// for long-running steps (package installs, builds) that exceed the
+        /// transport default.
+        /// Throws on non-zero exit code, timeout, or transport failure.
+        /// </summary>
+        Task<string> RunCommandAsync(string bashCommand, TimeSpan timeout, CancellationToken ct);
 
         /// <summary>
         /// Writes string content to a file on the guest (creates parent directories, sets 644).

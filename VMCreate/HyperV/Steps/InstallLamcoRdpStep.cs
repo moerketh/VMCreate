@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -56,8 +57,12 @@ namespace VMCreate
             string script = InstallScript.Replace("\r\n", "\n");
             await shell.CopyContentAsync(script, "/tmp/install_lamco.sh", ct);
 
+            // The install pulls apt packages, downloads the upstream deb and
+            // polls the detached fork build — far beyond the transport's
+            // default command timeout. Allow 20 minutes.
             string result = await shell.RunCommandAsync(
-                "sudo bash /tmp/install_lamco.sh && sudo rm -f /tmp/install_lamco.sh", ct);
+                "sudo bash /tmp/install_lamco.sh && sudo rm -f /tmp/install_lamco.sh",
+                TimeSpan.FromMinutes(20), ct);
 
             logger.LogInformation("Lamco RDP Server install result on VM {VMName}: {Result}", shell.VmName, result.Trim());
         }

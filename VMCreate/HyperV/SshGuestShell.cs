@@ -119,19 +119,28 @@ namespace VMCreate
         }
 
         /// <inheritdoc/>
+        public async Task<string> RunCommandAsync(string bashCommand, TimeSpan timeout, CancellationToken ct)
+        {
+            return await RunWithRetryAsync(bashCommand, timeout, ct);
+        }
+
+        // Windows CreateProcess command lines are capped at 32,767 chars.
+        // Staying well below that leaves room for the ssh arguments plus the
+        // bash-level quote escaping applied by EscapeForSsh (which can inflate
+        // the string further). Exceeding the cap kills Process.Start with
+        // Win32Exception 206 ("filename or extension is too long").
+        private const int MaxCommandLength = 24 * 1024;
+
+        // Base64 chunk length for the chunked copy path: far below
+        // MaxCommandLength, large enough that a 36 KB install script
+        // transfers in four ssh round trips.
+        private const int CopyChunkBase64Length = 12 * 1024;
+
+        /// <inheritdoc/>
         public async Task CopyContentAsync(string content, string guestPath, CancellationToken ct)
         {
             byte[] bytes = Encoding.UTF8.GetBytes(content);
-            string base64 = Convert.ToBase64String(bytes);
-            string safePath = EscapeSingleQuotes(guestPath);
-
-            string command = $@"
-                sudo mkdir -p ""$(dirname '{safePath}')""
-                echo '{base64}' | base64 -d | sudo tee '{safePath}' > /dev/null
-                sudo chmod 644 '{safePath}'
-            ";
-
-            await RunCommandAsync(command, ct);
+            await CopyBase64ToGuestAsync(Convert.ToBase64String(bytes), guestPath, ct);
             _logger.LogInformation("Wrote content -> {GuestPath} on VM {VMName}", guestPath, VmName);
         }
 
@@ -142,17 +151,56 @@ namespace VMCreate
                 throw new FileNotFoundException($"Host file not found: {hostPath}");
 
             byte[] content = await File.ReadAllBytesAsync(hostPath, ct);
-            string base64 = Convert.ToBase64String(content);
-            string safePath = EscapeSingleQuotes(guestPath);
-
-            string command = $@"
-                sudo mkdir -p ""$(dirname '{safePath}')""
-                echo '{base64}' | base64 -d | sudo tee '{safePath}' > /dev/null
-                sudo chmod 644 '{safePath}'
-            ";
-
-            await RunCommandAsync(command, ct);
+            await CopyBase64ToGuestAsync(Convert.ToBase64String(content), guestPath, ct);
             _logger.LogInformation("Copied {HostPath} -> {GuestPath} on VM {VMName}", hostPath, guestPath, VmName);
+        }
+
+        /// <summary>
+        /// Transfers base64-encoded payload to the guest in chunks, then decodes
+        /// it into place. The previous single-command variant embedded the whole
+        /// base64 payload on the ssh command line; scripts past ~24 KB blew past
+        /// the CreateProcess limit and failed with Win32Exception 206 before ssh
+        /// ever ran. Chunking keeps every invocation small; the temp file makes
+        /// the transfer atomic (decode only after all chunks landed).
+        /// </summary>
+        private async Task CopyBase64ToGuestAsync(string base64, string guestPath, CancellationToken ct)
+        {
+            string safePath = EscapeSingleQuotes(guestPath);
+            string tmpRemote = $"/tmp/vmcreate-copy-{Guid.NewGuid():N}.b64";
+
+            try
+            {
+                int offset = 0;
+                bool first = true;
+                while (offset < base64.Length)
+                {
+                    int length = Math.Min(CopyChunkBase64Length, base64.Length - offset);
+                    string piece = base64.Substring(offset, length);
+                    string redirect = first ? ">" : ">>";
+                    string command = $"printf '%s' '{piece}' {redirect} '{tmpRemote}'";
+                    await RunCommandAsync(command, ct);
+                    offset += length;
+                    first = false;
+                }
+
+                // Empty payload: create an empty temp file so the decode yields
+                // an empty target instead of failing on a missing file.
+                if (first)
+                    await RunCommandAsync($": > '{tmpRemote}'", ct);
+
+                string decode = $@"
+                    sudo mkdir -p ""$(dirname '{safePath}')""
+                    base64 -d '{tmpRemote}' | sudo tee '{safePath}' > /dev/null
+                    sudo chmod 644 '{safePath}'
+                ";
+                await RunCommandAsync(decode, ct);
+            }
+            finally
+            {
+                // Best-effort temp cleanup; failures are harmless in /tmp.
+                try { await RunCommandAsync($"rm -f '{tmpRemote}'", ct); }
+                catch { _logger.LogDebug("Temp copy file {Path} left behind on VM {VMName}", tmpRemote, VmName); }
+            }
         }
 
         // ── Private helpers ──────────────────────────────────────────────
@@ -234,6 +282,14 @@ namespace VMCreate
             args.Append("-o UserKnownHostsFile=NUL ");
             args.Append($"{AutomationUser}@{_vmIpAddress} ");
             args.Append($"bash -c {EscapeForSsh(linuxCommand)}");
+
+            if (args.Length > MaxCommandLength)
+            {
+                throw new InvalidOperationException(
+                    $"SSH command for VM '{VmName}' is {args.Length} characters (limit {MaxCommandLength}). " +
+                    "Windows cannot pass a command line this long to ssh.exe. " +
+                    "Transfer the payload as a file via CopyContentAsync/CopyFileAsync (chunked) and execute it on the guest instead.");
+            }
 
             _logger.LogDebug("SSH exec: ssh {Args}", args.ToString());
 
