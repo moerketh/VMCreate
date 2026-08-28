@@ -371,7 +371,14 @@ view_only = false
 [server.transports]
 [server.transports.tcp]
 listen_addr = ""0.0.0.0:3389""
+# vsock is opt-in since the fork's vsock-hardening commits: the transport is
+# unauthenticated by construction (vmms authenticates on the host side), so
+# the server will NOT enable it from the Hyper-V autodetect alone — it only
+# logs a suggestion. This deployment is a single-user lab VM behind the
+# Default Switch, so opt in explicitly; the built-in allowlist accepts only
+# VMADDR_CID_HOST (2) and refuses the in-guest loopback CID (1) regardless.
 [server.transports.vsock]
+enabled = true
 port = 3389
 
 [security]
