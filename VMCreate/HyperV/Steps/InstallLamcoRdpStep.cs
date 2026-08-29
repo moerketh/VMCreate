@@ -764,10 +764,24 @@ MONITORS_EOF
             # retry after a timeout kill) picks up where it left off —
             # cargo reuses target/ artifacts, so only the final link runs.
             rm -f ""$FORK_BUILD_LOG"" ""$FORK_DONE_MARKER""
+            # The service restart is chained INTO the detached build: the
+            # restart below (as the autologin user) makes the freshly built
+            # server acquire its portal session — which throws the
+            # ""accept screencast"" consent dialog on the VM console. So the
+            # whole flow is: deployment finishes -> dialog appears -> click
+            # Allow once. No manual commands. AUTOLOGIN_USER is exported so
+            # the detached shell inherits it (it recomputes nothing).
+            export AUTOLOGIN_USER
             nohup bash -c ""cd '$FORK_DIR' && PATH='$HOME/.cargo/bin':\$PATH \
                 cargo build --release --features x264,vsock \
                 && install -m 0755 target/release/lamco-rdp-server /usr/bin/lamco-rdp-server \
-                && touch '$FORK_DONE_MARKER'"" >""$FORK_BUILD_LOG"" 2>&1 &
+                && touch '$FORK_DONE_MARKER' \
+                && [ -n \$AUTOLOGIN_USER ] \
+                && { loginctl enable-linger \$AUTOLOGIN_USER 2>/dev/null || true; \
+                     sudo -u \$AUTOLOGIN_USER XDG_RUNTIME_DIR=/run/user/\$(id -u \$AUTOLOGIN_USER) \
+                         systemctl --user enable lamco-rdp-server.service 2>/dev/null || true; \
+                     sudo -u \$AUTOLOGIN_USER XDG_RUNTIME_DIR=/run/user/\$(id -u \$AUTOLOGIN_USER) \
+                         systemctl --user restart lamco-rdp-server.service; }"" >""$FORK_BUILD_LOG"" 2>&1 &
             echo ""Fork build detached (log: $FORK_BUILD_LOG); waiting...""
             for i in $(seq 1 $FORK_WAIT_LOOPS); do
                 if [ -f ""$FORK_DONE_MARKER"" ]; then
