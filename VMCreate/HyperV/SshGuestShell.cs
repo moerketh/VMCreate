@@ -24,7 +24,15 @@ namespace VMCreate
         private string _vmIpAddress;
 
         private const string AutomationUser = "vmcreate";
-        private static readonly TimeSpan ReadyTimeout = TimeSpan.FromSeconds(180);
+        // 2026-08-29: 180s proved too tight for the FIRST boot of a freshly
+        // cloned distro — a Parrot rollout took ~6.5 min from ISO-cycle
+        // shutdown to sshd answering (btrfs first-boot initialization, cold
+        // disk cache), and the deployment aborted ~20s before the guest came
+        // up. 10 minutes matches the ISO boot-cycle's own shutdown budget
+        // (ShutdownTimeoutSeconds) and PowerShell Direct's CommandTimeout;
+        // the wait still polls IP + SSH every ~5s, so a fast guest connect
+        // is detected immediately.
+        private static readonly TimeSpan ReadyTimeout = TimeSpan.FromSeconds(600);
         private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(120);
         private const int MaxRetries = 3;
         private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(5);
