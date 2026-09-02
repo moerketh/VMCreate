@@ -932,7 +932,13 @@ PYEOF
         sudo -u ""$AUTOLOGIN_USER"" kwriteconfig6 --file kscreenlockerrc --group Daemon --key LockOnResume false 2>/dev/null || true
         # Holder script: takes the inhibitor and parks (keeps the D-Bus
         # connection alive so the cookie stays held).
-        sudo -u ""$AUTOLOGIN_USER"" mkdir -p ~/.local/bin 2>/dev/null || true
+        # GOTCHA: do NOT use `sudo -u $U mkdir -p ~/.local/bin` — bash
+        # expands ~ to ROOT's home BEFORE sudo runs, so the user's directory
+        # never exists and the heredoc cat below fails (fresh-VM boot
+        # 2026-09-02: unit crash-looped on the missing file). Use the
+        # literal /home/$AUTOLOGIN_USER path for every write.
+        mkdir -p /home/""$AUTOLOGIN_USER""/.local/bin 2>/dev/null || true
+        chown ""$AUTOLOGIN_USER"": /home/""$AUTOLOGIN_USER""/.local/bin 2>/dev/null || true
         cat > /home/""$AUTOLOGIN_USER""/.local/bin/lamco-idle-inhibit.py << 'PYEOF'
 #!/usr/bin/env python3
 # Hold a freedesktop ScreenSaver inhibitor cookie for the session lifetime.
@@ -957,10 +963,13 @@ while True:
     except Exception:
         pass
 PYEOF
+        chown ""$AUTOLOGIN_USER"": /home/""$AUTOLOGIN_USER""/.local/bin/lamco-idle-inhibit.py 2>/dev/null || true
         chmod 0755 /home/""$AUTOLOGIN_USER""/.local/bin/lamco-idle-inhibit.py 2>/dev/null || true
         # Systemd user unit; binds to the graphical session (the session bus
-        # where the screensaver runs exists only there).
-        sudo -u ""$AUTOLOGIN_USER"" mkdir -p ~/.config/systemd/user 2>/dev/null || true
+        # where the screensaver runs exists only there). Same ~-expansion
+        # rule: literal /home path (script runs as root; mkdir+chown).
+        mkdir -p /home/""$AUTOLOGIN_USER""/.config/systemd/user 2>/dev/null || true
+        chown ""$AUTOLOGIN_USER"": /home/""$AUTOLOGIN_USER""/.config/systemd/user 2>/dev/null || true
         cat > /home/""$AUTOLOGIN_USER""/.config/systemd/user/lamco-idle-inhibit.service << 'UNITEOF'
 [Unit]
 Description=lamco RDP idle-lock inhibitor (Hyper-V lock-greeter wedge prevention)
@@ -975,6 +984,7 @@ RestartSec=10
 [Install]
 WantedBy=graphical-session.target
 UNITEOF
+        chown ""$AUTOLOGIN_USER"": /home/""$AUTOLOGIN_USER""/.config/systemd/user/lamco-idle-inhibit.service 2>/dev/null || true
         sudo -u ""$AUTOLOGIN_USER"" XDG_RUNTIME_DIR=/run/user/$(id -u ""$AUTOLOGIN_USER"") \
             systemctl --user daemon-reload 2>/dev/null || true
         sudo -u ""$AUTOLOGIN_USER"" XDG_RUNTIME_DIR=/run/user/$(id -u ""$AUTOLOGIN_USER"") \
