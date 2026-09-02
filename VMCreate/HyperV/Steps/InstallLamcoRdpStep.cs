@@ -996,6 +996,34 @@ UNITEOF
         echo ""Idle-lock suppression: Autolock=false + lamco-idle-inhibit.service (Hyper-V lock-greeter wedge prevention).""
     fi
 
+    # -- KWin private-interface grant (zkde-screencast) ----------------------
+    # KWin 6.x gates private Wayland interfaces behind an allowlist:
+    # zkde_screencast_unstable_v1 is only advertised to clients whose
+    # .desktop file lists it under X-KDE-Wayland-Interfaces (matched by the
+    # client's executable path — see KWin wayland_server.cpp
+    # interfacesBlackList + serviceutils.h fetchRequestedInterfaces).
+    # xdg-desktop-portal-kde and krfb ship such entries; without one the
+    # lamco fork's kwin-virtual strategy cannot bind the global (fresh-VM
+    # finding TEST_20260902110104: ""zkde stream creation failed: zkde
+    # _screencast global not bound"" on every connect, and the global is
+    # invisible even to wayland-info).
+    cat > /usr/share/applications/lamco-rdp-server.desktop << 'DESKTOPEOF'
+[Desktop Entry]
+Type=Application
+Name=Lamco RDP Server
+Exec=/usr/bin/lamco-rdp-server
+NoDisplay=true
+X-KDE-Wayland-Interfaces=zkde_screencast_unstable_v1
+DESKTOPEOF
+    chmod 0644 /usr/share/applications/lamco-rdp-server.desktop
+    # Refresh KDE's service cache so the grant takes effect without relogin.
+    if [ -n ""$AUTOLOGIN_USER"" ] && command -v kbuildsycoca6 >/dev/null 2>&1; then
+        sudo -u ""$AUTOLOGIN_USER"" XDG_RUNTIME_DIR=/run/user/$(id -u ""$AUTOLOGIN_USER"") \
+            DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u ""$AUTOLOGIN_USER"")/bus \
+            kbuildsycoca6 --noincremental 2>/dev/null || true
+    fi
+    echo ""KWin private-interface grant installed (zkde_screencast_unstable_v1 for /usr/bin/lamco-rdp-server).""
+
     # linger + enable (the service starts on next graphical-session target)
     loginctl enable-linger ""$AUTOLOGIN_USER"" 2>/dev/null || true
     sudo -u ""$AUTOLOGIN_USER"" XDG_RUNTIME_DIR=/run/user/$(id -u ""$AUTOLOGIN_USER"") \

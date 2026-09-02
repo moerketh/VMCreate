@@ -259,5 +259,32 @@ namespace VMCreate.Tests.HyperV.Steps
             StringAssert.Contains(captured, "systemctl --user enable lamco-idle-inhibit.service",
                 "unit enabled for future boots");
         }
+
+        [TestMethod]
+        public async Task ExecuteAsync_ProvisionsKwinPrivateInterfaceGrant()
+        {
+            // KWin 6.x only advertises zkde_screencast_unstable_v1 to clients
+            // whose .desktop file lists it under X-KDE-Wayland-Interfaces
+            // (executable-path match). Without the entry the kwin-virtual
+            // strategy cannot bind the global (fresh-VM finding
+            // TEST_20260902110104: every connect failed with "zkde stream
+            // creation failed: global not bound").
+            string? captured = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("done");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(captured);
+            StringAssert.Contains(captured, "/usr/share/applications/lamco-rdp-server.desktop",
+                "desktop file installed at the system applications path");
+            StringAssert.Contains(captured, "Exec=/usr/bin/lamco-rdp-server",
+                "Exec must match the lamco binary path (KWin matches by executable path)");
+            StringAssert.Contains(captured, "X-KDE-Wayland-Interfaces=zkde_screencast_unstable_v1",
+                "the private interface must be declared for KWin to advertise it");
+            StringAssert.Contains(captured, "kbuildsycoca6 --noincremental",
+                "service cache refreshed so the grant applies without relogin");
+        }
     }
 }
