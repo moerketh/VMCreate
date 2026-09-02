@@ -114,9 +114,9 @@ namespace VMCreate.Tests.HyperV.Steps
         [TestMethod]
         public async Task ExecuteAsync_ScriptFailure_ThrowsAndIsNotSwallowed()
         {
-            // Regression guard for the TEST VM incident where a bash syntax error in the
-            // embedded script was swallowed (GUI reported success, no Lamco installed).
-            // The step must let the SSH exception propagate so the orchestrator reports failure.
+            // Guard: a bash syntax error in the embedded script must surface
+            // as a deployment failure. The step must let the SSH exception
+            // propagate so the orchestrator reports failure.
             _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
                   .ThrowsAsync(new Exception("SSH command failed (exit code 2): syntax error"));
 
@@ -155,10 +155,10 @@ namespace VMCreate.Tests.HyperV.Steps
             StringAssert.Contains(captured, "ExecStopPost", "crash-safety cursor restore in unit");
             StringAssert.Contains(captured, "plasma-apply-cursortheme breeze_cursors", "ExecStopPost restores visible theme");
             // The generator shadows EVERY name from installed themes
-            // (wallpaper-ghost fix: the desktop uses the "default" role,
-            // which is absent from the hardcoded fallback list; XCursor
-            // inheritance made the wallpaper show a visible breeze arrow
-            // while windows were clean).
+            // (the desktop background uses the "default" role, which is
+            // absent from the hardcoded fallback list; XCursor inheritance
+            // would make the wallpaper show a visible breeze arrow while
+            // windows are clean).
             StringAssert.Contains(captured, "breeze_cursors/cursors", "scan source theme dir");
             StringAssert.Contains(captured, "names.update(os.listdir(theme_dir))", "dynamic name shadowing");
             // The names list must include the core cursor roles
@@ -169,13 +169,12 @@ namespace VMCreate.Tests.HyperV.Steps
         [TestMethod]
         public async Task ExecuteAsync_RetiresVgem_AndTrustsStockKWin()
         {
-            // The capture path is fixed entirely server-side by the lamco fork
-            // (DMA-BUF materialize + zero-frame fallback to MemFd): the script
-            // must NOT load vgem for a fake renderD128 (DMA-BUF dead end),
-            // must clean up vgem artifacts from older deployments, and must
+            // The capture path is fixed entirely server-side (DMA-BUF
+            // materialize + zero-frame fallback to MemFd): the script must
+            // NOT load vgem for a fake renderD128 (DMA-BUF dead end), must
+            // clean up vgem artifacts from older deployments, and must
             // NOT force any KWin software-render/SHM env overrides — stock
-            // KWin + the fork binary is the shipping path (patches/ removed;
-            // KWIN_SCREENCAST_FORCE_SHM was a hand-tuned-VM-only crutch).
+            // KWin + the server binary is the shipping path.
             string? captured = null;
             _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                   .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
@@ -212,10 +211,9 @@ namespace VMCreate.Tests.HyperV.Steps
         [TestMethod]
         public async Task ExecuteAsync_ForkBuild_IncludesKwinVirtualFeatures()
         {
-            // The lamco fork must be built with the kwin-virtual strategy
+            // The fork must be built with the kwin-virtual strategy
             // (zkde_screencast_unstable_v1 virtual output + libei input) —
-            // a fresh VM without these features silently falls back to the
-            // old kscreen/DRM scaling path.
+            // a build without these features has no virtual-output capture.
             string? captured = null;
             _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                   .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
@@ -231,11 +229,10 @@ namespace VMCreate.Tests.HyperV.Steps
         [TestMethod]
         public async Task ExecuteAsync_ProvisionsIdleLockSuppression()
         {
-            // E2E regression guard (TEST_20260901180150): KDE idle autolock
-            // wedged the lock greeter under hyperv_drm framebuffer spam and
-            // swallowed ALL input including the console — a wedged lock
-            // bricks the VM remotely. Provisioning must disable autolock
-            // AND install a durable inhibitor holder unit.
+            // KDE idle autolock can wedge the lock greeter under hyperv_drm
+            // framebuffer spam and swallow ALL input including the console —
+            // a wedged lock bricks the VM remotely. Provisioning must disable
+            // autolock AND install a durable inhibitor holder unit.
             string? captured = null;
             _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                   .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
@@ -266,9 +263,8 @@ namespace VMCreate.Tests.HyperV.Steps
             // KWin 6.x only advertises zkde_screencast_unstable_v1 to clients
             // whose .desktop file lists it under X-KDE-Wayland-Interfaces
             // (executable-path match). Without the entry the kwin-virtual
-            // strategy cannot bind the global (fresh-VM finding
-            // TEST_20260902110104: every connect failed with "zkde stream
-            // creation failed: global not bound").
+            // strategy cannot bind the global: every connect fails with
+            // "zkde stream creation failed: global not bound".
             string? captured = null;
             _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                   .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
@@ -290,11 +286,11 @@ namespace VMCreate.Tests.HyperV.Steps
         [TestMethod]
         public async Task ExecuteAsync_ProvisionsJournaldRateLimitRelief()
         {
-            // E2E finding (2026-09-01): hyperv_drm framebuffer error spam
-            // exhausts journald's default rate limit within seconds, after
-            // which ALL user-session logs are silently dropped — including the
-            // lamco/kwin-virtual lines needed to diagnose live sessions.
-            // Provisioning must raise the burst.
+            // hyperv_drm framebuffer error spam exhausts journald's default
+            // rate limit within seconds, after which ALL user-session logs
+            // are silently dropped — including the lamco/kwin-virtual lines
+            // needed to diagnose live sessions. Provisioning must raise the
+            // burst.
             string? captured = null;
             _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                   .Callback<string, string, CancellationToken>((content, _, _) => captured = content);

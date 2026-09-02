@@ -11,7 +11,7 @@ namespace VMCreate
     /// <para>
     /// Unlike xrdp (which installs via the external cloning-ISO chroot), Lamco
     /// installs post-boot over SSH. It is a Wayland-native server built on IronRDP
-    /// with XDG Desktop Portal + PipeWire screen capture, so Wayland is kept
+    /// with PipeWire-based screen capture, so Wayland is kept
     /// enabled (the <see cref="ForceX11Step"/>/<see cref="DisableWaylandSessionsStep"/>
     /// steps are skipped via <see cref="VmCustomizations.RdpBackend"/> gating).
     /// </para>
@@ -20,8 +20,8 @@ namespace VMCreate
     /// (deb for Debian/Ubuntu/Parrot, rpm for Fedora, rpm for openSUSE) from
     /// <c>github.com/lamco-admin/lamco-rdp-server/releases</c>, installs it via
     /// the native package manager, installs Portal/PipeWire runtime deps, generates
-    /// TLS certificates, writes <c>/etc/lamco-rdp-server/config.toml</c> with PAM
-    /// auth, installs the systemd <b>user</b> service unit, and enables linger
+    /// TLS certificates, writes <c>/etc/lamco-rdp-server/config.toml</c> (hybrid
+    /// security, no auth), installs the systemd <b>user</b> service unit, and enables linger
     /// so the user service starts at boot. The one-time Portal permission grant
     /// (<c>--grant-permission</c>) is an interactive GUI dialog and is left as a
     /// manual post-deploy step — <see cref="EnableGraphicalAutologinStep"/>
@@ -337,9 +337,8 @@ fi
 echo ""TLS certificates present: /etc/lamco-rdp-server/cert.pem""
 
 # -- Write config.toml (full tuned profile, hybrid security, no auth) ------
-# Verbatim port of the hand-tuned config from the reference test VM
-# (TEST_20260817213920) — the profile with verified deep blacks, 60fps and
-# a single client-side pointer. Key quality switches vs the naive minimum:
+# Tuned profile: deep blacks (full 0-255 color range), 60fps, and a single
+# zero-lag client-rendered pointer. Key quality switches vs a minimal config:
 #   [egfx]: qp 1-10 + color_range=""full"" + color_matrix=""identity""  -> full
 #           0-255 range (deep black, no washed-out 16-235), 50 Mbps x264.
 #   [video]: target_fps=60 + cursor_mode=""hidden""; [cursor] metadata mode
@@ -351,13 +350,13 @@ echo ""TLS certificates present: /etc/lamco-rdp-server/cert.pem""
 # acceptor then rejects the stream (""corrupt message"" spam, client never
 # connects). Hybrid lets the server accept the CredSSP-free standard path.
 # No [security.credssp_credentials] — including it makes IronRDP require
-# credentials even with auth_method=none. [gui_state]/[diagnostics] from
-# the reference VM are GUI/debug state and stay out of the template.
+# credentials even with auth_method=none. [gui_state]/[diagnostics] are
+# GUI/debug state and stay out of the template.
 #
-# NOTE: Hyper-V Enhanced Session (vmconnect.exe with HvSocket/VMBus transport)
-# does NOT work with Lamco/IronRDP because Hyper-V uses a proprietary pre-RDP
-# greeting protocol that IronRDP does not implement. Users must connect via
-# standard RDP (mstsc to VM-IP:3389) instead of Enhanced Session.
+# NOTE: Hyper-V Enhanced Session (vmconnect.exe) connects through the vsock
+# transport below: vmms terminates TLS/CredSSP on the host side and relays the
+# plain RDP stream to the guest listener. Standard RDP clients (mstsc to
+# VM-IP:3389) connect through the TCP transport.
 cat > /etc/lamco-rdp-server/config.toml << 'CONFIG_EOF'
 config_version = 1
 
@@ -371,12 +370,12 @@ view_only = false
 [server.transports]
 [server.transports.tcp]
 listen_addr = ""0.0.0.0:3389""
-# vsock is opt-in since the fork's vsock-hardening commits: the transport is
-# unauthenticated by construction (vmms authenticates on the host side), so
-# the server will NOT enable it from the Hyper-V autodetect alone — it only
-# logs a suggestion. This deployment is a single-user lab VM behind the
-# Default Switch, so opt in explicitly; the built-in allowlist accepts only
-# VMADDR_CID_HOST (2) and refuses the in-guest loopback CID (1) regardless.
+# vsock is opt-in: the transport is unauthenticated by construction (vmms
+# authenticates on the host side), so the server never enables it from the
+# Hyper-V autodetect alone — it only logs a suggestion. This deployment is a
+# single-user lab VM behind the Default Switch, so it is enabled explicitly;
+# the built-in allowlist accepts only VMADDR_CID_HOST (2) and refuses the
+# in-guest loopback CID (1) regardless.
 [server.transports.vsock]
 enabled = true
 port = 3389
@@ -694,12 +693,12 @@ MONITORS_EOF
         echo ""kscreen-doctor not found — KWin will use DRM default (1024x768).""
     fi
 
-    # -- Build lamco-rdp-server from the vmcreate fork --------------------
-    # The stock release binary black-screens on virtual GPUs (hyperv_drm /
-    # virtio + software GL): PipeWire negotiates DMA-BUF, the capture never
-    # delivers a frame on that path, and the software EGFX paths drop
-    # FrameBuffer::DmaBuf anyway. The fork (feature/hyperv-enhanced-session)
-    # fixes it entirely server-side:
+    # -- Build lamco-rdp-server from the fork --------------------------------
+    # The server is built from source rather than the release binary: the
+    # release binary black-screens on virtual GPUs (hyperv_drm / virtio /
+    # software GL — PipeWire negotiates DMA-BUF, the capture never delivers a
+    # frame on that path, and the software EGFX paths drop FrameBuffer::DmaBuf
+    # anyway). The source pipeline fixes this entirely server-side:
     #   1. DMA-BUF CPU reads use the DMA_BUF_IOCTL_SYNC bracket, correct
     #      mmap pgoff, and reject non-linear modifiers.
     #   2. DmaBuf frames are materialized to CPU memory before caching.
@@ -766,12 +765,12 @@ MONITORS_EOF
             # cargo reuses target/ artifacts, so only the final link runs.
             rm -f ""$FORK_BUILD_LOG"" ""$FORK_DONE_MARKER""
             # The service restart is chained INTO the detached build: the
-            # restart below (as the autologin user) makes the freshly built
-            # server acquire its portal session — which throws the
-            # ""accept screencast"" consent dialog on the VM console. So the
-            # whole flow is: deployment finishes -> dialog appears -> click
-            # Allow once. No manual commands. AUTOLOGIN_USER is exported so
-            # the detached shell inherits it (it recomputes nothing).
+            # restart (as the autologin user) makes the freshly built server
+            # acquire its portal session — which shows the remote-control
+            # consent dialog on the VM console. So the whole flow is:
+            # deployment finishes -> dialog appears -> click Allow once.
+            # No manual commands. AUTOLOGIN_USER is exported so the detached
+            # shell inherits it (it recomputes nothing).
             export AUTOLOGIN_USER
             nohup bash -c ""cd '$FORK_DIR' && PATH='$HOME/.cargo/bin':\$PATH \
                 cargo build --release --features x264,vsock,kwin-virtual,libei \
@@ -806,11 +805,11 @@ MONITORS_EOF
         echo ""WARNING: could not clone the fork — keeping the release binary."" >&2
     fi
 
-    # -- Retire vgem artifacts from older deployments ---------------------
-    # vgem was a DMA-BUF experiment leftover (a fake renderD128 racing the
-    # real DRM node for the name). The fork needs no extra render node and
-    # no KWin env overrides — stock KWin + materialize/fallback in lamco is
-    # the shipping path. Clean up any artifacts old deployments left.
+    # -- Retire vgem artifacts -----------------------------------------------
+    # The server needs no extra render node and no KWin env overrides —
+    # stock KWin + the materialize/fallback capture paths are the shipping
+    # path. vgem (a fake renderD128 racing the real DRM node for the name)
+    # is not used; remove artifacts older deployments may have left.
     rm -f /etc/modules-load.d/vgem.conf /etc/udev/rules.d/99-vgem-render.rules 2>/dev/null || true
 
     # -- Transparent cursor theme (KDE) ------------------------------------
@@ -822,8 +821,8 @@ MONITORS_EOF
     # (lamco cursor_pdu.rs reads breeze_cursors directly, not the active
     # theme) still delivers the real arrow to mstsc, so exactly one
     # client-rendered zero-lag pointer remains (xrdp parity).
-    # XCursor binary layout was verified against a genuine breeze file
-    # (magic 0x72756358 LE, version 0x00010000, 36-byte image chunks).
+    # XCursor binary layout per the genuine breeze file: magic 0x72756358
+    # LE, version 0x00010000, 36-byte image chunks.
     # KDE/KWin only — GNOME/mutter deferred pending Hidden-mode
     # verification.
     if command -v kwriteconfig6 >/dev/null 2>&1 || command -v kwriteconfig5 >/dev/null 2>&1; then
@@ -865,12 +864,12 @@ fallback_names = [
     'ew-resize', 'ns-resize', 'cell', 'color-picker', 'zoom-in',
     'zoom-out',
 ]
-# CRITICAL (2026-08-22 wallpaper-ghost fix): shadow EVERY cursor name of
-# an installed real theme, not just the list above. XCursor themes
-# INHERIT the parent theme for any name they lack - and Plasma's desktop
-# background uses the ""default"" role, which is NOT in the fallback list.
-# Result was: transparent cursor over windows (text role covered) but a
-# visible lagging breeze arrow over the desktop background only.
+# CRITICAL: shadow EVERY cursor name of an installed real theme, not just
+# the list above. XCursor themes INHERIT the parent theme for any name
+# they lack - and Plasma's desktop background uses the ""default"" role,
+# which is NOT in the fallback list. Shadowing only the list leaves the
+# desktop background with a visible lagging breeze arrow while windows
+# are clean.
 names = set(fallback_names)
 for theme_dir in ('/usr/share/icons/breeze_cursors/cursors',
                   '/usr/share/icons/Adwaita/cursors',
@@ -903,9 +902,9 @@ PYEOF
         # theme INSTALLED but not active). Provisioning therefore leaves
         # kcminputrc on a VISIBLE theme (breeze_cursors) so the console
         # always has a pointer at boot — xrdp-parity console behavior.
-        # GOTCHA (verified 2026-08-22): plasma-apply-cursortheme only
-        # swaps the live sprite when config differs — lamco's apply uses
-        # the breeze_cursors→transparent toggle to force a real reload.
+        # GOTCHA: plasma-apply-cursortheme only swaps the live sprite when
+        # config differs — lamco's apply uses the breeze_cursors→transparent
+        # toggle to force a real reload.
         sudo -u ""$AUTOLOGIN_USER"" ""$KW"" --file kcminputrc --group Mouse --key cursorTheme breeze_cursors 2>/dev/null || true
         # Disable the Shake Cursor effect: pointless compositing churn on
         # an invisible sprite, and wiggle-scaling was the visual tell of
@@ -916,11 +915,11 @@ PYEOF
     fi
 
     # -- Idle-lock suppression (KDE) ----------------------------------------
-    # E2E finding (2026-09-01, TEST_20260901180150): KDE's idle autolock
-    # engaged during RDP sessions on Hyper-V, and the LOCK GREETER WEDGED
-    # under the hyperv_drm framebuffer error spam (44% CPU, no frames) —
-    # swallowing ALL input including the vmconnect console. A wedged lock
-    # screen bricks the machine remotely (only a reboot recovers).
+    # KDE's idle autolock is disabled for RDP deployments: the lock greeter
+    # can wedge under the hyperv_drm framebuffer error spam (high CPU, no
+    # frames) and swallow ALL input including the vmconnect console — a
+    # wedged lock screen bricks the machine remotely (only a reboot
+    # recovers).
     # Two provisions:
     #   1. kscreenlockerrc Autolock=false — read at session start, so the
     #      first boot of a provisioned VM is already immune.
@@ -935,17 +934,16 @@ PYEOF
         # connection alive so the cookie stays held).
         # GOTCHA: do NOT use `sudo -u $U mkdir -p ~/.local/bin` — bash
         # expands ~ to ROOT's home BEFORE sudo runs, so the user's directory
-        # never exists and the heredoc cat below fails (fresh-VM boot
-        # 2026-09-02: unit crash-looped on the missing file). Use the
-        # literal /home/$AUTOLOGIN_USER path for every write.
+        # never exists and the heredoc cat below fails. Use the literal
+        # /home/$AUTOLOGIN_USER path for every write.
         mkdir -p /home/""$AUTOLOGIN_USER""/.local/bin 2>/dev/null || true
         chown ""$AUTOLOGIN_USER"": /home/""$AUTOLOGIN_USER""/.local/bin 2>/dev/null || true
         cat > /home/""$AUTOLOGIN_USER""/.local/bin/lamco-idle-inhibit.py << 'PYEOF'
 #!/usr/bin/env python3
 # Hold a freedesktop ScreenSaver inhibitor cookie for the session lifetime.
-# Installed by VMCreate: KDE's idle lock wedges under hyperv_drm framebuffer
-# spam on Hyper-V and bricks remote access. dbus-send one-shots release the
-# cookie when their connection dies; this process parks holding it.
+# KDE's idle lock can wedge under hyperv_drm framebuffer spam on Hyper-V and
+# brick remote access. dbus-send one-shots release the cookie when their
+# connection dies; this process parks holding it.
 import time
 
 import dbus
@@ -1004,10 +1002,9 @@ UNITEOF
     # client's executable path — see KWin wayland_server.cpp
     # interfacesBlackList + serviceutils.h fetchRequestedInterfaces).
     # xdg-desktop-portal-kde and krfb ship such entries; without one the
-    # lamco fork's kwin-virtual strategy cannot bind the global (fresh-VM
-    # finding TEST_20260902110104: ""zkde stream creation failed: zkde
-    # _screencast global not bound"" on every connect, and the global is
-    # invisible even to wayland-info).
+    # kwin-virtual strategy cannot bind the global: every connect fails
+    # with ""zkde stream creation failed: zkde_screencast global not bound"",
+    # and the global stays invisible even to wayland-info.
     cat > /usr/share/applications/lamco-rdp-server.desktop << 'DESKTOPEOF'
 [Desktop Entry]
 Type=Application
@@ -1045,12 +1042,12 @@ elif command -v firewall-cmd >/dev/null 2>&1; then
 fi
 
 # -- Raise journald rate limit (diagnosability) ----------------------------
-# E2E finding (2026-09-01, TEST_20260901180150): hyperv_drm framebuffer
-# error spam (100+/s) exhausts journald's default rate limit (RateLimitBurst
-# =100 per 30s) within seconds, after which journald silently DROPS all
-# further user-session logs - including the very lamco/kwin-virtual lines
-# needed to diagnose live sessions (""no events"" in journalctl does not
-# mean ""no activity""). Raise the burst so session logs always survive.
+# hyperv_drm framebuffer error spam (100+/s) exhausts journald's default
+# rate limit (RateLimitBurst=100 per 30s) within seconds, after which
+# journald silently DROPS all further user-session logs — including the
+# lamco/kwin-virtual lines needed to diagnose live sessions (""no events""
+# in journalctl does not mean ""no activity""). Raise the burst so session
+# logs always survive.
 mkdir -p /etc/systemd/journald.conf.d
 cat > /etc/systemd/journald.conf.d/99-lamco-ratelimit.conf << 'JOURNALD_EOF'
 [Journal]
