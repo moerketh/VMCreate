@@ -208,5 +208,56 @@ namespace VMCreate.Tests.HyperV.Steps
             StringAssert.Contains(captured, "rm -rf /usr/share/icons/transparent");
             StringAssert.Contains(captured, "rm -rf /tmp/lamco-transparent-theme");
         }
+
+        [TestMethod]
+        public async Task ExecuteAsync_ForkBuild_IncludesKwinVirtualFeatures()
+        {
+            // The lamco fork must be built with the kwin-virtual strategy
+            // (zkde_screencast_unstable_v1 virtual output + libei input) —
+            // a fresh VM without these features silently falls back to the
+            // old kscreen/DRM scaling path.
+            string? captured = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("done");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(captured);
+            StringAssert.Contains(captured, "--features x264,vsock,kwin-virtual,libei",
+                "fork build must include the kwin-virtual strategy features");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_ProvisionsIdleLockSuppression()
+        {
+            // E2E regression guard (TEST_20260901180150): KDE idle autolock
+            // wedged the lock greeter under hyperv_drm framebuffer spam and
+            // swallowed ALL input including the console — a wedged lock
+            // bricks the VM remotely. Provisioning must disable autolock
+            // AND install a durable inhibitor holder unit.
+            string? captured = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("done");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(captured);
+            // Config: autolock off at session start (first boot is immune)
+            StringAssert.Contains(captured, "--file kscreenlockerrc --group Daemon --key Autolock false",
+                "KDE autolock disabled in kscreenlockerrc");
+            StringAssert.Contains(captured, "--key LockOnResume false",
+                "resume lock disabled too");
+            // Durable inhibitor: python holder keeps the D-Bus connection
+            // (and thus the cookie) alive for the session lifetime
+            StringAssert.Contains(captured, "lamco-idle-inhibit.py", "inhibitor holder script");
+            StringAssert.Contains(captured, "ss.Inhibit(", "inhibitor actually requested");
+            StringAssert.Contains(captured, "lamco-idle-inhibit.service", "systemd user unit");
+            StringAssert.Contains(captured, "WantedBy=graphical-session.target",
+                "unit binds to the graphical session");
+            StringAssert.Contains(captured, "systemctl --user enable lamco-idle-inhibit.service",
+                "unit enabled for future boots");
+        }
     }
 }

@@ -773,7 +773,7 @@ MONITORS_EOF
             # the detached shell inherits it (it recomputes nothing).
             export AUTOLOGIN_USER
             nohup bash -c ""cd '$FORK_DIR' && PATH='$HOME/.cargo/bin':\$PATH \
-                cargo build --release --features x264,vsock \
+                cargo build --release --features x264,vsock,kwin-virtual,libei \
                 && install -m 0755 target/release/lamco-rdp-server /usr/bin/lamco-rdp-server \
                 && touch '$FORK_DONE_MARKER' \
                 && [ -n \$AUTOLOGIN_USER ] \
@@ -912,6 +912,78 @@ PYEOF
         sudo -u ""$AUTOLOGIN_USER"" ""$KW"" --file kwinrc --group Plugins --key shakecursorEnabled false 2>/dev/null || true
         sudo -u ""$AUTOLOGIN_USER"" XDG_RUNTIME_DIR=/run/user/$(id -u ""$AUTOLOGIN_USER"") DISPLAY=:0 WAYLAND_DISPLAY=wayland-0 qdbus6 org.kde.KWin /KWin reconfigure 2>/dev/null || true
         echo ""Cursor setup: transparent theme installed, console on breeze_cursors (lamco toggles per RDP session).""
+    fi
+
+    # -- Idle-lock suppression (KDE) ----------------------------------------
+    # E2E finding (2026-09-01, TEST_20260901180150): KDE's idle autolock
+    # engaged during RDP sessions on Hyper-V, and the LOCK GREETER WEDGED
+    # under the hyperv_drm framebuffer error spam (44% CPU, no frames) —
+    # swallowing ALL input including the vmconnect console. A wedged lock
+    # screen bricks the machine remotely (only a reboot recovers).
+    # Two provisions:
+    #   1. kscreenlockerrc Autolock=false — read at session start, so the
+    #      first boot of a provisioned VM is already immune.
+    #   2. A durable systemd user unit holding a freedesktop ScreenSaver
+    #      inhibitor cookie — a dbus-send one-shot dies with its connection
+    #      and releases the cookie; a holder process keeps it for the
+    #      session lifetime (the validated pattern from the E2E).
+    if [ -n ""$AUTOLOGIN_USER"" ] && command -v kwriteconfig6 >/dev/null 2>&1; then
+        sudo -u ""$AUTOLOGIN_USER"" kwriteconfig6 --file kscreenlockerrc --group Daemon --key Autolock false 2>/dev/null || true
+        sudo -u ""$AUTOLOGIN_USER"" kwriteconfig6 --file kscreenlockerrc --group Daemon --key LockOnResume false 2>/dev/null || true
+        # Holder script: takes the inhibitor and parks (keeps the D-Bus
+        # connection alive so the cookie stays held).
+        sudo -u ""$AUTOLOGIN_USER"" mkdir -p ~/.local/bin 2>/dev/null || true
+        cat > /home/""$AUTOLOGIN_USER""/.local/bin/lamco-idle-inhibit.py << 'PYEOF'
+#!/usr/bin/env python3
+# Hold a freedesktop ScreenSaver inhibitor cookie for the session lifetime.
+# Installed by VMCreate: KDE's idle lock wedges under hyperv_drm framebuffer
+# spam on Hyper-V and bricks remote access. dbus-send one-shots release the
+# cookie when their connection dies; this process parks holding it.
+import time
+
+import dbus
+
+bus = dbus.SessionBus()
+ss = dbus.Interface(
+    bus.get_object(""org.freedesktop.ScreenSaver"", ""/ScreenSaver""),
+    ""org.freedesktop.ScreenSaver"",
+)
+cookie = ss.Inhibit(""lamco-rdp"", ""rdp-session-keepalive"")
+print(f""inhibitor cookie: {cookie}"", flush=True)
+while True:
+    time.sleep(60)
+    try:
+        ss.GetActive()
+    except Exception:
+        pass
+PYEOF
+        chmod 0755 /home/""$AUTOLOGIN_USER""/.local/bin/lamco-idle-inhibit.py 2>/dev/null || true
+        # Systemd user unit; binds to the graphical session (the session bus
+        # where the screensaver runs exists only there).
+        sudo -u ""$AUTOLOGIN_USER"" mkdir -p ~/.config/systemd/user 2>/dev/null || true
+        cat > /home/""$AUTOLOGIN_USER""/.config/systemd/user/lamco-idle-inhibit.service << 'UNITEOF'
+[Unit]
+Description=lamco RDP idle-lock inhibitor (Hyper-V lock-greeter wedge prevention)
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 %h/.local/bin/lamco-idle-inhibit.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=graphical-session.target
+UNITEOF
+        sudo -u ""$AUTOLOGIN_USER"" XDG_RUNTIME_DIR=/run/user/$(id -u ""$AUTOLOGIN_USER"") \
+            systemctl --user daemon-reload 2>/dev/null || true
+        sudo -u ""$AUTOLOGIN_USER"" XDG_RUNTIME_DIR=/run/user/$(id -u ""$AUTOLOGIN_USER"") \
+            DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u ""$AUTOLOGIN_USER"")/bus \
+            systemctl --user enable lamco-idle-inhibit.service 2>/dev/null || true
+        sudo -u ""$AUTOLOGIN_USER"" XDG_RUNTIME_DIR=/run/user/$(id -u ""$AUTOLOGIN_USER"") \
+            DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u ""$AUTOLOGIN_USER"")/bus \
+            systemctl --user start lamco-idle-inhibit.service 2>/dev/null || true
+        echo ""Idle-lock suppression: Autolock=false + lamco-idle-inhibit.service (Hyper-V lock-greeter wedge prevention).""
     fi
 
     # linger + enable (the service starts on next graphical-session target)
