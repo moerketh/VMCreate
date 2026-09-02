@@ -286,5 +286,29 @@ namespace VMCreate.Tests.HyperV.Steps
             StringAssert.Contains(captured, "kbuildsycoca6 --noincremental",
                 "service cache refreshed so the grant applies without relogin");
         }
+
+        [TestMethod]
+        public async Task ExecuteAsync_ProvisionsJournaldRateLimitRelief()
+        {
+            // E2E finding (2026-09-01): hyperv_drm framebuffer error spam
+            // exhausts journald's default rate limit within seconds, after
+            // which ALL user-session logs are silently dropped — including the
+            // lamco/kwin-virtual lines needed to diagnose live sessions.
+            // Provisioning must raise the burst.
+            string? captured = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("done");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(captured);
+            StringAssert.Contains(captured, "/etc/systemd/journald.conf.d/99-lamco-ratelimit.conf",
+                "journald override installed");
+            StringAssert.Contains(captured, "RateLimitBurst=100000",
+                "rate limit burst raised so session logs survive framebuffer spam");
+            StringAssert.Contains(captured, "python3-dbus",
+                "python3-dbus present for the idle-inhibit holder script");
+        }
     }
 }

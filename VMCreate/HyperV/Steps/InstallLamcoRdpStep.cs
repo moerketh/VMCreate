@@ -736,7 +736,8 @@ MONITORS_EOF
             apt-get install -y -q build-essential pkg-config cmake ninja-build \
                 libpipewire-0.3-dev libspa-0.2-dev libopus-dev \
                 libdbus-1-dev libudev-dev libx264-dev \
-                libpam0g-dev libxkbcommon-dev 2>/dev/null || true
+                libpam0g-dev libxkbcommon-dev \
+                python3-dbus python3-gi 2>/dev/null || true
             cd ""$FORK_DIR"" || exit 1
             if [ -n ""$LAMCO_FORK_COMMIT"" ]; then
                 git fetch --depth 1 origin ""$LAMCO_FORK_COMMIT"" 2>/dev/null || true
@@ -1042,6 +1043,22 @@ elif command -v firewall-cmd >/dev/null 2>&1; then
     firewall-cmd --add-port=3389/tcp --permanent 2>/dev/null || true
     firewall-cmd --reload 2>/dev/null || true
 fi
+
+# -- Raise journald rate limit (diagnosability) ----------------------------
+# E2E finding (2026-09-01, TEST_20260901180150): hyperv_drm framebuffer
+# error spam (100+/s) exhausts journald's default rate limit (RateLimitBurst
+# =100 per 30s) within seconds, after which journald silently DROPS all
+# further user-session logs - including the very lamco/kwin-virtual lines
+# needed to diagnose live sessions (""no events"" in journalctl does not
+# mean ""no activity""). Raise the burst so session logs always survive.
+mkdir -p /etc/systemd/journald.conf.d
+cat > /etc/systemd/journald.conf.d/99-lamco-ratelimit.conf << 'JOURNALD_EOF'
+[Journal]
+RateLimitIntervalSec=30s
+RateLimitBurst=100000
+JOURNALD_EOF
+systemctl restart systemd-journald 2>/dev/null || true
+echo ""Raised journald rate limit (framebuffer spam must not drown session logs).""
 
 echo ""=== Lamco RDP Server install complete ===""
 echo ""NOTE: After first graphical login, run 'lamco-rdp-server --grant-permission'""
