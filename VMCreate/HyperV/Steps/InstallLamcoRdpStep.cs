@@ -646,6 +646,35 @@ WantedBy=default.target
 UNIT_EOF
     chown ""$AUTOLOGIN_USER"" ""$USER_HOME/.config/systemd/user/lamco-rdp-server.service""
 
+    # -- One-shot portal consent grant ---------------------------------------
+    # The libei/kwin-virtual input path needs a one-time Portal RemoteDesktop
+    # consent. Without a stored restore token the server's session-creation
+    # BLOCKS on the consent dialog and no listener ever binds — a fresh VM
+    # looks deployed-but-dead (vmconnect cannot connect). This oneshot unit
+    # runs `--grant-permission` at first graphical-session start: the dialog
+    # appears once on the VM console, one 'Allow' click stores the token
+    # (and the xdg-desktop-portal-kderc MegaAuth permission entry), then the
+    # unit never runs again (ConditionPathExists on a marker it creates).
+    cat > ""$USER_HOME/.config/systemd/user/lamco-grant.service"" << 'GRANT_EOF'
+[Unit]
+Description=Lamco one-time portal RemoteDesktop consent grant
+After=graphical-session.target
+Wants=graphical-session.target
+ConditionEnvironment=WAYLAND_DISPLAY
+# Skip forever once the marker exists (created below after a grant).
+ConditionPathExists=!%h/.local/share/lamco-rdp-server/consent-granted
+
+[Service]
+Type=oneshot
+ExecStartPre=/bin/sh -c 'if [ -s ""%h/.local/share/lamco-rdp-server/restore_token"" ] || kreadconfig6 --file xdg-desktop-portal-kderc --group remote-desktop --key ""lamco-rdp-server"" 2>/dev/null | grep -q .; then touch ""%h/.local/share/lamco-rdp-server/consent-granted""; echo ""Consent already present — skipping dialog.""; exit 111; fi; exit 0'
+ExecStart=/bin/sh -c 'timeout 300 /usr/bin/lamco-rdp-server --grant-permission || true; if [ -s ""%h/.local/share/lamco-rdp-server/restore_token"" ]; then touch ""%h/.local/share/lamco-rdp-server/consent-granted""; echo ""Consent granted — restore token stored.""; else echo ""Consent flow did not complete (timeout or dismissed) — will retry next boot.""; fi'
+RemainAfterExit=no
+
+[Install]
+WantedBy=graphical-session.target
+GRANT_EOF
+    chown ""$AUTOLOGIN_USER"" ""$USER_HOME/.config/systemd/user/lamco-grant.service""
+
     # -- Create monitors.xml to force 1920x1080@60 resolution ------------
     # The hyperv_drm driver reports 1024x768 as the preferred mode, which
     # mutter/GNOME picks by default. This overrides it to 1920x1080.
@@ -695,33 +724,50 @@ MONITORS_EOF
         echo ""kscreen-doctor not found — KWin will use DRM default (1024x768).""
     fi
 
-    # -- Build lamco-rdp-server from the fork --------------------------------
-    # The server is built from source rather than the release binary: the
-    # release binary black-screens on virtual GPUs (hyperv_drm / virtio /
-    # software GL — PipeWire negotiates DMA-BUF, the capture never delivers a
-    # frame on that path, and the software EGFX paths drop FrameBuffer::DmaBuf
-    # anyway). The source pipeline fixes this entirely server-side:
-    #   1. DMA-BUF CPU reads use the DMA_BUF_IOCTL_SYNC bracket, correct
-    #      mmap pgoff, and reject non-linear modifiers.
-    #   2. DmaBuf frames are materialized to CPU memory before caching.
-    #   3. One-shot probe: DmaBuf negotiated but zero frames for 10s ->
-    #      flip to MemFd and rebind the stream (measurement-driven, no
-    #      driver-name allowlist).
-    # No KWin patch is required: stock KWin works once the consumer side
-    # handles the negotiated buffer types correctly.
+    # -- Install lamco-rdp-server: fork release deb, source build fallback --
+    # Preferred: the fork's tag-triggered release pipeline builds the same
+    # feature set (default incl. libei/gui, plus vsock, kwin-virtual, x264)
+    # and ships a deb — installing it cuts the ~18-minute on-VM Rust build
+    # (two fat-LTO binaries on a fresh VM) to a dpkg. The deb is built from
+    # the tagged release commit, the same code the source path builds. If
+    # the download or install fails, fall back to the on-VM source build.
     LAMCO_FORK_REPO=""moerketh/lamco-rdp-server""
     LAMCO_FORK_BRANCH=""feature/hyperv-enhanced-session-v3""
     LAMCO_FORK_COMMIT=""""   # empty = branch head; pin a SHA for reproducible builds
+    LAMCO_FORK_DEB_VERSION=""1.4.5-hyperv1""
+    LAMCO_FORK_DEB_URL=""https://github.com/${LAMCO_FORK_REPO}/releases/download/v1.4.5-hyperv.1/lamco-rdp-server_${LAMCO_FORK_DEB_VERSION}_amd64.deb""
+    if curl -fsSL --max-time 60 -o /tmp/lamco-fork.deb ""$LAMCO_FORK_DEB_URL"" 2>/dev/null \
+        && dpkg -i --force-confnew /tmp/lamco-fork.deb >/dev/null 2>&1 \
+        && apt-get install -f -y -q >/dev/null 2>&1 \
+        && /usr/bin/lamco-rdp-server --version 2>/dev/null | grep -aq ""1.4.5""; then
+        echo ""Installed fork release deb lamco-rdp-server_${LAMCO_FORK_DEB_VERSION}_amd64 (pipeline-built).""
+        DEB_INSTALLED=1
+    else
+        echo ""Fork release deb unavailable — falling back to on-VM source build.""
+        DEB_INSTALLED=0
+        rm -f /tmp/lamco-fork.deb 2>/dev/null || true
+    fi
     FORK_DIR=""/opt/lamco-fork""
     FORK_BUILD_LOG=""/tmp/lamco-fork-build.log""
     FORK_DONE_MARKER=""/opt/lamco-fork/.fork-installed""
     FORK_WAIT_INTERVAL=10
     FORK_WAIT_LOOPS=45   # 7.5 min poll inside this step; build self-completes if longer
-    if [ ! -d ""$FORK_DIR/.git"" ]; then
+    if [ ""${DEB_INSTALLED:-0}"" = ""1"" ]; then
+        # Pipeline deb installed the binary and its units; still restart the
+        # service so it acquires its portal session under the new binary.
+        if [ -n ""$AUTOLOGIN_USER"" ]; then
+            loginctl enable-linger ""$AUTOLOGIN_USER"" 2>/dev/null || true
+            sudo -u ""$AUTOLOGIN_USER"" XDG_RUNTIME_DIR=/run/user/$(id -u ""$AUTOLOGIN_USER"") \
+                systemctl --user daemon-reload 2>/dev/null || true
+            sudo -u ""$AUTOLOGIN_USER"" XDG_RUNTIME_DIR=/run/user/$(id -u ""$AUTOLOGIN_USER"") \
+                systemctl --user restart lamco-rdp-server.service 2>/dev/null || true
+        fi
+    fi
+    if [ ""${DEB_INSTALLED:-0}"" != ""1"" ] && [ ! -d ""$FORK_DIR/.git"" ]; then
         git clone --depth 1 --branch ""$LAMCO_FORK_BRANCH"" \
             ""https://github.com/${LAMCO_FORK_REPO}.git"" ""$FORK_DIR"" 2>/dev/null || true
     fi
-    if [ -d ""$FORK_DIR"" ]; then
+    if [ ""${DEB_INSTALLED:-0}"" != ""1"" ] && [ -d ""$FORK_DIR"" ]; then
         if ! command -v cargo >/dev/null 2>&1; then
             echo ""Installing Rust toolchain (minimal profile)...""
             curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal 2>/dev/null || true
@@ -799,6 +845,29 @@ MONITORS_EOF
                 sleep $FORK_WAIT_INTERVAL
             done
             [ -f ""$FORK_DONE_MARKER"" ] || echo ""WARNING: fork build still running after ${FORK_WAIT_LOOPS}x${FORK_WAIT_INTERVAL}s — it installs itself on completion; rerun this step (or wait) to pick up the fixed binary."" >&2
+            # -- Readiness gate: the build marker is NOT service readiness ----
+            # Session creation can park on the one-time portal consent dialog
+            # (see lamco-grant.service above): until it is answered, NO
+            # listener binds and vmconnect cannot connect. Poll for the
+            # dispatcher line so this step's report distinguishes ""service
+            # up and listening"" from ""deployed but blocked on consent"" —
+            # a fresh VM is expected to need one Allow click on the console.
+            if [ -f ""$FORK_DONE_MARKER"" ] && [ -n ""$AUTOLOGIN_USER"" ]; then
+                RDY_UID=$(id -u ""$AUTOLOGIN_USER"")
+                for r in $(seq 1 12); do
+                    if journalctl _UID=$RDY_UID --since ""-5 min"" --no-pager 2>/dev/null \
+                        | grep -aq ""Accept dispatcher started""; then
+                        echo ""Service ready: accept dispatcher running (TCP/vsock listeners bound).""
+                        break
+                    fi
+                    if journalctl _UID=$RDY_UID --since ""-5 min"" --no-pager 2>/dev/null \
+                        | grep -aq ""permission dialog will appear""; then
+                        echo ""NOTICE: one-time portal consent dialog is on the VM console — click Allow once, then the service binds its listeners."" >&2
+                        break
+                    fi
+                    sleep 10
+                done
+            fi
             cd / || exit 1
         else
             echo ""WARNING: Rust toolchain unavailable — keeping the release binary."" >&2
@@ -1030,6 +1099,8 @@ DESKTOPEOF
         systemctl --user daemon-reload 2>/dev/null || true
     sudo -u ""$AUTOLOGIN_USER"" XDG_RUNTIME_DIR=/run/user/$(id -u ""$AUTOLOGIN_USER"") \
         systemctl --user enable lamco-rdp-server.service 2>/dev/null || true
+    sudo -u ""$AUTOLOGIN_USER"" XDG_RUNTIME_DIR=/run/user/$(id -u ""$AUTOLOGIN_USER"") \
+        systemctl --user enable lamco-grant.service 2>/dev/null || true
     echo ""Installed systemd user unit for $AUTOLOGIN_USER and enabled linger.""
 else
     echo ""WARNING: could not determine autologin user; systemd user unit not installed."" >&2

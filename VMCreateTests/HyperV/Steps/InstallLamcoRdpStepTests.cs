@@ -348,7 +348,60 @@ namespace VMCreate.Tests.HyperV.Steps
             StringAssert.Contains(captured, "LAMCO_FORK_BRANCH=\"feature/hyperv-enhanced-session-v3\"",
                 "fork deploy tracks the v3 branch (per-transport security + allowlist line)");
             StringAssert.Contains(captured, "--features x264,vsock,kwin-virtual,libei",
-                "build features include the vsock transport and kwin-virtual strategy");
+                "fallback source build keeps the full deployment feature set");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_InstallsForkReleaseDebWithSourceFallback()
+        {
+            // The pipeline-built deb cuts the ~18-minute on-VM Rust build to a
+            // dpkg; the source build remains the fallback when the deb is
+            // unreachable. Both paths must be visible in the script. The step
+            // copies several files; assert over the accumulated content.
+            var captured = new List<string>();
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured.Add(content));
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("done");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            var all = string.Join("\n", captured);
+            StringAssert.Contains(all, "LAMCO_FORK_DEB_URL=",
+                "pipeline deb is the preferred install path (URL built from repo/tag)");
+            StringAssert.Contains(all, "v1.4.5-hyperv.1",
+                "deb URL points at the fork release tag");
+            StringAssert.Contains(all, "DEB_INSTALLED=1",
+                "deb success flag drives the source-build skip");
+            StringAssert.Contains(all, "falling back to on-VM source build",
+                "deb failure falls back to the source build");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_ProvisionsOneShotConsentGrant()
+        {
+            // Without a stored portal restore token the server's session
+            // creation blocks on the RemoteDesktop consent dialog and NO
+            // listener binds (a fresh VM looks deployed-but-dead). The
+            // oneshot lamco-grant service runs --grant-permission at first
+            // graphical-session start so the dialog appears exactly once.
+            var captured = new List<string>();
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured.Add(content));
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("done");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            var all = string.Join("\n", captured);
+            StringAssert.Contains(all, "lamco-grant.service",
+                "oneshot grant unit provisioned");
+            StringAssert.Contains(all, "--grant-permission",
+                "grant flow obtains and stores the restore token");
+            StringAssert.Contains(all, "consent-granted",
+                "marker file makes the oneshot skip after a successful grant");
+            StringAssert.Contains(all, "WantedBy=graphical-session.target",
+                "grant runs at graphical session start (dialog on the console)");
+            StringAssert.Contains(all, "Accept dispatcher started",
+                "readiness gate distinguishes service-up from blocked-on-consent");
         }
     }
 }
