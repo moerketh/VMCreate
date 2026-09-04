@@ -368,7 +368,7 @@ namespace VMCreate.Tests.HyperV.Steps
             var all = string.Join("\n", captured);
             StringAssert.Contains(all, "LAMCO_FORK_DEB_URL=",
                 "pipeline deb is the preferred install path (URL built from repo/tag)");
-            StringAssert.Contains(all, "v1.4.5-hyperv.1",
+            StringAssert.Contains(all, "v1.4.5-hyperv.2",
                 "deb URL points at the fork release tag");
             StringAssert.Contains(all, "DEB_INSTALLED=1",
                 "deb success flag drives the source-build skip");

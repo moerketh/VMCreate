@@ -734,8 +734,8 @@ MONITORS_EOF
     LAMCO_FORK_REPO=""moerketh/lamco-rdp-server""
     LAMCO_FORK_BRANCH=""feature/hyperv-enhanced-session-v3""
     LAMCO_FORK_COMMIT=""""   # empty = branch head; pin a SHA for reproducible builds
-    LAMCO_FORK_DEB_VERSION=""1.4.5-hyperv1""
-    LAMCO_FORK_DEB_URL=""https://github.com/${LAMCO_FORK_REPO}/releases/download/v1.4.5-hyperv.1/lamco-rdp-server_${LAMCO_FORK_DEB_VERSION}_amd64.deb""
+    LAMCO_FORK_DEB_VERSION=""1.4.5-hyperv2""
+    LAMCO_FORK_DEB_URL=""https://github.com/${LAMCO_FORK_REPO}/releases/download/v1.4.5-hyperv.2/lamco-rdp-server_${LAMCO_FORK_DEB_VERSION}_amd64.deb""
     if curl -fsSL --max-time 60 -o /tmp/lamco-fork.deb ""$LAMCO_FORK_DEB_URL"" 2>/dev/null \
         && dpkg -i --force-confnew /tmp/lamco-fork.deb >/dev/null 2>&1 \
         && apt-get install -f -y -q >/dev/null 2>&1 \
