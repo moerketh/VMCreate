@@ -306,5 +306,49 @@ namespace VMCreate.Tests.HyperV.Steps
             StringAssert.Contains(captured, "python3-dbus",
                 "python3-dbus present for the idle-inhibit holder script");
         }
+
+        [TestMethod]
+        public async Task ExecuteAsync_ProvisionsVsockCidAllowlist()
+        {
+            // The vsock transport serves Hyper-V Enhanced Session: vmms
+            // relays from VMADDR_CID_HOST (CID 2). The listener binds
+            // VMADDR_CID_ANY (no bind-time filter), so the accept-time
+            // allowlist is the only access control confining it to the
+            // host relay.
+            string? captured = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("done");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(captured);
+            StringAssert.Contains(captured, "[server.transports.vsock]",
+                "vsock transport section present in the provisioned config");
+            StringAssert.Contains(captured, "allowed_cids = [2]",
+                "vsock accept-time CID allowlist confined to the host relay (VMADDR_CID_HOST)");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_DeploysForkV3Branch()
+        {
+            // The fork line carrying per-transport security routing
+            // (dual-server), the vsock CID allowlist, kwin-virtual, and the
+            // client-size/silent-adoption fixes is feature/hyperv-
+            // enhanced-session-v3. A stale branch pin silently deploys the
+            // pre-fix line.
+            string? captured = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("done");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(captured);
+            StringAssert.Contains(captured, "LAMCO_FORK_BRANCH=\"feature/hyperv-enhanced-session-v3\"",
+                "fork deploy tracks the v3 branch (per-transport security + allowlist line)");
+            StringAssert.Contains(captured, "--features x264,vsock,kwin-virtual,libei",
+                "build features include the vsock transport and kwin-virtual strategy");
+        }
     }
 }

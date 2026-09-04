@@ -370,15 +370,17 @@ view_only = false
 [server.transports]
 [server.transports.tcp]
 listen_addr = ""0.0.0.0:3389""
-# vsock is opt-in: the transport is unauthenticated by construction (vmms
-# authenticates on the host side), so the server never enables it from the
-# Hyper-V autodetect alone — it only logs a suggestion. This deployment is a
-# single-user lab VM behind the Default Switch, so it is enabled explicitly;
-# the built-in allowlist accepts only VMADDR_CID_HOST (2) and refuses the
-# in-guest loopback CID (1) regardless.
+# vsock carries Hyper-V Enhanced Session (vmconnect.exe): vmms terminates
+# TLS/CredSSP on the host and relays plain RDP. The fork's per-transport
+# security routing serves these on a dedicated Standard-RDP-Security
+# server while TCP above keeps TLS/Hybrid — no security_mode compromise.
+# The CID allowlist accepts only VMADDR_CID_HOST (2): the host relay is
+# the only legitimate Enhanced Session peer; the in-guest loopback CID (1)
+# and any other peer are refused at accept time.
 [server.transports.vsock]
 enabled = true
 port = 3389
+allowed_cids = [2]
 
 [security]
 cert_path = ""/etc/lamco-rdp-server/cert.pem""
@@ -708,7 +710,7 @@ MONITORS_EOF
     # No KWin patch is required: stock KWin works once the consumer side
     # handles the negotiated buffer types correctly.
     LAMCO_FORK_REPO=""moerketh/lamco-rdp-server""
-    LAMCO_FORK_BRANCH=""feature/hyperv-enhanced-session""
+    LAMCO_FORK_BRANCH=""feature/hyperv-enhanced-session-v3""
     LAMCO_FORK_COMMIT=""""   # empty = branch head; pin a SHA for reproducible builds
     FORK_DIR=""/opt/lamco-fork""
     FORK_BUILD_LOG=""/tmp/lamco-fork-build.log""
