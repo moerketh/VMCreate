@@ -535,7 +535,7 @@ enable_adaptive_quality = false
 [cursor]
 mode = ""metadata""
 auto_mode = true
-predictive_latency_threshold_ms = 0
+predictive_latency_threshold_ms = 100
 cursor_update_fps = 60
 
 [cursor.predictor]
