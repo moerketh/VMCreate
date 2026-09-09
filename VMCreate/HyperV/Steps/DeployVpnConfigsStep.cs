@@ -29,8 +29,12 @@ namespace VMCreate
                 foreach (var key in customizations.HtbVpnKeys)
                 {
                     string guestPath = $"/etc/openvpn/client/{key.GuestFileName}";
-                    await shell.CopyContentAsync(key.OvpnContent, guestPath, ct);
-                    logger.LogInformation("Deployed {Name} VPN config to {Path} on VM {VMName}",
+                    // .ovpn bodies embed client certificates AND private keys —
+                    // CopySecretAsync lands them as root:root 0600 (the old
+                    // 644-everything copy contract left the keys world-readable
+                    // for every local account on the VM).
+                    await shell.CopySecretAsync(key.OvpnContent, guestPath, ct);
+                    logger.LogInformation("Deployed {Name} VPN config to {Path} on VM {VMName} (root:root 0600)",
                         key.Name, guestPath, shell.VmName);
 
                     // Import into NetworkManager so it appears in the system tray
@@ -70,7 +74,11 @@ namespace VMCreate
             if (!string.IsNullOrEmpty(customizations.OvpnFilePath) && File.Exists(customizations.OvpnFilePath))
             {
                 string guestPath = "/etc/openvpn/client/manual.ovpn";
-                await shell.CopyFileAsync(customizations.OvpnFilePath, guestPath, ct);
+                // .ovpn bodies embed client certificates and private keys —
+                // copy as a secret (root:root 0600), like the API-downloaded
+                // configs above.
+                string manualContent = await File.ReadAllTextAsync(customizations.OvpnFilePath, ct);
+                await shell.CopySecretAsync(manualContent, guestPath, ct);
 
                 string safeGuestPath = EscapeSingleQuotes(guestPath);
                 string importResult = await shell.RunCommandAsync(

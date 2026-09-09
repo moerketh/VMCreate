@@ -110,11 +110,15 @@ namespace CreateVM.HyperV.vmbus
             args.Append($"{GuestUsername}@{vmIp} ");
             args.Append($"bash -c {EscapeForSsh(linuxCommand)}");
 
-            _logger.LogDebug("SSH diagnostics exec: ssh {Args}", args.ToString());
+            // NOTE: never log the full ssh argument list — the remote command
+            // can embed guest payload, and the plaintext rolling log lives
+            // in %TEMP%. Transport options only.
+            _logger.LogDebug("SSH diagnostics exec on {VMName}@{IP} ({Length} chars)", vmName, vmIp, linuxCommand.Length);
 
             var psi = new ProcessStartInfo
             {
-                FileName = "ssh",
+                // Absolute path (see SshGuestShell.RunCommandInternalAsync).
+                FileName = System.Environment.ExpandEnvironmentVariables(@"%SystemRoot%\System32\OpenSSH\ssh.exe"),
                 Arguments = args.ToString(),
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,

@@ -108,6 +108,19 @@ namespace VMCreate
                         filename, galleryItem.ChecksumUri, galleryItem.ChecksumAlgorithm,
                         cancellationToken, createVmProgressInfo);
                 }
+                else
+                {
+                    // Visible, not silent: 13 of 23 gallery loaders (Parrot
+                    // among them) ship no checksum — a compromised or MITM'd
+                    // mirror controls the downloaded bytes. The ArchiveExtractor's
+                    // Zip-Slip defenses catch path escapes, but content
+                    // integrity is simply unverified for these items. Say so
+                    // in the log instead of quietly skipping verification.
+                    _logger.LogWarning(
+                        "No checksum available for {Name} ({Uri}) — the downloaded image cannot be verified against the publisher. " +
+                        "Proceeding unverified; treat the resulting VM as untrusted until first-boot hardening completes.",
+                        galleryItem.Name, galleryItem.DiskUri);
+                }
 
                 // Extract if needed — archives (OVA, ZIP, 7Z, etc.) and compressed disks
                 // (vmdk.xz, vhdx.zip) need extraction. Bare ISO/QCOW2/VHDX/VHD are used directly.

@@ -436,5 +436,98 @@ namespace VMCreate.Tests
                 if (Directory.Exists(extractPath)) Directory.Delete(extractPath, true);
             }
         }
+
+        // ── Zip-Slip traversal defenses ──────────────────────────────────
+        // 13 of 23 gallery loaders download archives with no checksum
+        // verification (Parrot ships none at all), so a compromised or
+        // MITM'd mirror controls the archive BYTES. Path traversal in entry
+        // names must fail loudly instead of overwriting files outside the
+        // extraction directory.
+
+        [TestMethod]
+        public void Extract_RelativeParentTraversal_EntryIsRejected()
+        {
+            // ../../evil escapes the extract root via .. segments.
+            byte[] data = System.Text.Encoding.UTF8.GetBytes("escaped");
+            string archivePath = CreateZipArchive(new Dictionary<string, byte[]>
+            {
+                { "innocent.txt", System.Text.Encoding.UTF8.GetBytes("fine") },
+                { "../../evil.txt", data }
+            });
+            string extractPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+
+            try
+            {
+                var ex = Assert.Throws<IOException>(() =>
+                    _extractor.Extract(archivePath, extractPath, CancellationToken.None,
+                        new ImmediateProgress<CreateVMProgressInfo>(_ => { })));
+
+                StringAssert.Contains(ex.Message, "outside the extraction directory",
+                    "the failure must name the Zip-Slip problem");
+                // And nothing may have escaped: the parent of the extract dir
+                // must not contain the evil file.
+                string escapeTarget = Path.Combine(Path.GetDirectoryName(extractPath)!, "evil.txt");
+                Assert.IsFalse(File.Exists(escapeTarget), "traversal payload must NOT be written outside the root");
+            }
+            finally
+            {
+                File.Delete(archivePath);
+                if (Directory.Exists(extractPath)) Directory.Delete(extractPath, true);
+                File.Delete(Path.Combine(Path.GetTempPath(), "evil.txt"));
+            }
+        }
+
+        [TestMethod]
+        public void Extract_DeepTraversal_EntryIsRejected()
+        {
+            // Many .. segments (defense in depth: even though GetFullPath
+            // would clamp some of these, the check must not rely on luck).
+            string archivePath = CreateZipArchive(new Dictionary<string, byte[]>
+            {
+                { "a/../../../../../../../../bombed.txt", System.Text.Encoding.UTF8.GetBytes("x") }
+            });
+            string extractPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+
+            try
+            {
+                Assert.Throws<IOException>(() =>
+                    _extractor.Extract(archivePath, extractPath, CancellationToken.None,
+                        new ImmediateProgress<CreateVMProgressInfo>(_ => { })));
+            }
+            finally
+            {
+                File.Delete(archivePath);
+                if (Directory.Exists(extractPath)) Directory.Delete(extractPath, true);
+            }
+        }
+
+        [TestMethod]
+        public void Extract_RootedEntryKey_IsRejected()
+        {
+            // An absolute entry key makes Path.Combine discard the extract
+            // base entirely — the classic Zip-Slip variant. On Windows the
+            // key carries a drive letter; both forms must be contained.
+            string archivePath = CreateZipArchive(new Dictionary<string, byte[]>
+            {
+                { "ok.txt", System.Text.Encoding.UTF8.GetBytes("fine") },
+                { "/etc/evil.txt", System.Text.Encoding.UTF8.GetBytes("rooted") }
+            });
+            string extractPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+
+            try
+            {
+                var ex = Assert.Throws<IOException>(() =>
+                    _extractor.Extract(archivePath, extractPath, CancellationToken.None,
+                        new ImmediateProgress<CreateVMProgressInfo>(_ => { })));
+
+                StringAssert.Contains(ex.Message, "outside the extraction directory");
+                Assert.IsFalse(File.Exists("/etc/evil.txt"), "rooted path must not be followed");
+            }
+            finally
+            {
+                File.Delete(archivePath);
+                if (Directory.Exists(extractPath)) Directory.Delete(extractPath, true);
+            }
+        }
     }
 }

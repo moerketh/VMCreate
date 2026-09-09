@@ -172,15 +172,42 @@ namespace VMCreate
                     long lastReportTimeTicks = 0;
                     const long ThrottleIntervalTicks = TimeSpan.TicksPerMillisecond * 200;
 
+                    // Zip-Slip defense: 13 of 23 gallery loaders download
+                    // archives without checksum verification (Parrot ships
+                    // none at all), so a compromised or MITM'd mirror controls
+                    // the archive BYTES. Every entry path must be resolved
+                    // under extractPath and rejected otherwise; symlink/
+                    // hardlink entries are refused outright (SharpCompress
+                    // exposes them as IsSymbolicLink; following them writes
+                    // outside the tree). The entry cap bounds pathological
+                    // archives (TotalUncompressedSize is attacker-supplied
+                    // metadata and cannot be trusted as a zip-bomb defense).
+                    string extractRoot = Path.GetFullPath(extractPath);
+                    int processedEntries = 0;
+                    const int MaxEntries = 250_000;
+
                     foreach (var entry in archive.Entries)
                     {
                         cancellationToken.ThrowIfCancellationRequested();
+
+                        if (++processedEntries > MaxEntries)
+                        {
+                            throw new IOException(
+                                $"Archive contains more than {MaxEntries} entries — refusing to extract (possible zip bomb or corrupted archive).");
+                        }
+
+                        if (!string.IsNullOrEmpty(entry.LinkTarget))
+                        {
+                            throw new IOException(
+                                $"Archive entry '{entry.Key}' is a link to '{entry.LinkTarget}' — refusing to extract (possible path escape). " +
+                                "The gallery archives this tool extracts never legitimately contain links.");
+                        }
 
                         if (entry.IsDirectory)
                         {
                             // Create directory entries so nested paths exist before file extraction.
                             string dirPath = entry.Key != null
-                                ? Path.Combine(extractPath, NormalizePath(entry.Key))
+                                ? ResolveSafeEntryPath(extractRoot, entry.Key)
                                 : extractPath;
                             Directory.CreateDirectory(dirPath);
                             continue;
@@ -199,7 +226,7 @@ namespace VMCreate
                         }
                         else
                         {
-                            destinationPath = Path.Combine(extractPath, NormalizePath(entryName));
+                            destinationPath = ResolveSafeEntryPath(extractRoot, entryName);
                         }
 
                         // Ensure parent directory exists (in case directory entries were missing)
@@ -313,6 +340,34 @@ namespace VMCreate
         {
             // Replace forward slashes with OS-specific separators and trim trailing slashes.
             return path.Replace('/', Path.DirectorySeparatorChar).TrimEnd(Path.DirectorySeparatorChar);
+        }
+
+        /// <summary>
+        /// Zip-Slip defense: combines the entry key under the extraction root
+        /// and canonicalizes the result; throws if the entry escapes the root.
+        /// <para>
+        /// Path.Combine alone is NOT safe: a rooted entry key ("C:\evil" or
+        /// "/etc/passwd") makes Combine discard the base entirely, and a
+        /// key containing ../.. walks out of the tree — with FileMode.Create
+        /// overwriting whatever lands at the target unconditionally.
+        /// </para>
+        /// </summary>
+        private static string ResolveSafeEntryPath(string extractRoot, string entryKey)
+        {
+            string combined = Path.Combine(extractRoot, NormalizePath(entryKey));
+            string fullPath = Path.GetFullPath(combined);
+
+            // Containment: the canonical path must sit inside the extraction
+            // root (allowing the root itself). EndsWith check includes the
+            // separator so "C:\extract" does not match "C:\extract-evil".
+            bool isInsideRoot = fullPath.StartsWith(extractRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                                || string.Equals(fullPath, extractRoot, StringComparison.OrdinalIgnoreCase);
+            if (!isInsideRoot)
+            {
+                throw new IOException(
+                    $"Archive entry '{entryKey}' resolves outside the extraction directory — refusing to extract (Zip-Slip).");
+            }
+            return fullPath;
         }
 
         private static string FormatBytes(long bytes)

@@ -90,13 +90,22 @@ namespace VMCreate
                     "The gallery item's distro hint disagrees with the actual guest; aborting the Lamco install.");
             }
 
-            await shell.CopyContentAsync(script, "/tmp/install_lamco.sh", ct);
+            // /tmp hardening: predictable root-run script paths in a
+            // world-writable directory are a code-execution TOCTOU — an
+            // attacker can pre-create /tmp/install_lamco.sh; `sudo tee`
+            // writes INTO their file without taking ownership, and the
+            // window between copy and execute lets the owner swap content.
+            // An unpredictable path (host-generated GUID) makes
+            // pre-creation infeasible; ownership+perms are tightened before
+            // execution as defense in depth.
+            string guestScript = $"/tmp/install_lamco_{Guid.NewGuid():N}.sh";
+            await shell.CopyContentAsync(script, guestScript, ct);
 
             // The install pulls apt packages and downloads the fork deb —
             // beyond the transport's default command timeout, but well under
             // 20 minutes now that the on-VM Rust build fallback is gone.
             string result = await shell.RunCommandAsync(
-                "sudo bash /tmp/install_lamco.sh && sudo rm -f /tmp/install_lamco.sh",
+                $"sudo chown root:root {guestScript} && sudo chmod 0700 {guestScript} && sudo bash {guestScript} && sudo rm -f {guestScript}",
                 TimeSpan.FromMinutes(20), ct);
 
             // Result contract: the script prints a machine-readable terminal

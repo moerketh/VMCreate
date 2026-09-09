@@ -88,10 +88,16 @@ namespace VMCreate.Tests.HyperV.Steps
                 _loggerMock.Object,
                 CancellationToken.None);
 
-            _shellMock.Verify(s => s.CopyContentAsync(
+            // VPN configs embed client certs + private keys: the copy MUST go
+            // through CopySecretAsync (root:root 0600 on the guest), never the
+            // world-readable 644 CopyContentAsync path.
+            _shellMock.Verify(s => s.CopySecretAsync(
                 "client config",
                 "/etc/openvpn/client/lab.ovpn",
                 It.IsAny<CancellationToken>()), Times.Once);
+            _shellMock.Verify(s => s.CopyContentAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never,
+                "VPN key material must not be copied with the 644 contract");
 
             _shellMock.Verify(s => s.RunCommandAsync(
                 "sudo nmcli connection import type openvpn file '/etc/openvpn/client/lab.ovpn' 2>&1",
@@ -145,10 +151,14 @@ namespace VMCreate.Tests.HyperV.Steps
                     _loggerMock.Object,
                     CancellationToken.None);
 
-                _shellMock.Verify(s => s.CopyFileAsync(
-                    tempFile,
+                // Manual .ovpn embeds keys too: secret copy, not the 644 file path.
+                _shellMock.Verify(s => s.CopySecretAsync(
+                    "manual config",
                     "/etc/openvpn/client/manual.ovpn",
                     It.IsAny<CancellationToken>()), Times.Once);
+                _shellMock.Verify(s => s.CopyFileAsync(
+                    It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never,
+                    "manual .ovpn must not land with the 644 contract");
 
                 _shellMock.Verify(s => s.RunCommandAsync(
                     "sudo nmcli connection import type openvpn file '/etc/openvpn/client/manual.ovpn' 2>&1",

@@ -35,6 +35,16 @@ namespace VMCreate
         Task CopyContentAsync(string content, string guestPath, CancellationToken ct);
 
         /// <summary>
+        /// Writes SECRET string content (private keys, VPN configs embedding
+        /// client certificates, credentials) to a file on the guest. The
+        /// result is owned by root:root with mode 0600 — never
+        /// world-readable, and not group/other-readable by any other local
+        /// account. Implementations must not place the material in
+        /// intermediate world-readable locations along the way.
+        /// </summary>
+        Task CopySecretAsync(string content, string guestPath, CancellationToken ct);
+
+        /// <summary>
         /// Copies a host file to the guest (creates parent directories, sets 644).
         /// </summary>
         Task CopyFileAsync(string hostPath, string guestPath, CancellationToken ct);

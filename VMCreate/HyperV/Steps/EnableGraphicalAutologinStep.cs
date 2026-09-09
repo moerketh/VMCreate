@@ -73,10 +73,15 @@ namespace VMCreate
             string script = ScriptResourceLoader.Load("enable_autologin.sh")
                 .Replace("__AUTOLOGIN_USER__", autologinUser);
 
-            await shell.CopyContentAsync(script, "/tmp/enable_autologin.sh", ct);
+            // /tmp hardening: unpredictable path (host-generated GUID) +
+            // root:0700 before execution — see InstallLamcoRdpStep for the
+            // TOCTOU rationale. Predictable paths in a world-writable
+            // directory are root code execution for a local attacker.
+            string guestScript = $"/tmp/enable_autologin_{Guid.NewGuid():N}.sh";
+            await shell.CopyContentAsync(script, guestScript, ct);
 
             string result = await shell.RunCommandAsync(
-                "sudo bash /tmp/enable_autologin.sh && sudo rm -f /tmp/enable_autologin.sh", ct);
+                $"sudo chown root:root {guestScript} && sudo chmod 0700 {guestScript} && sudo bash {guestScript} && sudo rm -f {guestScript}", ct);
 
             // Result contract: AUTOLOGIN_RESULT=ok|degraded on the last line.
             // Hard failures exit non-zero (RunCommandAsync throws); a missing

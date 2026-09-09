@@ -177,11 +177,14 @@ namespace VMCreate.Tests.HyperV.Steps
                     content.Contains("/etc/os-release") &&
                     content.Contains("config.toml") &&
                     content.Contains("lamco-rdp-server.service")),
-                "/tmp/install_lamco.sh",
+                It.Is<string>(p => p.StartsWith("/tmp/install_lamco_") && p.EndsWith(".sh")),
                 It.IsAny<CancellationToken>()), Times.Once);
 
             _shell.Verify(s => s.RunCommandAsync(
-                It.Is<string>(cmd => cmd.Contains("sudo bash /tmp/install_lamco.sh") && cmd.Contains("sudo rm -f /tmp/install_lamco.sh")),
+                It.Is<string>(cmd => cmd.Contains("sudo chown root:root /tmp/install_lamco_")
+                                     && cmd.Contains("sudo chmod 0700 /tmp/install_lamco_")
+                                     && cmd.Contains("sudo bash /tmp/install_lamco_")
+                                     && cmd.Contains("sudo rm -f /tmp/install_lamco_")),
                 It.IsAny<TimeSpan>(),
                 It.IsAny<CancellationToken>()), Times.Once);
         }
@@ -198,8 +201,15 @@ namespace VMCreate.Tests.HyperV.Steps
             await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
 
             _shell.Verify(s => s.RunCommandAsync(
-                It.Is<string>(cmd => cmd.Contains("sudo bash /tmp/install_lamco.sh && sudo rm -f /tmp/install_lamco.sh")
-                                     && !cmd.Contains(".sh; sudo")),
+                It.Is<string>(cmd =>
+                    cmd.Contains("sudo chown root:root /tmp/install_lamco_")
+                    && cmd.Contains("sudo bash /tmp/install_lamco_")
+                    // && (not ;) between every link so a script failure (exit
+                    // non-zero) aborts the chain and surfaces as a deployment
+                    // failure instead of being masked by the later rm.
+                    && cmd.Contains("&& sudo bash /tmp/install_lamco_")
+                    && cmd.Contains("&& sudo rm -f /tmp/install_lamco_")
+                    && !cmd.Contains(".sh; sudo")),
                 It.Is<TimeSpan>(t => t >= TimeSpan.FromMinutes(15)),
                 It.IsAny<CancellationToken>()), Times.Once);
         }

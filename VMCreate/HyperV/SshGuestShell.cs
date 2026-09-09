@@ -148,8 +148,19 @@ namespace VMCreate
         public async Task CopyContentAsync(string content, string guestPath, CancellationToken ct)
         {
             byte[] bytes = Encoding.UTF8.GetBytes(content);
-            await CopyBase64ToGuestAsync(Convert.ToBase64String(bytes), guestPath, ct);
+            await CopyBase64ToGuestAsync(Convert.ToBase64String(bytes), guestPath, "644", ct);
             _logger.LogInformation("Wrote content -> {GuestPath} on VM {VMName}", guestPath, VmName);
+        }
+
+        /// <inheritdoc/>
+        public async Task CopySecretAsync(string content, string guestPath, CancellationToken ct)
+        {
+            // Key material (VPN configs embedding client certs/private keys,
+            // TLS keys, credentials): root:root 0600. The old 644-for-everything
+            // contract left VPN private keys world-readable in /etc/openvpn/client/.
+            byte[] bytes = Encoding.UTF8.GetBytes(content);
+            await CopyBase64ToGuestAsync(Convert.ToBase64String(bytes), guestPath, "600", ct);
+            _logger.LogInformation("Wrote secret content -> {GuestPath} on VM {VMName} (root:root 0600)", guestPath, VmName);
         }
 
         /// <inheritdoc/>
@@ -159,7 +170,7 @@ namespace VMCreate
                 throw new FileNotFoundException($"Host file not found: {hostPath}");
 
             byte[] content = await File.ReadAllBytesAsync(hostPath, ct);
-            await CopyBase64ToGuestAsync(Convert.ToBase64String(content), guestPath, ct);
+            await CopyBase64ToGuestAsync(Convert.ToBase64String(content), guestPath, "644", ct);
             _logger.LogInformation("Copied {HostPath} -> {GuestPath} on VM {VMName}", hostPath, guestPath, VmName);
         }
 
@@ -171,44 +182,88 @@ namespace VMCreate
         /// ever ran. Chunking keeps every invocation small; the temp file makes
         /// the transfer atomic (decode only after all chunks landed).
         /// </summary>
-        private async Task CopyBase64ToGuestAsync(string base64, string guestPath, CancellationToken ct)
+        /// <remarks>
+        /// Idempotency: the append chunks (printf ... >>) are NOT retried
+        /// individually — a transport error after the write landed would
+        /// duplicate the chunk's data in the temp file on retry. The chunk
+        /// loop runs on the no-retry path; any transport failure restarts
+        /// the WHOLE copy from a fresh temp file, which is always safe.
+        /// </remarks>
+        private async Task CopyBase64ToGuestAsync(string base64, string guestPath, string chmodMode, CancellationToken ct)
         {
             string safePath = EscapeSingleQuotes(guestPath);
-            string tmpRemote = $"/tmp/vmcreate-copy-{Guid.NewGuid():N}.b64";
+            // Host-side dirname: the previous $@"sudo mkdir -p ""$(dirname
+            // '{safePath}')""..." embedded real double quotes in a verbatim
+            // string — ssh.exe's argv parser strips them, so the guest
+            // received an unquoted $(dirname '...') that would word-split on
+            // any path with spaces. Compute it here and single-quote it.
+            string guestDir = EscapeSingleQuotes(GuestParentDirectory(guestPath));
 
-            try
+            const int maxCopyAttempts = 3;
+            for (int attempt = 1; ; attempt++)
             {
-                int offset = 0;
-                bool first = true;
-                while (offset < base64.Length)
+                string tmpRemote = $"/tmp/vmcreate-copy-{Guid.NewGuid():N}.b64";
+                try
                 {
-                    int length = Math.Min(CopyChunkBase64Length, base64.Length - offset);
-                    string piece = base64.Substring(offset, length);
-                    string redirect = first ? ">" : ">>";
-                    string command = $"printf '%s' '{piece}' {redirect} '{tmpRemote}'";
-                    await RunCommandAsync(command, ct);
-                    offset += length;
-                    first = false;
+                    int offset = 0;
+                    bool first = true;
+                    while (offset < base64.Length)
+                    {
+                        int length = Math.Min(CopyChunkBase64Length, base64.Length - offset);
+                        string piece = base64.Substring(offset, length);
+                        string redirect = first ? ">" : ">>";
+                        string command = $"printf '%s' '{piece}' {redirect} '{tmpRemote}'";
+                        // No per-chunk retry (see remarks): the whole copy
+                        // restarts below on a transport error.
+                        await RunCommandInternalAsync(command, CommandTimeout, ct);
+                        offset += length;
+                        first = false;
+                    }
+
+                    // Empty payload: create an empty temp file so the decode yields
+                    // an empty target instead of failing on a missing file.
+                    if (first)
+                        await RunCommandInternalAsync($": > '{tmpRemote}'", CommandTimeout, ct);
+
+                    string decode = $@"
+                        sudo mkdir -p '{guestDir}'
+                        base64 -d '{tmpRemote}' | sudo tee '{safePath}' > /dev/null
+                        sudo chmod {chmodMode} '{safePath}'
+                        sudo chown root:root '{safePath}'
+                    ";
+                    await RunCommandInternalAsync(decode, CommandTimeout, ct);
+                    return;
                 }
-
-                // Empty payload: create an empty temp file so the decode yields
-                // an empty target instead of failing on a missing file.
-                if (first)
-                    await RunCommandAsync($": > '{tmpRemote}'", ct);
-
-                string decode = $@"
-                    sudo mkdir -p ""$(dirname '{safePath}')""
-                    base64 -d '{tmpRemote}' | sudo tee '{safePath}' > /dev/null
-                    sudo chmod 644 '{safePath}'
-                ";
-                await RunCommandAsync(decode, ct);
+                catch (Exception ex) when (attempt < maxCopyAttempts && IsSshTransportError(ex))
+                {
+                    _logger.LogWarning("SSH transport error during copy to {GuestPath} (attempt {Attempt}/{Max}); restarting the transfer from scratch: {Message}",
+                        guestPath, attempt, maxCopyAttempts, ex.Message);
+                    _vmIpAddress = null;
+                    await Task.Delay(RetryDelay, ct);
+                    _vmIpAddress = await DiscoverVmIpAsync(ct);
+                    try { await RunCommandInternalAsync($"rm -f '{tmpRemote}'", CommandTimeout, ct); }
+                    catch { /* best effort — the GUID-named temp leaks harmlessly */ }
+                }
+                finally
+                {
+                    // Best-effort temp cleanup; failures are harmless in /tmp.
+                    try { await RunCommandInternalAsync($"rm -f '{tmpRemote}'", CommandTimeout, ct); }
+                    catch { _logger.LogDebug("Temp copy file {Path} left behind on VM {VMName}", tmpRemote, VmName); }
+                }
             }
-            finally
-            {
-                // Best-effort temp cleanup; failures are harmless in /tmp.
-                try { await RunCommandAsync($"rm -f '{tmpRemote}'", ct); }
-                catch { _logger.LogDebug("Temp copy file {Path} left behind on VM {VMName}", tmpRemote, VmName); }
-            }
+        }
+
+        /// <summary>
+        /// POSIX dirname for guest paths, computed host-side (no $(dirname)
+        /// substitution on the guest: quoting through ssh argv parsing is
+        /// fragile and space-containing paths word-split).
+        /// </summary>
+        private static string GuestParentDirectory(string guestPath)
+        {
+            int idx = guestPath.LastIndexOf('/');
+            if (idx < 0) return ".";
+            if (idx == 0) return "/";
+            return guestPath.Substring(0, idx);
         }
 
         // ── Private helpers ──────────────────────────────────────────────
@@ -299,11 +354,18 @@ namespace VMCreate
                     "Transfer the payload as a file via CopyContentAsync/CopyFileAsync (chunked) and execute it on the guest instead.");
             }
 
-            _logger.LogDebug("SSH exec: ssh {Args}", args.ToString());
+            // NOTE: never log the full ssh argument list. The remote command
+            // can embed guest payload (CopyContentAsync chunks are base64
+            // script/secret material on the command line), and the plaintext
+            // rolling log lives in %TEMP%. Log the transport options only.
+            _logger.LogDebug("SSH exec on VM {VMName} ({Length} chars)", VmName, linuxCommand.Length);
 
             var psi = new ProcessStartInfo
             {
-                FileName = "ssh",
+                // Absolute path: a bare "ssh" resolves via PATH (hijackable;
+                // also absent from service contexts). Windows ships OpenSSH
+                // exactly here.
+                FileName = Environment.ExpandEnvironmentVariables(@"%SystemRoot%\System32\OpenSSH\ssh.exe"),
                 Arguments = args.ToString(),
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,

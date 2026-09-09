@@ -82,11 +82,14 @@ namespace VMCreate.Tests.HyperV.Steps
                     content.Contains("AutomaticLogin") &&
                     content.Contains("enable-linger") &&
                     content.Contains("99-lamco-autologin")),
-                "/tmp/enable_autologin.sh",
+                It.Is<string>(p => p.StartsWith("/tmp/enable_autologin_") && p.EndsWith(".sh")),
                 It.IsAny<CancellationToken>()), Times.Once);
 
             _shell.Verify(s => s.RunCommandAsync(
-                It.Is<string>(cmd => cmd.Contains("sudo bash /tmp/enable_autologin.sh") && cmd.Contains("sudo rm -f /tmp/enable_autologin.sh")),
+                It.Is<string>(cmd => cmd.Contains("sudo chown root:root /tmp/enable_autologin_")
+                                     && cmd.Contains("sudo chmod 0700 /tmp/enable_autologin_")
+                                     && cmd.Contains("sudo bash /tmp/enable_autologin_")
+                                     && cmd.Contains("sudo rm -f /tmp/enable_autologin_")),
                 It.IsAny<CancellationToken>()), Times.Once);
         }
 
@@ -99,7 +102,7 @@ namespace VMCreate.Tests.HyperV.Steps
 
             _shell.Verify(s => s.CopyContentAsync(
                 It.Is<string>(content => content.Contains("USER=\"ubuntu\"")),
-                "/tmp/enable_autologin.sh",
+                It.Is<string>(p => p.StartsWith("/tmp/enable_autologin_") && p.EndsWith(".sh")),
                 It.IsAny<CancellationToken>()), Times.Once);
         }
 

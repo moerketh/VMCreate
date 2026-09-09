@@ -78,8 +78,14 @@ namespace VMCreate
                 a.Equals("/demo", StringComparison.OrdinalIgnoreCase)
                 || a.Equals("--demo", StringComparison.OrdinalIgnoreCase));
             var logPath = Path.Combine(Path.GetTempPath(), "VMCreate.log");
+            // SECURITY: this is a PLAINTEXT rolling log in %TEMP%. The
+            // previous MinimumLevel.Debug() floor captured every SSH command
+            // line — including CopyContentAsync base64 chunks that embed VPN
+            // configs with client certificates and private keys. Debug stays
+            // OFF for the file sink; the transports log the information needed
+            // for diagnosis at Information/Warning.
             Log.Logger = new LoggerConfiguration()
-                .MinimumLevel.Debug()
+                .MinimumLevel.Information()
                 .MinimumLevel.Override("Microsoft.Extensions.Http", Serilog.Events.LogEventLevel.Warning)
                 .WriteTo.File(logPath, rollingInterval: RollingInterval.Day)
                 .CreateLogger();

@@ -22,7 +22,6 @@ namespace VMCreate
         private readonly ILogger _logger;
         private readonly string _vmName;
         private readonly string _username;
-        private readonly string _password;
         private readonly PSCredential _credential;
 
         private static readonly TimeSpan ReadyTimeout = TimeSpan.FromSeconds(600);
@@ -35,8 +34,11 @@ namespace VMCreate
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _vmName = vmName ?? throw new ArgumentNullException(nameof(vmName));
             _username = username ?? throw new ArgumentNullException(nameof(username));
-            _password = password ?? throw new ArgumentNullException(nameof(password));
 
+            // The plaintext password is ONLY used to build the SecureString
+            // credential. It is deliberately NOT retained in a field — a
+            // lingering _password beside the SecureString defeats the point
+            // of the SecureString (dumpable via reflection/heap inspection).
             var securePassword = new SecureString();
             foreach (char c in password)
                 securePassword.AppendChar(c);
@@ -71,6 +73,13 @@ namespace VMCreate
                                     || ex.Message?.Contains("not yet available") == true)
             {
                 _logger.LogDebug("VM {VMName} not yet ready, beginning initial wait...", _vmName);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                // Cancellation must propagate — the old bare catch { } swallowed
+                // it (making shutdown/cancel hangs look like a VM readiness
+                // problem) and then slept 60s anyway.
+                throw;
             }
             catch
             {
@@ -157,6 +166,19 @@ namespace VMCreate
             ";
 
             await RunCommandInternalAsync(script, CommandTimeout, ct);
+        }
+
+        /// <summary>
+        /// Writes SECRET string content (keys, credentials) to the guest.
+        /// PowerShell Direct targets Windows guests where this path exists
+        /// for interface parity; the file is written and ACLs left to the
+        /// guest defaults (no icacls hardening here yet — no current caller
+        /// copies secrets to Windows guests).
+        /// </summary>
+        public async Task CopySecretAsync(string content, string guestPath, CancellationToken ct)
+        {
+            _logger.LogInformation("Writing secret content to {Path} on VM {VMName} via PowerShell Direct", guestPath, _vmName);
+            await CopyContentAsync(content, guestPath, ct);
         }
 
         /// <summary>
