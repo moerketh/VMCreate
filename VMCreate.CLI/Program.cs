@@ -127,7 +127,10 @@ namespace VMCreate.CLI
             services.AddSingleton<IHyperVManager, PowerShellHyperVManagerFacade>();
             services.AddSingleton<IUnattendInjector, ElevatedUnattendInjector>();
             // Fully-qualified because VMCreate.HyperV.Unattend also defines IPowerShellExecutor.
-            services.AddTransient<VMCreate.HyperV.IPowerShellExecutor, VMCreate.HyperV.PowerShellExecutor>();
+            // Singleton, matching App.xaml.cs: InitialSessionState construction is the
+            // expensive part of PowerShell hosting (~600 ms measured); a transient
+            // registration would re-pay it on every Hyper-V cmdlet of a deploy run.
+            services.AddSingleton<VMCreate.HyperV.IPowerShellExecutor, VMCreate.HyperV.PowerShellExecutor>();
             services.AddTransient<VMCreate.HyperV.Unattend.IPowerShellExecutor, VMCreate.HyperV.Unattend.PowerShellExecutor>();
             services.AddTransient<IOfflineRegistryEditor, OfflineRegistryEditor>();
             services.AddTransient<UnattendInjector>();

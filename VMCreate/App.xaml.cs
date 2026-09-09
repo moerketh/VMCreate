@@ -5,6 +5,7 @@ using CreateVM.HyperV.vmbus;
 using Serilog;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -24,6 +25,24 @@ namespace VMCreate
 
         /// <summary>When true, VMConnect is launched automatically after the VM starts.</summary>
         internal static bool DemoMode { get; private set; }
+
+        // ── Startup timing (permanent, always-on) ─────────────────────────
+        // Started before any DI construction; milestones are logged at
+        // Information so a normal run's log answers "what took so long"
+        // without a profiler. ElapsedMilliseconds is cheap; the stopwatch
+        // runs for the life of the process. See RecordStartup for details.
+        private static readonly Stopwatch _startupStopwatch = Stopwatch.StartNew();
+
+        /// <summary>
+        /// Logs a startup milestone at Information: elapsed ms since process
+        /// start (first static access) plus the marker name. Called from the
+        /// startup path (App + MainWindow first frame).
+        /// </summary>
+        internal static void RecordStartup(string milestone)
+        {
+            Log.Information("Startup: {ElapsedMs} ms — {Milestone}",
+                _startupStopwatch.ElapsedMilliseconds, milestone);
+        }
 
         private async void App_OnStartup(object sender, StartupEventArgs e)
         {
@@ -99,6 +118,7 @@ namespace VMCreate
                 .CreateLogger();
 
             Log.Information("VMCreate {Version} starting", ProductInfo.InformationalVersion);
+            RecordStartup("process-entry"); // the stopwatch itself starts in the static ctor, just before this
 
             var services = new ServiceCollection();
             services.AddLogging(loggingBuilder =>
@@ -238,9 +258,11 @@ namespace VMCreate
             services.AddSingleton<MainWindow>();
 
             _serviceProvider = services.BuildServiceProvider();
+            RecordStartup("di-built");
 
             var mainWindow = _serviceProvider.GetRequiredService<MainWindow>();
             mainWindow.Show();
+            RecordStartup("window-shown");
         }
 
         protected override void OnExit(ExitEventArgs e)

@@ -51,6 +51,7 @@ namespace VMCreate
             SystemThemeWatcher.Watch(this);
 
             Loaded += MyWindow_LoadedAsync;
+            ContentRendered += (_, __) => App.RecordStartup("first-frame");
 
             // Sync the theme toggle icon with the current theme at startup
             SyncThemeIcon();

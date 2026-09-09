@@ -56,6 +56,7 @@ jobs:
           -c Release
           -r win-x64
           --self-contained
+          -p:DebugType=none -p:DebugSymbols=false
           -o publish
 
       - name: Publish CLI self-contained executable
@@ -64,6 +65,7 @@ jobs:
           -c Release
           -r win-x64
           --self-contained
+          -p:DebugType=none -p:DebugSymbols=false
           -o publish-cli
 
       - name: Package CLI for distribution
