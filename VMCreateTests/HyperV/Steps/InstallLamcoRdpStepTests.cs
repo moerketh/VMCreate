@@ -142,13 +142,15 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
-        public async Task ExecuteAsync_ProvisionsTransparentCursorTheme_ForKde()
+        public async Task ExecuteAsync_NoTransparentCursorTheme_ForkOwnsPointerHandling()
         {
-            // xrdp-parity: the guest cursor must never be composited into the
-            // captured video (KWin bakes it in on Hyper-V's software cursor
-            // plane, creating a lagging "ghost" arrow behind the client-side
-            // pointer). The install script must generate + install the
-            // transparent XCursor theme and activate it for the autologin user.
+            // The fork (>= v1.4.5-hyperv.2) deleted cursor_theme.rs: pointer
+            // handling is entirely the transparent color-pointer shape PDU +
+            // Runtime Painted auto-selection (config.mode = metadata qualifies
+            // — verified against the fork's observe_metadata_cursors). The
+            // guest-side transparent XCursor theme, kcminputrc toggles, and
+            // ExecStopPost restore targeted that deleted mechanism and must
+            // NOT be provisioned anymore.
             string? captured = null;
             _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                   .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
@@ -157,30 +159,39 @@ namespace VMCreate.Tests.HyperV.Steps
             await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
 
             Assert.IsNotNull(captured);
-            // Generated + installed under the system icon path (KDE-gated by kwriteconfig presence)
-            StringAssert.Contains(captured, "kwriteconfig6", "KDE detection gate");
-            StringAssert.Contains(captured, "/usr/share/icons/transparent", "theme install target");
-            StringAssert.Contains(captured, "0x72756358", "verified XCursor magic");
-            StringAssert.Contains(captured, "0x00010000", "verified XCursor version");
-            // Activated for the autologin user: transparent theme INSTALLED but
-            // console stays on breeze_cursors; lamco toggles per RDP session
-            // (connect = transparent for clean stream, disconnect = restore).
-            StringAssert.Contains(captured, "cursorTheme breeze_cursors", "console stays on visible theme");
-            StringAssert.DoesNotMatch(captured, new System.Text.RegularExpressions.Regex("XCURSOR_THEME\\s*=\\s*transparent"),
-                "no forced transparent env (lamco manages live state)");
-            StringAssert.Contains(captured, "shakecursorEnabled false", "shakecursor plugin key");
-            StringAssert.Contains(captured, "ExecStopPost", "crash-safety cursor restore in unit");
-            StringAssert.Contains(captured, "plasma-apply-cursortheme breeze_cursors", "ExecStopPost restores visible theme");
-            // The generator shadows EVERY name from installed themes
-            // (the desktop background uses the "default" role, which is
-            // absent from the hardcoded fallback list; XCursor inheritance
-            // would make the wallpaper show a visible breeze arrow while
-            // windows are clean).
-            StringAssert.Contains(captured, "breeze_cursors/cursors", "scan source theme dir");
-            StringAssert.Contains(captured, "names.update(os.listdir(theme_dir))", "dynamic name shadowing");
-            // The names list must include the core cursor roles
-            StringAssert.Contains(captured, "left_ptr", "arrow cursor role");
-            StringAssert.Contains(captured, "watch", "busy cursor role");
+            Assert.IsFalse(captured.Contains("/usr/share/icons/transparent\n") && captured.Contains("cp -r"),
+                "no transparent theme generation/install");
+            Assert.IsFalse(captured.Contains("cursorTheme breeze_cursors"),
+                "no kcminputrc cursor theme preset");
+            Assert.IsFalse(captured.Contains("plasma-apply-cursortheme"),
+                "no live cursor theme application");
+            Assert.IsFalse(System.Text.RegularExpressions.Regex.IsMatch(captured, @"^ExecStopPost=", System.Text.RegularExpressions.RegexOptions.Multiline),
+                "no ExecStopPost cursor restore directive in the unit (the mechanism is deleted)");
+            Assert.IsFalse(captured.Contains("shakecursorEnabled"),
+                "no shakecursor toggling (tied to the retired transparent theme)");
+            // The config must keep cursor.mode = "metadata": it is the
+            // precondition for the fork's Runtime Painted auto-flip on
+            // metadata-less capture paths (kwin-virtual).
+            StringAssert.Contains(captured, "mode = \"metadata\"",
+                "cursor mode stays metadata so the fork's Painted auto-flip can engage");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_CleansUpRetiredTransparentThemeArtifacts()
+        {
+            // VMs deployed before the retirement carry /usr/share/icons/
+            // transparent from the old provisioning; re-running the install
+            // must remove it (it can only cause confusion now).
+            string? captured = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("done");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(captured);
+            StringAssert.Contains(captured, "rm -rf /usr/share/icons/transparent",
+                "retired theme artifacts are cleaned up");
         }
 
         [TestMethod]
@@ -208,11 +219,10 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
-        public async Task ExecuteAsync_ThemeProvision_IsIdempotentSafe_BashShaped()
+        public async Task ExecuteAsync_RetiredThemeCleanup_IsIdempotentSafe()
         {
-            // The script must not fail if the theme already exists: it uses
-            // rm -rf before cp -r (not a bare cp that errors on existing dirs)
-            // and guards the python generator with || warning rather than set -e death.
+            // The retired-theme cleanup must not fail when the directory is
+            // absent: rm -rf guarded by [ -d ], not a bare cp/rm sequence.
             string? captured = null;
             _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                   .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
@@ -221,8 +231,8 @@ namespace VMCreate.Tests.HyperV.Steps
             await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
 
             Assert.IsNotNull(captured);
-            StringAssert.Contains(captured, "rm -rf /usr/share/icons/transparent");
-            StringAssert.Contains(captured, "rm -rf /tmp/lamco-transparent-theme");
+            StringAssert.Contains(captured, "if [ -d /usr/share/icons/transparent ]; then",
+                "cleanup is guarded (absent dir must not fail the install)");
         }
 
         [TestMethod]

@@ -443,10 +443,11 @@ ConditionEnvironment=WAYLAND_DISPLAY
 [Service]
 Type=simple
 ExecStart=/usr/bin/lamco-rdp-server --config /etc/lamco-rdp-server/config.toml
-# Safety net: if the service dies while the guest cursor is transparent
-# (RDP session active), restore the visible console cursor on the way
-# down so the console is never left pointerless after a crash.
-ExecStopPost=bash -c 'kwriteconfig6 --file kcminputrc --group Mouse --key cursorTheme breeze_cursors && DISPLAY=:0 WAYLAND_DISPLAY=wayland-0 plasma-apply-cursortheme breeze_cursors || true'
+# Cursor lifecycle note: the fork (>= v1.4.5-hyperv.2) owns pointer handling
+# entirely via the transparent color-pointer shape PDU and Runtime Painted
+# auto-selection — it no longer touches kcminputrc or XCursor themes
+# (cursor_theme.rs was deleted). No ExecStopPost cursor restore exists or
+# is needed.
 Restart=on-failure
 RestartSec=5
 Environment=RUST_LOG=info
@@ -595,106 +596,17 @@ MONITORS_EOF
     # is not used; remove artifacts older deployments may have left.
     rm -f /etc/modules-load.d/vgem.conf /etc/udev/rules.d/99-vgem-render.rules 2>/dev/null || true
 
-    # -- Transparent cursor theme (KDE) ------------------------------------
-    # KWin composites the cursor sprite into the framebuffer on Hyper-V
-    # (hyperv_drm has no GPU cursor plane), which bakes the guest cursor
-    # into the RDP video stream a frame or two behind the client-side
-    # pointer — a lagging ghost arrow. Installing a fully transparent
-    # XCursor theme removes it from the capture; the pointer shape PDU
-    # (lamco cursor_pdu.rs reads breeze_cursors directly, not the active
-    # theme) still delivers the real arrow to mstsc, so exactly one
-    # client-rendered zero-lag pointer remains (xrdp parity).
-    # XCursor binary layout per the genuine breeze file: magic 0x72756358
-    # LE, version 0x00010000, 36-byte image chunks.
-    # KDE/KWin only — GNOME/mutter deferred pending Hidden-mode
-    # verification.
-    if command -v kwriteconfig6 >/dev/null 2>&1 || command -v kwriteconfig5 >/dev/null 2>&1; then
-        KW=kwriteconfig6
-        command -v kwriteconfig6 >/dev/null 2>&1 || KW=kwriteconfig5
-        if command -v python3 >/dev/null 2>&1; then
-            python3 - << 'PYEOF' || echo "WARNING: transparent cursor theme generation failed."
-import os, struct
-
-work = '/tmp/lamco-transparent-theme'
-d = os.path.join(work, 'transparent', 'cursors')
-os.makedirs(d, exist_ok=True)
-
-def make_xcursor():
-    # 1x1 fully transparent image, nominal size 24 (libXcursor picks nearest)
-    HEADER = 16; TOC = 12; CHUNK = 36; PIXELS = 4
-    SUBTYPE = 24
-    pos = HEADER + TOC
-    header = struct.pack('<IIII', 0x72756358, HEADER, 0x00010000, 1)
-    toc = struct.pack('<III', 0xFFFD0002, SUBTYPE, pos)
-    chunk = struct.pack('<IIIIIIIII', CHUNK, 0xFFFD0002, SUBTYPE, 1, 1, 1, 0, 0, 1)
-    data = header + toc + chunk + b'\x00\x00\x00\x00'
-    assert len(data) == HEADER + TOC + CHUNK + PIXELS, len(data)
-    return data
-
-blob = make_xcursor()
-fallback_names = [
-    'left_ptr', 'right_ptr', 'cross', 'circle', 'xxx_authentication',
-    'wait', 'left_ptr_watch', 'sb_h_double_arrow', 'sb_v_double_arrow',
-    'bottom_left_corner', 'bottom_right_corner', 'top_left_corner',
-    'top_right_corner', 'grab', 'grabbing', 'hand', 'hand2', 'pointer',
-    'question_arrow', 'text', 'watch', 'half-busy', 'openhand',
-    'closedhand', 'fcfz', 'left_side', 'right_side', 'top_side',
-    'bottom_side', 'center_ptr', 'crosshair', 'dot', 'dot_box_mask',
-    'icon', 'menu', 'pencil', 'pirate', 'plus', 'trek', 'ul_angle',
-    'ur_angle', 'll_angle', 'lr_angle', 'move', 'all-scroll',
-    'vertical-text', 'context-menu', 'copy', 'progress', 'not-allowed',
-    'no-drop', 'col-resize', 'row-resize', 'nesw-resize', 'nwse-resize',
-    'ew-resize', 'ns-resize', 'cell', 'color-picker', 'zoom-in',
-    'zoom-out',
-]
-# CRITICAL: shadow EVERY cursor name of an installed real theme, not just
-# the list above. XCursor themes INHERIT the parent theme for any name
-# they lack - and Plasma's desktop background uses the "default" role,
-# which is NOT in the fallback list. Shadowing only the list leaves the
-# desktop background with a visible lagging breeze arrow while windows
-# are clean.
-names = set(fallback_names)
-for theme_dir in ('/usr/share/icons/breeze_cursors/cursors',
-                  '/usr/share/icons/Adwaita/cursors',
-                  '/usr/share/icons/whiteglass/cursors',
-                  '/usr/share/icons/default/cursors'):
-    try:
-        names.update(os.listdir(theme_dir))
-    except OSError:
-        continue
-for n in sorted(names):
-    with open(os.path.join(d, n), 'wb') as f:
-        f.write(blob)
-with open(os.path.join(work, 'transparent', 'index.theme'), 'w') as f:
-    f.write('[Icon Theme]\nInherits=breeze_cursors\n')
-print('generated', len(names), 'transparent cursor files')
-PYEOF
-            if [ -d /tmp/lamco-transparent-theme/transparent ]; then
-                rm -rf /usr/share/icons/transparent
-                cp -r /tmp/lamco-transparent-theme/transparent /usr/share/icons/transparent
-                rm -rf /tmp/lamco-transparent-theme
-                echo "Installed transparent cursor theme to /usr/share/icons/transparent."
-            fi
-        else
-            echo "python3 not found - skipping transparent cursor theme install."
-        fi
-        # Activate for the autologin user — SESSION-SCOPED from here on.
-        # The lamco server makes the cursor transparent only while an RDP
-        # client is connected and restores it on disconnect + ExecStopPost
-        # (see cursor_theme.rs in the lamco fork; needs the transparent
-        # theme INSTALLED but not active). Provisioning therefore leaves
-        # kcminputrc on a VISIBLE theme (breeze_cursors) so the console
-        # always has a pointer at boot — xrdp-parity console behavior.
-        # GOTCHA: plasma-apply-cursortheme only swaps the live sprite when
-        # config differs — lamco's apply uses the breeze_cursors→transparent
-        # toggle to force a real reload.
-        sudo -u "$AUTOLOGIN_USER" "$KW" --file kcminputrc --group Mouse --key cursorTheme breeze_cursors 2>/dev/null || true
-        # Disable the Shake Cursor effect: pointless compositing churn on
-        # an invisible sprite, and wiggle-scaling was the visual tell of
-        # the wallpaper ghost. Runtime-unloaded by lamco per session.
-        sudo -u "$AUTOLOGIN_USER" "$KW" --file kwinrc --group Plugins --key shakecursorEnabled false 2>/dev/null || true
-        sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") DISPLAY=:0 WAYLAND_DISPLAY=wayland-0 qdbus6 org.kde.KWin /KWin reconfigure 2>/dev/null || true
-        echo "Cursor setup: transparent theme installed, console on breeze_cursors (lamco toggles per RDP session)."
+    # -- Retired: transparent XCursor theme provisioning --------------------
+    # The fork (>= v1.4.5-hyperv.2) deleted cursor_theme.rs: pointer handling
+    # is now entirely the transparent color-pointer shape PDU + Runtime
+    # Painted auto-selection (a config.mode of metadata/predictive flips to
+    # Painted after 5 metadata-absent frames). The old provisioning here
+    # (generate a transparent XCursor theme into /usr/share/icons, preset
+    # kcminputrc, disable shakecursor, ExecStopPost restore) targeted that
+    # deleted mechanism and is dead code. Clean up artifacts left on VMs
+    # deployed before the retirement:
+    if [ -d /usr/share/icons/transparent ]; then
+        rm -rf /usr/share/icons/transparent
     fi
 
     # -- Idle-lock suppression (KDE) ----------------------------------------
@@ -843,6 +755,7 @@ systemctl restart systemd-journald 2>/dev/null || true
 echo "Raised journald rate limit (framebuffer spam must not drown session logs)."
 
 echo "=== Lamco RDP Server install complete ==="
-echo "NOTE: After first graphical login, run 'lamco-rdp-server --grant-permission'"
-echo "      and click Allow to authorize screen sharing (one-time, interactive)."
+# The one-time Portal consent is automated: lamco-grant.service runs
+# --grant-permission at first graphical-session start, so the dialog appears
+# on the VM console exactly once. No manual step.
 exit 0
