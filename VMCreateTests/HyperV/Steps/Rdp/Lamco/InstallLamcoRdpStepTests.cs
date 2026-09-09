@@ -342,8 +342,19 @@ namespace VMCreate.Tests.HyperV.Steps
                 "fork deb sha256 pinned — whoever can push a release asset must not get root on every VM");
             StringAssert.Contains(captured, "sha256sum \"$FORK_DEB_TMP\"",
                 "digest verified before dpkg -i");
-            StringAssert.Contains(captured, "grep -aq \"$LAMCO_FORK_DEB_VERSION\"",
-                "success check greps the fork marker, not the bare version (a partial install leaving stock 1.4.5 must fail)");
+            // Fork identity comes from the dpkg database: the -hyperv2 marker
+            // lives in the deb's Package Version field, NOT in the binary.
+            // Fork policy pins Cargo.toml at the upstream base version, so the
+            // binary's --version prints bare 1.4.5 forever (verified on the
+            // pinned asset). A binary-grep for the marker can never pass.
+            StringAssert.Contains(captured, "dpkg-query -W -f='${Version}' lamco-rdp-server",
+                "fork identity is read from the dpkg database");
+            StringAssert.Contains(captured, "[ \"$installed_pkg_ver\" != \"$LAMCO_FORK_DEB_VERSION\" ]",
+                "installed package version must equal the pinned fork version exactly");
+            StringAssert.Contains(captured, "[ \"$installed_status\" != \"install ok installed\" ]",
+                "package must be in 'install ok installed' state — a half-configured or removed package fails");
+            StringAssert.Contains(captured, "grep -aq \" $LAMCO_FORK_CRATE_VERSION\"",
+                "binary payload sanity gate: --version must report the pinned crate generation");
             // No fallback paths may exist
             Assert.IsFalse(captured.Contains("cargo build"), "no on-VM source build");
             Assert.IsFalse(captured.Contains("rustup"), "no curl|sh toolchain");
@@ -375,7 +386,9 @@ namespace VMCreate.Tests.HyperV.Steps
             StringAssert.Contains(captured, "ERROR: apt-get dependency resolution failed after dpkg -i (dpkg rc=$dpkg_rc)",
                 "dependency-fixup failure exits 1 with the dpkg rc preserved for attribution");
             StringAssert.Contains(captured, "does not report the fork marker",
-                "fork-marker check failure exits 1");
+                "dpkg fork-marker check failure exits 1");
+            StringAssert.Contains(captured, "does not run or does not",
+                "binary payload sanity check failure exits 1");
             Assert.IsFalse(captured.Contains("keeping the release binary"),
                 "no silent keep-stock-binary fallback");
         }

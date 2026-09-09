@@ -19,6 +19,12 @@ set -o pipefail
 LAMCO_FORK_REPO="moerketh/lamco-rdp-server"
 LAMCO_FORK_TAG="v1.4.5-hyperv.2"
 LAMCO_FORK_DEB_VERSION="1.4.5-hyperv2"
+# The fork's release policy: the Cargo.toml crate version stays at the
+# upstream base (1.4.5) and the deb's package version carries the lineage
+# suffix — i.e. the BINARY deliberately reports only the base version
+# (verified on the pinned asset: /usr/bin/lamco-rdp-server --version prints
+# "lamco-rdp-server 1.4.5"), while dpkg reports 1.4.5-hyperv2.
+LAMCO_FORK_CRATE_VERSION="1.4.5"
 LAMCO_FORK_DEB_SHA256="13f119f7c59435abc3be22072122b9adb350b4a60e724462faa9a3d67f2cfb7e"
 LAMCO_FORK_DEB_URL="https://github.com/${LAMCO_FORK_REPO}/releases/download/${LAMCO_FORK_TAG}/lamco-rdp-server_${LAMCO_FORK_DEB_VERSION}_amd64.deb"
 
@@ -81,11 +87,19 @@ esac
 
 # -- Install the pinned fork deb --------------------------------------------
 # The ONLY install path. Download, verify the sha256 against the pinned
-# digest, dpkg -i, then apt-get -f for any missing runtime deps. The success
-# check greps the FORK MARKER (1.4.5-hyperv2) — not the bare version — so a
-# partial install that leaves a stock upstream 1.4.5 binary in place cannot
-# pass. Any failure aborts the deployment loudly: no fallback exists, and
-# silently shipping a stock/broken binary is strictly worse than failing.
+# digest, dpkg -i, then apt-get -f for any missing runtime deps. Verification
+# is then layered, each layer proving a different thing:
+#   1. sha256 of the download — this EXACT fork artifact, not a re-pointed tag
+#   2. dpkg database — the fork marker (1.4.5-hyperv2) lives in the deb's
+#      Package Version field; the binary only reports the bare crate version
+#      per fork policy, so the marker MUST be read from dpkg, not from
+#      `--version`
+#   3. binary payload — the /usr/bin binary runs and reports the pinned crate
+#      version, so the registered deb actually delivered a working payload
+# A partial install that leaves a stock upstream 1.4.5 package or a broken
+# binary in place cannot pass. Any failure aborts the deployment loudly: no
+# fallback exists, and silently shipping a stock/broken binary is strictly
+# worse than failing.
 FORK_DEB_TMP="$(mktemp /tmp/lamco-fork.XXXXXX.deb)"
 fetch_url "$LAMCO_FORK_DEB_URL" "$FORK_DEB_TMP" \
     || { echo "ERROR: download failed for $LAMCO_FORK_DEB_URL" >&2; rm -f "$FORK_DEB_TMP"; exit 1; }
@@ -116,14 +130,31 @@ fi
 DEBIAN_FRONTEND=noninteractive apt-get install -f -y -q 2>&1 \
     || { echo "ERROR: apt-get dependency resolution failed after dpkg -i (dpkg rc=$dpkg_rc)." >&2; rm -f "$FORK_DEB_TMP"; exit 1; }
 rm -f "$FORK_DEB_TMP"
-if ! /usr/bin/lamco-rdp-server --version 2>/dev/null | grep -aq "$LAMCO_FORK_DEB_VERSION"; then
+
+# -- Verify: fork identity (dpkg) + payload sanity (binary) -----------------
+# FORK IDENTITY — authoritative: the dpkg database must report EXACTLY the
+# pinned fork deb version, in state 'install ok installed'. The marker
+# suffix (-hyperv2) exists only in the deb's Package Version field; grepping
+# the binary for it can NEVER pass on a genuine fork build (the fork pins the
+# Cargo crate version at the upstream base), which is precisely how the
+# previous binary-grep check broke this deployment.
+installed_status="$(dpkg-query -W -f='${Status}' lamco-rdp-server 2>/dev/null)"
+installed_pkg_ver="$(dpkg-query -W -f='${Version}' lamco-rdp-server 2>/dev/null)"
+if [ "$installed_pkg_ver" != "$LAMCO_FORK_DEB_VERSION" ] || [ "$installed_status" != "install ok installed" ]; then
     echo "ERROR: installed lamco-rdp-server does not report the fork marker" >&2
-    echo "       '$LAMCO_FORK_DEB_VERSION' (got: $(/usr/bin/lamco-rdp-server --version 2>/dev/null | head -1))." >&2
-    echo "       The deb may not have fully installed (e.g. broken deps leaving a" >&2
-    echo "       stock binary). Aborting — no silent degradation." >&2
+    echo "       '$LAMCO_FORK_DEB_VERSION' in the dpkg database (dpkg says: status='$installed_status', version='$installed_pkg_ver')." >&2
+    echo "       The deb may not have fully installed (e.g. broken deps, or the" >&2
+    echo "       apt-get fixup resolved by removing it). Aborting — no silent degradation." >&2
     exit 1
 fi
-echo "Installed fork deb lamco-rdp-server_${LAMCO_FORK_DEB_VERSION}_amd64 (sha256-verified, pipeline-built)."
+# PAYLOAD SANITY — the registered package must have delivered a binary that
+# executes and reports the pinned crate generation.
+if ! /usr/bin/lamco-rdp-server --version 2>/dev/null | grep -aq " $LAMCO_FORK_CRATE_VERSION"; then
+    echo "ERROR: installed binary /usr/bin/lamco-rdp-server does not run or does not" >&2
+    echo "       report crate version '$LAMCO_FORK_CRATE_VERSION' (got: $(/usr/bin/lamco-rdp-server --version 2>/dev/null | head -1))." >&2
+    exit 1
+fi
+echo "Installed fork deb lamco-rdp-server_${LAMCO_FORK_DEB_VERSION}_amd64 (dpkg reports '$installed_pkg_ver', binary reports '$LAMCO_FORK_CRATE_VERSION', sha256-verified download)."
 
 # -- Install Portal + PipeWire runtime deps if missing ----------------------
 # Branch by detected desktop so we pull the correct portal backend.
