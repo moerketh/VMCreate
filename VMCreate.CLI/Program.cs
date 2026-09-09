@@ -9,10 +9,13 @@ using System.CommandLine.Builder;
 using System.CommandLine.Parsing;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using VMCreate;
 using VMCreate.CLI.Commands;
 using VMCreate.Gallery;
+using VMCreate.HyperV.Unattend;
+using VMCreate.HyperV.VmCreation;
 using VMCreate.MediaHandlers;
 
 namespace VMCreate.CLI
@@ -34,16 +37,19 @@ namespace VMCreate.CLI
                     .WriteTo.File(injectLogPath, rollingInterval: RollingInterval.Day, shared: true)
                     .CreateLogger();
 
-                var services = new ServiceCollection();
-                services.AddLogging(b =>
+                // Named differently from the main-path container below to avoid
+                // CS0136 (the main path declares its own `services` local within
+                // the same enclosing method scope).
+                var injectServices = new ServiceCollection();
+                injectServices.AddLogging(b =>
                 {
                     b.ClearProviders();
                     b.AddSerilog(injectSerilog, dispose: true);
                 });
-                services.AddTransient<VMCreate.HyperV.Unattend.IPowerShellExecutor, VMCreate.HyperV.Unattend.PowerShellExecutor>();
-                services.AddTransient<IOfflineRegistryEditor, OfflineRegistryEditor>();
-                services.AddTransient<UnattendInjector>();
-                var sp = services.BuildServiceProvider();
+                injectServices.AddTransient<VMCreate.HyperV.Unattend.IPowerShellExecutor, VMCreate.HyperV.Unattend.PowerShellExecutor>();
+                injectServices.AddTransient<IOfflineRegistryEditor, OfflineRegistryEditor>();
+                injectServices.AddTransient<UnattendInjector>();
+                var sp = injectServices.BuildServiceProvider();
                 var injector = sp.GetRequiredService<UnattendInjector>();
                 var injectLogger = sp.GetRequiredService<ILogger<UnattendInjector>>();
 
@@ -94,13 +100,17 @@ namespace VMCreate.CLI
             services.AddTransient<IChecksumVerifier, ChecksumVerifier>();
             services.AddTransient<ICloningIsoDownloader, CloningIsoDownloader>();
 
-            // Hyper-V / VM plumbing
-            services.AddSingleton<IHyperVManager, PowerShellHyperVManager>();
-            services.AddSingleton<IVmLifecycleManager>(s => s.GetRequiredService<IHyperVManager>());
-            services.AddSingleton<IVmDiskManager>(s => s.GetRequiredService<IHyperVManager>());
-            services.AddSingleton<IVmBootManager>(s => s.GetRequiredService<IHyperVManager>());
-            services.AddSingleton<IVmNetworkManager>(s => s.GetRequiredService<IHyperVManager>());
-            services.AddSingleton<IVmConfigManager>(s => s.GetRequiredService<IHyperVManager>());
+            // Hyper-V / VM plumbing — mirrors App.xaml.cs: five focused role
+            // managers, then the IHyperVManager facade that wraps them all.
+            // PowerShellHyperVManagerFacade is public in VMCreate but sealed;
+            // the CLI (a separate assembly) needs the same role registrations
+            // the GUI uses because VmDeploymentOrchestrator consumes IHyperVManager.
+            services.AddSingleton<IVmLifecycleManager, PowerShellVmLifecycleManager>();
+            services.AddSingleton<IVmDiskManager, PowerShellVmDiskManager>();
+            services.AddSingleton<IVmBootManager, PowerShellVmBootManager>();
+            services.AddSingleton<IVmNetworkManager, PowerShellVmNetworkManager>();
+            services.AddSingleton<IVmConfigManager, PowerShellVmConfigManager>();
+            services.AddSingleton<IHyperVManager, PowerShellHyperVManagerFacade>();
             services.AddSingleton<IUnattendInjector, ElevatedUnattendInjector>();
             // Fully-qualified because VMCreate.HyperV.Unattend also defines IPowerShellExecutor.
             services.AddTransient<VMCreate.HyperV.IPowerShellExecutor, VMCreate.HyperV.PowerShellExecutor>();
@@ -179,6 +189,10 @@ namespace VMCreate.CLI
             services.AddHttpClient<IHtbApiClient, HtbApiClient>();
 
             // ── VM creation orchestrator ────────────────────────────────────
+            // VmDeploymentOrchestrator is consumed by HyperVVmCreator; VmGenerationResolver
+            // by MediaHandlerFactory. Without them the container builds but fails at resolve time.
+            services.AddTransient<IVmDeploymentOrchestrator, VmDeploymentOrchestrator>();
+            services.AddSingleton<IVmGenerationResolver, VmGenerationResolver>();
             services.AddTransient<IVmCreator, HyperVVmCreator>();
             services.AddTransient<CreateVM>();
             services.AddSingleton<IPartitionSchemeDetector, PartitionSchemeDetector>();

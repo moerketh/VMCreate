@@ -226,19 +226,29 @@ namespace VMCreate.CLI.Commands
         /// An unrecognized value FAILS LOUDLY — silently mapping a typo
         /// (e.g. "lamc") to Xrdp would provision a completely different
         /// desktop stack than the user asked for.
+        /// Returns false (and reports a validation error) on unrecognized values;
+        /// TryResolveRdpBackend is a pure parse, checked before any VM work starts.
+        /// (System.CommandLine 2.0.0-beta4 has no CommandLineConfigurationException;
+        /// the CLI validates values itself and returns exit codes instead.)
         /// </summary>
-        private static RdpBackend ResolveRdpBackend(string rdpBackend, bool noXrdp)
+        private static RdpBackend ResolveRdpBackend(string rdpBackend, bool noXrdp, bool jsonMode, out bool valid)
         {
+            valid = true;
             if (!string.IsNullOrEmpty(rdpBackend)
                 && !string.Equals(rdpBackend, "xrdp", StringComparison.OrdinalIgnoreCase))
             {
-                return rdpBackend.ToLowerInvariant() switch
+                switch (rdpBackend.ToLowerInvariant())
                 {
-                    "lamco" => RdpBackend.Lamco,
-                    "none" => RdpBackend.None,
-                    _ => throw new System.CommandLine.Invocation.CommandLineConfigurationException(
-                        $"Unknown --rdp-backend value '{rdpBackend}'. Valid values: xrdp, lamco, none."),
-                };
+                    case "lamco":
+                        return RdpBackend.Lamco;
+                    case "none":
+                        return RdpBackend.None;
+                    default:
+                        valid = false;
+                        PrintError(jsonMode, "validation",
+                            $"Unknown --rdp-backend value '{rdpBackend}'. Valid values: xrdp, lamco, none.");
+                        return RdpBackend.Xrdp;
+                }
             }
             return noXrdp ? RdpBackend.None : RdpBackend.Xrdp;
         }
@@ -316,9 +326,13 @@ namespace VMCreate.CLI.Commands
             // ── Build VmCustomizations ───────────────────────────────────────
             bool hasHtbVpn = !string.IsNullOrEmpty(args.HtbToken) || !string.IsNullOrEmpty(args.OvpnPath);
 
+            RdpBackend rdpBackend = ResolveRdpBackend(args.RdpBackend, args.NoXrdp, jsonMode, out bool rdpBackendValid);
+            if (!rdpBackendValid)
+                return ExitCodes.InvalidArguments;
+
             var vmCustomizations = new VmCustomizations
             {
-                RdpBackend = ResolveRdpBackend(args.RdpBackend, args.NoXrdp),
+                RdpBackend = rdpBackend,
                 EnableIntegrationServices = !args.NoIntegrationServices,
                 DnsMode = string.Equals(args.DnsMode, "custom", StringComparison.OrdinalIgnoreCase)
                     ? DnsMode.Custom

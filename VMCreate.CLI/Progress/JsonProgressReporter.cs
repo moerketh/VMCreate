@@ -23,11 +23,13 @@ namespace VMCreate.CLI.Progress
 
             var payload = new ProgressPayload
             {
-                Phase = value.Phase,
+                Phase = value.Phase.ToString(),
                 Percentage = value.ProgressPercentage > 0 ? value.ProgressPercentage : null,
                 SpeedMbps = value.DownloadSpeed > 0 ? Math.Round(value.DownloadSpeed, 2) : null,
                 Uri = !string.IsNullOrEmpty(value.URI) ? value.URI : null,
-                DetectedGeneration = !string.IsNullOrEmpty(value.DetectedGeneration) ? value.DetectedGeneration : null,
+                // DetectedGeneration is int? (1 = MBR/BIOS, 2 = UEFI/GPT, null = undetected);
+                // the NDJSON schema keeps it a string.
+                DetectedGeneration = value.DetectedGeneration?.ToString(),
             };
 
             Console.WriteLine(JsonSerializer.Serialize(payload, _opts));
