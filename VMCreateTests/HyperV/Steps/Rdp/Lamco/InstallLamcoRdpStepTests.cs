@@ -372,8 +372,8 @@ namespace VMCreate.Tests.HyperV.Steps
                 "download failure exits 1");
             StringAssert.Contains(captured, "sha256 mismatch",
                 "digest mismatch exits 1");
-            StringAssert.Contains(captured, "ERROR: dpkg install of the fork deb failed",
-                "dpkg failure exits 1");
+            StringAssert.Contains(captured, "ERROR: apt-get dependency resolution failed after dpkg -i (dpkg rc=$dpkg_rc)",
+                "dependency-fixup failure exits 1 with the dpkg rc preserved for attribution");
             StringAssert.Contains(captured, "does not report the fork marker",
                 "fork-marker check failure exits 1");
             Assert.IsFalse(captured.Contains("keeping the release binary"),
@@ -438,13 +438,15 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
-        public async Task ExecuteAsync_ProvisionsJournaldRateLimitRelief()
+        public async Task ExecuteAsync_ScopesFramebufferSpamToKwinUnitLogFilter()
         {
-            // hyperv_drm framebuffer error spam exhausts journald's default
-            // rate limit within seconds, after which ALL user-session logs
-            // are silently dropped — including the lamco/kwin-virtual lines
-            // needed to diagnose live sessions. Provisioning must raise the
-            // burst.
+            // hyperv_drm framebuffer error spam originates from kwin's own
+            // stderr under plasma-kwin_wayland.service and exhausts journald's
+            // PER-SERVICE rate-limit bucket, drowning kwin's diagnostics and
+            // the lamco session lines that share it. Provisioning must scope
+            // the fix to that unit (LogFilterPatterns drop-in) instead of
+            // raising the global journald burst, which lets the spam through
+            // and keeps the journal 90% noise.
             string? captured = null;
             _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                   .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
@@ -453,22 +455,31 @@ namespace VMCreate.Tests.HyperV.Steps
             await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
 
             Assert.IsNotNull(captured);
-            StringAssert.Contains(captured, "/etc/systemd/journald.conf.d/99-lamco-ratelimit.conf",
-                "journald override installed");
-            StringAssert.Contains(captured, "RateLimitBurst=100000",
-                "rate limit burst raised so session logs survive framebuffer spam");
+            StringAssert.Contains(captured, "/etc/systemd/user/plasma-kwin_wayland.service.d/lamco-logfilter.conf",
+                "scoped log-filter drop-in installed on the kwin user unit");
+            StringAssert.Contains(captured, "LogFilterPatterns=~Failed to create framebuffer",
+                "framebuffer spam lines are dropped client-side before reaching the journal");
+            Assert.IsFalse(captured.Contains("RateLimitBurst=100000"),
+                "the global journald burst raise is gone — it flooded the journal at full spam rate and left defaults unsafe for every other service");
+            Assert.IsFalse(captured.Contains("systemctl restart systemd-journald"),
+                "journald is not restarted anymore — the filter is applied via user-manager daemon-reload");
+            StringAssert.Contains(captured, "rm -f /etc/systemd/journald.conf.d/99-lamco-ratelimit.conf",
+                "stale global override from older provisioning runs is removed");
             StringAssert.Contains(captured, "python3-dbus",
                 "python3-dbus present for the idle-inhibit holder script");
         }
 
         [TestMethod]
-        public async Task ExecuteAsync_ProvisionsVsockCidAllowlist()
+        public async Task ExecuteAsync_ProvisionsVsockTransport()
         {
             // The vsock transport serves Hyper-V Enhanced Session: vmms
-            // relays from VMADDR_CID_HOST (CID 2). The listener binds
-            // VMADDR_CID_ANY (no bind-time filter), so the accept-time
-            // allowlist is the only access control confining it to the
-            // host relay.
+            // relays from VMADDR_CID_HOST (CID 2). The fork binds
+            // VMADDR_CID_ANY with no accept-time CID allowlist — there is
+            // no allowed_cids key in the fork's config schema — so access
+            // control is architectural: only Hyper-V's host-side relay
+            // can attach to the guest's vsock device. The test pins that
+            // the (unsupported) allowlist key is NOT deployed: writing it
+            // would be a silent no-op that reads as enforcement.
             string? captured = null;
             _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                   .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
@@ -479,8 +490,8 @@ namespace VMCreate.Tests.HyperV.Steps
             Assert.IsNotNull(captured);
             StringAssert.Contains(captured, "[server.transports.vsock]",
                 "vsock transport section present in the provisioned config");
-            StringAssert.Contains(captured, "allowed_cids = [2]",
-                "vsock accept-time CID allowlist confined to the host relay (VMADDR_CID_HOST)");
+            Assert.IsFalse(captured.Contains("allowed_cids ="),
+                "the fork has no allowed_cids key — deploying it would be a silent no-op dressed as enforcement");
         }
 
         [TestMethod]

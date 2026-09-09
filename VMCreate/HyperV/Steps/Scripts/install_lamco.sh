@@ -101,9 +101,20 @@ if [ "$actual_sha" != "$LAMCO_FORK_DEB_SHA256" ]; then
     exit 1
 fi
 echo "sha256 OK ($LAMCO_FORK_DEB_SHA256)"
-DEBIAN_FRONTEND=noninteractive dpkg -i --force-confnew "$FORK_DEB_TMP" 2>&1 \
-    || DEBIAN_FRONTEND=noninteractive apt-get install -f -y -q 2>&1 \
-    || { echo "ERROR: dpkg install of the fork deb failed." >&2; rm -f "$FORK_DEB_TMP"; exit 1; }
+# Install the deb, then ALWAYS resolve dependencies with apt-get, then let
+# the fork-marker check below be the sole verdict. The old `dpkg || apt -f ||
+# exit` chain short-circuited: when dpkg -i failed on missing deps, apt-get -f
+# "fixed" the half-staged package — but a dpkg rc was never recorded, and if
+# apt-get itself exited non-zero after making changes, the either/or shape
+# made attribution impossible. Sequential + unconditional dependency fixup
+# is idempotent (a clean dpkg makes apt-get -f a fast no-op).
+DEBIAN_FRONTEND=noninteractive dpkg -i --force-confnew "$FORK_DEB_TMP" 2>&1
+dpkg_rc=$?
+if [ "$dpkg_rc" -ne 0 ]; then
+    echo "NOTE: dpkg -i exited $dpkg_rc (missing/broken deps are expected when the fork deb's runtime packages aren't pre-installed) — running apt-get dependency fixup." >&2
+fi
+DEBIAN_FRONTEND=noninteractive apt-get install -f -y -q 2>&1 \
+    || { echo "ERROR: apt-get dependency resolution failed after dpkg -i (dpkg rc=$dpkg_rc)." >&2; rm -f "$FORK_DEB_TMP"; exit 1; }
 rm -f "$FORK_DEB_TMP"
 if ! /usr/bin/lamco-rdp-server --version 2>/dev/null | grep -aq "$LAMCO_FORK_DEB_VERSION"; then
     echo "ERROR: installed lamco-rdp-server does not report the fork marker" >&2
@@ -173,8 +184,9 @@ echo "TLS certificates present: /etc/lamco-rdp-server/cert.pem"
 #   unlocked desktop of a sudo-capable user. The TCP transport therefore
 #   binds 127.0.0.1 ONLY — reachable from inside the guest (and by host
 #   tools that SSH in). The vsock transport carries Hyper-V Enhanced
-#   Session (vmconnect) and is CID-allowlisted to VMADDR_CID_HOST (2) at
-#   accept time. If you need LAN RDP: set auth_method to something real
+#   Session (vmconnect); the fork applies no CID allowlist, but vsock is
+#   unreachable from outside the VM — only the host (vmms/vmconnect) can
+#   connect. If you need LAN RDP: set auth_method to something real
 #   FIRST, then change the TCP bind — do not just widen the bind.
 #   Note: mstsc/standard RDP clients can still reach the server over SSH
 #   port forwarding (ssh -L 3389:127.0.0.1:3389), which preserves the
@@ -204,7 +216,15 @@ cat > /etc/lamco-rdp-server/config.toml << 'CONFIG_EOF'
 config_version = 1
 
 [server]
-listen_addr = "[::]:3389"
+# Loopback for the same reason as the TCP transport below. In this fork
+# (src/transport/config.rs, TransportsConfig::resolve) the per-transport
+# [server.transports.tcp].listen_addr supersedes this key for the TCP bind,
+# but the top-level value still feeds three things: the exposure guard
+# (auth_method=none on a non-loopback address logs an unauthenticated-RDP
+# warning at every startup), the GUI's address fields, and the fallback
+# TCP bind if the [server.transports] table is ever removed. "[::]:3389"
+# here triggered that warning on every boot.
+listen_addr = "127.0.0.1:3389"
 max_connections = 10
 session_timeout = 0
 use_portals = true
@@ -220,13 +240,15 @@ listen_addr = "127.0.0.1:3389"
 # TLS/CredSSP on the host and relays plain RDP. The fork's per-transport
 # security routing serves these on a dedicated Standard-RDP-Security
 # server while TCP above keeps TLS/Hybrid — no security_mode compromise.
-# The CID allowlist accepts only VMADDR_CID_HOST (2): the host relay is
-# the only legitimate Enhanced Session peer; the in-guest loopback CID (1)
-# and any other peer are refused at accept time.
+# NOTE: the fork binds vsock on VMADDR_CID_ANY with no CID allowlist
+# (src/transport/listener.rs, VsockListenerImpl::bind) — access control is
+# the hypervisor's. Within a Hyper-V VM only the host (vmms/vmconnect)
+# can reach the vsock device, so the host relay is in practice the only
+# peer. (An `allowed_cids` key used to sit here; the fork has no such
+# option — it was dead config, silently ignored by serde.)
 [server.transports.vsock]
 enabled = true
 port = 3389
-allowed_cids = [2]
 
 [security]
 cert_path = "/etc/lamco-rdp-server/cert.pem"
@@ -609,14 +631,13 @@ MONITORS_EOF
     # The deb installed the binary and its units; restart so the service
     # acquires its portal session under the new binary. The restart also
     # surfaces the one-time consent dialog (lamco-grant.service) if it has
-    # not been answered yet.
-    if [ -n "$AUTOLOGIN_USER" ]; then
-        loginctl enable-linger "$AUTOLOGIN_USER" 2>/dev/null || true
-        sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
-            systemctl --user daemon-reload 2>/dev/null || true
-        sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
-            systemctl --user restart lamco-rdp-server.service 2>/dev/null || true
-    fi
+    # not been answered yet. (No AUTOLOGIN_USER re-test here: this whole
+    # block is already inside `if [ -n "$AUTOLOGIN_USER" ]`.)
+    loginctl enable-linger "$AUTOLOGIN_USER" 2>/dev/null || true
+    sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
+        systemctl --user daemon-reload 2>/dev/null || true
+    sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
+        systemctl --user restart lamco-rdp-server.service 2>/dev/null || true
 
     # -- Readiness gate: installed is NOT the same as listening ------------
     # Session creation can park on the one-time portal consent dialog
@@ -624,23 +645,40 @@ MONITORS_EOF
     # binds and vmconnect cannot connect. Poll for the dispatcher line so
     # this step's report distinguishes "service up and listening" from
     # "deployed but blocked on consent" — a fresh VM is expected to need
-    # one Allow click on the console.
-    if [ -n "$AUTOLOGIN_USER" ]; then
-        RDY_UID=$(id -u "$AUTOLOGIN_USER")
-        for r in $(seq 1 12); do
-            if journalctl _UID=$RDY_UID --since "-5 min" --no-pager 2>/dev/null \
-                | grep -aq "Accept dispatcher started"; then
-                echo "Service ready: accept dispatcher running (TCP/vsock listeners bound)."
-                break
-            fi
-            if journalctl _UID=$RDY_UID --since "-5 min" --no-pager 2>/dev/null \
-                | grep -aq "permission dialog will appear"; then
-                echo "NOTICE: one-time portal consent dialog is on the VM console — click Allow once, then the service binds its listeners." >&2
-                break
-            fi
-            sleep 10
-        done
-    fi
+    # one Allow click on the console. Every outcome (including exhaustion
+    # of the 12x10s poll budget) is reported; a silent fall-through would
+    # read as success in the host-side result parse.
+    # (No AUTOLOGIN_USER re-test here: we are inside the outer user guard.)
+    RDY_UID=$(id -u "$AUTOLOGIN_USER")
+    RDY_OUTCOME="timeout"
+    for r in $(seq 1 12); do
+        if journalctl _UID=$RDY_UID --since "-5 min" --no-pager 2>/dev/null \
+            | grep -aq "Accept dispatcher started"; then
+            RDY_OUTCOME="ready"
+            break
+        fi
+        if journalctl _UID=$RDY_UID --since "-5 min" --no-pager 2>/dev/null \
+            | grep -aq "permission dialog will appear"; then
+            RDY_OUTCOME="consent"
+            break
+        fi
+        sleep 10
+    done
+    case "$RDY_OUTCOME" in
+        ready)
+            echo "Service ready: accept dispatcher running (TCP/vsock listeners bound)."
+            ;;
+        consent)
+            echo "NOTICE: one-time portal consent dialog is on the VM console — click Allow once, then the service binds its listeners." >&2
+            echo "DEGRADED: deployed but NOT listening yet — portal consent pending on the VM console." >&2
+            DEGRADED=1
+            ;;
+        timeout)
+            echo "DEGRADED: readiness gate timed out (120s) — neither dispatcher start nor consent prompt appeared." >&2
+            echo "Diagnose with: journalctl _UID=$RDY_UID -b --no-pager | tail -n 50" >&2
+            DEGRADED=1
+            ;;
+    esac
 
 
     # -- Retire vgem artifacts -----------------------------------------------
@@ -688,9 +726,9 @@ MONITORS_EOF
         # for non-standard home paths.
         IDLE_HOME=$(getent passwd "$AUTOLOGIN_USER" | cut -d: -f6)
         if [ -n "$IDLE_HOME" ] && [ -d "$IDLE_HOME" ]; then
-        mkdir -p "$IDLE_HOME"/.local/bin 2>/dev/null || true
-        chown "$AUTOLOGIN_USER": "$IDLE_HOME"/.local/bin 2>/dev/null || true
-        cat > "$IDLE_HOME"/.local/bin/lamco-idle-inhibit.py << 'PYEOF'
+            mkdir -p "$IDLE_HOME"/.local/bin 2>/dev/null || true
+            chown "$AUTOLOGIN_USER": "$IDLE_HOME"/.local/bin 2>/dev/null || true
+            cat > "$IDLE_HOME"/.local/bin/lamco-idle-inhibit.py << 'PYEOF'
 #!/usr/bin/env python3
 # Hold a freedesktop ScreenSaver inhibitor cookie for the session lifetime.
 # KDE's idle lock can wedge under hyperv_drm framebuffer spam on Hyper-V and
@@ -714,14 +752,14 @@ while True:
     except Exception:
         pass
 PYEOF
-        chown "$AUTOLOGIN_USER": "$IDLE_HOME"/.local/bin/lamco-idle-inhibit.py 2>/dev/null || true
-        chmod 0755 "$IDLE_HOME"/.local/bin/lamco-idle-inhibit.py 2>/dev/null || true
-        # Systemd user unit; binds to the graphical session (the session bus
-        # where the screensaver runs exists only there). Same ~-expansion
-        # rule: use the resolved $IDLE_HOME (script runs as root; mkdir+chown).
-        mkdir -p "$IDLE_HOME"/.config/systemd/user 2>/dev/null || true
-        chown "$AUTOLOGIN_USER": "$IDLE_HOME"/.config/systemd/user 2>/dev/null || true
-        cat > "$IDLE_HOME"/.config/systemd/user/lamco-idle-inhibit.service << 'UNITEOF'
+            chown "$AUTOLOGIN_USER": "$IDLE_HOME"/.local/bin/lamco-idle-inhibit.py 2>/dev/null || true
+            chmod 0755 "$IDLE_HOME"/.local/bin/lamco-idle-inhibit.py 2>/dev/null || true
+            # Systemd user unit; binds to the graphical session (the session bus
+            # where the screensaver runs exists only there). Same ~-expansion
+            # rule: use the resolved $IDLE_HOME (script runs as root; mkdir+chown).
+            mkdir -p "$IDLE_HOME"/.config/systemd/user 2>/dev/null || true
+            chown "$AUTOLOGIN_USER": "$IDLE_HOME"/.config/systemd/user 2>/dev/null || true
+            cat > "$IDLE_HOME"/.config/systemd/user/lamco-idle-inhibit.service << 'UNITEOF'
 [Unit]
 Description=lamco RDP idle-lock inhibitor (Hyper-V lock-greeter wedge prevention)
 PartOf=graphical-session.target
@@ -735,16 +773,16 @@ RestartSec=10
 [Install]
 WantedBy=graphical-session.target
 UNITEOF
-        chown "$AUTOLOGIN_USER": "$IDLE_HOME"/.config/systemd/user/lamco-idle-inhibit.service 2>/dev/null || true
-        sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
-            systemctl --user daemon-reload 2>/dev/null || true
-        sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
-            DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u "$AUTOLOGIN_USER")/bus \
-            systemctl --user enable lamco-idle-inhibit.service 2>/dev/null || true
-        sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
-            DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u "$AUTOLOGIN_USER")/bus \
-            systemctl --user start lamco-idle-inhibit.service 2>/dev/null || true
-        echo "Idle-lock suppression: Autolock=false + lamco-idle-inhibit.service (Hyper-V lock-greeter wedge prevention)."
+            chown "$AUTOLOGIN_USER": "$IDLE_HOME"/.config/systemd/user/lamco-idle-inhibit.service 2>/dev/null || true
+            sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
+                systemctl --user daemon-reload 2>/dev/null || true
+            sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
+                DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u "$AUTOLOGIN_USER")/bus \
+                systemctl --user enable lamco-idle-inhibit.service 2>/dev/null || true
+            sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
+                DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u "$AUTOLOGIN_USER")/bus \
+                systemctl --user start lamco-idle-inhibit.service 2>/dev/null || true
+            echo "Idle-lock suppression: Autolock=false + lamco-idle-inhibit.service (Hyper-V lock-greeter wedge prevention)."
         else
             echo "WARNING: no home dir for $AUTOLOGIN_USER — idle-lock suppression unit not installed." >&2
             DEGRADED=1
@@ -792,21 +830,39 @@ else
     DEGRADED=1
 fi
 
-# -- Raise journald rate limit (diagnosability) ----------------------------
-# hyperv_drm framebuffer error spam (100+/s) exhausts journald's default
-# rate limit (RateLimitBurst=100 per 30s) within seconds, after which
-# journald silently DROPS all further user-session logs — including the
-# lamco/kwin-virtual lines needed to diagnose live sessions ("no events"
-# in journalctl does not mean "no activity"). Raise the burst so session
-# logs always survive.
-mkdir -p /etc/systemd/journald.conf.d
-cat > /etc/systemd/journald.conf.d/99-lamco-ratelimit.conf << 'JOURNALD_EOF'
-[Journal]
-RateLimitIntervalSec=30s
-RateLimitBurst=100000
-JOURNALD_EOF
-systemctl restart systemd-journald 2>/dev/null || true
-echo "Raised journald rate limit (framebuffer spam must not drown session logs)."
+# -- Scoped suppression of kwin framebuffer-error spam (diagnosability) ------
+# hyperv_drm framebuffer creation failures (~15/s, "kwin_wayland_drm: Failed
+# to create framebuffer") come from kwin's own stderr under
+# plasma-kwin_wayland.service, not from the kernel. A flood from one unit
+# exhausts journald's PER-SERVICE rate-limit bucket, so kwin's own
+# diagnostic lines and the lamco session logs share its bucket and are
+# dropped. The fix is scoped: journald's global limits stay at their
+# defaults (all other services keep their buckets) and the spam never
+# reaches the journal at all:
+#   - LogFilterPatterns= (systemd >= 254, unit [Service] directive) drops
+#     matching lines client-side, before storage. Parrot 7.3 (Debian 13
+#     base) ships systemd 257. On older systemd the directive is ignored
+#     with a warning in the journal, so the drop-in degrades to a no-op
+#     rather than breaking the session.
+#   - the drop-in lives in /etc/systemd/user/, so every user manager
+#     (lightdm greeter autologin session, vmcreate SSH session) loads it.
+# Placed on kwin's unit because that is where the spam originates — a global
+# journald burst raise (the old /etc/systemd/journald.conf.d/99-lamco-
+# ratelimit.conf) let the spam through at full rate and kept the journal
+# 90% spam.
+mkdir -p /etc/systemd/user/plasma-kwin_wayland.service.d
+cat > /etc/systemd/user/plasma-kwin_wayland.service.d/lamco-logfilter.conf << 'KWIN_LOGFILTER_EOF'
+[Service]
+LogFilterPatterns=~Failed to create framebuffer
+KWIN_LOGFILTER_EOF
+if [ -n "$AUTOLOGIN_USER" ] && command -v systemctl >/dev/null 2>&1; then
+    sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
+        systemctl --user daemon-reload 2>/dev/null || true
+fi
+# Remove a stale global override from older provisioning runs, so journald
+# defaults are restored.
+rm -f /etc/systemd/journald.conf.d/99-lamco-ratelimit.conf
+echo "Scoped kwin framebuffer log filter installed (journald defaults untouched)."
 
 echo "=== Lamco RDP Server install complete ==="
 # The one-time Portal consent is automated: lamco-grant.service runs
