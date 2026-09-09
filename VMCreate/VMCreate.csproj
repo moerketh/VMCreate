@@ -77,6 +77,7 @@
     <Compile Include="HyperV\SshKeyManager.cs" />
     <Compile Include="HyperV\HtbApiClient.cs" />
     <Compile Include="HyperV\SshGuestShell.cs" />
+    <Compile Include="HyperV\SshTransport.cs" />
     <Compile Include="HyperV\Steps\System\CleanupTemporaryNicStep.cs" />
     <Compile Include="HyperV\Steps\Vpn\DeployVpnConfigsStep.cs" />
     <Compile Include="HyperV\Steps\Rdp\Xrdp\DisableKwinCompositingStep.cs" />

@@ -1,9 +1,7 @@
 using Microsoft.Extensions.Logging;
 using System;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Management.Automation;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -22,6 +20,12 @@ namespace VMCreate
         private readonly ILogger _logger;
         private readonly string _privateKeyPath;
         private string _vmIpAddress;
+
+        // Host-key TOFU pinning: per-VM known_hosts path (see
+        // ResetHostKeyPinning). Written by ssh itself on first connect
+        // (accept-new); every subsequent exec in this deployment then
+        // verifies against the recorded key and hard-fails on a mismatch.
+        private string _hostKeyKnownHostsPath;
 
         private const string AutomationUser = "vmcreate";
         // 2026-08-29: 180s proved too tight for the FIRST boot of a freshly
@@ -46,6 +50,40 @@ namespace VMCreate
             _privateKeyPath = privateKeyPath ?? throw new ArgumentNullException(nameof(privateKeyPath));
         }
 
+        /// <summary>
+        /// Arms per-deployment host-key pinning. Call before the first SSH
+        /// connection: deletes any stale known_hosts left by a previous
+        /// deployment of the same VM name and provisions a fresh file so
+        /// the guest's *current* host key is the one that gets trusted on
+        /// first use. Without this, a re-created VM whose image regenerated
+        /// its SSH host keys would hard-fail against the old pinned entry,
+        /// and a stale file from an aborted deploy could pin the wrong VM.
+        /// </summary>
+        public void ResetHostKeyPinning()
+        {
+            string directory = Path.Combine(Path.GetTempPath(), "VMCreate", "known_hosts");
+            string path = Path.Combine(directory, $"{SanitizeVmNameForFileName(VmName)}.known_hosts");
+
+            Directory.CreateDirectory(directory);
+            if (File.Exists(path))
+                File.Delete(path);
+            // ssh appends the entry itself on first connect; we just need the
+            // (empty) file to exist so it isn't created with inherited ACLs
+            // from a different parent (and so `accept-new` never falls back
+            // to the user's global file).
+            using (File.Create(path)) { }
+            _hostKeyKnownHostsPath = path;
+        }
+
+        /// <summary>
+        /// VmName becomes part of the known_hosts file name; strip anything
+        /// Windows forbids in file names plus path separators.
+        /// </summary>
+        private static string SanitizeVmNameForFileName(string vmName) =>
+            string.Concat(vmName.Select(c => invalidFileNameChars.Contains(c) ? '_' : c));
+
+        private static readonly char[] invalidFileNameChars = Path.GetInvalidFileNameChars();
+
         // ── Connection lifecycle ─────────────────────────────────────────
 
         /// <summary>
@@ -56,6 +94,10 @@ namespace VMCreate
         public async Task WaitForReadyAsync(CancellationToken ct)
         {
             _logger.LogInformation("Waiting for SSH to become available on VM {VMName}...", VmName);
+
+            // Per-deployment TOFU pinning arm: fresh known_hosts before the
+            // very first connection attempt (see ResetHostKeyPinning).
+            ResetHostKeyPinning();
 
             var deadline = DateTime.UtcNow + ReadyTimeout;
             Exception lastError = null;
@@ -191,13 +233,13 @@ namespace VMCreate
         /// </remarks>
         private async Task CopyBase64ToGuestAsync(string base64, string guestPath, string chmodMode, CancellationToken ct)
         {
-            string safePath = EscapeSingleQuotes(guestPath);
+            string safePath = SshTransport.EscapeSingleQuotes(guestPath);
             // Host-side dirname: the previous $@"sudo mkdir -p ""$(dirname
             // '{safePath}')""..." embedded real double quotes in a verbatim
             // string — ssh.exe's argv parser strips them, so the guest
             // received an unquoted $(dirname '...') that would word-split on
             // any path with spaces. Compute it here and single-quote it.
-            string guestDir = EscapeSingleQuotes(GuestParentDirectory(guestPath));
+            string guestDir = SshTransport.EscapeSingleQuotes(GuestParentDirectory(guestPath));
 
             const int maxCopyAttempts = 3;
             for (int attempt = 1; ; attempt++)
@@ -241,12 +283,13 @@ namespace VMCreate
                     _vmIpAddress = null;
                     await Task.Delay(RetryDelay, ct);
                     _vmIpAddress = await DiscoverVmIpAsync(ct);
-                    try { await RunCommandInternalAsync($"rm -f '{tmpRemote}'", CommandTimeout, ct); }
-                    catch { /* best effort — the GUID-named temp leaks harmlessly */ }
                 }
                 finally
                 {
                     // Best-effort temp cleanup; failures are harmless in /tmp.
+                    // Runs on every exit path (success, guest error, transport
+                    // retry), so the transport-retry catch above does NOT need
+                    // its own rm -f — a second one there was pure duplication.
                     try { await RunCommandInternalAsync($"rm -f '{tmpRemote}'", CommandTimeout, ct); }
                     catch { _logger.LogDebug("Temp copy file {Path} left behind on VM {VMName}", tmpRemote, VmName); }
                 }
@@ -268,26 +311,10 @@ namespace VMCreate
 
         // ── Private helpers ──────────────────────────────────────────────
 
+        /// <summary>Delegates to the shared transport (adapter ordering matters:
+        /// post-boot SSH rides the temporary NIC, so 'VMCreate Temp' wins).</summary>
         private async Task<string> DiscoverVmIpAsync(CancellationToken ct)
-        {
-            using var ps = PowerShell.Create();
-            ps.AddScript($@"
-                $adapters = Get-VMNetworkAdapter -VMName '{VmName.Replace("'", "''")}' -ErrorAction SilentlyContinue
-                # Prefer the temporary adapter added by VMCreate for post-boot SSH
-                $sorted = $adapters | Sort-Object {{ if ($_.Name -eq 'VMCreate Temp') {{ 0 }} else {{ 1 }} }}
-                foreach ($a in $sorted) {{
-                    foreach ($ip in $a.IPAddresses) {{
-                        if ($ip -match '^\d+\.\d+\.\d+\.\d+$') {{
-                            $ip
-                            return
-                        }}
-                    }}
-                }}
-            ");
-
-            var result = await Task.Run(() => ps.Invoke(), ct);
-            return result.FirstOrDefault()?.ToString();
-        }
+            => await SshTransport.DiscoverVmIpAsync(VmName, ct, preferVmCreateTempAdapter: true);
 
         private async Task<string> RunWithRetryAsync(string linuxCommand, TimeSpan timeout, CancellationToken ct)
         {
@@ -332,119 +359,21 @@ namespace VMCreate
             if (string.IsNullOrEmpty(_vmIpAddress))
                 throw new InvalidOperationException("VM IP address not discovered yet. Call WaitForReadyAsync first.");
 
-            // Normalize Windows CRLF → LF so bash doesn't choke on \r
-            linuxCommand = linuxCommand.Replace("\r\n", "\n").Replace("\r", "\n").Trim();
-
-            var args = new StringBuilder();
-            args.Append($"-i \"{_privateKeyPath}\" ");
-            // Host key checking is intentionally disabled: we connect to freshly-created
-            // local Hyper-V guests whose host keys are regenerated on every install.
-            args.Append("-o StrictHostKeyChecking=no ");
-            args.Append("-o BatchMode=yes ");
-            args.Append("-o ConnectTimeout=10 ");
-            args.Append("-o UserKnownHostsFile=NUL ");
-            args.Append($"{AutomationUser}@{_vmIpAddress} ");
-            args.Append($"bash -c {EscapeForSsh(linuxCommand)}");
-
-            if (args.Length > MaxCommandLength)
-            {
-                throw new InvalidOperationException(
-                    $"SSH command for VM '{VmName}' is {args.Length} characters (limit {MaxCommandLength}). " +
-                    "Windows cannot pass a command line this long to ssh.exe. " +
-                    "Transfer the payload as a file via CopyContentAsync/CopyFileAsync (chunked) and execute it on the guest instead.");
-            }
-
             // NOTE: never log the full ssh argument list. The remote command
             // can embed guest payload (CopyContentAsync chunks are base64
             // script/secret material on the command line), and the plaintext
             // rolling log lives in %TEMP%. Log the transport options only.
             _logger.LogDebug("SSH exec on VM {VMName} ({Length} chars)", VmName, linuxCommand.Length);
 
-            var psi = new ProcessStartInfo
-            {
-                // Absolute path: a bare "ssh" resolves via PATH (hijackable;
-                // also absent from service contexts). Windows ships OpenSSH
-                // exactly here.
-                FileName = Environment.ExpandEnvironmentVariables(@"%SystemRoot%\System32\OpenSSH\ssh.exe"),
-                Arguments = args.ToString(),
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            };
-
-            using var process = new Process { StartInfo = psi };
-            var stdout = new StringBuilder();
-            var stderr = new StringBuilder();
-
-            process.OutputDataReceived += (_, e) => { if (e.Data != null) stdout.AppendLine(e.Data); };
-            process.ErrorDataReceived += (_, e) => { if (e.Data != null) stderr.AppendLine(e.Data); };
-
-            process.Start();
-            process.BeginOutputReadLine();
-            process.BeginErrorReadLine();
-
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutCts.CancelAfter(timeout);
-
-            try
-            {
-                await process.WaitForExitAsync(timeoutCts.Token);
-            }
-            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-            {
-                try { process.Kill(entireProcessTree: true); } catch { }
-                throw new TimeoutException(
-                    $"SSH command timed out after {timeout.TotalSeconds}s on VM '{VmName}'");
-            }
-            catch (OperationCanceledException)
-            {
-                try { process.Kill(entireProcessTree: true); } catch { }
-                throw;
-            }
-
-            string stdoutStr = stdout.ToString();
-            string stderrStr = stderr.ToString();
-
-            if (process.ExitCode != 0)
-            {
-                // Filter out the benign "Permanently added" SSH warning before choosing the error detail
-                string significantStderr = string.Join("\n", stderrStr
-                    .Split('\n')
-                    .Where(line => !string.IsNullOrWhiteSpace(line)
-                                && !line.Contains("Permanently added", StringComparison.OrdinalIgnoreCase)))
-                    .Trim();
-                string errorDetail = !string.IsNullOrEmpty(significantStderr) ? significantStderr : stdoutStr.Trim();
-                throw new Exception(
-                    $"SSH command failed (exit code {process.ExitCode}) on VM '{VmName}': {errorDetail}");
-            }
-
-            // Log non-trivial stderr (filter out the expected "Permanently added" known-hosts warning)
-            if (!string.IsNullOrWhiteSpace(stderrStr))
-            {
-                var significantLines = stderrStr
-                    .Split('\n')
-                    .Where(line => !string.IsNullOrWhiteSpace(line)
-                                && !line.Contains("Permanently added", StringComparison.OrdinalIgnoreCase))
-                    .ToArray();
-                if (significantLines.Length > 0)
-                    _logger.LogDebug("SSH stderr (non-fatal): {Stderr}", string.Join("\n", significantLines).Trim());
-            }
-
-            return stdoutStr;
-        }
-
-        /// <summary>
-        /// Escapes a value for safe embedding inside a single-quoted bash string.
-        /// Closes the quote, inserts an escaped literal quote, and re-opens the quote.
-        /// </summary>
-        private static string EscapeSingleQuotes(string value) =>
-            value.Replace("'", "'\\''");
-
-        private static string EscapeForSsh(string command)
-        {
-            string escaped = command.Replace("'", "'\\''");
-            return $"'{escaped}'";
+            // Host-key TOFU pinning: the per-VM known_hosts file is created
+            // fresh for every deployment in WaitForReadyAsync — see
+            // ResetHostKeyPinning. All execs in this shell instance then
+            // trust-and-record the guest's host key and hard-fail if a
+            // later exec sees a different key (e.g. another VM took over
+            // the IP address mid-deployment).
+            return await SshTransport.ExecuteAsync(
+                _logger, VmName, _privateKeyPath, _vmIpAddress, AutomationUser,
+                _hostKeyKnownHostsPath, linuxCommand, timeout, ct, maxArgumentLength: MaxCommandLength);
         }
     }
 }
