@@ -32,9 +32,14 @@ namespace VMCreate.CLI
             {
                 string vhdxPath = args[1];
                 string injectLogPath = Path.Combine(Path.GetTempPath(), "VMCreate.inject.log");
+                // SECURITY: same plaintext-log discipline as the main
+                // paths — the elevated child carries unattend.xml, which
+                // embeds the local administrator password. Debug stays OFF
+                // by default; turn it on per-run only for injection
+                // debugging.
                 var injectSerilog = new Serilog.LoggerConfiguration()
-                    .MinimumLevel.Debug()
-                    .WriteTo.File(injectLogPath, rollingInterval: RollingInterval.Day, shared: true)
+                    .MinimumLevel.Information()
+                    .WriteTo.File(injectLogPath, rollingInterval: RollingInterval.Day, shared: true, retainedFileCountLimit: 7)
                     .CreateLogger();
 
                 // Named differently from the main-path container below to avoid
@@ -73,10 +78,19 @@ namespace VMCreate.CLI
 
             // ── Logging ──────────────────────────────────────────────────────
             var logPath = Path.Combine(Path.GetTempPath(), "VMCreate.log");
+            // SECURITY: PLAINTEXT rolling log in %TEMP% — the same file name
+            // the GUI hardening closed (App.xaml.cs). The previous Debug
+            // floor captured every SSH command line, including
+            // CopyContentAsync base64 chunks that embed VPN configs with
+            // client certificates and private keys. The CLI was wired into
+            // the solution while this floor was still open, so every
+            // `vmcreate create` run reopened the GUI's leak. Debug stays
+            // OFF; 7-day retention bounds how long plaintext history
+            // lingers on disk (Serilog default: 31).
             Log.Logger = new LoggerConfiguration()
-                .MinimumLevel.Debug()
+                .MinimumLevel.Information()
                 .MinimumLevel.Override("Microsoft.Extensions.Http", Serilog.Events.LogEventLevel.Warning)
-                .WriteTo.File(logPath, rollingInterval: RollingInterval.Day)
+                .WriteTo.File(logPath, rollingInterval: RollingInterval.Day, retainedFileCountLimit: 7)
                 .CreateLogger();
 
             // ── DI container ─────────────────────────────────────────────────

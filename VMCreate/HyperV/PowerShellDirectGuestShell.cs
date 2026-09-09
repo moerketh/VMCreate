@@ -131,7 +131,13 @@ namespace VMCreate
         /// </summary>
         public async Task<string> RunCommandAsync(string command, CancellationToken ct)
         {
-            _logger.LogDebug("Running PowerShell Direct command on VM {VMName}: {Command}", _vmName, Truncate(command, 200));
+            // SECURITY: never log the command body. CopyContentAsync/
+            // CopyFileAsync embed base64 payload (configs, scripts, secrets)
+            // on the command line — a 200-char preview still leaks ~145
+            // characters of it into the plaintext %TEMP% log. Mirrors the
+            // SSH transport (SshGuestShell.RunCommandInternalAsync): log
+            // target and length only.
+            _logger.LogDebug("Running PowerShell Direct command on VM {VMName} ({Length} chars)", _vmName, command?.Length ?? 0);
             string result = await RunCommandInternalAsync(command, CommandTimeout, ct);
             _logger.LogDebug("PowerShell Direct command completed on VM {VMName} ({Length} chars)", _vmName, result?.Length ?? 0);
             return result;
@@ -143,7 +149,8 @@ namespace VMCreate
         /// </summary>
         public async Task<string> RunCommandAsync(string command, TimeSpan timeout, CancellationToken ct)
         {
-            _logger.LogDebug("Running PowerShell Direct command on VM {VMName}: {Command}", _vmName, Truncate(command, 200));
+            // SECURITY: length only — see RunCommandAsync above.
+            _logger.LogDebug("Running PowerShell Direct command on VM {VMName} ({Length} chars)", _vmName, command?.Length ?? 0);
             string result = await RunCommandInternalAsync(command, timeout, ct);
             _logger.LogDebug("PowerShell Direct command completed on VM {VMName} ({Length} chars)", _vmName, result?.Length ?? 0);
             return result;
@@ -169,16 +176,37 @@ namespace VMCreate
         }
 
         /// <summary>
-        /// Writes SECRET string content (keys, credentials) to the guest.
-        /// PowerShell Direct targets Windows guests where this path exists
-        /// for interface parity; the file is written and ACLs left to the
-        /// guest defaults (no icacls hardening here yet — no current caller
-        /// copies secrets to Windows guests).
+        /// Writes SECRET string content (keys, credentials) to the guest via
+        /// PowerShell Direct (Windows guests). Honours the IGuestShell
+        /// contract: the result is owned by SYSTEM/Administrators only —
+        /// inheritance is stripped and no other account can read it.
+        /// The command is executed on an internal path that never logs the
+        /// command body, so key material cannot reach the plaintext %TEMP%
+        /// log regardless of the configured level.
         /// </summary>
         public async Task CopySecretAsync(string content, string guestPath, CancellationToken ct)
         {
             _logger.LogInformation("Writing secret content to {Path} on VM {VMName} via PowerShell Direct", guestPath, _vmName);
-            await CopyContentAsync(content, guestPath, ct);
+
+            // Base64-encode the content to avoid escaping issues
+            string base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(content));
+            string script = $@"
+                $bytes = [Convert]::FromBase64String('{base64}')
+                $dir = Split-Path -Parent '{EscapeForPowerShell(guestPath)}'
+                if (-not (Test-Path $dir)) {{ New-Item -ItemType Directory -Path $dir -Force | Out-Null }}
+                [System.IO.File]::WriteAllBytes('{EscapeForPowerShell(guestPath)}', $bytes)
+                # Strip inherited ACEs (BUILTIN\Users read access comes from
+                # the parent directory by default) and grant SYSTEM +
+                # Administrators only — the Windows equivalent of the SSH
+                # path's root:root 0600. Well-known SIDs instead of group
+                # names: 'SYSTEM'/'Administrators' are localized on
+                # non-English guests (e.g. 'Administratoren'). No (OI)(CI)
+                # inheritance flags: the target is a file.
+                icacls '{EscapeForPowerShell(guestPath)}' /inheritance:r /grant:r '*S-1-5-18:F' '*S-1-5-32-544:F' | Out-Null
+            ";
+
+            await RunCommandInternalAsync(script, CommandTimeout, ct);
+            _logger.LogInformation("Wrote secret -> {Path} on VM {VMName} (SYSTEM/Administrators only)", guestPath, _vmName);
         }
 
         /// <summary>
@@ -259,12 +287,6 @@ namespace VMCreate
             }
 
             return output.ToString();
-        }
-
-        private static string Truncate(string s, int maxLength)
-        {
-            if (string.IsNullOrEmpty(s)) return s;
-            return s.Length <= maxLength ? s : s.Substring(0, maxLength) + "...";
         }
 
         private static string EscapeForPowerShell(string s)

@@ -126,8 +126,10 @@ namespace VMCreate
 
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("Labs connections returned HTTP {Code}: {Body}",
-                    (int)response.StatusCode, Truncate(body, 300));
+                // SECURITY: classification, not content — an error body
+                // could echo request data or embed rejected key material.
+                _logger.LogWarning("Labs connections returned HTTP {Code} (body: {Length} bytes, {Classification})",
+                    (int)response.StatusCode, body?.Length ?? 0, ClassifyContent(body));
                 throw new HttpRequestException($"HTTP {(int)response.StatusCode} from connections API");
             }
 
@@ -261,7 +263,11 @@ namespace VMCreate
                 if (!response.IsSuccessStatusCode)
                 {
                     string msg = $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}";
-                    _logger.LogWarning("{Name} VPN download failed: {Status} — {Body}", name, msg, Truncate(content, 200));
+                    // SECURITY: log classification, not content — the body
+                    // could be a rejected-but-valid config; its first 200
+                    // chars can embed certificate/key material.
+                    _logger.LogWarning("{Name} VPN download failed: {Status} (body: {Length} bytes, {Classification})",
+                        name, msg, content?.Length ?? 0, ClassifyContent(content));
                     return new HtbVpnDownloadResult { EndpointName = name, Success = false, ErrorMessage = msg };
                 }
 
@@ -292,7 +298,9 @@ namespace VMCreate
                 if (!response.IsSuccessStatusCode)
                 {
                     string msg = $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}";
-                    _logger.LogWarning("{Name} VPN download failed: {Status} — {Body}", name, msg, Truncate(content, 200));
+                    // SECURITY: classification, not content — see Labs path.
+                    _logger.LogWarning("{Name} VPN download failed: {Status} (body: {Length} bytes, {Classification})",
+                        name, msg, content?.Length ?? 0, ClassifyContent(content));
                     return new HtbVpnDownloadResult { EndpointName = name, Success = false, ErrorMessage = msg };
                 }
 
@@ -327,8 +335,11 @@ namespace VMCreate
                 // Check if content is HTML (login redirect)
                 if (content.TrimStart().StartsWith("<!") || content.TrimStart().StartsWith("<html"))
                 {
-                    _logger.LogWarning("Academy returned HTML (likely auth redirect). First 300 chars: {Preview}",
-                        Truncate(content, 300));
+                    // SECURITY: classification only — an HTML login page has
+                    // no key material, but a false negative on the heuristic
+                    // would write a real config's first 300 chars to disk.
+                    _logger.LogWarning("Academy returned HTML (likely auth redirect): {Length} bytes",
+                        content.Length);
                     return new HtbVpnDownloadResult
                     {
                         EndpointName = name,
@@ -393,8 +404,12 @@ namespace VMCreate
         {
             if (string.IsNullOrWhiteSpace(content) || !content.Contains("remote "))
             {
-                _logger.LogWarning("{Name} response is not a valid .ovpn file. Preview: {Preview}",
-                    name, Truncate(content, 300));
+                // SECURITY: classification only — this fires when the .ovpn
+                // heuristic rejects the body; if it false-negatives on a
+                // real config, printing the preview would leak its key/cert
+                // section to the plaintext log at Warning (above the floor).
+                _logger.LogWarning("{Name} response is not a valid .ovpn file: {Classification} ({Length} bytes)",
+                    name, ClassifyContent(content), content?.Length ?? 0);
                 return new HtbVpnDownloadResult
                 {
                     EndpointName = name,
@@ -417,9 +432,30 @@ namespace VMCreate
             };
         }
 
-        private static string Truncate(string s, int maxLen) =>
-            string.IsNullOrEmpty(s) ? "(empty)" :
-            s.Length <= maxLen ? s : s.Substring(0, maxLen) + "...";
+        /// <summary>
+        /// Content-based classification for failure logging: describes what a body
+        /// looks like WITHOUT writing any of it to the plaintext log. If a validity
+        /// heuristic false-negatives on a real config, the log must not become the
+        /// leak — 'unrecognized, {Length} bytes' is safe; a preview is not.
+        /// </summary>
+        private static string ClassifyContent(string content)
+        {
+            if (string.IsNullOrWhiteSpace(content))
+                return "empty";
+            string trimmed = content.TrimStart();
+            if (trimmed.StartsWith("{") || trimmed.StartsWith("["))
+            {
+                // Distinguish a real JSON payload from an HTML page whose leading
+                // whitespace revealed brackets — cheap check, good signal.
+                try { using var _ = JsonDocument.Parse(content); return "valid JSON"; }
+                catch { /* fall through */ }
+            }
+            if (trimmed.StartsWith("<!") || trimmed.StartsWith("<html", StringComparison.OrdinalIgnoreCase))
+                return "HTML";
+            if (trimmed.StartsWith("-----BEGIN"))
+                return "PEM/key material";
+            return "unrecognized";
+        }
 
         public void Dispose()
         {

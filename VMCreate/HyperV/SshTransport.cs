@@ -97,6 +97,21 @@ namespace VMCreate
         /// stdout was captured at all. When false (automation path), any
         /// nonzero exit throws.
         /// </param>
+        /// <remarks>
+        /// INVARIANT: on failure, <see cref="FilterSignificantStderr"/> output
+        /// (stderr, or stdout as fallback) flows into the thrown exception
+        /// message — from there into VmDeploymentResult.ErrorMessage (shown
+        /// in the GUI) and, via orchestration logging at Warning/Error, into
+        /// the PLAINTEXT log in %TEMP%. Guest stderr/stdout is therefore an
+        /// unconditional channel into that log. No current step echoes
+        /// credentials to stderr, and base64 payloads are quote-safe so
+        /// quoting errors cannot make bash echo a copied chunk — but any
+        /// future step MUST NOT print secrets (credentials, key material)
+        /// to guest stdout/stderr: they would land in the plaintext log
+        /// regardless of the configured level. Log classifications or
+        /// lengths instead (see HtbApiClient.ClassifyContent for the
+        /// pattern).
+        /// </remarks>
         public static async Task<string> ExecuteAsync(
             ILogger logger,
             string vmName,

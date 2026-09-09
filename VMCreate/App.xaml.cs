@@ -35,9 +35,14 @@ namespace VMCreate
             {
                 string vhdxPath = e.Args[1];
                 string injectLogPath = Path.Combine(Path.GetTempPath(), "VMCreate.inject.log");
+                // SECURITY: same plaintext-log discipline as the main path
+                // below — the elevated child carries unattend.xml, which
+                // embeds the local administrator password. Debug stays OFF
+                // by default; turn it on per-run only for injection
+                // debugging.
                 var injectSerilog = new Serilog.LoggerConfiguration()
-                    .MinimumLevel.Debug()
-                    .WriteTo.File(injectLogPath, rollingInterval: RollingInterval.Day, shared: true)
+                    .MinimumLevel.Information()
+                    .WriteTo.File(injectLogPath, rollingInterval: RollingInterval.Day, shared: true, retainedFileCountLimit: 7)
                     .CreateLogger();
 
                 var injectServices = new ServiceCollection();
@@ -84,10 +89,13 @@ namespace VMCreate
             // configs with client certificates and private keys. Debug stays
             // OFF for the file sink; the transports log the information needed
             // for diagnosis at Information/Warning.
+            // 7-day retention: these files are plaintext; Serilog's
+            // default 31-day window keeps a month of deployment history on
+            // disk for no diagnostic value.
             Log.Logger = new LoggerConfiguration()
                 .MinimumLevel.Information()
                 .MinimumLevel.Override("Microsoft.Extensions.Http", Serilog.Events.LogEventLevel.Warning)
-                .WriteTo.File(logPath, rollingInterval: RollingInterval.Day)
+                .WriteTo.File(logPath, rollingInterval: RollingInterval.Day, retainedFileCountLimit: 7)
                 .CreateLogger();
 
             Log.Information("VMCreate {Version} starting", ProductInfo.InformationalVersion);
