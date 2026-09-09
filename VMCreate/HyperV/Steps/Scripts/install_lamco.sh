@@ -4,17 +4,27 @@ set -o pipefail
 # =========================================================================
 # Lamco RDP Server — install + configure (Wayland-native)
 # =========================================================================
-# Downloads the matching deb/rpm from GitHub Releases, installs it, sets up
-# TLS certs, config.toml (PAM auth), the systemd user unit, and linger.
-# The one-time --grant-permission Portal dialog is NOT run here (interactive).
+# Installs the PINNED fork deb from GitHub Releases (sha256-verified), sets
+# up TLS certs, config.toml, the systemd user units, and linger. The one-time
+# portal consent dialog is automated by lamco-grant.service (see below).
+#
+# SECURITY/RELIABILITY CONTRACT:
+#   - The deb tag, version, and sha256 are pinned below. A re-pointed tag,
+#     a missing asset, or a digest mismatch FAILS THIS SCRIPT LOUDLY.
+#     There is no source-build fallback and no upstream fallback: silently
+#     shipping a stock/broken binary is the worse failure.
+#   - Lamco is Debian-family-only (the fork pipeline ships amd64 debs;
+#     rpm/flatpak assets are not built for this lineage).
 
-LAMCO_REPO="lamco-admin/lamco-rdp-server"
-LAMCO_FALLBACK_TAG="v1.4.4"
-API_URL="https://api.github.com/repos/${LAMCO_REPO}/releases/latest"
+LAMCO_FORK_REPO="moerketh/lamco-rdp-server"
+LAMCO_FORK_TAG="v1.4.5-hyperv.2"
+LAMCO_FORK_DEB_VERSION="1.4.5-hyperv2"
+LAMCO_FORK_DEB_SHA256="13f119f7c59435abc3be22072122b9adb350b4a60e724462faa9a3d67f2cfb7e"
+LAMCO_FORK_DEB_URL="https://github.com/${LAMCO_FORK_REPO}/releases/download/${LAMCO_FORK_TAG}/lamco-rdp-server_${LAMCO_FORK_DEB_VERSION}_amd64.deb"
 
-echo "=== Lamco RDP Server install ==="
+echo "=== Lamco RDP Server install (pinned fork deb ${LAMCO_FORK_TAG}) ==="
 
-# -- Detect distro from /etc/os-release ------------------------------------
+# -- Validate distro: Debian family only ------------------------------------
 if [ ! -f /etc/os-release ]; then
     echo "ERROR: /etc/os-release not found — cannot determine distro." >&2
     exit 1
@@ -22,6 +32,21 @@ fi
 . /etc/os-release
 DISTRO_ID="${ID}"
 DISTRO_LIKE="${ID_LIKE:-}"
+is_debian_family() {
+    case "$DISTRO_ID" in
+        ubuntu|debian|parrot) return 0 ;;
+    esac
+    case " $DISTRO_LIKE " in
+        *" debian"*|*" ubuntu"*) return 0 ;;
+    esac
+    return 1
+}
+if ! is_debian_family; then
+    echo "ERROR: distro '${DISTRO_ID}' (ID_LIKE='${DISTRO_LIKE}') is not Debian-family." >&2
+    echo "       The pinned fork deb is amd64 Debian packaging; Lamco support" >&2
+    echo "       for rpm distros awaits a fork release pipeline for them." >&2
+    exit 1
+fi
 
 download_tool=""
 if command -v curl >/dev/null 2>&1; then
@@ -42,162 +67,47 @@ fetch_url() {
     fi
 }
 
-fetch_text() {
-    # $1 = URL, prints body to stdout
-    if [ "$download_tool" = "curl" ]; then
-        curl -fsSL "$1"
-    else
-        wget -q "$1" -O -
-    fi
-}
-
-# -- Resolve the latest release tag + asset URLs ---------------------------
-# Try the GitHub API first; fall back to a hardcoded tag if offline/API-limited.
-# The API response lists the ACTUAL asset filenames (which include release-
-# revision suffixes like -1, -4 and distro suffixes like fc42/fc43 that we
-# cannot guess reliably), so we parse the assets array rather than templating.
-RELEASE_TAG="$LAMCO_FALLBACK_TAG"
-ASSET_DEB=""
-ASSET_RPM_FC=""
-ASSET_RPM_SUSE=""
-ASSET_FLATPAK=""
-
-api_body=$(fetch_text "$API_URL" 2>/dev/null || true)
-if [ -n "$api_body" ]; then
-    parsed_tag=$(printf '%s' "$api_body" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
-    [ -n "$parsed_tag" ] && RELEASE_TAG="$parsed_tag"
-    echo "Resolved latest Lamco release: $RELEASE_TAG (via GitHub API)"
-    # Extract every browser_download_url from the assets array. Each line of
-    # api_urls will be a full https://github.com/.../releases/download/<tag>/<filename>.
-    api_urls=$(printf '%s' "$api_body" | sed -n 's/.*"browser_download_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
-    # Pick the asset for each family by filename pattern.
-    ASSET_DEB=$(printf '%s\n' "$api_urls" | grep -E '_amd64\.deb$' | head -1 || true)
-    ASSET_RPM_FC=$(printf '%s\n' "$api_urls" | grep -E '\.fc[0-9]+\.x86_64\.rpm$' | head -1 || true)
-    ASSET_RPM_SUSE=$(printf '%s\n' "$api_urls" | grep -E '\.suse[a-z0-9.-]*\.x86_64\.rpm$' | head -1 || true)
-    ASSET_FLATPAK=$(printf '%s\n' "$api_urls" | grep -E '\.flatpak$' | head -1 || true)
-else
-    echo "GitHub API unreachable — using fallback tag $RELEASE_TAG"
-fi
-
-DOWNLOAD_BASE="https://github.com/${LAMCO_REPO}/releases/download/${RELEASE_TAG}"
-
-# Determine arch (only x86_64 is shipped per the README matrix).
+# Determine arch (only amd64 is built by the fork pipeline).
 ARCH="$(uname -m)"
 case "$ARCH" in
     x86_64|amd64) ARCH="x86_64" ;;
-    *) echo "ERROR: unsupported arch $ARCH (only x86_64 packages are published)." >&2; exit 1 ;;
+    *) echo "ERROR: unsupported arch $ARCH (the pinned fork deb is amd64 only)." >&2; exit 1 ;;
 esac
 
-# -- Select the package for this distro -------------------------------------
-# Debian family (ID=ubuntu/debian/parrot, or ID_LIKE contains debian/ubuntu)
-is_debian_family() {
-    case "$DISTRO_ID" in
-        ubuntu|debian|parrot) return 0 ;;
-    esac
-    case " $DISTRO_LIKE " in
-        *" debian"*|*" ubuntu"*) return 0 ;;
-    esac
-    return 1
-}
-is_fedora_family() {
-    case "$DISTRO_ID" in
-        fedora) return 0 ;;
-    esac
-    case " $DISTRO_LIKE " in
-        *" fedora"*|*" rhel"*) return 0 ;;
-    esac
-    return 1
-}
-is_opensuse_family() {
-    case "$DISTRO_ID" in
-        opensuse-tumbleweed|opensuse-leap|opensuse|suse|sles) return 0 ;;
-    esac
-    case " $DISTRO_LIKE " in
-        *" opensuse"*|*" suse"*) return 0 ;;
-    esac
-    return 1
-}
-
-# resolve_pkg_url: picks the best asset URL for this distro.
-# Prefers a native package (deb/rpm) parsed from the API; falls back to a
-# templated URL using the release tag; finally falls back to the Flatpak
-# (universal, works on any distro with flatpak installed).
-PKG_URL=""
-PKG_KIND=""
-if is_debian_family; then
-    if [ -n "$ASSET_DEB" ]; then
-        PKG_URL="$ASSET_DEB"; PKG_KIND="deb"
-    else
-        # Fallback template: try the common naming convention.
-        PKG_URL="${DOWNLOAD_BASE}/lamco-rdp-server_${RELEASE_TAG#v}-1_amd64.deb"; PKG_KIND="deb"
-    fi
-elif is_fedora_family; then
-    if [ -n "$ASSET_RPM_FC" ]; then
-        PKG_URL="$ASSET_RPM_FC"; PKG_KIND="rpm"
-    elif [ -n "$ASSET_FLATPAK" ]; then
-        PKG_URL="$ASSET_FLATPAK"; PKG_KIND="flatpak"
-    else
-        echo "ERROR: no Fedora rpm or Flatpak asset in release $RELEASE_TAG." >&2; exit 1
-    fi
-elif is_opensuse_family; then
-    if [ -n "$ASSET_RPM_SUSE" ]; then
-        PKG_URL="$ASSET_RPM_SUSE"; PKG_KIND="rpm"
-    elif [ -n "$ASSET_FLATPAK" ]; then
-        PKG_URL="$ASSET_FLATPAK"; PKG_KIND="flatpak"
-    else
-        echo "ERROR: no openSUSE rpm or Flatpak asset in release $RELEASE_TAG." >&2; exit 1
-    fi
-else
-    echo "ERROR: distro $DISTRO_ID (likes='$DISTRO_LIKE') is not in the Lamco PoC supported set." >&2
+# -- Install the pinned fork deb --------------------------------------------
+# The ONLY install path. Download, verify the sha256 against the pinned
+# digest, dpkg -i, then apt-get -f for any missing runtime deps. The success
+# check greps the FORK MARKER (1.4.5-hyperv2) — not the bare version — so a
+# partial install that leaves a stock upstream 1.4.5 binary in place cannot
+# pass. Any failure aborts the deployment loudly: no fallback exists, and
+# silently shipping a stock/broken binary is strictly worse than failing.
+FORK_DEB_TMP="$(mktemp /tmp/lamco-fork.XXXXXX.deb)"
+fetch_url "$LAMCO_FORK_DEB_URL" "$FORK_DEB_TMP" \
+    || { echo "ERROR: download failed for $LAMCO_FORK_DEB_URL" >&2; rm -f "$FORK_DEB_TMP"; exit 1; }
+echo "Verifying sha256 of the fork deb..."
+actual_sha=$(sha256sum "$FORK_DEB_TMP" | awk '{print $1}')
+if [ "$actual_sha" != "$LAMCO_FORK_DEB_SHA256" ]; then
+    echo "ERROR: sha256 mismatch for the fork deb." >&2
+    echo "       expected: $LAMCO_FORK_DEB_SHA256" >&2
+    echo "       actual:   $actual_sha" >&2
+    echo "       The tag may have been re-pointed or the asset replaced. Pin the" >&2
+    echo "       new digest in the install script only after verifying the release." >&2
+    rm -f "$FORK_DEB_TMP"
     exit 1
 fi
-
-echo "Selected Lamco package: $PKG_URL (kind=$PKG_KIND)"
-
-echo "Downloading $PKG_URL"
-case "$PKG_KIND" in
-    deb)      TMP_PKG="/tmp/lamco-rdp-server.deb" ;;
-    rpm)      TMP_PKG="/tmp/lamco-rdp-server.rpm" ;;
-    flatpak)  TMP_PKG="/tmp/lamco-rdp-server.flatpak" ;;
-esac
-fetch_url "$PKG_URL" "$TMP_PKG" || { echo "ERROR: download failed for $PKG_URL" >&2; exit 1; }
-
-# -- Install the package ----------------------------------------------------
-case "$PKG_KIND" in
-    deb)
-        DEBIAN_FRONTEND=noninteractive apt-get update -y 2>&1 || true
-        DEBIAN_FRONTEND=noninteractive apt-get install -y "$TMP_PKG" 2>&1
-        ;;
-    rpm)
-        if command -v dnf >/dev/null 2>&1; then
-            dnf install -y "$TMP_PKG" 2>&1
-        elif command -v zypper >/dev/null 2>&1; then
-            zypper --non-interactive install "$TMP_PKG" 2>&1
-        elif command -v rpm >/dev/null 2>&1; then
-            rpm -ivh "$TMP_PKG" 2>&1
-        else
-            echo "ERROR: no dnf/zypper/rpm available to install the rpm." >&2
-            exit 1
-        fi
-        ;;
-    flatpak)
-        # Flatpak is the universal fallback when no native binary package exists.
-        # Install flatpak if missing, then install the bundle.
-        if command -v apt-get >/dev/null 2>&1; then
-            DEBIAN_FRONTEND=noninteractive apt-get install -y flatpak 2>&1 || true
-        elif command -v dnf >/dev/null 2>&1; then
-            dnf install -y flatpak 2>&1 || true
-        elif command -v zypper >/dev/null 2>&1; then
-            zypper --non-interactive install flatpak 2>&1 || true
-        fi
-        flatpak install --user -y --bundle "$TMP_PKG" 2>&1
-        # The Flatpak app ID is io.lamco.rdp-server per the INSTALL.md.
-        # Note: Flatpak runs sandboxed; the systemd user unit below is for the
-        # native binary and will be a no-op under Flatpak. The user runs the
-        # Flatpak via 'flatpak run io.lamco.rdp-server' instead.
-        ;;
-esac
-rm -f "$TMP_PKG"
+echo "sha256 OK ($LAMCO_FORK_DEB_SHA256)"
+DEBIAN_FRONTEND=noninteractive dpkg -i --force-confnew "$FORK_DEB_TMP" 2>&1 \
+    || DEBIAN_FRONTEND=noninteractive apt-get install -f -y -q 2>&1 \
+    || { echo "ERROR: dpkg install of the fork deb failed." >&2; rm -f "$FORK_DEB_TMP"; exit 1; }
+rm -f "$FORK_DEB_TMP"
+if ! /usr/bin/lamco-rdp-server --version 2>/dev/null | grep -aq "$LAMCO_FORK_DEB_VERSION"; then
+    echo "ERROR: installed lamco-rdp-server does not report the fork marker" >&2
+    echo "       '$LAMCO_FORK_DEB_VERSION' (got: $(/usr/bin/lamco-rdp-server --version 2>/dev/null | head -1))." >&2
+    echo "       The deb may not have fully installed (e.g. broken deps leaving a" >&2
+    echo "       stock binary). Aborting — no silent degradation." >&2
+    exit 1
+fi
+echo "Installed fork deb lamco-rdp-server_${LAMCO_FORK_DEB_VERSION}_amd64 (sha256-verified, pipeline-built)."
 
 # -- Install Portal + PipeWire runtime deps if missing ----------------------
 # Branch by detected desktop so we pull the correct portal backend.
@@ -212,23 +122,13 @@ if [ -z "$desktop" ]; then
     fi
 fi
 
-if command -v apt-get >/dev/null 2>&1; then
-    DEBIAN_FRONTEND=noninteractive apt-get install -y \
-        pipewire wireplumber xdg-desktop-portal \
-        $([ "$desktop" = "GNOME" ] && echo "xdg-desktop-portal-gnome") \
-        $([ "$desktop" = "KDE" ] && echo "xdg-desktop-portal-kde") \
-        2>&1 || true
-elif command -v dnf >/dev/null 2>&1; then
-    dnf install -y pipewire wireplumber xdg-desktop-portal \
-        $([ "$desktop" = "GNOME" ] && echo "xdg-desktop-portal-gnome") \
-        $([ "$desktop" = "KDE" ] && echo "xdg-desktop-portal-kde") \
-        2>&1 || true
-elif command -v zypper >/dev/null 2>&1; then
-    zypper --non-interactive install pipewire wireplumber xdg-desktop-portal \
-        $([ "$desktop" = "GNOME" ] && echo "xdg-desktop-portal-gnome") \
-        $([ "$desktop" = "KDE" ] && echo "xdg-desktop-portal-kde") \
-        2>&1 || true
-fi
+DEBIAN_FRONTEND=noninteractive apt-get update -y 2>&1 || true
+DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    pipewire wireplumber xdg-desktop-portal \
+    python3-dbus \
+    $([ "$desktop" = "GNOME" ] && echo "xdg-desktop-portal-gnome") \
+    $([ "$desktop" = "KDE" ] && echo "xdg-desktop-portal-kde") \
+    2>&1 || true
 
 # -- Generate TLS certificates ---------------------------------------------
 # The server requires cert.pem + key.pem to start. Try the shipped setup-certs
@@ -533,7 +433,7 @@ if [ -n "$AUTOLOGIN_USER" ]; then
     cat > "$USER_HOME/.config/systemd/user/lamco-rdp-server.service" << 'UNIT_EOF'
 [Unit]
 Description=Lamco RDP Server
-Documentation=https://github.com/lamco-admin/lamco-rdp-server
+Documentation=https://github.com/moerketh/lamco-rdp-server
 After=graphical-session.target
 Wants=graphical-session.target
 StartLimitIntervalSec=60
@@ -650,157 +550,43 @@ MONITORS_EOF
         echo "kscreen-doctor not found — KWin will use DRM default (1024x768)."
     fi
 
-    # -- Install lamco-rdp-server: fork release deb, source build fallback --
-    # Preferred: the fork's tag-triggered release pipeline builds the same
-    # feature set (default incl. libei/gui, plus vsock, kwin-virtual, x264)
-    # and ships a deb — installing it cuts the ~18-minute on-VM Rust build
-    # (two fat-LTO binaries on a fresh VM) to a dpkg. The deb is built from
-    # the tagged release commit, the same code the source path builds. If
-    # the download or install fails, fall back to the on-VM source build.
-    LAMCO_FORK_REPO="moerketh/lamco-rdp-server"
-    LAMCO_FORK_BRANCH="feature/hyperv-enhanced-session-v3"
-    LAMCO_FORK_COMMIT=""   # empty = branch head; pin a SHA for reproducible builds
-    LAMCO_FORK_DEB_VERSION="1.4.5-hyperv2"
-    LAMCO_FORK_DEB_URL="https://github.com/${LAMCO_FORK_REPO}/releases/download/v1.4.5-hyperv.2/lamco-rdp-server_${LAMCO_FORK_DEB_VERSION}_amd64.deb"
-    if curl -fsSL --max-time 60 -o /tmp/lamco-fork.deb "$LAMCO_FORK_DEB_URL" 2>/dev/null \
-        && dpkg -i --force-confnew /tmp/lamco-fork.deb >/dev/null 2>&1 \
-        && apt-get install -f -y -q >/dev/null 2>&1 \
-        && /usr/bin/lamco-rdp-server --version 2>/dev/null | grep -aq "1.4.5"; then
-        echo "Installed fork release deb lamco-rdp-server_${LAMCO_FORK_DEB_VERSION}_amd64 (pipeline-built)."
-        DEB_INSTALLED=1
-    else
-        echo "Fork release deb unavailable — falling back to on-VM source build."
-        DEB_INSTALLED=0
-        rm -f /tmp/lamco-fork.deb 2>/dev/null || true
+    # -- Restart the service under the freshly installed binary ------------
+    # The deb installed the binary and its units; restart so the service
+    # acquires its portal session under the new binary. The restart also
+    # surfaces the one-time consent dialog (lamco-grant.service) if it has
+    # not been answered yet.
+    if [ -n "$AUTOLOGIN_USER" ]; then
+        loginctl enable-linger "$AUTOLOGIN_USER" 2>/dev/null || true
+        sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
+            systemctl --user daemon-reload 2>/dev/null || true
+        sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
+            systemctl --user restart lamco-rdp-server.service 2>/dev/null || true
     fi
-    FORK_DIR="/opt/lamco-fork"
-    FORK_BUILD_LOG="/tmp/lamco-fork-build.log"
-    FORK_DONE_MARKER="/opt/lamco-fork/.fork-installed"
-    FORK_WAIT_INTERVAL=10
-    FORK_WAIT_LOOPS=45   # 7.5 min poll inside this step; build self-completes if longer
-    if [ "${DEB_INSTALLED:-0}" = "1" ]; then
-        # Pipeline deb installed the binary and its units; still restart the
-        # service so it acquires its portal session under the new binary.
-        if [ -n "$AUTOLOGIN_USER" ]; then
-            loginctl enable-linger "$AUTOLOGIN_USER" 2>/dev/null || true
-            sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
-                systemctl --user daemon-reload 2>/dev/null || true
-            sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
-                systemctl --user restart lamco-rdp-server.service 2>/dev/null || true
-        fi
-    fi
-    if [ "${DEB_INSTALLED:-0}" != "1" ] && [ ! -d "$FORK_DIR/.git" ]; then
-        git clone --depth 1 --branch "$LAMCO_FORK_BRANCH" \
-            "https://github.com/${LAMCO_FORK_REPO}.git" "$FORK_DIR" 2>/dev/null || true
-    fi
-    if [ "${DEB_INSTALLED:-0}" != "1" ] && [ -d "$FORK_DIR" ]; then
-        if ! command -v cargo >/dev/null 2>&1; then
-            echo "Installing Rust toolchain (minimal profile)..."
-            curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal 2>/dev/null || true
-        fi
-        export PATH="$HOME/.cargo/bin:$PATH"
-        if command -v cargo >/dev/null 2>&1; then
-            # Build toolchain for the crates with native build scripts:
-            # cmake (libopus_sys), pkg-config -dev headers probed by
-            # libspa-sys/libpipewire (pipewire/spa), libopus_sys (opus),
-            # zbus (dbus), the x264 feature, and the link-stage libs for
-            # pam-auth (libpam) and the gui dev (libxkbcommon). A vanilla
-            # server install only pulls runtime libs, not these.
-            apt-get install -y -q build-essential pkg-config cmake ninja-build \
-                libpipewire-0.3-dev libspa-0.2-dev libopus-dev \
-                libdbus-1-dev libudev-dev libx264-dev \
-                libpam0g-dev libxkbcommon-dev \
-                python3-dbus python3-gi 2>/dev/null || true
-            cd "$FORK_DIR" || exit 1
-            if [ -n "$LAMCO_FORK_COMMIT" ]; then
-                git fetch --depth 1 origin "$LAMCO_FORK_COMMIT" 2>/dev/null || true
-                git checkout "$LAMCO_FORK_COMMIT" 2>/dev/null || true
-            else
-                git fetch --depth 1 origin "$LAMCO_FORK_BRANCH" 2>/dev/null || true
-                git reset --hard FETCH_HEAD 2>/dev/null || true
+
+    # -- Readiness gate: installed is NOT the same as listening ------------
+    # Session creation can park on the one-time portal consent dialog
+    # (see lamco-grant.service above): until it is answered, NO listener
+    # binds and vmconnect cannot connect. Poll for the dispatcher line so
+    # this step's report distinguishes "service up and listening" from
+    # "deployed but blocked on consent" — a fresh VM is expected to need
+    # one Allow click on the console.
+    if [ -n "$AUTOLOGIN_USER" ]; then
+        RDY_UID=$(id -u "$AUTOLOGIN_USER")
+        for r in $(seq 1 12); do
+            if journalctl _UID=$RDY_UID --since "-5 min" --no-pager 2>/dev/null \
+                | grep -aq "Accept dispatcher started"; then
+                echo "Service ready: accept dispatcher running (TCP/vsock listeners bound)."
+                break
             fi
-            # The fork's licenses/ dir is not in git (packaging artifact), but
-            # third_party.rs include_str!()s OpenH264 license texts at build
-            # time. Fetch the genuine Cisco texts into the checkout.
-            if [ ! -s "$FORK_DIR/licenses/OpenH264-BINARY_LICENSE.txt" ]; then
-                mkdir -p "$FORK_DIR/licenses"
-                curl -fsSL https://raw.githubusercontent.com/cisco/openh264/master/LICENSE \
-                    -o "$FORK_DIR/licenses/OpenH264-BINARY_LICENSE.txt" 2>/dev/null || true
-                # The repo has no standalone PATENTS file; the LICENSE text
-                # carries the patent grant. Use it for both required files.
-                cp "$FORK_DIR/licenses/OpenH264-BINARY_LICENSE.txt" \
-                   "$FORK_DIR/licenses/OpenH264-PATENT.txt" 2>/dev/null || true
+            if journalctl _UID=$RDY_UID --since "-5 min" --no-pager 2>/dev/null \
+                | grep -aq "permission dialog will appear"; then
+                echo "NOTICE: one-time portal consent dialog is on the VM console — click Allow once, then the service binds its listeners." >&2
+                break
             fi
-            # A cold release build (LTO) takes longer than the deployment
-            # step's command timeout, so run it DETACHED (survives this
-            # shell) and poll here instead of blocking. The marker file
-            # makes the build idempotent: a re-run of this script (or a
-            # retry after a timeout kill) picks up where it left off —
-            # cargo reuses target/ artifacts, so only the final link runs.
-            rm -f "$FORK_BUILD_LOG" "$FORK_DONE_MARKER"
-            # The service restart is chained INTO the detached build: the
-            # restart (as the autologin user) makes the freshly built server
-            # acquire its portal session — which shows the remote-control
-            # consent dialog on the VM console. So the whole flow is:
-            # deployment finishes -> dialog appears -> click Allow once.
-            # No manual commands. AUTOLOGIN_USER is exported so the detached
-            # shell inherits it (it recomputes nothing).
-            export AUTOLOGIN_USER
-            nohup bash -c "cd '$FORK_DIR' && PATH='$HOME/.cargo/bin':\$PATH \
-                cargo build --release --features x264,vsock,kwin-virtual,libei \
-                && install -m 0755 target/release/lamco-rdp-server /usr/bin/lamco-rdp-server \
-                && touch '$FORK_DONE_MARKER' \
-                && [ -n \$AUTOLOGIN_USER ] \
-                && { loginctl enable-linger \$AUTOLOGIN_USER 2>/dev/null || true; \
-                     sudo -u \$AUTOLOGIN_USER XDG_RUNTIME_DIR=/run/user/\$(id -u \$AUTOLOGIN_USER) \
-                         systemctl --user enable lamco-rdp-server.service 2>/dev/null || true; \
-                     sudo -u \$AUTOLOGIN_USER XDG_RUNTIME_DIR=/run/user/\$(id -u \$AUTOLOGIN_USER) \
-                         systemctl --user restart lamco-rdp-server.service; }" >"$FORK_BUILD_LOG" 2>&1 &
-            echo "Fork build detached (log: $FORK_BUILD_LOG); waiting..."
-            for i in $(seq 1 $FORK_WAIT_LOOPS); do
-                if [ -f "$FORK_DONE_MARKER" ]; then
-                    echo "Installed fork-built lamco-rdp-server (DMA-BUF capture fixes included)."
-                    break
-                fi
-                if ! pgrep -f "cargo build --release" >/dev/null 2>&1; then
-                    # Build process died without the marker: real failure.
-                    echo "WARNING: fork build failed — keeping the release binary (expect a black screen on virtual GPUs)." >&2
-                    tail -5 "$FORK_BUILD_LOG" >&2 || true
-                    break
-                fi
-                sleep $FORK_WAIT_INTERVAL
-            done
-            [ -f "$FORK_DONE_MARKER" ] || echo "WARNING: fork build still running after ${FORK_WAIT_LOOPS}x${FORK_WAIT_INTERVAL}s — it installs itself on completion; rerun this step (or wait) to pick up the fixed binary." >&2
-            # -- Readiness gate: the build marker is NOT service readiness ----
-            # Session creation can park on the one-time portal consent dialog
-            # (see lamco-grant.service above): until it is answered, NO
-            # listener binds and vmconnect cannot connect. Poll for the
-            # dispatcher line so this step's report distinguishes "service
-            # up and listening" from "deployed but blocked on consent" —
-            # a fresh VM is expected to need one Allow click on the console.
-            if [ -f "$FORK_DONE_MARKER" ] && [ -n "$AUTOLOGIN_USER" ]; then
-                RDY_UID=$(id -u "$AUTOLOGIN_USER")
-                for r in $(seq 1 12); do
-                    if journalctl _UID=$RDY_UID --since "-5 min" --no-pager 2>/dev/null \
-                        | grep -aq "Accept dispatcher started"; then
-                        echo "Service ready: accept dispatcher running (TCP/vsock listeners bound)."
-                        break
-                    fi
-                    if journalctl _UID=$RDY_UID --since "-5 min" --no-pager 2>/dev/null \
-                        | grep -aq "permission dialog will appear"; then
-                        echo "NOTICE: one-time portal consent dialog is on the VM console — click Allow once, then the service binds its listeners." >&2
-                        break
-                    fi
-                    sleep 10
-                done
-            fi
-            cd / || exit 1
-        else
-            echo "WARNING: Rust toolchain unavailable — keeping the release binary." >&2
-        fi
-    else
-        echo "WARNING: could not clone the fork — keeping the release binary." >&2
+            sleep 10
+        done
     fi
+
 
     # -- Retire vgem artifacts -----------------------------------------------
     # The server needs no extra render node and no KWin env overrides —

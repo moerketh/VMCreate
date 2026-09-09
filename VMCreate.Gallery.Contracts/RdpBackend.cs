@@ -24,11 +24,13 @@ namespace VMCreate
         /// <summary>
         /// Lamco RDP Server — a Wayland-native RDP server built on IronRDP with
         /// XDG Desktop Portal + PipeWire screen capture. Keeps Wayland enabled
-        /// (no X11 fallback) and installs post-boot over SSH via native deb/rpm
-        /// packages from GitHub Releases. Requires a graphical Wayland session
-        /// to share, so graphical autologin is enabled. The one-time Portal
-        /// permission grant (<c>--grant-permission</c>) is a manual post-deploy
-        /// step (interactive GUI dialog). Supported on recent GNOME 45+ and
+        /// (no X11 fallback) and installs post-boot over SSH from a pinned fork
+        /// release deb (sha256-verified; no fallback paths — a missing asset
+        /// fails the deployment loudly). Requires a graphical Wayland session
+        /// to share, so graphical autologin is enabled; the one-time Portal
+        /// consent grant is automated via a systemd oneshot unit.
+        /// Debian-family distros only (Ubuntu, Debian, Parrot) — the fork
+        /// pipeline ships amd64 debs. Supported on recent GNOME 45+ and
         /// KDE Plasma 6.3+ desktops.
         /// </summary>
         Lamco

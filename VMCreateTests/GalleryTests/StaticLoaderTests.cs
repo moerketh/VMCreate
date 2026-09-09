@@ -56,12 +56,13 @@ namespace VMCreate.Tests.GalleryTests
         [TestMethod]
         public async Task OpenSuseTumbleweed_LoadGalleryItems_SetsOpenSuseDistroHint()
         {
-            // The LinuxDistro hint lets the pre-deployment UI show the Lamco RDP Server
-            // option for openSUSE without a live SSH shell.
+            // The LinuxDistro hint drives pre-deployment UI gating. openSUSE
+            // is classified but NOT Lamco-supported: the install path is a
+            // pinned amd64 Debian deb and the fork pipeline ships no rpms.
             var item = (await new OpenSuseTumbleweed().LoadGalleryItems())[0];
 
             Assert.AreEqual(LinuxDistro.OpenSuse, item.LinuxDistro);
-            Assert.IsTrue(item.SupportsLamco());
+            Assert.IsFalse(item.SupportsLamco());
         }
 
         [TestMethod]

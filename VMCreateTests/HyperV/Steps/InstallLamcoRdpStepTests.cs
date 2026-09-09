@@ -61,13 +61,30 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
-        public void IsApplicable_TrueForAllPoCSupportedDistros()
+        public void IsApplicable_TrueForAllDebianFamilyDistros()
         {
-            foreach (var distro in new[] { LinuxDistro.Ubuntu, LinuxDistro.Fedora, LinuxDistro.Debian, LinuxDistro.OpenSuse, LinuxDistro.Parrot })
+            // The install is a pinned amd64 Debian deb — the fork pipeline
+            // builds no rpms/flatpaks for this lineage.
+            foreach (var distro in new[] { LinuxDistro.Ubuntu, LinuxDistro.Debian, LinuxDistro.Parrot })
             {
                 var item = new GalleryItem { LinuxDistro = distro };
                 Assert.IsTrue(_step.IsApplicable(item, _lamcoCustomizations),
                     $"{distro} should be supported");
+            }
+        }
+
+        [TestMethod]
+        public void IsApplicable_FalseForRpmDistros_UntilForkShipsRpms()
+        {
+            // The upstream selection that carried rpm distros was removed with
+            // the pinned-deb-only install (rpm/flatpak assets are not built
+            // for the fork lineage). These must be gated off in the UI too,
+            // not just fail inside the script.
+            foreach (var distro in new[] { LinuxDistro.Fedora, LinuxDistro.OpenSuse, LinuxDistro.Unknown })
+            {
+                var item = new GalleryItem { LinuxDistro = distro };
+                Assert.IsFalse(_step.IsApplicable(item, _lamcoCustomizations),
+                    $"{distro} must not be offered the Lamco backend (no pinned package exists)");
             }
         }
 
@@ -209,11 +226,12 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
-        public async Task ExecuteAsync_ForkBuild_IncludesKwinVirtualFeatures()
+        public async Task ExecuteAsync_InstallsPinnedForkDeb_OnlyPath()
         {
-            // The fork must be built with the kwin-virtual strategy
-            // (zkde_screencast_unstable_v1 virtual output + libei input) —
-            // a build without these features has no virtual-output capture.
+            // The install path is EXACTLY ONE: the pinned fork deb, verified
+            // by sha256 before dpkg. There is no source-build fallback and no
+            // upstream fallback — a missing/re-pinned asset must fail the
+            // deployment loudly, never silently ship a stock binary.
             string? captured = null;
             _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                   .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
@@ -222,8 +240,48 @@ namespace VMCreate.Tests.HyperV.Steps
             await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
 
             Assert.IsNotNull(captured);
-            StringAssert.Contains(captured, "--features x264,vsock,kwin-virtual,libei",
-                "fork build must include the kwin-virtual strategy features");
+            StringAssert.Contains(captured, "LAMCO_FORK_TAG=\"v1.4.5-hyperv.2\"",
+                "fork deb tag pinned in the script");
+            StringAssert.Contains(captured, "LAMCO_FORK_DEB_SHA256=\"13f119f7c59435abc3be22072122b9adb350b4a60e724462faa9a3d67f2cfb7e\"",
+                "fork deb sha256 pinned — whoever can push a release asset must not get root on every VM");
+            StringAssert.Contains(captured, "sha256sum \"$FORK_DEB_TMP\"",
+                "digest verified before dpkg -i");
+            StringAssert.Contains(captured, "grep -aq \"$LAMCO_FORK_DEB_VERSION\"",
+                "success check greps the fork marker, not the bare version (a partial install leaving stock 1.4.5 must fail)");
+            // No fallback paths may exist
+            Assert.IsFalse(captured.Contains("cargo build"), "no on-VM source build");
+            Assert.IsFalse(captured.Contains("rustup"), "no curl|sh toolchain");
+            Assert.IsFalse(captured.Contains("git clone"), "no unpinned fork clone");
+            Assert.IsFalse(captured.Contains("releases/latest"), "no latest-tag resolution: the tag is pinned");
+            Assert.IsFalse(captured.Contains("DEB_INSTALLED"), "no deb/source branching");
+            Assert.IsFalse(captured.Contains("lamco-admin"), "no upstream repo anywhere");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_DebFailsLoudly_NoSilentDegradation()
+        {
+            // Guard: the script must exit 1 with a clear message on every
+            // failure mode of the only install path — download, digest,
+            // dpkg, and the fork-marker check. The era of "WARNING: ...
+            // keeping the release binary" silent degradation is over.
+            string? captured = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("done");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(captured);
+            StringAssert.Contains(captured, "ERROR: download failed for",
+                "download failure exits 1");
+            StringAssert.Contains(captured, "sha256 mismatch",
+                "digest mismatch exits 1");
+            StringAssert.Contains(captured, "ERROR: dpkg install of the fork deb failed",
+                "dpkg failure exits 1");
+            StringAssert.Contains(captured, "does not report the fork marker",
+                "fork-marker check failure exits 1");
+            Assert.IsFalse(captured.Contains("keeping the release binary"),
+                "no silent keep-stock-binary fallback");
         }
 
         [TestMethod]
@@ -330,13 +388,11 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
-        public async Task ExecuteAsync_DeploysForkV3Branch()
+        public async Task ExecuteAsync_DistroGate_IsDebianFamilyOnly()
         {
-            // The fork line carrying per-transport security routing
-            // (dual-server), the vsock CID allowlist, kwin-virtual, and the
-            // client-size/silent-adoption fixes is feature/hyperv-
-            // enhanced-session-v3. A stale branch pin silently deploys the
-            // pre-fix line.
+            // The pinned fork deb is amd64 Debian packaging; rpm/flatpak
+            // assets are not built for this lineage. A non-Debian distro must
+            // be rejected at the top of the script, not after a download.
             string? captured = null;
             _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                   .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
@@ -345,35 +401,57 @@ namespace VMCreate.Tests.HyperV.Steps
             await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
 
             Assert.IsNotNull(captured);
-            StringAssert.Contains(captured, "LAMCO_FORK_BRANCH=\"feature/hyperv-enhanced-session-v3\"",
-                "fork deploy tracks the v3 branch (per-transport security + allowlist line)");
-            StringAssert.Contains(captured, "--features x264,vsock,kwin-virtual,libei",
-                "fallback source build keeps the full deployment feature set");
+            StringAssert.Contains(captured, "is not Debian-family",
+                "non-Debian distros are refused with exit 1");
+            Assert.IsFalse(captured.Contains("dnf"), "no rpm package manager paths");
+            Assert.IsFalse(captured.Contains("zypper"), "no rpm package manager paths");
+            Assert.IsFalse(captured.Contains("flatpak install"), "no flatpak fallback");
         }
 
         [TestMethod]
-        public async Task ExecuteAsync_InstallsForkReleaseDebWithSourceFallback()
+        public async Task ExecuteAsync_DebInstallsBeforeConfigWrite()
         {
-            // The pipeline-built deb cuts the ~18-minute on-VM Rust build to a
-            // dpkg; the source build remains the fallback when the deb is
-            // unreachable. Both paths must be visible in the script. The step
-            // copies several files; assert over the accumulated content.
-            var captured = new List<string>();
+            // dpkg -i --force-confnew replaces conffiles with package defaults;
+            // if the fork deb ships /etc/lamco-rdp-server/config.toml as a
+            // conffile, writing our tuned config BEFORE the install would be
+            // clobbered. The config write must come after the deb install.
+            string? captured = null;
             _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                  .Callback<string, string, CancellationToken>((content, _, _) => captured.Add(content));
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
             _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("done");
 
             await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
 
-            var all = string.Join("\n", captured);
-            StringAssert.Contains(all, "LAMCO_FORK_DEB_URL=",
-                "pipeline deb is the preferred install path (URL built from repo/tag)");
-            StringAssert.Contains(all, "v1.4.5-hyperv.2",
-                "deb URL points at the fork release tag");
-            StringAssert.Contains(all, "DEB_INSTALLED=1",
-                "deb success flag drives the source-build skip");
-            StringAssert.Contains(all, "falling back to on-VM source build",
-                "deb failure falls back to the source build");
+            Assert.IsNotNull(captured);
+            var debIdx = captured.IndexOf("dpkg -i --force-confnew", StringComparison.Ordinal);
+            var configIdx = captured.IndexOf("cat > /etc/lamco-rdp-server/config.toml", StringComparison.Ordinal);
+            Assert.IsTrue(debIdx >= 0, "deb install present");
+            Assert.IsTrue(configIdx >= 0, "config write present");
+            Assert.IsTrue(debIdx < configIdx,
+                "deb install must precede the config.toml write (--force-confnew would clobber it)");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_ReadinessGateOnRealPath()
+        {
+            // The readiness gate distinguishes "service up and listening"
+            // from "deployed but blocked on the one-time consent dialog".
+            // It used to be nested inside the deleted source-build branch
+            // (never on the real install path); it must run on the deb path.
+            string? captured = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("done");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(captured);
+            StringAssert.Contains(captured, "Accept dispatcher started",
+                "readiness gate present in the script");
+            // The gate is on the main path: it must no longer be nested
+            // inside a `command -v cargo` block (the source build is gone).
+            Assert.IsFalse(captured.Contains("command -v cargo"),
+                "readiness gate is no longer gated on cargo availability");
         }
 
         [TestMethod]

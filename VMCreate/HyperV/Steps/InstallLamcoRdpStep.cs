@@ -7,7 +7,7 @@ namespace VMCreate
 {
     /// <summary>
     /// Installs and configures the Lamco RDP Server (Wayland-native RDP) on the
-    /// guest VM via native deb/rpm packages from GitHub Releases.
+    /// guest VM from a pinned fork release deb.
     /// <para>
     /// Unlike xrdp (which installs via the external cloning-ISO chroot), Lamco
     /// installs post-boot over SSH. It is a Wayland-native server built on IronRDP
@@ -16,23 +16,22 @@ namespace VMCreate
     /// steps are skipped via <see cref="VmCustomizations.RdpBackend"/> gating).
     /// </para>
     /// <para>
-    /// This step downloads the matching release asset for the detected distro
-    /// (deb for Debian/Ubuntu/Parrot, rpm for Fedora, rpm for openSUSE) from
-    /// <c>github.com/lamco-admin/lamco-rdp-server/releases</c>, installs it via
-    /// the native package manager, installs Portal/PipeWire runtime deps, generates
-    /// TLS certificates, writes <c>/etc/lamco-rdp-server/config.toml</c> (hybrid
-    /// security, no auth), installs the systemd <b>user</b> service unit, and enables linger
-    /// so the user service starts at boot. The one-time Portal permission grant
-    /// (<c>--grant-permission</c>) is an interactive GUI dialog and is left as a
-    /// manual post-deploy step — <see cref="EnableGraphicalAutologinStep"/>
-    /// ensures a Wayland session exists for the user to grant into.
+    /// The install path is exactly one: the pinned fork deb
+    /// (tag + version + sha256 pinned in <c>Scripts/install_lamco.sh</c>) from
+    /// <c>github.com/moerketh/lamco-rdp-server/releases</c>, sha256-verified
+    /// before <c>dpkg -i</c>. There is no source-build fallback and no upstream
+    /// fallback — a missing or re-pinned asset fails the deployment loudly
+    /// rather than silently shipping a stock binary. After the install the
+    /// script installs Portal/PipeWire runtime deps, generates TLS
+    /// certificates, writes <c>/etc/lamco-rdp-server/config.toml</c>, installs
+    /// the systemd <b>user</b> service units (including the automated one-time
+    /// consent grant, <c>lamco-grant.service</c>), and enables linger.
     /// </para>
     /// <para>
-    /// PoC gating: only runs when <see cref="VmCustomizations.RdpBackend"/> is
+    /// Gating: only runs when <see cref="VmCustomizations.RdpBackend"/> is
     /// <see cref="RdpBackend.Lamco"/> and the gallery item's
-    /// <see cref="GalleryItem.LinuxDistro"/> is one of the supported distributions
-    /// (Ubuntu, Fedora, Debian, openSUSE, Parrot). <see cref="DistroDetector"/>
-    /// re-verifies at runtime as a defensive check.
+    /// <see cref="GalleryItem.LinuxDistro"/> is Debian-family
+    /// (Ubuntu, Debian, Parrot) — the fork pipeline ships amd64 debs only.
     /// </para>
     /// <para>
     /// Runs at Order 235, before <see cref="EnableGraphicalAutologinStep"/> (238)
@@ -67,4 +66,5 @@ namespace VMCreate
             logger.LogInformation("Lamco RDP Server install result on VM {VMName}: {Result}", shell.VmName, result.Trim());
         }
     }
-}
+}
+

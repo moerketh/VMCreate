@@ -107,8 +107,9 @@ namespace VMCreate
 
         /// <summary>
         /// True when the selected gallery item supports the Lamco RDP Server
-        /// backend (Ubuntu, Fedora, Debian, openSUSE Tumbleweed, Parrot). Hides
-        /// the Lamco radio on unsupported distros. Evaluated from the
+        /// backend (Debian family: Ubuntu, Debian, Parrot — the install is a
+        /// pinned amd64 Debian deb). Hides the Lamco radio on unsupported
+        /// distros. Evaluated from the
         /// <see cref="GalleryItem.LinuxDistro"/> metadata hint (no live shell yet).
         /// </summary>
         public bool LamcoOptionVisible => SelectedItem.SupportsLamco();

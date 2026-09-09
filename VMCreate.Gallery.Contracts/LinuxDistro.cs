@@ -30,14 +30,14 @@ namespace VMCreate
     {
         /// <summary>
         /// Returns true if the Lamco RDP Server backend is supported on this
-        /// distribution. PoC gating: Ubuntu, Fedora, Debian, openSUSE Tumbleweed,
-        /// and Parrot Security OS. Expand after validation.
+        /// distribution. The install path is a pinned amd64 Debian deb; the
+        /// fork release pipeline does not build rpm/flatpak assets for this
+        /// lineage. Fedora/openSUSE regain Lamco support when the fork
+        /// pipeline ships rpms for them.
         /// </summary>
         public static bool SupportsLamco(this LinuxDistro distro) =>
             distro is LinuxDistro.Ubuntu
-                or LinuxDistro.Fedora
                 or LinuxDistro.Debian
-                or LinuxDistro.OpenSuse
                 or LinuxDistro.Parrot;
 
         /// <summary>

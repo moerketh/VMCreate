@@ -11,13 +11,20 @@ namespace VMCreate.Tests.GalleryTests
     public sealed class LinuxDistroTests
     {
         [TestMethod]
-        public void SupportsLamco_TrueForPoCDistros()
+        public void SupportsLamco_TrueForDebianFamilyDistros()
         {
+            // The Lamco install path is a pinned amd64 Debian deb; rpm distros
+            // are gated off until the fork pipeline ships rpms.
             Assert.IsTrue(LinuxDistro.Ubuntu.SupportsLamco());
-            Assert.IsTrue(LinuxDistro.Fedora.SupportsLamco());
             Assert.IsTrue(LinuxDistro.Debian.SupportsLamco());
-            Assert.IsTrue(LinuxDistro.OpenSuse.SupportsLamco());
             Assert.IsTrue(LinuxDistro.Parrot.SupportsLamco());
+        }
+
+        [TestMethod]
+        public void SupportsLamco_FalseForRpmDistros()
+        {
+            Assert.IsFalse(LinuxDistro.Fedora.SupportsLamco());
+            Assert.IsFalse(LinuxDistro.OpenSuse.SupportsLamco());
         }
 
         [TestMethod]
