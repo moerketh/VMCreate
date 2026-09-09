@@ -25,6 +25,7 @@ namespace VMCreate
             => _viewModel.InsertDiskSubSteps(detectedGeneration, needsIsoBoot);
         public void InsertCustomizePhase() => _viewModel.InsertCustomizePhase();
         public void InsertCleanupIsoBootPhase() => _viewModel.InsertCleanupIsoBootPhase();
+        public void EnsureResolvedRdpBackendPhases() => _viewModel.EnsureResolvedRdpBackendPhases();
 
         public void ActivatePhase(string id) => _viewModel.ActivatePhase(id);
         public void CompletePhase(string id) => _viewModel.CompletePhase(id);

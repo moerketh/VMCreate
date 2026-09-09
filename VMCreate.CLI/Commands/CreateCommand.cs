@@ -79,8 +79,8 @@ namespace VMCreate.CLI.Commands
 
             var rdpBackendOpt = new Option<string>(
                 "--rdp-backend",
-                getDefaultValue: () => "xrdp",
-                description: "RDP server backend: xrdp (default, disables Wayland), lamco (Wayland-native Lamco RDP Server), or none.");
+                getDefaultValue: () => "auto",
+                description: "RDP server backend: auto (default — detects Wayland vs X11 in the guest post-boot and picks the best backend), xrdp (disables Wayland), lamco (Wayland-native Lamco RDP Server), or none.");
 
             var noIntegrationSvcOpt = new Option<bool>(
                 "--no-integration-services",
@@ -222,7 +222,7 @@ namespace VMCreate.CLI.Commands
         /// <summary>
         /// Resolves the RDP backend from --rdp-backend, with --no-xrdp as a
         /// deprecated back-compat alias for --rdp-backend none. --no-xrdp only
-        /// takes effect when --rdp-backend is left at its default (xrdp).
+        /// takes effect when --rdp-backend is left at its default (auto).
         /// An unrecognized value FAILS LOUDLY — silently mapping a typo
         /// (e.g. "lamc") to Xrdp would provision a completely different
         /// desktop stack than the user asked for.
@@ -230,15 +230,25 @@ namespace VMCreate.CLI.Commands
         /// TryResolveRdpBackend is a pure parse, checked before any VM work starts.
         /// (System.CommandLine 2.0.0-beta4 has no CommandLineConfigurationException;
         /// the CLI validates values itself and returns exit codes instead.)
+        /// <para>
+        /// Note: RdpBackend.Auto (the default) is resolved at runtime in the
+        /// guest by AutoRdpBackendResolveStep — the CLI just passes it through.
+        /// The VMCreate.CLI process, however, currently registers only
+        /// Gallery.Security customization steps (not the VMCreate assembly
+        /// infra steps), so CLI Auto deployments will fall back to xrdp at the
+        /// service level until the CLI step registration is extended.
+        /// </para>
         /// </summary>
         private static RdpBackend ResolveRdpBackend(string rdpBackend, bool noXrdp, bool jsonMode, out bool valid)
         {
             valid = true;
             if (!string.IsNullOrEmpty(rdpBackend)
-                && !string.Equals(rdpBackend, "xrdp", StringComparison.OrdinalIgnoreCase))
+                && !string.Equals(rdpBackend, "auto", StringComparison.OrdinalIgnoreCase))
             {
                 switch (rdpBackend.ToLowerInvariant())
                 {
+                    case "xrdp":
+                        return RdpBackend.Xrdp;
                     case "lamco":
                         return RdpBackend.Lamco;
                     case "none":
@@ -246,11 +256,11 @@ namespace VMCreate.CLI.Commands
                     default:
                         valid = false;
                         PrintError(jsonMode, "validation",
-                            $"Unknown --rdp-backend value '{rdpBackend}'. Valid values: xrdp, lamco, none.");
-                        return RdpBackend.Xrdp;
+                            $"Unknown --rdp-backend value '{rdpBackend}'. Valid values: auto, xrdp, lamco, none.");
+                        return RdpBackend.Auto;
                 }
             }
-            return noXrdp ? RdpBackend.None : RdpBackend.Xrdp;
+            return noXrdp ? RdpBackend.None : RdpBackend.Auto;
         }
 
         private static async Task<int> RunAsync(IServiceProvider services, CreateArgs args, CancellationToken ct)

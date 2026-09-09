@@ -96,6 +96,9 @@
     <Compile Include="HyperV\Steps\GuestIntegration\RemoveVBoxGuestAdditionsStep.cs" />
     <Compile Include="HyperV\Steps\GuestIntegration\RemoveVmwareToolsStep.cs" />
     <Compile Include="HyperV\Steps\ScriptResourceLoader.cs" />
+    <Compile Include="HyperV\Steps\Desktop\KaliKdeSwitchStep.cs" />
+    <Compile Include="HyperV\Steps\Rdp\AutoRdpBackendResolveStep.cs" />
+    <Compile Include="HyperV\Steps\Rdp\Xrdp\InstallXrdpPostBootStep.cs" />
     <Compile Include="HyperV\Steps\Rdp\Lamco\UsernameValidator.cs" />
     <Compile Include="HyperV\Steps\System\SyncTimezoneStep.cs" />
     <Compile Include="HyperV\IHyperVManager.cs" />
@@ -196,6 +199,9 @@
 
   <ItemGroup>
     <EmbeddedResource Include="HyperV\Steps\Scripts\install_lamco.sh" />
+    <EmbeddedResource Include="HyperV\Steps\Scripts\detect_display_server.sh" />
+    <EmbeddedResource Include="HyperV\Steps\Scripts\install_xrdp_postboot.sh" />
+    <EmbeddedResource Include="HyperV\Steps\Scripts\kali_kde_switch.sh" />
     <EmbeddedResource Include="HyperV\Steps\Scripts\enable_autologin.sh" />
     <EmbeddedResource Include="HyperV\Steps\Scripts\disable_kwin_compositing.sh" />
     <EmbeddedResource Include="HyperV\Steps\Scripts\disable_suspend_btrfs.sh" />

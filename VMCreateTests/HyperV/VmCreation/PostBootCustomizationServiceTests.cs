@@ -161,6 +161,65 @@ namespace VMCreate.Tests.HyperV.VmCreation
                 "a failed run must not report 100% completion");
         }
 
+        [TestMethod]
+        public async Task RunLinuxPostBootAsync_IsApplicableEvaluatedPerStep_ResolverMutationGatesLaterSteps()
+        {
+            // The Auto-backend design hinges on the LIVE IsApplicable loop:
+            // AutoRdpBackendResolveStep (232) mutates the shared
+            // VmCustomizations.RdpBackend in place, and every later step's
+            // gate is re-read at its turn. Here stepA plays the resolver
+            // (Auto → Xrdp) and stepB is gated on Auto — it must be skipped
+            // WITHOUT a warning or an exception, and the run must stay green.
+            var executed = new List<string>();
+            var customizations = new VmCustomizations { RdpBackend = RdpBackend.Auto };
+
+            var stepA = new Mock<ICustomizationStep>();
+            stepA.Setup(s => s.Name).Returns("StepA-Resolver");
+            stepA.Setup(s => s.Phase).Returns(CustomizationPhase.PostBoot);
+            stepA.Setup(s => s.Platform).Returns(StepPlatform.Linux);
+            stepA.Setup(s => s.Order).Returns(100);
+            stepA.Setup(s => s.ProgressPhaseId).Returns((string)null);
+            stepA.Setup(s => s.IsApplicable(It.IsAny<GalleryItem>(), It.IsAny<VmCustomizations>()))
+                .Returns((GalleryItem _, VmCustomizations c) => c.RdpBackend == RdpBackend.Auto);
+            stepA.Setup(s => s.ExecuteAsync(
+                    It.IsAny<IGuestShell>(), It.IsAny<GalleryItem>(), It.IsAny<VmCustomizations>(),
+                    It.IsAny<ILogger>(), It.IsAny<CancellationToken>()))
+                .Callback(() => { executed.Add("StepA-Resolver"); customizations.RdpBackend = RdpBackend.Xrdp; })
+                .Returns(Task.CompletedTask);
+
+            var stepB = new Mock<ICustomizationStep>();
+            stepB.Setup(s => s.Name).Returns("StepB-AutoOnly");
+            stepB.Setup(s => s.Phase).Returns(CustomizationPhase.PostBoot);
+            stepB.Setup(s => s.Platform).Returns(StepPlatform.Linux);
+            stepB.Setup(s => s.Order).Returns(200);
+            stepB.Setup(s => s.ProgressPhaseId).Returns((string)null);
+            stepB.Setup(s => s.IsApplicable(It.IsAny<GalleryItem>(), It.IsAny<VmCustomizations>()))
+                .Returns((GalleryItem _, VmCustomizations c) => c.RdpBackend == RdpBackend.Auto);
+            stepB.Setup(s => s.ExecuteAsync(
+                    It.IsAny<IGuestShell>(), It.IsAny<GalleryItem>(), It.IsAny<VmCustomizations>(),
+                    It.IsAny<ILogger>(), It.IsAny<CancellationToken>()))
+                .Callback(() => executed.Add("StepB-AutoOnly"))
+                .Returns(Task.CompletedTask);
+
+            var service = new PostBootCustomizationService(new[] { stepA.Object, stepB.Object }, _loggerMock.Object);
+
+            await service.RunLinuxPostBootAsync(
+                _shellMock.Object,
+                VmDeploymentPlan.FromSettings(new VmSettings { VMName = "TestVM" }),
+                new GalleryItem(),
+                customizations,
+                _progressMock.Object,
+                CancellationToken.None);
+
+            CollectionAssert.AreEqual(new[] { "StepA-Resolver" }, executed,
+                "stepB's gate is re-read AFTER the mutation — it must not execute");
+            _progressMock.Verify(p => p.Report(It.Is<CreateVMProgressInfo>(
+                r => r.StepName == "StepB-AutoOnly")), Times.Never);
+            _progressMock.Verify(p => p.Report(It.Is<CreateVMProgressInfo>(
+                r => r.ProgressPercentage == 100)), Times.Once,
+                "the mutation is a routing decision, not a failure — the run must complete green");
+        }
+
         private static ICustomizationStep CreateStep(
             string name,
             CustomizationPhase phase,

@@ -29,7 +29,7 @@ namespace VMCreate
         private readonly ILogger _logger;
         private readonly IHtbApiClient _htbApiClient;
         private readonly List<HtbVpnKey> _downloadedKeys = new();
-        private RdpBackend _selectedRdpBackend = RdpBackend.Xrdp;
+        private RdpBackend _selectedRdpBackend = RdpBackend.Auto;
         private string _htbApiToken;
         private bool _isDownloading;
         private string _ovpnFilePath;
@@ -75,10 +75,11 @@ namespace VMCreate
         public GalleryItem SelectedItem => _wizardData.SelectedItem;
 
         /// <summary>
-        /// The RDP server backend selected by the user: xrdp (default, disables
-        /// Wayland), Lamco (Wayland-native), or None. Bound to a 3-way radio group
-        /// in the Remote Access card. <see cref="LamcoOptionVisible"/> hides the
-        /// Lamco radio on unsupported distros.
+        /// The RDP server backend selected by the user: Auto (default,
+        /// detected in the guest at post-boot), xrdp (disables Wayland),
+        /// Lamco (Wayland-native), or None. Bound to a 4-way radio group
+        /// in the Remote Access card. <see cref="LamcoOptionVisible"/>
+        /// hides the Lamco radio on unsupported distros.
         /// </summary>
         public RdpBackend SelectedRdpBackend
         {
@@ -86,7 +87,13 @@ namespace VMCreate
             set => SetProperty(ref _selectedRdpBackend, value);
         }
 
-        // Back-compat boolean view over SelectedRdpBackend for the xrdp radio.
+        // Back-compat boolean view over SelectedRdpBackend for the Auto radio.
+        public bool IsRdpBackendAuto
+        {
+            get => _selectedRdpBackend == RdpBackend.Auto;
+            set { if (value) SelectedRdpBackend = RdpBackend.Auto; }
+        }
+
         public bool IsRdpBackendXrdp
         {
             get => _selectedRdpBackend == RdpBackend.Xrdp;

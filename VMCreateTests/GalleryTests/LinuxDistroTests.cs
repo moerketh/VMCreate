@@ -18,6 +18,7 @@ namespace VMCreate.Tests.GalleryTests
             Assert.IsTrue(LinuxDistro.Ubuntu.SupportsLamco());
             Assert.IsTrue(LinuxDistro.Debian.SupportsLamco());
             Assert.IsTrue(LinuxDistro.Parrot.SupportsLamco());
+            Assert.IsTrue(LinuxDistro.Kali.SupportsLamco());
         }
 
         [TestMethod]

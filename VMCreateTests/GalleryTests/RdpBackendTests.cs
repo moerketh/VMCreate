@@ -11,10 +11,23 @@ namespace VMCreate.Tests.GalleryTests
     public sealed class RdpBackendTests
     {
         [TestMethod]
-        public void Default_RdpBackend_IsXrdp()
+        public void Default_RdpBackend_IsAuto()
         {
             var c = new VmCustomizations();
-            Assert.AreEqual(RdpBackend.Xrdp, c.RdpBackend);
+            Assert.AreEqual(RdpBackend.Auto, c.RdpBackend);
+        }
+
+        [TestMethod]
+        public void ConfigureXrdp_Shim_ReturnsFalseForAuto()
+        {
+            // Auto reads false on the shim: nothing RDP-related may be
+            // pre-installed before the in-guest resolver picks a backend.
+            var c = new VmCustomizations { RdpBackend = RdpBackend.Auto };
+            Assert.IsFalse(c.ConfigureXrdp);
+
+            var c2 = new VmCustomizations();
+            Assert.AreEqual(RdpBackend.Auto, c2.RdpBackend);
+            Assert.IsFalse(c2.HasPreBootCustomizations);
         }
 
         [TestMethod]

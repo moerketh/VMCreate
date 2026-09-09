@@ -71,9 +71,14 @@
                                Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,0,4"/>
                     <TextBlock Text="Configure remote desktop access for the virtual machine."
                                FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,10"/>
+                    <RadioButton Content="Auto select (recommended) — detects Wayland vs X11 after first boot"
+                                 GroupName="RdpBackend" FontSize="14"
+                                 IsChecked="{Binding IsRdpBackendAuto}"
+                                 ToolTip="Detects whether the desktop defaults to Wayland or X11 inside the booted VM, then installs the best-suited RDP backend: the Wayland-native Lamco RDP Server on supported Debian-family distros with a Wayland session, or xrdp otherwise. Nothing RDP-related is pre-installed before boot; the chosen backend is installed post-boot over SSH."
+                                 AutomationProperties.Name="Auto-select RDP backend"/>
                     <RadioButton x:Name="XrdpCheckbox"
                                  Content="xrdp — Hyper-V Enhanced Session (disables Wayland, forces X11)"
-                                 GroupName="RdpBackend" FontSize="14"
+                                 GroupName="RdpBackend" FontSize="14" Margin="0,4,0,0"
                                  IsChecked="{Binding IsRdpBackendXrdp}"
                                  ToolTip="Installs and configures xrdp so Enhanced Session mode works with this Linux VM. A helper DVD will boot once to install xrdp, then the VM restarts normally. Disables Wayland and forces X11 for maximum compatibility."
                                  AutomationProperties.Name="Configure xrdp for enhanced session"/>

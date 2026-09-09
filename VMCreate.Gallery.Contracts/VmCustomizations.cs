@@ -37,21 +37,30 @@ namespace VMCreate
     {
         /// <summary>
         /// The RDP server backend to install on Linux guests. Default is
-        /// <see cref="RdpBackend.Xrdp"/> for maximum compatibility. When set to
+        /// <see cref="RdpBackend.Auto"/>: no backend is guessed statically —
+        /// a detection step resolves <see cref="RdpBackend.Auto"/> to a concrete
+        /// backend (<see cref="RdpBackend.Lamco"/> or <see cref="RdpBackend.Xrdp"/>)
+        /// at deployment time, after the guest is reachable over SSH (see
+        /// <c>AutoRdpBackendResolveStep</c>). When set to
         /// <see cref="RdpBackend.Lamco"/>, the Wayland-disable / X11-force steps
         /// are skipped (Lamco is Wayland-native) and graphical autologin is
-        /// enabled instead so Lamco has a live session to share.
+        /// enabled instead so Lamco has a live session to share. When set to
+        /// <see cref="RdpBackend.Xrdp"/>, xrdp is pre-installed via the cloning-ISO
+        /// chroot and Wayland is disabled for maximum compatibility.
         /// </summary>
-        public RdpBackend RdpBackend { get; set; } = RdpBackend.Xrdp;
+        public RdpBackend RdpBackend { get; set; } = RdpBackend.Auto;
 
         /// <summary>
-        /// Backward-compatible view over <see cref="RdpBackend"/>: true when the
-        /// xrdp backend is selected, false otherwise. The setter maps
+        /// Backward-compatible view over <see cref="RdpBackend"/>: true only when
+        /// the backend is concretely <see cref="RdpBackend.Xrdp"/>. The setter maps
         /// true → <see cref="RdpBackend.Xrdp"/> and false → <see cref="RdpBackend.None"/>,
         /// preserving the behavior of existing call sites (CLI <c>--no-xrdp</c>,
         /// persisted settings, KVP sender, ISO-boot trigger, deploy UI) without
-        /// requiring them to know about <see cref="RdpBackend"/>. New code should
-        /// read/write <see cref="RdpBackend"/> directly.
+        /// requiring them to know about <see cref="RdpBackend"/>. Note that
+        /// <see cref="RdpBackend.Auto"/> reads as <b>false</b> here: while Auto is
+        /// unresolved, no pre-boot xrdp work may start (xrdp and Lamco conflict
+        /// on port 3389, and the resolved backend is not yet known). New code
+        /// should read/write <see cref="RdpBackend"/> directly.
         /// </summary>
         public bool ConfigureXrdp
         {
@@ -112,7 +121,10 @@ namespace VMCreate
         /// Returns true if any pre-boot customizations are enabled
         /// (i.e. options applied during ISO customization before first boot).
         /// Only xrdp uses the pre-boot (cloning-ISO) path. Lamco installs
-        /// post-boot over SSH, so it does not trigger the ISO boot cycle.
+        /// post-boot over SSH, and Auto installs nothing pre-boot (the backend
+        /// is resolved post-boot; the Auto→Xrdp outcome backfills the xrdp
+        /// install via a post-boot step), so neither triggers the ISO boot
+        /// cycle through this property.
         /// </summary>
         public bool HasPreBootCustomizations => RdpBackend == RdpBackend.Xrdp;
 

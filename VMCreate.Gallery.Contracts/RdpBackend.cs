@@ -29,10 +29,33 @@ namespace VMCreate
         /// fails the deployment loudly). Requires a graphical Wayland session
         /// to share, so graphical autologin is enabled; the one-time Portal
         /// consent grant is automated via a systemd oneshot unit.
-        /// Debian-family distros only (Ubuntu, Debian, Parrot) — the fork
+        /// Debian-family distros only (Ubuntu, Debian, Parrot, Kali) — the fork
         /// pipeline ships amd64 debs. Supported on recent GNOME 45+ and
         /// KDE Plasma 6.3+ desktops.
         /// </summary>
-        Lamco
+        Lamco,
+
+        /// <summary>
+        /// Auto-select: the backend is resolved at deployment time instead of
+        /// chosen statically. A detection step runs post-boot over SSH, inspects
+        /// the guest's actual display-server state (Wayland session present,
+        /// session-manager alternatives) and distro, and rewrites this value to
+        /// either <see cref="Lamco"/> (Wayland-default desktop on a
+        /// Debian-family distro) or <see cref="Xrdp"/> (everything else).
+        /// <para>
+        /// While in this state the deployment pipeline behaves conservatively:
+        /// pre-boot customization is skipped (no <c>VMCREATE_XRDP</c> KVP, so
+        /// the cloning-ISO chroot never pre-installs xrdp — xrdp and Lamco
+        /// conflict on port 3389), and the backend-dependent post-boot steps
+        /// re-evaluate their applicability just-in-time as the resolver runs.
+        /// When the resolution lands on Xrdp, a post-boot xrdp install step
+        /// backfills the install that the skipped chroot would have done.
+        /// </para>
+        /// <para>
+        /// Defaults to Xrdp when detection cannot produce a verdict (SSH
+        /// transport failure), preserving the maximum-compatibility behavior.
+        /// </para>
+        /// </summary>
+        Auto
     }
 }

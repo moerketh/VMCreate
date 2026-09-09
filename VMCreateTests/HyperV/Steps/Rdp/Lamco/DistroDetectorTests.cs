@@ -45,6 +45,7 @@ namespace VMCreate.Tests.HyperV.Steps
             Assert.AreEqual(LinuxDistro.OpenSuse, DetectWith("ID=opensuse-tumbleweed\n").result);
             Assert.AreEqual(LinuxDistro.OpenSuse, DetectWith("ID=opensuse-leap\n").result);
             Assert.AreEqual(LinuxDistro.Parrot, DetectWith("ID=parrot\n").result);
+            Assert.AreEqual(LinuxDistro.Kali, DetectWith("ID=kali\n").result);
         }
 
         [TestMethod]
@@ -52,8 +53,6 @@ namespace VMCreate.Tests.HyperV.Steps
         {
             // Linux Mint: ID=linuxmint (unclassified) + ID_LIKE=ubuntu
             Assert.AreEqual(LinuxDistro.Ubuntu, DetectWith("ID=linuxmint\nID_LIKE=ubuntu\n").result);
-            // Kali: unclassified ID + ID_LIKE=debian
-            Assert.AreEqual(LinuxDistro.Debian, DetectWith("ID=kali\nID_LIKE=debian\n").result);
         }
 
         [TestMethod]

@@ -49,12 +49,22 @@ namespace VMCreate.Gallery
             // ── Stable point release (required) ──
             var stable = await LoadStableReleaseAsync(client, cancellationToken);
             if (stable != null)
+            {
                 items.Add(stable);
+                var stableKde = CreateKdeTwin(stable);
+                if (stableKde != null)
+                    items.Add(stableKde);
+            }
 
             // ── Latest weekly build (best-effort) ──
             var weekly = await LoadWeeklyReleaseAsync(client, cancellationToken);
             if (weekly != null)
+            {
                 items.Add(weekly);
+                var weeklyKde = CreateKdeTwin(weekly);
+                if (weeklyKde != null)
+                    items.Add(weeklyKde);
+            }
 
             if (items.Count == 0)
                 throw new Exception("Could not find any Kali Linux Hyper-V images.");
@@ -97,7 +107,8 @@ namespace VMCreate.Gallery
                 LastUpdated = ParseDate(date),
                 Version = version,
                 Category = "Security",
-                IsRecommended = true
+                IsRecommended = true,
+                LinuxDistro = LinuxDistro.Kali
             };
         }
 
@@ -162,7 +173,8 @@ namespace VMCreate.Gallery
                     LastUpdated = ParseDate(bestDate),
                     Version = bestVersion,
                     Category = "Security",
-                    IsRecommended = false
+                    IsRecommended = false,
+                    LinuxDistro = LinuxDistro.Kali
                 };
             }
             catch (OperationCanceledException)
@@ -174,6 +186,41 @@ namespace VMCreate.Gallery
                 // Graceful degradation: weekly is best-effort, stable is the primary item.
                 return null;
             }
+        }
+
+        /// <summary>
+        /// Creates the KDE Plasma twin of a Kali item: same disk image,
+        /// same release, but tagged <c>kali-kde</c> so the
+        /// <c>KaliKdeSwitchStep</c> post-boot customization swaps the stock
+        /// XFCE desktop for KDE Plasma (and, under the Auto RDP backend,
+        /// the Wayland-default Plasma session steers detection to the
+        /// Lamco RDP Server).
+        /// <para>
+        /// The twin shares the base item's <c>DiskUri</c> — the desktop is
+        /// switched post-boot, it is not a separate download — so the
+        /// aggregate loader's (Name, DiskUri) dedupe keeps both: names
+        /// differ (the "(KDE)" suffix), disks match.
+        /// </para>
+        /// </summary>
+        private static GalleryItem CreateKdeTwin(GalleryItem source)
+        {
+            if (source == null)
+                return null;
+
+            return new GalleryItem
+            {
+                Name = $"{source.Name} (KDE)",
+                Description = $"Kali Linux with the KDE Plasma desktop, switched from XFCE after deployment. Same disk image as {source.Name}.",
+                Publisher = source.Publisher,
+                DiskUri = source.DiskUri,
+                SymbolUri = source.SymbolUri,
+                LastUpdated = source.LastUpdated,
+                Version = source.Version,
+                Category = source.Category,
+                IsRecommended = false,
+                LinuxDistro = LinuxDistro.Kali,
+                Tags = new List<string> { "kali-kde" }
+            };
         }
 
         private static string ParseDate(string date)

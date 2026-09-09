@@ -81,6 +81,7 @@ namespace VMCreate
             if (Is(id, "opensuse-tumbleweed") || Is(id, "opensuse-leap")
                 || Is(id, "opensuse") || Is(id, "suse")) return LinuxDistro.OpenSuse;
             if (Is(id, "parrot")) return LinuxDistro.Parrot;
+            if (Is(id, "kali")) return LinuxDistro.Kali;
 
             // ID_LIKE fallbacks for derivatives (e.g. Linux Mint has
             // ID=linuxmint ID_LIKE=ubuntu; Kali has ID=kali ID_LIKE=debian).
