@@ -94,6 +94,7 @@
     <Compile Include="HyperV\Steps\RemoveAutomationUserStep.cs" />
     <Compile Include="HyperV\Steps\RemoveVBoxGuestAdditionsStep.cs" />
     <Compile Include="HyperV\Steps\RemoveVmwareToolsStep.cs" />
+    <Compile Include="HyperV\Steps\ScriptResourceLoader.cs" />
     <Compile Include="HyperV\Steps\SyncTimezoneStep.cs" />
     <Compile Include="HyperV\IHyperVManager.cs" />
     <Compile Include="HyperV\IHyperVManagerRoles.cs" />
@@ -192,6 +193,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="HyperV\Steps\Scripts\install_lamco.sh" />
+    <EmbeddedResource Include="HyperV\Steps\Scripts\enable_autologin.sh" />
     <EmbeddedResource Include="Icons\nixos.svg" />
     <EmbeddedResource Include="Icons\fedora-logo.svg" />
     <EmbeddedResource Include="Icons\alpine-logo.svg" />
