@@ -223,6 +223,9 @@ namespace VMCreate.CLI.Commands
         /// Resolves the RDP backend from --rdp-backend, with --no-xrdp as a
         /// deprecated back-compat alias for --rdp-backend none. --no-xrdp only
         /// takes effect when --rdp-backend is left at its default (xrdp).
+        /// An unrecognized value FAILS LOUDLY — silently mapping a typo
+        /// (e.g. "lamc") to Xrdp would provision a completely different
+        /// desktop stack than the user asked for.
         /// </summary>
         private static RdpBackend ResolveRdpBackend(string rdpBackend, bool noXrdp)
         {
@@ -233,7 +236,8 @@ namespace VMCreate.CLI.Commands
                 {
                     "lamco" => RdpBackend.Lamco,
                     "none" => RdpBackend.None,
-                    _ => RdpBackend.Xrdp
+                    _ => throw new System.CommandLine.Invocation.CommandLineConfigurationException(
+                        $"Unknown --rdp-backend value '{rdpBackend}'. Valid values: xrdp, lamco, none."),
                 };
             }
             return noXrdp ? RdpBackend.None : RdpBackend.Xrdp;

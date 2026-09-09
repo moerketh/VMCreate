@@ -49,6 +49,11 @@ namespace VMCreate
         public int Order => 240;
         public string? ProgressPhaseId => "Sub_ForceX11";
 
+        // Note the gate: != Lamco means BOTH Xrdp and None force X11/wayland-off.
+        // That is deliberate but worth stating: "no RDP" is NOT "no desktop
+        // changes" — the X11/wayland posture is still normalized so headless
+        // Hyper-V consoles stay usable. If a future backend needs Wayland
+        // without Lamco, this gate must become an explicit allowlist.
         public bool IsApplicable(GalleryItem item, VmCustomizations customizations)
             => customizations?.RdpBackend != RdpBackend.Lamco;
 

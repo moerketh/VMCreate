@@ -126,6 +126,41 @@ namespace VMCreate.Tests.HyperV.VmCreation
             _progressMock.Verify(p => p.Report(It.IsAny<CreateVMProgressInfo>()), Times.Never);
         }
 
+        [TestMethod]
+        public async Task RunLinuxPostBootAsync_ThrowingStep_AbortsRemainingStepsAndPropagates()
+        {
+            // The fabricated-success regression guard: a step that throws must
+            // abort every later step and propagate, so the orchestrator reports
+            // Success == false (the HyperVVmCreator comment describes this
+            // exact failure class — failures must never look like a green
+            // deploy).
+            var executed = new List<string>();
+
+            var stepA = CreateExecutableStep("StepA", CustomizationPhase.PostBoot, StepPlatform.Linux, 100,
+                onExecute: () => executed.Add("StepA"));
+            var stepB = CreateExecutableStep("StepB-Throws", CustomizationPhase.PostBoot, StepPlatform.Linux, 200,
+                onExecute: () => { executed.Add("StepB-Throws"); throw new InvalidOperationException("step exploded"); });
+            var stepC = CreateExecutableStep("StepC-After", CustomizationPhase.PostBoot, StepPlatform.Linux, 300,
+                onExecute: () => executed.Add("StepC-After"));
+
+            var service = new PostBootCustomizationService(new[] { stepA, stepB, stepC }, _loggerMock.Object);
+
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.RunLinuxPostBootAsync(
+                    _shellMock.Object,
+                    VmDeploymentPlan.FromSettings(new VmSettings { VMName = "TestVM" }),
+                    new GalleryItem(),
+                    new VmCustomizations(),
+                    _progressMock.Object,
+                    CancellationToken.None));
+
+            Assert.AreEqual("step exploded", ex.Message, "the step's exception propagates unwrapped");
+            CollectionAssert.AreEqual(new[] { "StepA", "StepB-Throws" }, executed,
+                "steps before and including the failure ran; the step AFTER the failure must not execute");
+            _progressMock.Verify(p => p.Report(It.Is<CreateVMProgressInfo>(r => r.ProgressPercentage == 100)), Times.Never,
+                "a failed run must not report 100% completion");
+        }
+
         private static ICustomizationStep CreateStep(
             string name,
             CustomizationPhase phase,

@@ -184,13 +184,16 @@ namespace VMCreate.HyperV.VmCreation
 
             if (vmCustomizations.EnableIntegrationServices)
             {
-                // Keep HvSocket transport for Lamco. Hyper-V Enhanced Session over vsock
-                // gets far enough to show the resolution selection dialog before the RDP
-                // handshake. The vsock listener is enabled (AF_VSOCK in RestrictAddressFamilies)
-                // and the TLS handshake works with the tls/none config. Note: Hyper-V's
-                // proprietary pre-RDP greeting may still cause "InvalidContentType" — this
-                // is an IronRDP limitation. Standard mstsc to <VM-IP>:3389 is the reliable
-                // connection path.
+                // Keep HvSocket transport for Lamco. Hyper-V Enhanced Session
+                // (vmconnect) connects through the guest's vsock listener
+                // (CID-allowlisted to the host relay) and terminates TLS/CredSSP
+                // on the host side. Note: Hyper-V's proprietary pre-RDP greeting
+                // may still cause "InvalidContentType" on some client builds —
+                // an IronRDP limitation. The TCP listener binds loopback ONLY
+                // (auth_method=none must never face a network): standard mstsc
+                // reaches it over an SSH port forward, e.g.
+                //   ssh -L 3389:127.0.0.1:3389 <user>@<VM-IP>
+                // then connect mstsc to 127.0.0.1:3389.
                 await _configManager.SetEnhancedSession(plan, cancellationToken);
             }
 

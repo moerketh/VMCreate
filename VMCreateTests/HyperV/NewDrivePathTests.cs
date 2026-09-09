@@ -1,7 +1,8 @@
+using Microsoft.VisualStudio.TestTools.UnitTesting;
 using VMCreate;
 using VMCreate.HyperV;
 
-namespace VMCreate.Tests
+namespace VMCreate.Tests.HyperV
 {
     /// <summary>
     /// Regression tests for the MBR-cloning new-drive path.

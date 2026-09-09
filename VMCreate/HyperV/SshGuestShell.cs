@@ -121,15 +121,15 @@ namespace VMCreate
         // ── IGuestShell implementation ───────────────────────────────────
 
         /// <inheritdoc/>
-        public async Task<string> RunCommandAsync(string bashCommand, CancellationToken ct)
+        public async Task<string> RunCommandAsync(string command, CancellationToken ct)
         {
-            return await RunWithRetryAsync(bashCommand, CommandTimeout, ct);
+            return await RunWithRetryAsync(command, CommandTimeout, ct);
         }
 
         /// <inheritdoc/>
-        public async Task<string> RunCommandAsync(string bashCommand, TimeSpan timeout, CancellationToken ct)
+        public async Task<string> RunCommandAsync(string command, TimeSpan timeout, CancellationToken ct)
         {
-            return await RunWithRetryAsync(bashCommand, timeout, ct);
+            return await RunWithRetryAsync(command, timeout, ct);
         }
 
         // Windows CreateProcess command lines are capped at 32,767 chars.

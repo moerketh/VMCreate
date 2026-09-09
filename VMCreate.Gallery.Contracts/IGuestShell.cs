@@ -15,18 +15,20 @@ namespace VMCreate
         string VmName { get; }
 
         /// <summary>
-        /// Executes a bash command on the guest and returns stdout.
-        /// Throws on non-zero exit code or transport failure.
+        /// Executes a command on the guest and returns stdout.
+        /// The command language is transport-defined: bash for SSH shells,
+        /// PowerShell for PowerShell Direct. Throws on non-zero exit code or
+        /// transport failure.
         /// </summary>
-        Task<string> RunCommandAsync(string bashCommand, CancellationToken ct);
+        Task<string> RunCommandAsync(string command, CancellationToken ct);
 
         /// <summary>
-        /// Executes a bash command on the guest with an explicit timeout,
+        /// Executes a command on the guest with an explicit timeout,
         /// for long-running steps (package installs, builds) that exceed the
-        /// transport default.
-        /// Throws on non-zero exit code, timeout, or transport failure.
+        /// transport default. Throws on non-zero exit code, timeout, or
+        /// transport failure.
         /// </summary>
-        Task<string> RunCommandAsync(string bashCommand, TimeSpan timeout, CancellationToken ct);
+        Task<string> RunCommandAsync(string command, TimeSpan timeout, CancellationToken ct);
 
         /// <summary>
         /// Writes string content to a file on the guest (creates parent directories, sets 644).
