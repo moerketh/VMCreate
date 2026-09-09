@@ -1,5 +1,6 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
@@ -96,15 +97,50 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
-        public void InstallLamcoScript_ParsesAsValidBash()
+        public void AllEmbeddedScripts_ParseAsValidBash()
         {
-            AssertScriptParses("install_lamco.sh");
+            // Discovery-based: every .sh resource embedded in the VMCreate
+            // assembly is linted, so a newly added script is covered the
+            // moment it is registered — no per-script test to forget.
+            var scripts = DiscoverEmbeddedScriptNames();
+            Assert.IsTrue(scripts.Count >= 2,
+                $"expected at least the two Lamco scripts, found {scripts.Count}");
+
+            var failures = new List<string>();
+            foreach (var name in scripts)
+            {
+                try
+                {
+                    AssertScriptParses(name);
+                }
+                catch (AssertFailedException ex)
+                {
+                    failures.Add(ex.Message);
+                }
+            }
+
+            if (failures.Count > 0)
+            {
+                Assert.Fail($"{failures.Count} of {scripts.Count} embedded scripts failed bash -n:{Environment.NewLine}{string.Join(Environment.NewLine, failures)}");
+            }
         }
 
-        [TestMethod]
-        public void EnableAutologinScript_ParsesAsValidBash()
+        private static List<string> DiscoverEmbeddedScriptNames()
         {
-            AssertScriptParses("enable_autologin.sh");
+            var assembly = typeof(global::VMCreate.InstallLamcoRdpStep).Assembly;
+            var names = new List<string>();
+            foreach (var name in assembly.GetManifestResourceNames())
+            {
+                if (name.EndsWith(".sh", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Resource names are <DefaultNamespace>.<Path...>.<file>.sh;
+                    // keep just the file name for the loader-style suffix match.
+                    var fileName = name.Substring(name.LastIndexOf('.') + 1);
+                    names.Add(fileName);
+                }
+            }
+            names.Sort();
+            return names;
         }
 
         private static void AssertScriptParses(string scriptFileName)

@@ -5,7 +5,7 @@ using System.Reflection;
 namespace VMCreate
 {
     /// <summary>
-    /// Loads embedded bash install scripts (the <c>.sh</c> files under
+    /// Loads embedded bash guest scripts (the <c>.sh</c> files under
     /// <c>HyperV/Steps/Scripts/</c>) from the assembly manifest.
     /// <para>
     /// The scripts live as real <c>.sh</c> files rather than C# verbatim
@@ -14,6 +14,12 @@ namespace VMCreate
     /// than building a logical name), normalizes CRLF to LF for the guest,
     /// and fails loudly when the resource is missing — a missing or renamed
     /// script must never silently deploy an empty file.
+    /// </para>
+    /// <para>
+    /// Register every new script in <c>VMCreate.csproj</c> as an
+    /// <c>&lt;EmbeddedResource&gt;</c>; the discovery-based
+    /// <c>EmbeddedScriptSyntaxTests</c> picks it up for linting
+    /// automatically.
     /// </para>
     /// </summary>
     internal static class ScriptResourceLoader
