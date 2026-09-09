@@ -220,6 +220,67 @@ namespace VMCreate.Tests.HyperV.VmCreation
                 "the mutation is a routing decision, not a failure — the run must complete green");
         }
 
+        [TestMethod]
+        public async Task RunLinuxPostBootAsync_SkippedCandidatesDoNotDistortTheProgressRange()
+        {
+            // The denominator fix: with 4 candidates of which only 2 are
+            // applicable, the OLD code pinned total=4 and the second
+            // applicable step reported completed/total = 1/4 = 25% as its
+            // STARTING percentage — the bar topped out near 25% and then
+            // jumped to 100% at the end. The skip-shrink walks the
+            // applicable steps across the full 0→100% range: total=4
+            // pre-skip, total=2 once the inapplicable candidates leave.
+            var executed = new List<string>();
+            var reports = new List<int>();
+
+            var stepA = CreateExecutableStep("StepA", CustomizationPhase.PostBoot, StepPlatform.Linux, 100,
+                onExecute: () => executed.Add("StepA"));
+            var skip1 = CreateStep("SkipX", CustomizationPhase.PostBoot, StepPlatform.Linux, 150, applicable: false);
+            var stepB = CreateExecutableStep("StepB", CustomizationPhase.PostBoot, StepPlatform.Linux, 200,
+                onExecute: () => executed.Add("StepB"));
+            var skip2 = CreateStep("SkipY", CustomizationPhase.PostBoot, StepPlatform.Linux, 250, applicable: false);
+
+            _progressMock
+                .Setup(p => p.Report(It.IsAny<CreateVMProgressInfo>()))
+                .Callback<CreateVMProgressInfo>(r => reports.Add(r.ProgressPercentage));
+
+            var service = new PostBootCustomizationService(
+                new[] { stepA, skip1, stepB, skip2 },
+                _loggerMock.Object);
+
+            await service.RunLinuxPostBootAsync(
+                _shellMock.Object,
+                VmDeploymentPlan.FromSettings(new VmSettings { VMName = "TestVM" }),
+                new GalleryItem(),
+                new VmCustomizations(),
+                _progressMock.Object,
+                CancellationToken.None);
+
+            CollectionAssert.AreEqual(new[] { "StepA", "StepB" }, executed,
+                "only the applicable steps execute, in order, in spite of the interleaved skipped candidates");
+
+            // Sequential live semantics: a candidate counts in the
+            // denominator until the loop REACHES and skips it — a later-
+            // ordered skip cannot be pre-known (its gate may mutate
+            // mid-run). So: StepA reports 0/4 = 0%; SkipX leaves (total=3);
+            // StepB reports 1/3 = 33%; SkipY leaves (total=2); the run
+            // closes with 100%. The old fixed-denominator code reported
+            // StepB at 1/4 = 25% — under the new semantics the bar lands
+            // strictly higher for the same work and still ends at 100%.
+            var startingReports = reports.Take(2).ToList();
+            CollectionAssert.AreEqual(new[] { 0, 33 }, startingReports,
+                "with 2 applicable of 4 candidates, the applicable steps start at 0% and 33% — "
+                + "not 0% and 25% (the old fixed denominator bug)");
+
+            // And the final 100% still lands exactly once.
+            Assert.AreEqual(1, reports.Count(p => p == 100),
+                "the run completes with exactly one 100% report");
+
+            CollectionAssert.AreEqual(new[] { 0, 33, 100 }, reports,
+                "skipped candidates produce no report at all — only the applicable steps "
+                + "get starting reports, plus the terminal 100%");
+        }
+
         private static ICustomizationStep CreateStep(
             string name,
             CustomizationPhase phase,

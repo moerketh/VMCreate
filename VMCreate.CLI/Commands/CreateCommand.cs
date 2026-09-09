@@ -233,10 +233,10 @@ namespace VMCreate.CLI.Commands
         /// <para>
         /// Note: RdpBackend.Auto (the default) is resolved at runtime in the
         /// guest by AutoRdpBackendResolveStep — the CLI just passes it through.
-        /// The VMCreate.CLI process, however, currently registers only
-        /// Gallery.Security customization steps (not the VMCreate assembly
-        /// infra steps), so CLI Auto deployments will fall back to xrdp at the
-        /// service level until the CLI step registration is extended.
+        /// The CLI's Program.ScannableAssemblies covers the same assembly set
+        /// as the GUI's App.xaml.cs scan (pinned by CliFrontEndParityTests),
+        /// so the resolver and every other VMCreate-assembly step run for
+        /// CLI deployments exactly as they do in the GUI.
         /// </para>
         /// </summary>
         private static RdpBackend ResolveRdpBackend(string rdpBackend, bool noXrdp, bool jsonMode, out bool valid)

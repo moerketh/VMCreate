@@ -99,12 +99,21 @@ namespace VMCreate.HyperV.VmCreation
             {
                 // Live (just-in-time) applicability: skip steps whose gate
                 // changed as a result of an earlier step mutating
-                // customizations (the Auto resolver). Skipped steps do not
-                // count toward progress — the denominator stays fixed at the
-                // initial candidate count so the bar never stalls at <100%
-                // when trailing steps are expected to be skipped.
+                // customizations (the Auto resolver). A skipped candidate
+                // leaves the denominator — it counts neither as done nor as
+                // pending — so the bar tracks progress across the steps
+                // that will actually run and walks the full 0→100% range.
+                // With the denominator pinned to the initial candidate
+                // count (27 Linux steps, of which a typical run applies
+                // ~7), the bar topped out near 25% and then jumped to 100%
+                // at the end — the skip-shrink keeps it monotonic and
+                // honest. total is always >= 1 at the report below because
+                // a report only happens for a step that is about to run.
                 if (!step.IsApplicable(item, customizations))
+                {
+                    total--;
                     continue;
+                }
 
                 _logger.LogInformation("Running Linux post-boot step: {StepName} (order {Order})", step.Name, step.Order);
                 progress.Report(new CreateVMProgressInfo
@@ -146,8 +155,15 @@ namespace VMCreate.HyperV.VmCreation
             int total = steps.Count;
             foreach (var step in steps)
             {
+                // Same live applicability + skip-shrink semantics as the
+                // Linux loop: skipped candidates leave the denominator so
+                // the bar covers the steps that actually run. The service
+                // must not carry two different progress models.
                 if (!step.IsApplicable(item, customizations))
+                {
+                    total--;
                     continue;
+                }
 
                 _logger.LogInformation("Running Windows post-boot step: {StepName} (order {Order})", step.Name, step.Order);
                 progress.Report(new CreateVMProgressInfo

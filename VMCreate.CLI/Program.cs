@@ -22,6 +22,22 @@ namespace VMCreate.CLI
 {
     internal static class Program
     {
+        /// <summary>
+        /// Assemblies the CLI scans for auto-discovered gallery loaders and
+        /// customization steps — the CLI's equivalent of App.xaml.cs's
+        /// scannableAssemblies. Exposed internal (InternalsVisibleTo) so
+        /// <c>CliFrontEndParityTests</c> can pin it to the same set the GUI
+        /// scans: a CLI that scans the wrong assembly silently registers
+        /// ZERO customization steps (a Linux deploy then does no post-boot
+        /// work at all, and an Auto deployment never even installs xrdp).
+        /// That shipped once — the parity test makes it impossible to ship
+        /// again unnoticed.
+        /// </summary>
+        internal static System.Reflection.Assembly[] ScannableAssemblies => new[]
+        {
+            typeof(VMCreate.SyncTimezoneStep).Assembly,                 // VMCreate (main — steps + general gallery)
+            typeof(VMCreate.Gallery.BlackArch).Assembly                 // VMCreate.Gallery.Security
+        };
         static async Task<int> Main(string[] args)
         {
             // ── Headless elevated child: --inject-unattend <vhdxPath> ────────
@@ -163,11 +179,15 @@ namespace VMCreate.CLI
             services.AddTransient<DiskFileDetector>();
 
             // ── Gallery ─────────────────────────────────────────────────────
-            var scannableAssemblies = new[]
-            {
-                System.Reflection.Assembly.GetExecutingAssembly(), // VMCreate.CLI
-                typeof(VMCreate.Gallery.BlackArch).Assembly                // VMCreate.Gallery.Security
-            };
+            // Same single scan set as the GUI (see ScannableAssemblies):
+            // VMCreate main + Gallery.Security. In App.xaml.cs,
+            // GetExecutingAssembly() IS the VMCreate main assembly; the CLI
+            // is a separate assembly, so it must name the main assembly
+            // explicitly — scanning the executing (CLI) assembly instead
+            // previously registered ZERO steps and a gallery missing the
+            // general distros. ScannableAssemblies is the pinned source of
+            // truth (CliFrontEndParityTests).
+            var scannableAssemblies = ScannableAssemblies;
 
             var galleryLoaderTypes = scannableAssemblies
                 .SelectMany(a => a.GetTypes())
@@ -189,6 +209,12 @@ namespace VMCreate.CLI
             services.AddTransient<IGalleryService, GalleryService>();
 
             // ── Customization steps (auto-discovered) ───────────────────────
+            // Same scannableAssemblies as the gallery loaders above — GUI parity:
+            // both front ends must discover the same step set
+            // (CliFrontEndParityTests pins this). AutoRdpBackendResolveStep
+            // (order 232), InstallXrdpPostBootStep (236) and KaliKdeSwitchStep
+            // (231) all live in the VMCreate main assembly; losing it again
+            // means a CLI Auto deployment silently routes to nothing.
             var stepTypes = scannableAssemblies
                 .SelectMany(a => a.GetTypes())
                 .Where(t => typeof(ICustomizationStep).IsAssignableFrom(t)

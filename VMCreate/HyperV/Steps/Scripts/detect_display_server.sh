@@ -61,7 +61,55 @@ case "$default_sm" in
         ;;
 esac
 
-# -- 3. GNOME special case ----------------------------------------------------
+# -- 3. SDDM special case -----------------------------------------------------
+# SDDM (KDE's display manager; stock on Parrot KDE, Debian KDE, Kali KDE)
+# does not participate in the x-session-manager alternative, so stock
+# Plasma 6 guests matched nothing in section 2 and fell through to the
+# x11 verdict — losing the Lamco path entirely.
+# What a fresh graphical login lands on under SDDM: the greeter preselects
+# the Session= pinned in /etc/sddm.conf (or /etc/sddm.conf.d/*.conf, which
+# override it — SDDM reads conf.d in alphabetical order, later wins); with
+# no pin anywhere it falls back to the compiled-in default session, which
+# on Plasma 6 is the WAYLAND plasma. Section 1 already proved a Wayland
+# session is installed, so an unpinned SDDM ⇒ fresh login lands on Wayland.
+if [ "$verdict" = "x11" ] && command -v sddm >/dev/null 2>&1; then
+    sddm_session=""
+    # Last non-empty Session= wins (conf.d overrides the main file).
+    for conf in /etc/sddm.conf /etc/sddm.conf.d/*.conf; do
+        [ -f "$conf" ] || continue
+        found=$(grep -hE '^[[:space:]]*Session[[:space:]]*=' "$conf" 2>/dev/null \
+            | head -n1 | cut -d= -f2- | tr -d '[:space:]')
+        [ -n "$found" ] && sddm_session="$found"
+    done
+
+    if [ -n "$sddm_session" ]; then
+        # Normalize: strip any path prefix and .desktop suffix — SDDM
+        # accepts both 'plasma' and 'plasma.desktop' spellings.
+        sddm_session=${sddm_session##*/}
+        sddm_session=${sddm_session%.desktop}
+
+        if [ -f "/usr/share/xsessions/$sddm_session.desktop" ] \
+            && [ ! -f "/usr/share/wayland-sessions/$sddm_session.desktop" ]; then
+            # Resolves under xsessions only (plasmax11 and friends): the
+            # pin explicitly targets an X11 session — keep the x11 verdict.
+            echo "SDDM session pinned to X11: $sddm_session"
+        else
+            # Resolves under wayland-sessions (plasma → Wayland on
+            # Plasma 6), or under both (wayland-sessions checked first
+            # because a same-named pin is how Plasma names its Wayland
+            # session).
+            verdict="wayland"
+            echo "SDDM session $sddm_session -> Wayland default."
+        fi
+    else
+        # No Session pin anywhere: Plasma 6's SDDM greeter preselects its
+        # compiled-in default — the Wayland session.
+        verdict="wayland"
+        echo "SDDM Session pin unset - Plasma 6 greeter defaults to the Wayland session."
+    fi
+fi
+
+# -- 4. GNOME special case ----------------------------------------------------
 # gnome-session is desktop-server-agnostic; GDM decides the display server,
 # and modern GNOME defaults to Wayland unless WaylandEnable=false opts out.
 if [ "$verdict" = "x11" ] && command -v gdm3 >/dev/null 2>&1; then
