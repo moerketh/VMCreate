@@ -178,8 +178,12 @@ namespace VMCreate
         /// <summary>
         /// Writes SECRET string content (keys, credentials) to the guest via
         /// PowerShell Direct (Windows guests). Honours the IGuestShell
-        /// contract: the result is owned by SYSTEM/Administrators only —
-        /// inheritance is stripped and no other account can read it.
+        /// contract: the file exists only in its final permission state —
+        /// it is created empty, the SYSTEM/Administrators-only ACL is
+        /// applied and VERIFIED (icacls exit code checked, not assumed)
+        /// before any secret bytes are written, so there is never a
+        /// world-readable intermediate. A failed ACL application throws
+        /// instead of returning success: the guarantee must be loud.
         /// The command is executed on an internal path that never logs the
         /// command body, so key material cannot reach the plaintext %TEMP%
         /// log regardless of the configured level.
@@ -194,15 +198,29 @@ namespace VMCreate
                 $bytes = [Convert]::FromBase64String('{base64}')
                 $dir = Split-Path -Parent '{EscapeForPowerShell(guestPath)}'
                 if (-not (Test-Path $dir)) {{ New-Item -ItemType Directory -Path $dir -Force | Out-Null }}
-                [System.IO.File]::WriteAllBytes('{EscapeForPowerShell(guestPath)}', $bytes)
-                # Strip inherited ACEs (BUILTIN\Users read access comes from
-                # the parent directory by default) and grant SYSTEM +
-                # Administrators only — the Windows equivalent of the SSH
-                # path's root:root 0600. Well-known SIDs instead of group
-                # names: 'SYSTEM'/'Administrators' are localized on
-                # non-English guests (e.g. 'Administratoren'). No (OI)(CI)
-                # inheritance flags: the target is a file.
+                # Create the target EMPTY first so the secret never exists in
+                # an unrestricted state: restrict+verify the empty placeholder
+                # BEFORE the bytes touch disk. Order matters — if the write came
+                # first, the file would carry inherited ACEs (BUILTIN\Users read
+                # from the parent directory) until icacls ran.
+                New-Item -ItemType File -Path '{EscapeForPowerShell(guestPath)}' -Force | Out-Null
+                # Strip inherited ACEs and grant SYSTEM + Administrators only —
+                # the Windows equivalent of the SSH path's root:root 0600.
+                # Well-known SIDs instead of group names: 'SYSTEM'/'Administrators'
+                # are localized on non-English guests (e.g. 'Administratoren').
+                # No (OI)(CI) inheritance flags: the target is a file.
                 icacls '{EscapeForPowerShell(guestPath)}' /inheritance:r /grant:r '*S-1-5-18:F' '*S-1-5-32-544:F' | Out-Null
+                # icacls reports failures on STDOUT with a quiet non-zero
+                # $LASTEXITCODE (native stderr stays empty, so HadErrors at the
+                # host sees nothing). The only reliable failure signal is the
+                # exit code — and a silent failure here would leave the file
+                # world-readable while the method returns success and logs
+                # '(SYSTEM/Administrators only)', a silently-broken guarantee.
+                # Loud failure instead: throw into the PS error stream.
+                if ($LASTEXITCODE -ne 0) {{ throw ""icacls ($LASTEXITCODE) failed setting the file ACL on '{EscapeForPowerShell(guestPath)}'"" }}
+                # ACL verified — safe to write the secret bytes into the
+                # already-restricted file.
+                [System.IO.File]::WriteAllBytes('{EscapeForPowerShell(guestPath)}', $bytes)
             ";
 
             await RunCommandInternalAsync(script, CommandTimeout, ct);

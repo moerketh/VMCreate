@@ -437,8 +437,10 @@ namespace VMCreate
         /// looks like WITHOUT writing any of it to the plaintext log. If a validity
         /// heuristic false-negatives on a real config, the log must not become the
         /// leak — 'unrecognized, {Length} bytes' is safe; a preview is not.
+        /// Internal + pure so tests can pin the exact classifications (the
+        /// 'PEM/key material' branch exists purely to prevent the leak).
         /// </summary>
-        private static string ClassifyContent(string content)
+        internal static string ClassifyContent(string content)
         {
             if (string.IsNullOrWhiteSpace(content))
                 return "empty";
