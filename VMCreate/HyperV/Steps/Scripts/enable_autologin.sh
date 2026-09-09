@@ -1,8 +1,27 @@
 #!/bin/bash
 set -o pipefail
 
+# Result contract: 0 = ok, 1 = degraded (completed with warnings — the host
+# step logs these). Hard failures exit non-zero before the terminal
+# AUTOLOGIN_RESULT line is reached.
+DEGRADED=0
+
 USER="__AUTOLOGIN_USER__"
-mkdir -p /etc/sddm.conf.d /etc/lightdm/lightdm.conf.d /etc/gdm3 /etc/gdm
+
+# -- Detect the installed display managers (REAL detection, no mkdir) -----
+# The old unconditional `mkdir -p` of all four DM config dirs made the
+# later [ -d ] checks meaningless (SDDM and LightDM autologin files were
+# written on every guest regardless of what is installed). Only create the
+# config dir for a display manager that is actually present.
+has_sddm=0; has_lightdm=0; has_gdm=0
+{ [ -d /etc/sddm.conf.d ] || [ -f /etc/sddm.conf ] || command -v sddm >/dev/null 2>&1; } && has_sddm=1
+{ [ -d /etc/lightdm/lightdm.conf.d ] || [ -f /etc/lightdm/lightdm.conf ] || command -v lightdm >/dev/null 2>&1; } && has_lightdm=1
+{ [ -d /etc/gdm3 ] || [ -f /etc/gdm3/custom.conf ] || command -v gdm3 >/dev/null 2>&1; } && has_gdm=1
+{ [ -f /etc/gdm/custom.conf ] || command -v gdm >/dev/null 2>&1; } && has_gdm=1
+if [ "$has_sddm$has_lightdm$has_gdm" = "000" ]; then
+    echo "WARNING: no display manager detected (sddm/lightdm/gdm) — autologin cannot be configured." >&2
+    DEGRADED=1
+fi
 
 # -- Detect an available Wayland session name -------------------------------
 # Pick the first available wayland-sessions/*.desktop. Prefer plasma/mutter
@@ -37,39 +56,35 @@ getent group audio  >/dev/null 2>&1 && usermod -aG audio  "$USER" 2>/dev/null ||
 # -- Enable linger so the user's systemd services run at boot --------------
 loginctl enable-linger "$USER" 2>/dev/null || true
 
-# -- Detect active display manager -----------------------------------------
-dm=""
-if [ -f /etc/X11/default-display-manager ]; then
-    dm=$(cat /etc/X11/default-display-manager 2>/dev/null)
-fi
-if [ -z "$dm" ] && command -v systemctl >/dev/null 2>&1; then
-    dm=$(systemctl cat display-manager.service 2>/dev/null | head -1 | sed -n 's/.*-\([^ @]*\).service.*/\1/p')
-fi
-# Normalize: trim path, lowercase
-dm=$(basename "$dm" 2>/dev/null | tr '[:upper:]' '[:lower:]')
+# -- Report which display managers were detected ---------------------------
+# (The old $dm detection ran a sed that never matched hyphen-free unit paths
+# like sddm.service and was used only in an echo; it is gone. Branching is
+# done with the has_* flags computed at the top of the script.)
+echo "Display managers detected: sddm=$has_sddm lightdm=$has_lightdm gdm=$has_gdm"
 
-echo "Detected display manager: ${dm:-(none)}"
-
-# -- GDM (GNOME: Ubuntu, Fedora, Debian-GNOME) -----------------------------
+# -- GDM (GNOME: Ubuntu, Debian-GNOME) -------------------------------------
 # Enable AutomaticLogin in /etc/gdm3/custom.conf or /etc/gdm/custom.conf.
 # Do NOT set WaylandEnable=false — Lamco requires Wayland.
-for conf in /etc/gdm3/custom.conf /etc/gdm/custom.conf; do
-    if [ -f "$conf" ]; then
-        if ! grep -q '^\[daemon\]' "$conf"; then
-            printf '\n[daemon]\n' >> "$conf"
+if [ "$has_gdm" = "1" ]; then
+    for conf in /etc/gdm3/custom.conf /etc/gdm/custom.conf; do
+        if [ -f "$conf" ]; then
+            if ! grep -q '^\[daemon\]' "$conf"; then
+                printf '\n[daemon]\n' >> "$conf"
+            fi
+            # Remove any existing AutomaticLogin/AutomaticLoginEnable lines then append fresh.
+            sed -i '/^#\?AutomaticLogin=/d; /^#\?AutomaticLoginEnable=/d' "$conf"
+            sed -i '/^\[daemon\]/a AutomaticLoginEnable=true' "$conf"
+            sed -i '/^\[daemon\]/a AutomaticLogin='"$USER" "$conf"
+            echo "Configured GDM autologin in $conf"
         fi
-        # Remove any existing AutomaticLogin/AutomaticLoginEnable lines then append fresh.
-        sed -i '/^#\?AutomaticLogin=/d; /^#\?AutomaticLoginEnable=/d' "$conf"
-        sed -i '/^\[daemon\]/a AutomaticLoginEnable=true' "$conf"
-        sed -i '/^\[daemon\]/a AutomaticLogin='"$USER" "$conf"
-        echo "Configured GDM autologin in $conf"
-    fi
-done
+    done
+fi
 
-# -- SDDM (KDE: openSUSE TW, Parrot-KDE, Debian-KDE) -----------------------
+# -- SDDM (KDE: Parrot-KDE, Debian-KDE) ------------------------------------
 # Build the [Autologin] block conditionally — avoid $(...) inside heredocs
-# so the C# verbatim string and bash both parse cleanly.
-if [ -d /etc/sddm.conf.d ]; then
+# so bash parses cleanly.
+if [ "$has_sddm" = "1" ]; then
+    mkdir -p /etc/sddm.conf.d
     {
         printf '[Autologin]\nUser=%s\n' "$USER"
         if [ -n "$wayland_session" ]; then
@@ -81,7 +96,8 @@ fi
 
 # -- LightDM (Parrot, some Debian spins) -----------------------------------
 # Parrot historically uses LightDM. Set autologin-user + autologin-session.
-if [ -d /etc/lightdm/lightdm.conf.d ]; then
+if [ "$has_lightdm" = "1" ]; then
+    mkdir -p /etc/lightdm/lightdm.conf.d
     {
         printf '[Seat:*]\nautologin-user=%s\nautologin-user-timeout=0\n' "$USER"
         if [ -n "$wayland_session" ]; then
@@ -128,17 +144,18 @@ if [ -n "$USER_HOME" ] && [ -d "$USER_HOME" ]; then
 MONITORS_EOF
     chown "$USER" "$USER_HOME/.config/monitors.xml" 2>/dev/null || true
     echo "Created monitors.xml for 1920x1080@60 resolution."
-fi
 
-# -- Set display resolution via kscreen-doctor for KDE/KWin ---------------
-# KWin ignores monitors.xml and uses KScreen config instead. Without a KScreen
-# config, KWin falls through to the hyperv_drm default (1024x768).
-# kscreen-doctor can set the mode at runtime. We also create a KDE autostart
-# script that runs kscreen-doctor after the Wayland session starts, ensuring
-# the resolution is set before lamco-rdp-server connects.
-if command -v kscreen-doctor >/dev/null 2>&1; then
-    mkdir -p "$USER_HOME/.config/autostart"
-    cat > "$USER_HOME/.config/autostart/kscreen-set-resolution.desktop" << 'KSCREEN_AUTOSTART_EOF'
+    # -- Set display resolution via kscreen-doctor for KDE/KWin -----------
+    # KWin ignores monitors.xml and uses KScreen config instead. Without a
+    # KScreen config, KWin falls through to the hyperv_drm default
+    # (1024x768). kscreen-doctor sets the mode at runtime; this KDE
+    # autostart entry re-applies it after the Wayland session starts, before
+    # lamco-rdp-server connects.
+    # Inside the USER_HOME guard on purpose: an unresolvable home previously
+    # wrote to /.config/autostart as root.
+    if command -v kscreen-doctor >/dev/null 2>&1; then
+        mkdir -p "$USER_HOME/.config/autostart"
+        cat > "$USER_HOME/.config/autostart/kscreen-set-resolution.desktop" << 'KSCREEN_AUTOSTART_EOF'
 [Desktop Entry]
 Type=Application
 Name=Set Display Resolution
@@ -146,10 +163,14 @@ Exec=kscreen-doctor output.1.mode.1920x1080@60
 X-KDE-autostart-phase=2
 NoDisplay=true
 KSCREEN_AUTOSTART_EOF
-    chown "$USER" "$USER_HOME/.config/autostart/kscreen-set-resolution.desktop" 2>/dev/null || true
-    echo "Created KDE autostart script for 1920x1080@60 via kscreen-doctor."
+        chown "$USER" "$USER_HOME/.config/autostart/kscreen-set-resolution.desktop" 2>/dev/null || true
+        echo "Created KDE autostart script for 1920x1080@60 via kscreen-doctor."
+    else
+        echo "kscreen-doctor not found — KWin will use DRM default (1024x768)."
+    fi
 else
-    echo "kscreen-doctor not found — KWin will use DRM default (1024x768)."
+    echo "WARNING: no home directory for $USER (getent) — monitors.xml and the kscreen autostart are NOT installed." >&2
+    DEGRADED=1
 fi
 
 # -- Retired: vgem dummy render node ---------------------------------------
@@ -161,4 +182,12 @@ fi
 rm -f /etc/modules-load.d/vgem.conf /etc/udev/rules.d/99-vgem-render.rules 2>/dev/null || true
 
 echo "=== graphical Wayland autologin configured for $USER ==="
+# Machine-readable terminal line: the host-side step parses this to decide
+# ok / degraded (warnings logged) — a zero-exit run without the line is
+# treated as failed by the C# step.
+if [ "${DEGRADED:-0}" = "1" ]; then
+    echo "AUTOLOGIN_RESULT=degraded"
+    exit 0
+fi
+echo "AUTOLOGIN_RESULT=ok"
 exit 0

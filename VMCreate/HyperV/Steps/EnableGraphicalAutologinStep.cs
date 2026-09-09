@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -44,11 +45,29 @@ namespace VMCreate
         public string? ProgressPhaseId => "Sub_EnableAutologin";
 
         public bool IsApplicable(GalleryItem item, VmCustomizations customizations)
-            => customizations.RdpBackend == RdpBackend.Lamco;
+            => customizations.RdpBackend == RdpBackend.Lamco && item.SupportsLamco();
 
         public async Task ExecuteAsync(IGuestShell shell, GalleryItem item, VmCustomizations customizations, ILogger logger, CancellationToken ct)
         {
-            var autologinUser = !string.IsNullOrWhiteSpace(item?.InitialUsername) ? item.InitialUsername : "root";
+            // A blank InitialUsername SKIPS the step (with a warning) rather
+            // than configuring a root graphical autologin: GDM/SDDM mostly
+            // refuse root autologin, and a passwordless root desktop is the
+            // worst possible degradation for a gallery field we failed to
+            // populate.
+            if (string.IsNullOrWhiteSpace(item?.InitialUsername))
+            {
+                logger.LogWarning("Skipping graphical autologin on VM {VMName}: gallery item has no InitialUsername — no autologin user to configure.", shell.VmName);
+                return;
+            }
+
+            var autologinUser = item.InitialUsername!;
+            if (!UsernameValidator.IsValidLinuxUsername(autologinUser))
+            {
+                throw new InvalidOperationException(
+                    $"Gallery item InitialUsername '{autologinUser}' is not a valid Linux username. " +
+                    "Refusing to substitute it into a root-run script (the field can be sourced from distro mirror pages).");
+            }
+
             logger.LogInformation("Enabling graphical Wayland autologin for user '{User}' on VM {VMName}", autologinUser, shell.VmName);
 
             string script = ScriptResourceLoader.Load("enable_autologin.sh")
@@ -59,8 +78,51 @@ namespace VMCreate
             string result = await shell.RunCommandAsync(
                 "sudo bash /tmp/enable_autologin.sh && sudo rm -f /tmp/enable_autologin.sh", ct);
 
-            logger.LogInformation("Graphical autologin result on VM {VMName}: {Result}", shell.VmName, result.Trim());
+            // Result contract: AUTOLOGIN_RESULT=ok|degraded on the last line.
+            // Hard failures exit non-zero (RunCommandAsync throws); a missing
+            // line on a zero-exit run is treated as failed so a swallowed
+            // install can never report success.
+            var (outcome, detail) = ParseResultLine(result, "AUTOLOGIN_RESULT=");
+            switch (outcome)
+            {
+                case AutologinOutcome.Ok:
+                    logger.LogInformation("Graphical autologin result on VM {VMName}: {Result}", shell.VmName, result.Trim());
+                    break;
+                case AutologinOutcome.Degraded:
+                    logger.LogWarning("Graphical autologin completed DEGRADED on VM {VMName}. The VM may boot to a greeter instead of the desktop: {Result}", shell.VmName, detail);
+                    break;
+                default:
+                    throw new InvalidOperationException(
+                        $"Graphical autologin on VM {shell.VmName} reported no AUTOLOGIN_RESULT line. " +
+                        "The script exited zero but did not confirm success — treating as failure.");
+            }
+        }
+
+        private static (AutologinOutcome outcome, string detail) ParseResultLine(string output, string marker)
+        {
+            string? last = null;
+            foreach (var line in output.Split('\n'))
+            {
+                var trimmed = line.Trim();
+                if (trimmed.StartsWith(marker, StringComparison.Ordinal))
+                    last = trimmed;
+            }
+            if (last is null) return (AutologinOutcome.Failed, output.Trim());
+            var value = last[marker.Length..];
+            if (value.Equals("ok", StringComparison.Ordinal))
+                return (AutologinOutcome.Ok, string.Empty);
+            if (value.Equals("degraded", StringComparison.Ordinal))
+                return (AutologinOutcome.Degraded, output.Trim());
+            return (AutologinOutcome.Failed, output.Trim());
+        }
+
+        private enum AutologinOutcome
+        {
+            Ok,
+            Degraded,
+            Failed
         }
     }
 }
-
+
+

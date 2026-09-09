@@ -95,6 +95,7 @@
     <Compile Include="HyperV\Steps\RemoveVBoxGuestAdditionsStep.cs" />
     <Compile Include="HyperV\Steps\RemoveVmwareToolsStep.cs" />
     <Compile Include="HyperV\Steps\ScriptResourceLoader.cs" />
+    <Compile Include="HyperV\Steps\UsernameValidator.cs" />
     <Compile Include="HyperV\Steps\SyncTimezoneStep.cs" />
     <Compile Include="HyperV\IHyperVManager.cs" />
     <Compile Include="HyperV\IHyperVManagerRoles.cs" />

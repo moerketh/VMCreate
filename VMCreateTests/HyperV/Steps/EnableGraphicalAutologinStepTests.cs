@@ -40,9 +40,19 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
-        public void IsApplicable_TrueForLamco()
+        public void IsApplicable_TrueForLamcoOnDebianFamily()
         {
             Assert.IsTrue(_step.IsApplicable(_item, _lamcoCustomizations));
+        }
+
+        [TestMethod]
+        public void IsApplicable_FalseForRpmDistros()
+        {
+            // Same gate as InstallLamcoRdpStep: --rdp-backend lamco on a
+            // non-Debian distro must not enable a passwordless desktop with
+            // no RDP server installed.
+            var fedoraItem = new GalleryItem { LinuxDistro = LinuxDistro.Fedora, InitialUsername = "user" };
+            Assert.IsFalse(_step.IsApplicable(fedoraItem, _lamcoCustomizations));
         }
 
         [TestMethod]
@@ -62,7 +72,7 @@ namespace VMCreate.Tests.HyperV.Steps
         [TestMethod]
         public async Task ExecuteAsync_DeploysAndRunsScript()
         {
-            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("done");
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("AUTOLOGIN_RESULT=ok");
 
             await _step.ExecuteAsync(_shell.Object, _item, _lamcoCustomizations, _logger.Object, CancellationToken.None);
 
@@ -83,7 +93,7 @@ namespace VMCreate.Tests.HyperV.Steps
         [TestMethod]
         public async Task ExecuteAsync_SubstitutesAutologinUser()
         {
-            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("done");
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("AUTOLOGIN_RESULT=ok");
 
             await _step.ExecuteAsync(_shell.Object, _item, _lamcoCustomizations, _logger.Object, CancellationToken.None);
 
@@ -91,6 +101,64 @@ namespace VMCreate.Tests.HyperV.Steps
                 It.Is<string>(content => content.Contains("USER=\"ubuntu\"")),
                 "/tmp/enable_autologin.sh",
                 It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_BlankUsername_SkipsStepInsteadOfRootAutologin()
+        {
+            // A blank gallery field must SKIP the step with a warning, never
+            // configure root graphical autologin (GDM/SDDM mostly refuse it;
+            // LightDM — Parrot's historical DM — would happily do it).
+            var blankItem = new GalleryItem { LinuxDistro = LinuxDistro.Parrot, InitialUsername = "" };
+
+            await _step.ExecuteAsync(_shell.Object, blankItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            _shell.Verify(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never,
+                "blank username skips the step — nothing is copied or run");
+            _logger.Verify(l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString().Contains("InitialUsername")),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_InvalidUsername_ThrowsBeforeCopy()
+        {
+            // Username goes into a root-run script via naive string.Replace;
+            // hostile values must fail host-side validation.
+            var hostileItem = new GalleryItem { LinuxDistro = LinuxDistro.Parrot, InitialUsername = "user\"; touch /tmp/pwned" };
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                _step.ExecuteAsync(_shell.Object, hostileItem, _lamcoCustomizations, _logger.Object, CancellationToken.None));
+
+            _shell.Verify(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_ResultLine_Missing_Throws()
+        {
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("no contract line");
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                _step.ExecuteAsync(_shell.Object, _item, _lamcoCustomizations, _logger.Object, CancellationToken.None));
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_ResultLine_Degraded_LogsWarning()
+        {
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .ReturnsAsync("WARNING: no display manager detected\nAUTOLOGIN_RESULT=degraded");
+
+            await _step.ExecuteAsync(_shell.Object, _item, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            _logger.Verify(l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString().Contains("DEGRADED")),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
         }
     }
 }

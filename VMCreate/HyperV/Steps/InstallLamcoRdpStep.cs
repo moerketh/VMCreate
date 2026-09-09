@@ -54,6 +54,42 @@ namespace VMCreate
             logger.LogInformation("Installing Lamco RDP Server on VM {VMName}", shell.VmName);
 
             string script = ScriptResourceLoader.Load("install_lamco.sh");
+
+            // ONE autologin-user resolver, shared with EnableGraphicalAutologinStep
+            // (order 238): item.InitialUsername is the authoritative source. The
+            // two steps previously resolved the user independently (C# field vs
+            // /etc/passwd guess) and a mismatch meant key.pem owned by the wrong
+            // group and user units in the wrong home — a deployed-but-dead VM.
+            // A blank field falls back to the script's /etc/passwd scan (first
+            // non-system account with a home dir); the value is validated
+            // before it ever reaches the root-run script.
+            if (!string.IsNullOrWhiteSpace(item?.InitialUsername))
+            {
+                if (!UsernameValidator.IsValidLinuxUsername(item.InitialUsername))
+                {
+                    throw new InvalidOperationException(
+                        $"Gallery item InitialUsername '{item.InitialUsername}' is not a valid Linux username. " +
+                        "Refusing to substitute it into a root-run script.");
+                }
+                script = script.Replace("__AUTOLOGIN_USER__", item.InitialUsername);
+            }
+            else
+            {
+                logger.LogWarning("Gallery item has no InitialUsername for VM {VMName}; the install script will resolve the autologin user from /etc/passwd.", shell.VmName);
+            }
+
+            // Runtime distro re-verification: the gallery metadata is a HINT
+            // (some loaders scrape mirror pages); the pinned fork deb is
+            // Debian-family-only, so a mismatched hint must fail HERE rather
+            // than inside the root-run script after packages are half-staged.
+            var detected = await DistroDetector.DetectAsync(shell, ct);
+            if (detected == LinuxDistro.Unknown || !detected.SupportsLamco())
+            {
+                throw new InvalidOperationException(
+                    $"VM {shell.VmName} reports distro '{detected}' from /etc/os-release at runtime — not a Lamco-supported (Debian-family) distro. " +
+                    "The gallery item's distro hint disagrees with the actual guest; aborting the Lamco install.");
+            }
+
             await shell.CopyContentAsync(script, "/tmp/install_lamco.sh", ct);
 
             // The install pulls apt packages and downloads the fork deb —
@@ -63,7 +99,52 @@ namespace VMCreate
                 "sudo bash /tmp/install_lamco.sh && sudo rm -f /tmp/install_lamco.sh",
                 TimeSpan.FromMinutes(20), ct);
 
-            logger.LogInformation("Lamco RDP Server install result on VM {VMName}: {Result}", shell.VmName, result.Trim());
+            // Result contract: the script prints a machine-readable terminal
+            // line (LAMCO_RESULT=ok|degraded). Hard failures exit non-zero
+            // before the line ever appears (RunCommandAsync throws), and a
+            // missing line on a zero-exit run is treated as failed: a
+            // completely swallowed install must not report success (same
+            // class of bug as the HyperVVmCreator fabricated-success fix).
+            var (outcome, detail) = ParseResultLine(result);
+            switch (outcome)
+            {
+                case LamcoOutcome.Ok:
+                    logger.LogInformation("Lamco RDP Server install result on VM {VMName}: {Result}", shell.VmName, result.Trim());
+                    break;
+                case LamcoOutcome.Degraded:
+                    logger.LogWarning("Lamco RDP Server install completed DEGRADED on VM {VMName}. The deployment is usable but parts of the provisioning were skipped: {Result}", shell.VmName, detail);
+                    break;
+                default:
+                    throw new InvalidOperationException(
+                        $"Lamco RDP Server install on VM {shell.VmName} reported no LAMCO_RESULT line. " +
+                        "The script exited zero but did not confirm success — treating as failure.");
+            }
+        }
+
+        private static (LamcoOutcome outcome, string detail) ParseResultLine(string output)
+        {
+            // The terminal line is the LAST LAMCO_RESULT= in the output.
+            string? last = null;
+            foreach (var line in output.Split('\n'))
+            {
+                var trimmed = line.Trim();
+                if (trimmed.StartsWith("LAMCO_RESULT=", StringComparison.Ordinal))
+                    last = trimmed;
+            }
+            if (last is null) return (LamcoOutcome.Failed, output.Trim());
+            var value = last["LAMCO_RESULT=".Length..];
+            if (value.Equals("ok", StringComparison.Ordinal))
+                return (LamcoOutcome.Ok, string.Empty);
+            if (value.Equals("degraded", StringComparison.Ordinal))
+                return (LamcoOutcome.Degraded, output.Trim());
+            return (LamcoOutcome.Failed, output.Trim());
+        }
+
+        private enum LamcoOutcome
+        {
+            Ok,
+            Degraded,
+            Failed
         }
     }
 }

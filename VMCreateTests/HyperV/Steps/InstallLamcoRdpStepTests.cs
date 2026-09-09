@@ -25,6 +25,11 @@ namespace VMCreate.Tests.HyperV.Steps
             _step = new InstallLamcoRdpStep();
             _shell = new Mock<IGuestShell>();
             _shell.Setup(s => s.VmName).Returns("TestVM");
+            // Runtime distro re-verification: ExecuteAsync reads /etc/os-release
+            // via the 2-arg RunCommandAsync before doing anything else. Default
+            // to a Debian-family guest (Parrot-shaped: exact ID + ID_LIKE).
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .ReturnsAsync("ID=parrot\nID_LIKE=debian\n");
             _logger = new Mock<ILogger<InstallLamcoRdpStep>>();
             _supportedItem = new GalleryItem { LinuxDistro = LinuxDistro.Ubuntu };
             _unsupportedItem = new GalleryItem { LinuxDistro = LinuxDistro.Unknown };
@@ -40,6 +45,77 @@ namespace VMCreate.Tests.HyperV.Steps
             Assert.AreEqual(StepPlatform.Linux, _step.Platform);
             Assert.AreEqual(235, _step.Order);
             Assert.AreEqual("Sub_InstallLamcoRdp", _step.ProgressPhaseId);
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_ResultLine_Ok_SucceedsQuietly()
+        {
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+                  .ReturnsAsync("installing...\nLAMCO_RESULT=ok");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_ResultLine_Degraded_LogsWarning()
+        {
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+                  .ReturnsAsync("WARNING: could not determine autologin user\nLAMCO_RESULT=degraded");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            _logger.Verify(l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString().Contains("DEGRADED")),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_ResultLine_Missing_Throws()
+        {
+            // A zero-exit run with NO LAMCO_RESULT line means the script was
+            // swallowed (the exact fabricated-success class already fixed in
+            // HyperVVmCreator) — it must throw, not report success.
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+                  .ReturnsAsync("some output but no terminal contract line");
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None));
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_InvalidInitialUsername_ThrowsBeforeCopy()
+        {
+            // The username is substituted into a root-run script; the gallery
+            // field can be sourced from distro mirror pages. Shell metachar,
+            // quotes, paths and whitespace must fail validation on the host.
+            var item = new GalleryItem { LinuxDistro = LinuxDistro.Parrot, InitialUsername = "user; rm -rf /" };
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                _step.ExecuteAsync(_shell.Object, item, _lamcoCustomizations, _logger.Object, CancellationToken.None));
+
+            _shell.Verify(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_BlankInitialUsername_FallsBackToPasswdScan()
+        {
+            // Blank field does NOT abort the Lamco install (the binary,
+            // config, units and TLS perms are user-independent): the script
+            // resolves the user from /etc/passwd and flags degraded only if
+            // that fails too.
+            var item = new GalleryItem { LinuxDistro = LinuxDistro.Parrot, InitialUsername = "" };
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+                  .ReturnsAsync("LAMCO_RESULT=ok");
+
+            await _step.ExecuteAsync(_shell.Object, item, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            _shell.Verify(s => s.CopyContentAsync(
+                It.Is<string>(c => c.Contains("AUTOLOGIN_USER=\"__AUTOLOGIN_USER__\"")),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once,
+                "blank username leaves the placeholder for the in-script /etc/passwd scan");
         }
 
         [TestMethod]
@@ -91,7 +167,7 @@ namespace VMCreate.Tests.HyperV.Steps
         [TestMethod]
         public async Task ExecuteAsync_DeploysAndRunsScript()
         {
-            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("done");
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("LAMCO_RESULT=ok");
 
             await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
 
@@ -117,7 +193,7 @@ namespace VMCreate.Tests.HyperV.Steps
             // invocation and the cleanup, so a non-zero exit code from the script is
             // returned to SSH and surfaces as a deployment failure instead of being
             // masked by the always-succeeding rm.
-            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("done");
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("LAMCO_RESULT=ok");
 
             await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
 
@@ -154,7 +230,7 @@ namespace VMCreate.Tests.HyperV.Steps
             string? captured = null;
             _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                   .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
-            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("done");
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("LAMCO_RESULT=ok");
 
             await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
 
@@ -185,7 +261,7 @@ namespace VMCreate.Tests.HyperV.Steps
             string? captured = null;
             _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                   .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
-            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("done");
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("LAMCO_RESULT=ok");
 
             await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
 
@@ -206,7 +282,7 @@ namespace VMCreate.Tests.HyperV.Steps
             string? captured = null;
             _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                   .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
-            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("done");
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("LAMCO_RESULT=ok");
 
             await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
 
@@ -226,7 +302,7 @@ namespace VMCreate.Tests.HyperV.Steps
             string? captured = null;
             _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                   .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
-            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("done");
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("LAMCO_RESULT=ok");
 
             await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
 
@@ -245,7 +321,7 @@ namespace VMCreate.Tests.HyperV.Steps
             string? captured = null;
             _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                   .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
-            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("done");
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("LAMCO_RESULT=ok");
 
             await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
 
@@ -277,7 +353,7 @@ namespace VMCreate.Tests.HyperV.Steps
             string? captured = null;
             _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                   .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
-            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("done");
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("LAMCO_RESULT=ok");
 
             await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
 
@@ -304,7 +380,7 @@ namespace VMCreate.Tests.HyperV.Steps
             string? captured = null;
             _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                   .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
-            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("done");
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("LAMCO_RESULT=ok");
 
             await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
 
@@ -336,7 +412,7 @@ namespace VMCreate.Tests.HyperV.Steps
             string? captured = null;
             _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                   .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
-            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("done");
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("LAMCO_RESULT=ok");
 
             await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
 
@@ -362,7 +438,7 @@ namespace VMCreate.Tests.HyperV.Steps
             string? captured = null;
             _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                   .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
-            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("done");
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("LAMCO_RESULT=ok");
 
             await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
 
@@ -386,7 +462,7 @@ namespace VMCreate.Tests.HyperV.Steps
             string? captured = null;
             _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                   .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
-            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("done");
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("LAMCO_RESULT=ok");
 
             await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
 
@@ -398,6 +474,37 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
+        public async Task ExecuteAsync_TransportSecurity_PinsLoopbackTcpAndNoAuthExceptions()
+        {
+            // RDP posture (review decision): TCP loopback only, vsock for
+            // Enhanced Session, no firewall rule. auth_method=none over a
+            // 0.0.0.0 bind was an unlocked sudo-capable desktop for
+            // anything on the Default Switch — and LAN-wide the moment the
+            // VM was re-attached to an external switch. These assertions
+            // pin the posture so it cannot drift silently again.
+            string? captured = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("LAMCO_RESULT=ok");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(captured);
+            StringAssert.Contains(captured, "listen_addr = \"127.0.0.1:3389\"",
+                "TCP transport binds loopback (auth_method=none must never face a network)");
+            Assert.IsFalse(captured.Contains("0.0.0.0:3389"),
+                "no wildcard TCP bind anywhere in the config");
+            StringAssert.Contains(captured, "auth_method = \"none\"",
+                "auth pin: auth stays explicitly none — if this changes, revisit the loopback bind");
+            Assert.IsFalse(captured.Contains("ufw allow 3389"),
+                "no ufw rule opening 3389 (loopback needs none)");
+            Assert.IsFalse(captured.Contains("firewall-cmd --add-port"),
+                "no firewalld rule opening 3389");
+            StringAssert.Contains(captured, "THREAT MODEL",
+                "the config template carries the threat-model comment for future editors");
+        }
+
+        [TestMethod]
         public async Task ExecuteAsync_DistroGate_IsDebianFamilyOnly()
         {
             // The pinned fork deb is amd64 Debian packaging; rpm/flatpak
@@ -406,7 +513,7 @@ namespace VMCreate.Tests.HyperV.Steps
             string? captured = null;
             _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                   .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
-            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("done");
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("LAMCO_RESULT=ok");
 
             await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
 
@@ -428,7 +535,7 @@ namespace VMCreate.Tests.HyperV.Steps
             string? captured = null;
             _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                   .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
-            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("done");
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("LAMCO_RESULT=ok");
 
             await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
 
@@ -451,7 +558,7 @@ namespace VMCreate.Tests.HyperV.Steps
             string? captured = null;
             _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                   .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
-            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("done");
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("LAMCO_RESULT=ok");
 
             await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
 
@@ -475,7 +582,7 @@ namespace VMCreate.Tests.HyperV.Steps
             var captured = new List<string>();
             _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                   .Callback<string, string, CancellationToken>((content, _, _) => captured.Add(content));
-            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("done");
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("LAMCO_RESULT=ok");
 
             await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
 

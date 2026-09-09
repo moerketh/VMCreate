@@ -22,6 +22,11 @@ LAMCO_FORK_DEB_VERSION="1.4.5-hyperv2"
 LAMCO_FORK_DEB_SHA256="13f119f7c59435abc3be22072122b9adb350b4a60e724462faa9a3d67f2cfb7e"
 LAMCO_FORK_DEB_URL="https://github.com/${LAMCO_FORK_REPO}/releases/download/${LAMCO_FORK_TAG}/lamco-rdp-server_${LAMCO_FORK_DEB_VERSION}_amd64.deb"
 
+# Result contract: 0 = ok, 1 = degraded (install completed with warnings —
+# the host step logs these). Hard failures exit non-zero BEFORE the terminal
+# LAMCO_RESULT line is ever reached. See the end of the script.
+DEGRADED=0
+
 echo "=== Lamco RDP Server install (pinned fork deb ${LAMCO_FORK_TAG}) ==="
 
 # -- Validate distro: Debian family only ------------------------------------
@@ -162,7 +167,19 @@ if [ ! -f /etc/lamco-rdp-server/cert.pem ] || [ ! -f /etc/lamco-rdp-server/key.p
 fi
 echo "TLS certificates present: /etc/lamco-rdp-server/cert.pem"
 
-# -- Write config.toml (full tuned profile, hybrid security, no auth) ------
+# -- Write config.toml (full tuned profile, loopback + vsock, no auth) -----
+# THREAT MODEL (read before changing transports):
+#   auth_method = "none" means ANYTHING that reaches a listener gets a live
+#   unlocked desktop of a sudo-capable user. The TCP transport therefore
+#   binds 127.0.0.1 ONLY — reachable from inside the guest (and by host
+#   tools that SSH in). The vsock transport carries Hyper-V Enhanced
+#   Session (vmconnect) and is CID-allowlisted to VMADDR_CID_HOST (2) at
+#   accept time. If you need LAN RDP: set auth_method to something real
+#   FIRST, then change the TCP bind — do not just widen the bind.
+#   Note: mstsc/standard RDP clients can still reach the server over SSH
+#   port forwarding (ssh -L 3389:127.0.0.1:3389), which preserves the
+#   authenticated SSH hop.
+#
 # Tuned profile: deep blacks (full 0-255 color range), 60fps, and a single
 # zero-lag client-rendered pointer. Key quality switches vs a minimal config:
 #   [egfx]: qp 1-10 + color_range="full" + color_matrix="identity"  -> full
@@ -171,9 +188,9 @@ echo "TLS certificates present: /etc/lamco-rdp-server/cert.pem"
 #           with the predictor -> one zero-lag client-rendered pointer.
 #   [performance]/[video_pipeline.*]: zero-copy + buffers + backpressure.
 # security_mode=hybrid + auth_method=none: the proven combination for Lamco
-# with standard RDP clients (mstsc, FreeRDP). In "tls"-only mode mstsc
-# negotiates standard RDP security without a TLS layer, and the TLS
-# acceptor then rejects the stream ("corrupt message" spam, client never
+# with standard RDP clients (mstsc, FreeRDP) ON LOOPBACK ONLY. In "tls"-only
+# mode mstsc negotiates standard RDP security without a TLS layer, and the
+# TLS acceptor then rejects the stream ("corrupt message" spam, client never
 # connects). Hybrid lets the server accept the CredSSP-free standard path.
 # No [security.credssp_credentials] — including it makes IronRDP require
 # credentials even with auth_method=none. [gui_state]/[diagnostics] are
@@ -181,8 +198,8 @@ echo "TLS certificates present: /etc/lamco-rdp-server/cert.pem"
 #
 # NOTE: Hyper-V Enhanced Session (vmconnect.exe) connects through the vsock
 # transport below: vmms terminates TLS/CredSSP on the host side and relays the
-# plain RDP stream to the guest listener. Standard RDP clients (mstsc to
-# VM-IP:3389) connect through the TCP transport.
+# plain RDP stream to the guest listener. Standard RDP clients reach the TCP
+# transport via SSH port forwarding (the listener is loopback-only).
 cat > /etc/lamco-rdp-server/config.toml << 'CONFIG_EOF'
 config_version = 1
 
@@ -195,7 +212,10 @@ view_only = false
 
 [server.transports]
 [server.transports.tcp]
-listen_addr = "0.0.0.0:3389"
+# LOOPBACK ONLY — see the threat model above the config write. auth_method
+# is "none"; binding anything wider hands an unlocked sudo-capable desktop
+# to every peer that can reach the port. mstsc users: ssh -L 3389:127.0.0.1:3389.
+listen_addr = "127.0.0.1:3389"
 # vsock carries Hyper-V Enhanced Session (vmconnect.exe): vmms terminates
 # TLS/CredSSP on the host and relays plain RDP. The fork's per-transport
 # security routing serves these on a dedicated Standard-RDP-Security
@@ -255,6 +275,11 @@ enable_touch = false
 
 [clipboard]
 enabled = true
+# 100 MB: large ISO/tool transfers between host and guest are a normal
+# workflow for this deployment path (file materialization goes through the
+# ~/Downloads staging backend). With the TCP listener on loopback only, a
+# malicious peer must already be inside the guest or hold an SSH hop; the
+# rate limit below (200ms per transfer) bounds abuse.
 max_size = 104857600
 rate_limit_ms = 200
 allowed_types = []
@@ -302,9 +327,15 @@ frame_ack_timeout = 5000
 periodic_idr_interval = 5
 codec = "avc420"
 encoder_backend = "x264"
-qp_min = 1
+# QUALITY PROFILE: qp 8-10 keeps near-lossless 1080p while letting the
+# encoder breathe on a 2-vCPU guest. (The old qp_min=1 forced
+# lossless-mode x264 for EVERY frame — combined with
+# damage_tracking.pixel_threshold=1's full-frame diff per frame at 1080p,
+# the encoder starved the very desktop it was encoding.) Adaptation is
+# ON so sustained load can climb to max_qp instead of dropping frames.
+qp_min = 8
 qp_max = 10
-qp_default = 1
+qp_default = 9
 avc444_aux_bitrate_ratio = 1.0
 color_matrix = "identity"
 color_range = "full"
@@ -315,9 +346,11 @@ avc444_aux_change_threshold = 0.05
 avc444_force_aux_idr_on_return = false
 
 [egfx.encoding_adaptation]
-enabled = false
-base_qp = 22
-min_qp = 18
+# ON for the default profile: raises QP under sustained encoder load so a
+# small guest CPU trades fidelity for frame rate instead of stalling.
+enabled = true
+base_qp = 9
+min_qp = 8
 max_qp = 42
 evaluation_interval_ms = 500
 moderate_queue_threshold = 3
@@ -328,7 +361,11 @@ enabled = true
 method = "diff"
 tile_size = 16
 diff_threshold = 0.01
-pixel_threshold = 1
+# 100 (not 1): pixel_threshold=1 meant even a single changed pixel marked a
+# tile dirty — at 1080p the per-frame full-buffer diff plus the resulting
+# x264 near-lossless encodes starved the 2-vCPU desktop. 100 still catches
+# real damage while ignoring sensor-noise-level flicker.
+pixel_threshold = 100
 merge_distance = 16
 min_region_area = 64
 
@@ -393,12 +430,16 @@ CONFIG_EOF
 chmod 644 /etc/lamco-rdp-server/config.toml
 
 # -- Install the systemd user service unit ----------------------------------
-# Write to the autologin user's ~/.config/systemd/user. The autologin user is
-# resolved from /etc/passwd by selecting the first non-system account with a
-# home dir that also has a graphical session. We rely on EnableGraphicalAutologinStep
-# (runs next, order 238) to set the autologin user; here we install the unit for
-# the most likely user. The unit is identical for all users.
-AUTOLOGIN_USER=$(awk -F: '$3 >= 1000 && $3 < 65534 && $6 != "" {print $1; exit}' /etc/passwd 2>/dev/null || echo "" )
+# Write to the autologin user's ~/.config/systemd/user. The PRIMARY user
+# source is __AUTOLOGIN_USER__, substituted host-side from the gallery
+# item's InitialUsername (the SAME resolver EnableGraphicalAutologinStep
+# uses at order 238 — one owner, no drift). The /etc/passwd scan below is
+# only the fallback for a blank gallery field: first non-system account
+# with a home dir.
+AUTOLOGIN_USER="__AUTOLOGIN_USER__"
+if [ -z "$AUTOLOGIN_USER" ]; then
+    AUTOLOGIN_USER=$(awk -F: '$3 >= 1000 && $3 < 65534 && $6 != "" {print $1; exit}' /etc/passwd 2>/dev/null || echo "" )
+fi
 if [ -z "$AUTOLOGIN_USER" ]; then
     # Fall back to a 'user'/'parrot' convention used by gallery items.
     for cand in user parrot ubuntu; do
@@ -469,7 +510,13 @@ RestrictNamespaces=yes
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_VSOCK
 
 [Install]
-WantedBy=default.target
+# graphical-session.target, NOT default.target: the unit is gated on
+# ConditionEnvironment=WAYLAND_DISPLAY, and with linger enabled
+# default.target is reached at boot BEFORE any Wayland session exists —
+# the condition fails and nothing re-triggers the unit. Binding to the
+# graphical session makes the session start pull it in (same as
+# lamco-grant.service).
+WantedBy=graphical-session.target
 UNIT_EOF
     chown "$AUTOLOGIN_USER" "$USER_HOME/.config/systemd/user/lamco-rdp-server.service"
 
@@ -487,6 +534,9 @@ UNIT_EOF
 Description=Lamco one-time portal RemoteDesktop consent grant
 After=graphical-session.target
 Wants=graphical-session.target
+# Run BEFORE the server: two instances of the binary contending for the
+# portal session produce spurious consent dialogs and lost tokens.
+Before=lamco-rdp-server.service
 ConditionEnvironment=WAYLAND_DISPLAY
 # Skip forever once the marker exists (created below after a grant).
 ConditionPathExists=!%h/.local/share/lamco-rdp-server/consent-granted
@@ -495,6 +545,10 @@ ConditionPathExists=!%h/.local/share/lamco-rdp-server/consent-granted
 Type=oneshot
 ExecStartPre=/bin/sh -c 'if [ -s "%h/.local/share/lamco-rdp-server/restore_token" ] || kreadconfig6 --file xdg-desktop-portal-kderc --group remote-desktop --key "lamco-rdp-server" 2>/dev/null | grep -q .; then touch "%h/.local/share/lamco-rdp-server/consent-granted"; echo "Consent already present — skipping dialog."; exit 111; fi; exit 0'
 ExecStart=/bin/sh -c 'timeout 300 /usr/bin/lamco-rdp-server --grant-permission || true; if [ -s "%h/.local/share/lamco-rdp-server/restore_token" ]; then touch "%h/.local/share/lamco-rdp-server/consent-granted"; echo "Consent granted — restore token stored."; else echo "Consent flow did not complete (timeout or dismissed) — will retry next boot."; fi'
+# ExecStartPre's exit 111 is the "already granted, skip" path, not a
+# failure — without this the unit shows as FAILED in systemctl status and
+# trips failure monitors for every already-provisioned VM.
+SuccessExitStatus=111
 RemainAfterExit=no
 
 [Install]
@@ -629,11 +683,14 @@ MONITORS_EOF
         # connection alive so the cookie stays held).
         # GOTCHA: do NOT use `sudo -u $U mkdir -p ~/.local/bin` — bash
         # expands ~ to ROOT's home BEFORE sudo runs, so the user's directory
-        # never exists and the heredoc cat below fails. Use the literal
-        # /home/$AUTOLOGIN_USER path for every write.
-        mkdir -p /home/"$AUTOLOGIN_USER"/.local/bin 2>/dev/null || true
-        chown "$AUTOLOGIN_USER": /home/"$AUTOLOGIN_USER"/.local/bin 2>/dev/null || true
-        cat > /home/"$AUTOLOGIN_USER"/.local/bin/lamco-idle-inhibit.py << 'PYEOF'
+        # never exists and the heredoc cat below fails. Use the resolved
+        # $USER_HOME (getent) for every write — a hardcoded /home/$U breaks
+        # for non-standard home paths.
+        IDLE_HOME=$(getent passwd "$AUTOLOGIN_USER" | cut -d: -f6)
+        if [ -n "$IDLE_HOME" ] && [ -d "$IDLE_HOME" ]; then
+        mkdir -p "$IDLE_HOME"/.local/bin 2>/dev/null || true
+        chown "$AUTOLOGIN_USER": "$IDLE_HOME"/.local/bin 2>/dev/null || true
+        cat > "$IDLE_HOME"/.local/bin/lamco-idle-inhibit.py << 'PYEOF'
 #!/usr/bin/env python3
 # Hold a freedesktop ScreenSaver inhibitor cookie for the session lifetime.
 # KDE's idle lock can wedge under hyperv_drm framebuffer spam on Hyper-V and
@@ -657,14 +714,14 @@ while True:
     except Exception:
         pass
 PYEOF
-        chown "$AUTOLOGIN_USER": /home/"$AUTOLOGIN_USER"/.local/bin/lamco-idle-inhibit.py 2>/dev/null || true
-        chmod 0755 /home/"$AUTOLOGIN_USER"/.local/bin/lamco-idle-inhibit.py 2>/dev/null || true
+        chown "$AUTOLOGIN_USER": "$IDLE_HOME"/.local/bin/lamco-idle-inhibit.py 2>/dev/null || true
+        chmod 0755 "$IDLE_HOME"/.local/bin/lamco-idle-inhibit.py 2>/dev/null || true
         # Systemd user unit; binds to the graphical session (the session bus
         # where the screensaver runs exists only there). Same ~-expansion
-        # rule: literal /home path (script runs as root; mkdir+chown).
-        mkdir -p /home/"$AUTOLOGIN_USER"/.config/systemd/user 2>/dev/null || true
-        chown "$AUTOLOGIN_USER": /home/"$AUTOLOGIN_USER"/.config/systemd/user 2>/dev/null || true
-        cat > /home/"$AUTOLOGIN_USER"/.config/systemd/user/lamco-idle-inhibit.service << 'UNITEOF'
+        # rule: use the resolved $IDLE_HOME (script runs as root; mkdir+chown).
+        mkdir -p "$IDLE_HOME"/.config/systemd/user 2>/dev/null || true
+        chown "$AUTOLOGIN_USER": "$IDLE_HOME"/.config/systemd/user 2>/dev/null || true
+        cat > "$IDLE_HOME"/.config/systemd/user/lamco-idle-inhibit.service << 'UNITEOF'
 [Unit]
 Description=lamco RDP idle-lock inhibitor (Hyper-V lock-greeter wedge prevention)
 PartOf=graphical-session.target
@@ -678,7 +735,7 @@ RestartSec=10
 [Install]
 WantedBy=graphical-session.target
 UNITEOF
-        chown "$AUTOLOGIN_USER": /home/"$AUTOLOGIN_USER"/.config/systemd/user/lamco-idle-inhibit.service 2>/dev/null || true
+        chown "$AUTOLOGIN_USER": "$IDLE_HOME"/.config/systemd/user/lamco-idle-inhibit.service 2>/dev/null || true
         sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
             systemctl --user daemon-reload 2>/dev/null || true
         sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
@@ -688,6 +745,10 @@ UNITEOF
             DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u "$AUTOLOGIN_USER")/bus \
             systemctl --user start lamco-idle-inhibit.service 2>/dev/null || true
         echo "Idle-lock suppression: Autolock=false + lamco-idle-inhibit.service (Hyper-V lock-greeter wedge prevention)."
+        else
+            echo "WARNING: no home dir for $AUTOLOGIN_USER — idle-lock suppression unit not installed." >&2
+            DEGRADED=1
+        fi
     fi
 
     # -- KWin private-interface grant (zkde-screencast) ----------------------
@@ -728,14 +789,7 @@ DESKTOPEOF
     echo "Installed systemd user unit for $AUTOLOGIN_USER and enabled linger."
 else
     echo "WARNING: could not determine autologin user; systemd user unit not installed." >&2
-fi
-
-# -- Open firewall port 3389 (best-effort) ---------------------------------
-if command -v ufw >/dev/null 2>&1; then
-    ufw allow 3389/tcp 2>/dev/null || true
-elif command -v firewall-cmd >/dev/null 2>&1; then
-    firewall-cmd --add-port=3389/tcp --permanent 2>/dev/null || true
-    firewall-cmd --reload 2>/dev/null || true
+    DEGRADED=1
 fi
 
 # -- Raise journald rate limit (diagnosability) ----------------------------
@@ -758,4 +812,14 @@ echo "=== Lamco RDP Server install complete ==="
 # The one-time Portal consent is automated: lamco-grant.service runs
 # --grant-permission at first graphical-session start, so the dialog appears
 # on the VM console exactly once. No manual step.
+#
+# Machine-readable terminal line: the host-side step parses this to decide
+# success (ok), partial (degraded — logged as a warning), or hard failure
+# (failed — exits before this line, so the line itself never appears for
+# failures; the step treats a missing line as failed too).
+if [ "${DEGRADED:-0}" = "1" ]; then
+    echo "LAMCO_RESULT=degraded"
+    exit 0
+fi
+echo "LAMCO_RESULT=ok"
 exit 0

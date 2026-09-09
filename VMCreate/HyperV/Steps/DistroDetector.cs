@@ -59,15 +59,25 @@ namespace VMCreate
 
         private static LinuxDistro Classify(string id, string idLike)
         {
-            // Check ID first, then ID_LIKE fallbacks (e.g. Ubuntu has ID=ubuntu,
-            // Parrot has ID=parrot; Linux Mint has ID=linuxmint ID_LIKE=ubuntu).
-            if (Is(id, "ubuntu") || HasLike(idLike, "ubuntu")) return LinuxDistro.Ubuntu;
-            if (Is(id, "debian") || HasLike(idLike, "debian")) return LinuxDistro.Debian;
-            if (Is(id, "fedora") || HasLike(idLike, "fedora")) return LinuxDistro.Fedora;
+            // ALL exact-ID checks BEFORE any ID_LIKE fallback. Parrot ships
+            // ID=parrot with ID_LIKE=debian; checking families per-distro
+            // (ubuntu||like-ubuntu, then debian||like-debian, ...) made the
+            // debian line match Parrot's ID_LIKE before the parrot line was
+            // ever reached — the exact Parrot branch was unreachable.
+            if (Is(id, "ubuntu")) return LinuxDistro.Ubuntu;
+            if (Is(id, "debian")) return LinuxDistro.Debian;
+            if (Is(id, "fedora")) return LinuxDistro.Fedora;
             if (Is(id, "opensuse-tumbleweed") || Is(id, "opensuse-leap")
-                || Is(id, "opensuse") || HasLike(idLike, "opensuse")
-                || Is(id, "suse") || HasLike(idLike, "suse")) return LinuxDistro.OpenSuse;
-            if (Is(id, "parrot") || HasLike(idLike, "parrot")) return LinuxDistro.Parrot;
+                || Is(id, "opensuse") || Is(id, "suse")) return LinuxDistro.OpenSuse;
+            if (Is(id, "parrot")) return LinuxDistro.Parrot;
+
+            // ID_LIKE fallbacks for derivatives (e.g. Linux Mint has
+            // ID=linuxmint ID_LIKE=ubuntu; Kali has ID=kali ID_LIKE=debian).
+            if (HasLike(idLike, "ubuntu")) return LinuxDistro.Ubuntu;
+            if (HasLike(idLike, "debian")) return LinuxDistro.Debian;
+            if (HasLike(idLike, "fedora")) return LinuxDistro.Fedora;
+            if (HasLike(idLike, "opensuse") || HasLike(idLike, "suse")) return LinuxDistro.OpenSuse;
+            if (HasLike(idLike, "parrot")) return LinuxDistro.Parrot;
 
             return LinuxDistro.Unknown;
         }
