@@ -12,8 +12,8 @@ namespace VMCreate.Gallery
     /// </summary>
     public class Tsurugi : IGalleryLoader
     {
-        private const string PinnedVersion = "25.11";
-        private const string IsoUrl = "https://ftp.nluug.nl/os/Linux/distr/tsurugi/01.Tsurugi_Linux_%5bLAB%5d/tsurugi_linux_25.11.iso";
+        private const string PinnedVersion = "26.03";
+        private const string IsoUrl = "https://ftp.nluug.nl/os/Linux/distr/tsurugi/01.Tsurugi_Linux_%5bLAB%5d/tsurugi_linux_26.03.iso";
         public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
             var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(Tsurugi).Assembly, "tsurugi-logo.svg");
