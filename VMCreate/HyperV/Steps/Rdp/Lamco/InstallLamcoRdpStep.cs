@@ -82,11 +82,31 @@ namespace VMCreate
             // (some loaders scrape mirror pages); the pinned fork deb is
             // Debian-family-only, so a mismatched hint must fail HERE rather
             // than inside the root-run script after packages are half-staged.
-            var detected = await DistroDetector.DetectAsync(shell, ct);
-            if (detected == LinuxDistro.Unknown || !detected.SupportsLamco())
+            // DetectAsync distinguishes a verdict (Unknown = guest answered
+            // but isn't Lamco-compatible) from no-verdict (null = the SSH read
+            // itself failed). A first-read transport hiccup is retried once;
+            // an unreadable guest must NOT be misreported as a distro
+            // mismatch.
+            LinuxDistro? detected = null;
+            for (int attempt = 1; ; attempt++)
+            {
+                detected = await DistroDetector.DetectAsync(shell, ct);
+                if (detected is not null || attempt >= 2)
+                    break;
+                logger.LogWarning("Distro detection read failed on attempt {Attempt} for VM {VMName} (SSH transport error?) — retrying once.", attempt, shell.VmName);
+            }
+
+            if (detected == null)
             {
                 throw new InvalidOperationException(
-                    $"VM {shell.VmName} reports distro '{detected}' from /etc/os-release at runtime — not a Lamco-supported (Debian-family) distro. " +
+                    $"VM {shell.VmName}: could not read /etc/os-release over SSH after two attempts — ssh transport failure, not a distro verdict. " +
+                    "Verify the guest is reachable (SSH up, automation user authorized) before re-running the Lamco install.");
+            }
+
+            if (detected == LinuxDistro.Unknown || !detected.Value.SupportsLamco())
+            {
+                throw new InvalidOperationException(
+                    $"VM {shell.VmName} reports distro '{detected.Value}' from /etc/os-release at runtime — not a Lamco-supported (Debian-family) distro. " +
                     "The gallery item's distro hint disagrees with the actual guest; aborting the Lamco install.");
             }
 

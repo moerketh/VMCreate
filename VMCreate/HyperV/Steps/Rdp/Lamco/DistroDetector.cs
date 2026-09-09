@@ -8,19 +8,26 @@ namespace VMCreate
     /// <c>/etc/os-release</c> over SSH. Used as a defensive re-check inside
     /// customization steps at execution time (the pre-deployment UI gates on the
     /// <see cref="GalleryItem.LinuxDistro"/> metadata hint instead, since no shell
-    /// exists yet on the customization page). Results are cached per VM name for
-    /// the lifetime of a deployment run so multiple steps don't re-query.
+    /// exists yet on the customization page). Each call re-queries the guest;
+    /// there is no cross-step cache (only InstallLamcoRdpStep uses this today,
+    /// once per deployment).
     /// </summary>
     public static class DistroDetector
     {
         /// <summary>
         /// Reads <c>/etc/os-release</c> on the guest and maps <c>ID</c> /
         /// <c>ID_LIKE</c> to a <see cref="LinuxDistro"/>. Returns
-        /// <see cref="LinuxDistro.Unknown"/> if the file is missing or the distro
-        /// is not classified. Never throws — detection failures fall back to
-        /// Unknown and the caller decides whether to proceed.
+        /// <see cref="LinuxDistro.Unknown"/> when the guest is reachable and
+        /// answers, but its release file is missing, empty, or names an
+        /// unclassified distro (a genuine "not a Lamco distro" verdict).
+        /// Returns <see langword="null"/> when the read itself failed — the
+        /// command threw (SSH transport error, timeout) — meaning detection
+        /// produced NO verdict and callers must not treat the result as a
+        /// distro mismatch. Callers decide how to react (retry, abort with a
+        /// transport-error message); this method never throws for non-canceled
+        /// failures.
         /// </summary>
-        public static async Task<LinuxDistro> DetectAsync(IGuestShell shell, CancellationToken ct)
+        public static async Task<LinuxDistro?> DetectAsync(IGuestShell shell, CancellationToken ct)
         {
             string release;
             try
@@ -28,9 +35,13 @@ namespace VMCreate
                 release = await shell.RunCommandAsync(
                     "cat /etc/os-release 2>/dev/null", ct);
             }
+            catch (System.OperationCanceledException)
+            {
+                throw;
+            }
             catch
             {
-                return LinuxDistro.Unknown;
+                return null;
             }
 
             if (string.IsNullOrWhiteSpace(release))

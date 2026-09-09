@@ -16,7 +16,7 @@ namespace VMCreate.Tests.HyperV.Steps
     [TestClass]
     public sealed class DistroDetectorTests
     {
-        private static (LinuxDistro result, Mock<IGuestShell> shell) DetectWith(string osRelease)
+        private static (LinuxDistro? result, Mock<IGuestShell> shell) DetectWith(string osRelease)
         {
             var shell = new Mock<IGuestShell>();
             shell.Setup(s => s.VmName).Returns("TestVM");
@@ -71,8 +71,13 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
-        public async Task DetectAsync_CommandThrows_ReturnsUnknown()
+        public async Task DetectAsync_CommandThrows_ReturnsNullNotUnknown()
         {
+            // Transport failures (ssh dropped, timeout) produce NO verdict —
+            // null — which InstallLamcoRdpStep distinguishes from Unknown
+            // (guest answered but is genuinely not a Lamco distro). A
+            // swallowed transport error previously masqueraded as "guest
+            // reports an unsupported distro".
             var shell = new Mock<IGuestShell>();
             shell.Setup(s => s.VmName).Returns("TestVM");
             shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -80,7 +85,7 @@ namespace VMCreate.Tests.HyperV.Steps
 
             var result = await DistroDetector.DetectAsync(shell.Object, CancellationToken.None);
 
-            Assert.AreEqual(LinuxDistro.Unknown, result);
+            Assert.IsNull(result);
         }
 
         [TestMethod]
@@ -104,6 +109,52 @@ namespace VMCreate.Tests.HyperV.Steps
 
             shell.Verify(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never,
                 "a runtime distro mismatch must abort before the script is copied");
+        }
+
+        [TestMethod]
+        public async Task InstallLamcoStep_TransportFailureOnFirstRead_RetriesDetectionAndProceeds()
+        {
+            // A first-read ssh hiccup is NOT a distro verdict: the step
+            // retries once, and a successful second read lets the install
+            // continue rather than misreporting a supported guest as
+            // unsupported.
+            var step = new InstallLamcoRdpStep();
+            var shell = new Mock<IGuestShell>();
+            shell.Setup(s => s.VmName).Returns("TestVM");
+            shell.SetupSequence(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                 .ThrowsAsync(new System.IO.IOException("ssh dropped"))
+                 .ReturnsAsync("ID=parrot\n");
+            shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+                 .ReturnsAsync("LAMCO_RESULT=ok");
+            var logger = new Mock<ILogger<InstallLamcoRdpStep>>();
+            var item = new GalleryItem { LinuxDistro = LinuxDistro.Parrot, InitialUsername = "user" };
+
+            await step.ExecuteAsync(shell.Object, item, new VmCustomizations { RdpBackend = RdpBackend.Lamco }, logger.Object, CancellationToken.None);
+
+            shell.Verify(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once,
+                "detection transport error was retried and answered — install should proceed");
+        }
+
+        [TestMethod]
+        public async Task InstallLamcoStep_PersistentTransportFailure_ReportsTransportNotDistro()
+        {
+            // Two failed reads mean the guest was never actually queried —
+            // the error must say "transport failure", not claim the guest
+            // reported an incompatible distro.
+            var step = new InstallLamcoRdpStep();
+            var shell = new Mock<IGuestShell>();
+            shell.Setup(s => s.VmName).Returns("TestVM");
+            shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                 .ThrowsAsync(new System.IO.IOException("ssh dropped"));
+            var logger = new Mock<ILogger<InstallLamcoRdpStep>>();
+            var item = new GalleryItem { LinuxDistro = LinuxDistro.Parrot, InitialUsername = "user" };
+
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                step.ExecuteAsync(shell.Object, item, new VmCustomizations { RdpBackend = RdpBackend.Lamco }, logger.Object, CancellationToken.None));
+
+            StringAssert.Contains(ex.Message, "ssh transport failure, not a distro verdict");
+            shell.Verify(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never,
+                "an unreadable guest must abort before the script is copied");
         }
     }
 }
