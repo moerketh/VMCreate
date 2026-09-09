@@ -172,9 +172,9 @@ namespace VMCreate
                     long lastReportTimeTicks = 0;
                     const long ThrottleIntervalTicks = TimeSpan.TicksPerMillisecond * 200;
 
-                    // Zip-Slip defense: 13 of 23 gallery loaders download
-                    // archives without checksum verification (Parrot ships
-                    // none at all), so a compromised or MITM'd mirror controls
+                    // Zip-Slip defense: many gallery loaders download
+                    // archives with weak or no checksum verification, so a
+                    // compromised or MITM'd mirror may control
                     // the archive BYTES. Every entry path must be resolved
                     // under extractPath and rejected otherwise; symlink/
                     // hardlink entries are refused outright (SharpCompress

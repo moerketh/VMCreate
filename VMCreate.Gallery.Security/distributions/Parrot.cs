@@ -17,6 +17,7 @@ namespace VMCreate.Gallery
     public class Parrot : IGalleryLoader
     {
         private const string IndexUrl = "https://deb.parrot.sh/parrot/iso/";
+        private const string SignedHashesFileName = "signed-hashes.txt";
         private const string SymbolUrl = "https://www.parrotsec.org/favicon.png";
         private readonly ILogger<Parrot> _logger;
         private readonly IHttpClientFactory _clientFactory;
@@ -170,6 +171,12 @@ namespace VMCreate.Gallery
                     ThumbnailUri = thumbnailUri,
                     SymbolUri = SymbolUrl,
                     DiskUri = baseUrl + filename,
+                    // Parrot publishes a PGP-signed multi-algorithm hash file per
+                    // version (md5/sha256/sha512 sections, same filenames under
+                    // each). ChecksumVerifier disambiguates by digest length, so a
+                    // sha256 request resolves to the sha256 section, not the md5 one.
+                    ChecksumUri = baseUrl + SignedHashesFileName,
+                    ChecksumAlgorithm = "SHA256",
                     SecureBoot = "false",
                     EnhancedSessionTransportType = "HvSocket",
                     Version = version,
@@ -197,6 +204,11 @@ namespace VMCreate.Gallery
                     ThumbnailUri = thumbnailUri,
                     SymbolUri = SymbolUrl,
                     DiskUri = baseUrl + filename,
+                    // Same multi-algorithm signed hash file as the ISO; verified
+                    // against the downloaded .qcow2.zip archive name, which the
+                    // hash file lists directly.
+                    ChecksumUri = baseUrl + SignedHashesFileName,
+                    ChecksumAlgorithm = "SHA256",
                     SecureBoot = "false",
                     EnhancedSessionTransportType = "HvSocket",
                     Version = version,

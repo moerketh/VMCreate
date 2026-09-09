@@ -438,9 +438,9 @@ namespace VMCreate.Tests
         }
 
         // ── Zip-Slip traversal defenses ──────────────────────────────────
-        // 13 of 23 gallery loaders download archives with no checksum
-        // verification (Parrot ships none at all), so a compromised or
-        // MITM'd mirror controls the archive BYTES. Path traversal in entry
+        // Many gallery loaders download archives with weak or no checksum
+        // verification, so a compromised or MITM'd mirror may control the
+        // archive BYTES. Path traversal in entry
         // names must fail loudly instead of overwriting files outside the
         // extraction directory.
 
