@@ -783,24 +783,61 @@ MONITORS_EOF
     # of the 12x10s poll budget) is reported; a silent fall-through would
     # read as success in the host-side result parse.
     # (No AUTOLOGIN_USER re-test here: we are inside the outer user guard.)
+    #
+    # SESSION-AWARE (E2E TEST_20260910224913 and every fresh deployment):
+    # the gate can only observe "dispatcher started" or the consent prompt
+    # when a GRAPHICAL SESSION EXISTS for the desktop user. On a fresh
+    # deployment this step (235) runs BEFORE EnableGraphicalAutologinStep
+    # (238) configures autologin — the VM sits at the DM greeter, no
+    # Wayland session is running, and graphical-session.target is inactive.
+    # The lamco user units are WantedBy=graphical-session.target, so the
+    # service (and the consent unit) cannot have started yet: both grep
+    # targets are unreachable and the 120 s poll is a STRUCTURAL
+    # timeout-degraded on every fresh deploy (all four TEST_202609101*
+    # runs logged it; DEGRADED training operators to ignore it is its own
+    # hazard). The gate therefore first checks the session state:
+    #   - graphical-session.target inactive → "deferred": the service
+    #     starts when the session does (autologin activates at the next
+    #     DM start, normally the first boot). Reported as INFO, not
+    #     DEGRADED — the install itself is complete and correct.
+    #   - session active but neither journal line appears within 120 s →
+    #     genuine DEGRADED: a live session with a silent service is the
+    #     real fabricated-success hazard this gate exists to catch.
     RDY_UID=$(id -u "$AUTOLOGIN_USER")
     RDY_OUTCOME="timeout"
-    for r in $(seq 1 12); do
-        if journalctl _UID=$RDY_UID --since "-5 min" --no-pager 2>/dev/null \
-            | grep -aq "Accept dispatcher started"; then
-            RDY_OUTCOME="ready"
-            break
-        fi
-        if journalctl _UID=$RDY_UID --since "-5 min" --no-pager 2>/dev/null \
-            | grep -aq "permission dialog will appear"; then
-            RDY_OUTCOME="consent"
-            break
-        fi
-        sleep 10
-    done
+    SESSION_ACTIVE=$(sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
+        systemctl --user is-active graphical-session.target 2>/dev/null || true)
+    if [ "$SESSION_ACTIVE" = "active" ]; then
+        for r in $(seq 1 12); do
+            if journalctl _UID=$RDY_UID --since "-5 min" --no-pager 2>/dev/null \
+                | grep -aq "Accept dispatcher started"; then
+                RDY_OUTCOME="ready"
+                break
+            fi
+            if journalctl _UID=$RDY_UID --since "-5 min" --no-pager 2>/dev/null \
+                | grep -aq "permission dialog will appear"; then
+                RDY_OUTCOME="consent"
+                break
+            fi
+            sleep 10
+        done
+    else
+        # No graphical session for the desktop user yet — the expected
+        # state on a fresh deployment (step 235 runs before autologin
+        # step 238 configures the next DM start). The service, the
+        # consent grant and the RDP listeners all activate WITH the
+        # session; verifying them here would be checking a boot that has
+        # not happened. Info only — the install completed and its units
+        # are correctly armed.
+        RDY_OUTCOME="deferred"
+    fi
     case "$RDY_OUTCOME" in
         ready)
             echo "Service ready: accept dispatcher running (TCP/vsock listeners bound)."
+            ;;
+        deferred)
+            echo "NOTICE: no graphical session active yet (VM at the display-manager greeter) — lamco starts with the session on the next desktop start."
+            echo "Install verified: deb installed, TLS ready, user units armed (graphical-session.target). Listeners bind at session start."
             ;;
         consent)
             # stdout per the STREAM RULE: the SSH transport returns stdout
@@ -811,7 +848,7 @@ MONITORS_EOF
             DEGRADED=1
             ;;
         timeout)
-            echo "DEGRADED: readiness gate timed out (120s) — neither dispatcher start nor consent prompt appeared."
+            echo "DEGRADED: readiness gate timed out (120s) — graphical session active but neither dispatcher start nor consent prompt appeared in the journal."
             echo "Diagnose with: journalctl _UID=$RDY_UID -b --no-pager | tail -n 50"
             DEGRADED=1
             ;;

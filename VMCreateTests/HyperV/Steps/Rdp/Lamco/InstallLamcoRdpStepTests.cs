@@ -606,6 +606,53 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
+        public async Task ExecuteAsync_ReadinessGate_IsSessionAware()
+        {
+            // E2E TEST_20260910224913 (and every fresh deployment): step 235
+            // runs BEFORE EnableGraphicalAutologinStep (238) configures
+            // autologin, so the VM sits at the DM greeter with NO graphical
+            // session. The lamco user units are WantedBy=graphical-session.target
+            // — neither the dispatcher nor the consent prompt can have started,
+            // and the unconditional 120 s journal poll was a STRUCTURAL
+            // timeout-degraded on every fresh deploy (all four TEST_202609101*
+            // runs logged LAMCO_RESULT=degraded for exactly this reason).
+            // The gate must first check graphical-session.target: inactive →
+            // "deferred" (INFO, no DEGRADED — the install is complete, the
+            // service starts with the session); only a LIVE session with a
+            // silent service may degrade.
+            string? captured = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("LAMCO_RESULT=ok");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(captured);
+            // The session-state check gates the journal poll.
+            StringAssert.Contains(captured, "systemctl --user is-active graphical-session.target",
+                "the gate checks the session state before polling the journal");
+            int sessionCheck = captured.IndexOf("systemctl --user is-active graphical-session.target", StringComparison.Ordinal);
+            int dispatcherPoll = captured.IndexOf("Accept dispatcher started", StringComparison.Ordinal);
+            Assert.IsTrue(sessionCheck >= 0 && dispatcherPoll > sessionCheck,
+                "the session-state check must precede the dispatcher journal poll");
+            // The deferred branch exists (assigned in the no-session else arm)
+            // and reports an explanatory NOTICE, not a failure.
+            StringAssert.Contains(captured, "RDY_OUTCOME=\"deferred\"",
+                "a deferred outcome exists for the no-session path");
+            StringAssert.Contains(captured, "lamco starts with the session",
+                "deferred outcome carries an explanatory NOTICE line");
+            // DEGRADED may only appear for the live-session case arms
+            // (consent/timeout), never in the deferred arm.
+            int deferredArm = captured.IndexOf("deferred)", StringComparison.Ordinal);
+            Assert.IsTrue(deferredArm > 0, "the case statement has a deferred arm");
+            int deferredArmEnd = captured.IndexOf(";;", deferredArm, StringComparison.Ordinal);
+            Assert.IsTrue(deferredArmEnd > deferredArm, "deferred arm is terminated");
+            string deferredArmBody = captured.Substring(deferredArm, deferredArmEnd - deferredArm);
+            Assert.IsFalse(deferredArmBody.Contains("DEGRADED"),
+                "the deferred (no-session) outcome must not set DEGRADED");
+        }
+
+        [TestMethod]
         public async Task ExecuteAsync_ProvisionsOneShotConsentGrant()
         {
             // Without a stored portal restore token the server's session
