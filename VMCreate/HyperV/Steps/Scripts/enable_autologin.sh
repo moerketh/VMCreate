@@ -4,6 +4,11 @@ set -o pipefail
 # Result contract: 0 = ok, 1 = degraded (completed with warnings — the host
 # step logs these). Hard failures exit non-zero before the terminal
 # AUTOLOGIN_RESULT line is reached.
+# STREAM RULE: the SSH transport returns STDOUT ONLY on zero-exit runs —
+# stderr is dropped to a debug log, so DEGRADED/WARNING reason lines on
+# stderr never reached the host's deployment log (TEST_20260910165003).
+# Reason lines therefore print to stdout; hard-failure ERROR lines may use
+# stderr (captured by the thrown SSH exception on non-zero exits).
 DEGRADED=0
 
 USER="__AUTOLOGIN_USER__"
@@ -19,7 +24,7 @@ has_sddm=0; has_lightdm=0; has_gdm=0
 { [ -d /etc/gdm3 ] || [ -f /etc/gdm3/custom.conf ] || command -v gdm3 >/dev/null 2>&1; } && has_gdm=1
 { [ -f /etc/gdm/custom.conf ] || command -v gdm >/dev/null 2>&1; } && has_gdm=1
 if [ "$has_sddm$has_lightdm$has_gdm" = "000" ]; then
-    echo "WARNING: no display manager detected (sddm/lightdm/gdm) — autologin cannot be configured." >&2
+    echo "WARNING: no display manager detected (sddm/lightdm/gdm) — autologin cannot be configured."
     DEGRADED=1
 fi
 
@@ -169,7 +174,7 @@ KSCREEN_AUTOSTART_EOF
         echo "kscreen-doctor not found — KWin will use DRM default (1024x768)."
     fi
 else
-    echo "WARNING: no home directory for $USER (getent) — monitors.xml and the kscreen autostart are NOT installed." >&2
+    echo "WARNING: no home directory for $USER (getent) — monitors.xml and the kscreen autostart are NOT installed."
     DEGRADED=1
 fi
 

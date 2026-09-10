@@ -26,6 +26,14 @@ namespace VMCreate
 
         public async Task ExecuteAsync(IGuestShell shell, GalleryItem item, VmCustomizations customizations, ILogger logger, CancellationToken ct)
         {
+            // In debug builds (debugger attached), preserve the vmcreate user for post-deployment
+            // troubleshooting and SSH access without requiring password entry.
+            if (System.Diagnostics.Debugger.IsAttached)
+            {
+                logger.LogWarning("Debug mode: skipping vmcreate user removal on VM {VMName} — user preserved for investigation", shell.VmName);
+                return;
+            }
+
             string check = await shell.RunCommandAsync(
                 "id vmcreate >/dev/null 2>&1 && echo EXISTS || echo ABSENT", ct);
 

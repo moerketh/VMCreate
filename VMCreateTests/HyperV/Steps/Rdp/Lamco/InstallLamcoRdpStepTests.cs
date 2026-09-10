@@ -632,5 +632,140 @@ namespace VMCreate.Tests.HyperV.Steps
             StringAssert.Contains(all, "Accept dispatcher started",
                 "readiness gate distinguishes service-up from blocked-on-consent");
         }
+
+        [TestMethod]
+        public async Task ExecuteAsync_RetiresPreinstalledXrdp_LamcoOwnsVsock3389()
+        {
+            // Kali's Hyper-V images bake xrdp in (hyperv-daemons xrdp
+            // pipewire-module-xrdp from the image build) listening on
+            // vsock://-1:3389 — every vmconnect Enhanced Session landed on
+            // xrdp and never on lamco (TEST_20260910165003: the RDP login
+            // wedged in xrdp's Xorg session, plasma-ksmserver failed,
+            // graphical-session.target dead — the "no KDE login" black
+            // screen). The install must stop + disable xrdp/xrdp-sesman
+            // and kill sesexec stragglers so lamco's vsock listener binds.
+            string? captured = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("LAMCO_RESULT=ok");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(captured);
+            // TEST_20260910195849: the first version gated on a
+            // `systemctl list-unit-files | awk | grep -qx` pipeline that
+            // silently no-oped during a real deployment (zero block output,
+            // xrdp survived active+enabled, Enhanced Session landed on
+            // Xorg). Existence must be a deterministic file check.
+            StringAssert.Contains(captured, "[ -f \"/lib/systemd/system/${unit}.service\" ]",
+                "unit existence is a deterministic [ -f ] file check, not a systemctl|awk|grep pipeline that can silently no-op");
+            StringAssert.Contains(captured, "systemctl stop \"${unit}.service\"",
+                "preinstalled xrdp units are stopped");
+            StringAssert.Contains(captured, "systemctl disable \"${unit}.service\"",
+                "preinstalled xrdp units are disabled so they never race lamco at boot");
+            StringAssert.Contains(captured, "pkill -x xrdp-sesexec",
+                "straggler sesexec processes (spawned per session by sesman, not a unit) are killed");
+            // Belt-and-braces keyed on the process name (single command, no
+            // pipeline), not the port (lamco itself legitimately holds
+            // 127.0.0.1:3389 on re-runs).
+            StringAssert.Contains(captured, "pgrep -x xrdp",
+                "post-stop check is a single pgrep — no multi-stage pipeline");
+            Assert.IsFalse(System.Text.RegularExpressions.Regex.IsMatch(captured, @"apt-get\s+purge.*xrdp", System.Text.RegularExpressions.RegexOptions.Multiline),
+                "xrdp packages are NOT purged — a later Xrdp-backend deployment needs them re-enablable");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_SentinelSurvivesHostSideSubstitution()
+        {
+            // TEST_20260910195849: the host substitutes via naive
+            // string.Replace of __AUTOLOGIN_USER__ across the WHOLE script,
+            // which rewrote the sentinel comparison itself ("x =
+            // placeholder" became "kali = kali", always true) and forced a
+            // correctly-substituted deployment down the guest-scan path.
+            // The sentinel must be BUILT from fragments the Replace cannot
+            // match; after substitution the script must still contain a
+            // comparison against a runtime-constructed placeholder.
+            string? captured = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("LAMCO_RESULT=ok");
+
+            var item = new GalleryItem { LinuxDistro = LinuxDistro.Kali, InitialUsername = "kali" };
+            await _step.ExecuteAsync(_shell.Object, item, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(captured);
+            // After substitution the assignment reads AUTOLOGIN_USER="kali"
+            // — and the sentinel comparison must NOT have been rewritten to
+            // compare against "kali" (the self-clobber); it compares against
+            // the runtime-built $_PLACEHOLDER.
+            StringAssert.Contains(captured, "AUTOLOGIN_USER=\"kali\"",
+                "the gallery username was substituted into the assignment");
+            StringAssert.Contains(captured, "[ \"$AUTOLOGIN_USER\" = \"$_PLACEHOLDER\" ]",
+                "sentinel comparison references the runtime-built placeholder");
+            Assert.IsFalse(captured.Contains("'kali''_USER__'"),
+                "the placeholder-construction fragments must not themselves be substituted");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_UnresolvedUser_HardFails_NotDegradedSuccess()
+        {
+            // A guest where no autologin user resolves (blank gallery field +
+            // empty /etc/passwd scan) means NO user units, NO autologin, NO
+            // portal grant — lamco is 100% dead. Reporting that as
+            // "completed with warnings" is exactly the TEST_20260910165003
+            // fabricated-success class: the deploy "succeeded" and the
+            // units lived under /.config at filesystem root. The script must
+            // hard-fail (exit 1) on that path.
+            string? captured = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("LAMCO_RESULT=ok");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(captured);
+            // The no-user branch exits 1 (hard failure) BEFORE printing any
+            // LAMCO_RESULT line — not the old "LAMCO_RESULT=degraded" +
+            // exit 0 which read as deployable in the host log.
+            Assert.IsTrue(System.Text.RegularExpressions.Regex.IsMatch(
+                    captured,
+                    @"if \[ -z ""\$AUTOLOGIN_USER"" \]; then[\s\S]*?exit 1",
+                    System.Text.RegularExpressions.RegexOptions.Multiline),
+                "the no-user path exits non-zero (hard failure)");
+            Assert.IsFalse(System.Text.RegularExpressions.Regex.IsMatch(
+                    captured,
+                    @"no autologin user could be resolved[\s\S]{0,500}LAMCO_RESULT=degraded",
+                    System.Text.RegularExpressions.RegexOptions.Multiline),
+                "the no-user path must not report a machine-readable degraded result — the deployment is dead, not degraded (bounded window: the terminal DEGRADED block 400 lines below is legitimate)");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_DegradedReasons_ReachTheHostLog()
+        {
+            // The SSH transport returns STDOUT ONLY on zero-exit runs
+            // (stderr is dropped to a debug log). DEGRADED reason lines on
+            // stderr were therefore invisible in the deployment log's
+            // DEGRADED warning — the host warned without a reason
+            // (TEST_20260910165003: "LAMCO_RESULT=degraded" with no
+            // readiness-gate detail). Every DEGRADED/WARNING/NOTICE line
+            // the host is meant to log must print to stdout.
+            string? captured = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("LAMCO_RESULT=ok");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(captured);
+            Assert.IsFalse(System.Text.RegularExpressions.Regex.IsMatch(
+                    captured,
+                    @"echo ""(DEGRADED|NOTICE)[^""]*""\s*>&2",
+                    System.Text.RegularExpressions.RegexOptions.Multiline),
+                "DEGRADED/NOTICE lines must not go to stderr — they never reach the host log on zero-exit runs");
+            // Hard-failure ERROR lines MAY use stderr: on non-zero exits the
+            // SSH transport captures it into the thrown exception.
+            StringAssert.Contains(captured, "readiness gate timed out (120s)",
+                "the timeout reason text is present (host logs it with the DEGRADED warning)");
+        }
     }
 }

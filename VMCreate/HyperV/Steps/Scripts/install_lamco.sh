@@ -31,6 +31,12 @@ LAMCO_FORK_DEB_URL="https://github.com/${LAMCO_FORK_REPO}/releases/download/${LA
 # Result contract: 0 = ok, 1 = degraded (install completed with warnings —
 # the host step logs these). Hard failures exit non-zero BEFORE the terminal
 # LAMCO_RESULT line is ever reached. See the end of the script.
+# STREAM RULE (TEST_20260910165003): the SSH transport returns STDOUT ONLY
+# on zero-exit runs — stderr is dropped to a debug log, so the DEGRADED
+# reason lines that went to stderr were invisible in the host's deployment
+# log. Every DEGRADED/WARNING/NOTICE reason line therefore prints to
+# stdout; only hard-failure ERROR lines use stderr (there stderr IS
+# captured — it flows into the thrown SSH exception).
 DEGRADED=0
 
 echo "=== Lamco RDP Server install (pinned fork deb ${LAMCO_FORK_TAG}) ==="
@@ -125,7 +131,10 @@ echo "sha256 OK ($LAMCO_FORK_DEB_SHA256)"
 DEBIAN_FRONTEND=noninteractive dpkg -i --force-confnew "$FORK_DEB_TMP" 2>&1
 dpkg_rc=$?
 if [ "$dpkg_rc" -ne 0 ]; then
-    echo "NOTE: dpkg -i exited $dpkg_rc (missing/broken deps are expected when the fork deb's runtime packages aren't pre-installed) — running apt-get dependency fixup." >&2
+    # stdout per the STREAM RULE: this note describes a RECOVERED condition
+    # (apt-get fixup below resolves it); on a zero-exit run it would be
+    # invisible on stderr.
+    echo "NOTE: dpkg -i exited $dpkg_rc (missing/broken deps are expected when the fork deb's runtime packages aren't pre-installed) — running apt-get dependency fixup."
 fi
 DEBIAN_FRONTEND=noninteractive apt-get install -f -y -q 2>&1 \
     || { echo "ERROR: apt-get dependency resolution failed after dpkg -i (dpkg rc=$dpkg_rc)." >&2; rm -f "$FORK_DEB_TMP"; exit 1; }
@@ -155,6 +164,56 @@ if ! /usr/bin/lamco-rdp-server --version 2>/dev/null | grep -aq " $LAMCO_FORK_CR
     exit 1
 fi
 echo "Installed fork deb lamco-rdp-server_${LAMCO_FORK_DEB_VERSION}_amd64 (dpkg reports '$installed_pkg_ver', binary reports '$LAMCO_FORK_CRATE_VERSION', sha256-verified download)."
+
+# -- Retire any preinstalled xrdp: lamco owns vsock:3389 --------------------
+# Kali's Hyper-V images bake xrdp in (apt history on the W37 image shows
+# "apt-get install -y hyperv-daemons xrdp pipewire-module-xrdp" from the
+# image build, 2026-09-05) with /etc/xrdp/xrdp.ini port=vsock://-1:3389 —
+# xrdp HELD that listener, so every vmconnect Enhanced Session landed on
+# xrdp, never on lamco (observed on TEST_20260910165003: the 11:30 RDP
+# login spawned xrdp-sesexec/Xorg :1, plasma-ksmserver failed, plasmashell
+# timeout-restarted, graphical-session.target dead — the "no KDE login"
+# black screen). Stop and disable every xrdp unit so lamco's vsock
+# listener can bind. Do NOT purge the packages: a deployment later
+# re-selecting the Xrdp backend needs xrdp intact to re-enable, and
+# stop+disable is sufficient and reversible.
+# EXISTENCE CHECK (TEST_20260910195849): the first version gated on
+# `systemctl list-unit-files | awk | grep -qx` — a three-stage pipeline
+# that silently no-oped during a real deployment (zero block output in
+# the host log while the same pipeline matched interactively minutes
+# later), leaving xrdp active+enabled and Enhanced Session landing on
+# Xorg. A unit file is a FILE: [ -f ] is deterministic, needs no dbus,
+# no pipes, no awk — and every branch below echoes, so the host log
+# always shows which path ran. Never a silent skip.
+for unit in xrdp xrdp-sesman; do
+    if [ -f "/lib/systemd/system/${unit}.service" ] \
+        || [ -f "/usr/lib/systemd/system/${unit}.service" ] \
+        || [ -f "/etc/systemd/system/${unit}.service" ]; then
+        if systemctl stop "${unit}.service" >/dev/null 2>&1; then
+            echo "Stopped preinstalled ${unit}.service — lamco owns vsock:3389."
+        else
+            echo "DEGRADED: failed to stop ${unit}.service — Enhanced Session may still land on xrdp instead of lamco."
+            DEGRADED=1
+        fi
+        systemctl disable "${unit}.service" >/dev/null 2>&1 || true
+        echo "Disabled ${unit}.service (will not race lamco at boot)."
+    else
+        echo "No preinstalled ${unit}.service unit file — nothing to retire."
+    fi
+done
+# xrdp-sesexec is not a systemd unit (xrdp-sesman spawns one per session);
+# kill any straggler so a wedged session (the black-screen login) cannot
+# hold the vsock listener open.
+pkill -x xrdp-sesexec 2>/dev/null || true
+# Belt-and-braces: pgrep is a single command — no pipeline that can
+# silently no-op (the ss|grep|grep chain died with the same class of
+# bug as the existence check above). Keyed on the process NAME, not the
+# bare port: on a re-run of this script, lamco itself legitimately
+# listens on 127.0.0.1:3389 from the previous provisioning.
+if pgrep -x xrdp >/dev/null 2>&1; then
+    echo "DEGRADED: an xrdp process is still alive after stop attempts — Enhanced Session will land on xrdp, not lamco."
+    DEGRADED=1
+fi
 
 # -- Install Portal + PipeWire runtime deps if missing ----------------------
 # Branch by detected desktop so we pull the correct portal backend.
@@ -490,6 +549,28 @@ chmod 644 /etc/lamco-rdp-server/config.toml
 # only the fallback for a blank gallery field: first non-system account
 # with a home dir.
 AUTOLOGIN_USER="__AUTOLOGIN_USER__"
+# GOTCHA 1 (TEST_20260910165003): a blank gallery InitialUsername leaves the
+# literal placeholder in the assignment above — non-empty, but not a
+# username. The original `[ -z ... ]` guard skipped the /etc/passwd
+# fallback, getent failed, USER_HOME collapsed to "" and every "user"
+# path silently rooted at / (units in /.config/systemd/user, monitors.xml
+# in /.config) — a deployed-but-dead RDP server.
+# GOTCHA 2 (TEST_20260910195849): the host substitutes via naive
+# string.Replace of __AUTOLOGIN_USER__ across the WHOLE script, which also
+# rewrites the sentinel comparison itself — "x = placeholder" became
+# "kali = kali" (always true) and a correctly-substituted deployment was
+# forced down the guest-scan path. The sentinel must therefore be
+# constructed at runtime from string fragments so the Replace cannot
+# rewrite the comparison target: only the assignment on the line above is
+# the substitution site.
+_PLACEHOLDER='__AUTOLOGIN'
+_PLACEHOLDER="${_PLACEHOLDER}"'_USER__'
+if [ "$AUTOLOGIN_USER" = "$_PLACEHOLDER" ]; then
+    AUTOLOGIN_USER=""
+    AUTOLOGIN_USER_RESOLVED="guest-scan"
+else
+    AUTOLOGIN_USER_RESOLVED="gallery-field"
+fi
 if [ -z "$AUTOLOGIN_USER" ]; then
     AUTOLOGIN_USER=$(awk -F: '$3 >= 1000 && $3 < 65534 && $6 != "" {print $1; exit}' /etc/passwd 2>/dev/null || echo "" )
 fi
@@ -499,6 +580,28 @@ if [ -z "$AUTOLOGIN_USER" ]; then
         if id "$cand" >/dev/null 2>&1; then AUTOLOGIN_USER="$cand"; break; fi
     done
 fi
+if [ -z "$AUTOLOGIN_USER" ]; then
+    # HARD failure, not degraded: a guest with no resolvable user means NO
+    # user units, NO autologin, NO portal grant — lamco is 100% dead while
+    # the deploy would report success. This is exactly the
+    # TEST_20260910165003 class (deployment "completed" with warnings
+    # hiding a dead RDP server). stderr is captured by the SSH transport
+    # for non-zero exits (it flows into the thrown exception), so the
+    # reason reaches the host log; the LAMCO_RESULT line is deliberately
+    # absent (hard failures exit before it).
+    echo "ERROR: no autologin user could be resolved (gallery InitialUsername blank and /etc/passwd scan found no desktop user)." >&2
+    echo "       The systemd user units, TLS key group ownership and portal grant all" >&2
+    echo "       need a real user — refusing to write them into /.config (observed on TEST_20260910165003)." >&2
+    exit 1
+fi
+if ! id "$AUTOLOGIN_USER" >/dev/null 2>&1; then
+    # Same class as above: the gallery field resolved to a user that does
+    # not exist on this guest (e.g. image shipped a different desktop
+    # user). Units cannot be written for a nonexistent account.
+    echo "ERROR: resolved autologin user '$AUTOLOGIN_USER' (source: $AUTOLOGIN_USER_RESOLVED) does not exist on this guest." >&2
+    exit 1
+fi
+echo "Autologin user resolved as '$AUTOLOGIN_USER' (source: $AUTOLOGIN_USER_RESOLVED)."
 
 if [ -n "$AUTOLOGIN_USER" ]; then
     USER_HOME=$(getent passwd "$AUTOLOGIN_USER" | cut -d: -f6)
@@ -700,13 +803,16 @@ MONITORS_EOF
             echo "Service ready: accept dispatcher running (TCP/vsock listeners bound)."
             ;;
         consent)
-            echo "NOTICE: one-time portal consent dialog is on the VM console — click Allow once, then the service binds its listeners." >&2
-            echo "DEGRADED: deployed but NOT listening yet — portal consent pending on the VM console." >&2
+            # stdout per the STREAM RULE: the SSH transport returns stdout
+            # only on zero-exit runs; a reason line on stderr never reached
+            # the host's DEGRADED warning (TEST_20260910165003).
+            echo "NOTICE: one-time portal consent dialog is on the VM console — click Allow once, then the service binds its listeners."
+            echo "DEGRADED: deployed but NOT listening yet — portal consent pending on the VM console."
             DEGRADED=1
             ;;
         timeout)
-            echo "DEGRADED: readiness gate timed out (120s) — neither dispatcher start nor consent prompt appeared." >&2
-            echo "Diagnose with: journalctl _UID=$RDY_UID -b --no-pager | tail -n 50" >&2
+            echo "DEGRADED: readiness gate timed out (120s) — neither dispatcher start nor consent prompt appeared."
+            echo "Diagnose with: journalctl _UID=$RDY_UID -b --no-pager | tail -n 50"
             DEGRADED=1
             ;;
     esac
@@ -815,7 +921,7 @@ UNITEOF
                 systemctl --user start lamco-idle-inhibit.service 2>/dev/null || true
             echo "Idle-lock suppression: Autolock=false + lamco-idle-inhibit.service (Hyper-V lock-greeter wedge prevention)."
         else
-            echo "WARNING: no home dir for $AUTOLOGIN_USER — idle-lock suppression unit not installed." >&2
+            echo "WARNING: no home dir for $AUTOLOGIN_USER — idle-lock suppression unit not installed."
             DEGRADED=1
         fi
     fi
@@ -857,7 +963,12 @@ DESKTOPEOF
         systemctl --user enable lamco-grant.service 2>/dev/null || true
     echo "Installed systemd user unit for $AUTOLOGIN_USER and enabled linger."
 else
-    echo "WARNING: could not determine autologin user; systemd user unit not installed." >&2
+    # Unreachable by construction: both no-user paths above hard-fail
+    # (exit 1) before this block. Kept as a defensive guard so a future
+    # edit that relaxes the resolver can never fall through to a silent
+    # success — it still reports, loudly (stdout per the STREAM RULE: a
+    # degraded reason on stderr never reaches the host log).
+    echo "WARNING: autologin user became empty after resolution — no user units installed."
     DEGRADED=1
 fi
 
