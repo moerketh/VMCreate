@@ -45,7 +45,8 @@ namespace VMCreate.Gallery
                     SecureBoot = "false",
                     EnhancedSessionTransportType = "HvSocket",
                     Version = "22.04 LTS",
-                    LastUpdated = jammyBuildInfo.Result
+                    LastUpdated = jammyBuildInfo.Result,
+                    LinuxDistro = LinuxDistro.Ubuntu
                 },
                 new GalleryItem
                 {
@@ -58,7 +59,8 @@ namespace VMCreate.Gallery
                     SecureBoot = "false",
                     EnhancedSessionTransportType = "HvSocket",
                     Version = "24.04 LTS",
-                    LastUpdated = nobleBuildInfo.Result
+                    LastUpdated = nobleBuildInfo.Result,
+                    LinuxDistro = LinuxDistro.Ubuntu
                 }
             };
         }

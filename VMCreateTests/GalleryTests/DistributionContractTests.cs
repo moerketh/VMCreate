@@ -165,7 +165,19 @@ namespace VMCreate.Tests.GalleryTests
             var items = await new Kali(FactoryFor(html)).LoadGalleryItems();
 
             AssertContractInvariants(items, nameof(Kali));
-            Assert.AreEqual(1, items.Count);
+
+            // Stable XFCE + its KDE twin (the weekly fetch fails on the
+            // same-content fixture and degrades to null).
+            Assert.AreEqual(2, items.Count);
+            Assert.AreEqual(LinuxDistro.Kali, items[0].LinuxDistro);
+            Assert.IsFalse(items[0].HasTag("kali-kde"), "Base item must stay untagged");
+
+            // The KDE twin: same disk, tagged, named with the (KDE) suffix.
+            Assert.IsTrue(items[1].HasTag("kali-kde"), "Twin must carry the kali-kde tag");
+            StringAssert.Contains(items[1].Name, "(KDE)", StringComparison.Ordinal);
+            Assert.AreEqual(items[0].DiskUri, items[1].DiskUri, "Twin shares the base disk");
+            Assert.AreEqual(LinuxDistro.Kali, items[1].LinuxDistro);
+            Assert.IsFalse(items[1].IsRecommended, "Twin must not steal the recommended slot");
         }
 
         [TestMethod]
@@ -199,15 +211,28 @@ namespace VMCreate.Tests.GalleryTests
             var items = await new Kali(factory).LoadGalleryItems();
 
             AssertContractInvariants(items, nameof(Kali));
-            Assert.AreEqual(2, items.Count);
+            Assert.AreEqual(4, items.Count);
 
-            // Stable item is first, weekly second
+            // Stable item is first, its KDE twin second, weekly third, weekly twin fourth.
             Assert.AreEqual("2024.3", items[0].Version);
             Assert.IsTrue(items[0].IsRecommended, "Stable release should be recommended");
+            Assert.IsTrue(items[1].HasTag("kali-kde"));
+            StringAssert.Contains(items[1].Name, "2024.3", StringComparison.Ordinal);
 
-            Assert.AreEqual("2024-W38", items[1].Version);
-            Assert.IsFalse(items[1].IsRecommended, "Weekly build should not be recommended");
-            StringAssert.Contains(items[1].Name, "Weekly", StringComparison.OrdinalIgnoreCase);
+            Assert.AreEqual("2024-W38", items[2].Version);
+            Assert.IsFalse(items[2].IsRecommended, "Weekly build should not be recommended");
+            StringAssert.Contains(items[2].Name, "Weekly", StringComparison.OrdinalIgnoreCase);
+            Assert.IsTrue(items[3].HasTag("kali-kde"));
+            StringAssert.Contains(items[3].Name, "Weekly", StringComparison.OrdinalIgnoreCase);
+
+            // Every item is Kali, and each twin shares the disk with its
+            // base (stable lives under /current/, weekly under /kali-weekly/
+            // — the two bases differ by design).
+            foreach (var item in items)
+                Assert.AreEqual(LinuxDistro.Kali, item.LinuxDistro);
+            Assert.AreEqual(items[0].DiskUri, items[1].DiskUri, "Stable twin shares the stable disk");
+            Assert.AreEqual(items[2].DiskUri, items[3].DiskUri, "Weekly twin shares the weekly disk");
+            Assert.AreNotEqual(items[0].DiskUri, items[2].DiskUri, "Stable and weekly base disks differ");
         }
 
         [TestMethod]

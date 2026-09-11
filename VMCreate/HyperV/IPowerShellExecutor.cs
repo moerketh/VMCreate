@@ -49,8 +49,33 @@ namespace VMCreate.HyperV
 
         public PowerShellExecutor()
         {
-            _initialSessionState = InitialSessionState.CreateDefault();
+            // Timed at Information: InitialSessionState construction is the
+            // bulk of PowerShell-hosting startup cost and lands on the first
+            // Hyper-V call of the session (this executor is a singleton in
+            // App.xaml.cs, constructed lazily on first resolve).
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            // CreateDefault2() populates only Microsoft.PowerShell.Core;
+            // CreateDefault() adds every built-in cmdlet/provider (~600
+            // types to materialize on first runspace open — measured ~600 ms
+            // constructor + ~2 s first open before this change). Everything
+            // this executor needs beyond Core is pulled in by the explicit
+            // Hyper-V module import below, and the managers call only
+            // Hyper-V cmdlets plus reg.exe (Unattend executor below), all
+            // of which resolve fine without the full default set.
+            _initialSessionState = InitialSessionState.CreateDefault2();
             _initialSessionState.ImportPSModule(new[] { "Hyper-V" });
+            LogStartup("powershell-session-state-built", sw);
+        }
+
+        /// <summary>
+        /// Logs a one-shot PowerShell-hosting startup cost at Information.
+        /// The executor is process-singleton, so this fires once and marks
+        /// where "first thing you click is slow" actually goes.
+        /// </summary>
+        private static void LogStartup(string milestone, System.Diagnostics.Stopwatch sw)
+        {
+            Serilog.Log.Information("Startup: {ElapsedMs} ms — {Milestone} (PowerShell hosting)",
+                sw.ElapsedMilliseconds, milestone);
         }
 
         public Task<PowerShellResult> RunCommandAsync(

@@ -24,7 +24,9 @@ namespace VMCreate.CLI.Progress
         {
             if (value == null) return;
 
-            string phase = value.Phase ?? string.Empty;
+            // Phase is a typed VmDeploymentPhase enum since the progress contract
+            // was made strongly-typed; format the invariant name for display.
+            string phase = value.Phase.ToString();
             string pct = value.ProgressPercentage > 0 ? $" {value.ProgressPercentage}%" : string.Empty;
             string speed = value.DownloadSpeed > 0 ? $"  [grey]{value.DownloadSpeed:F1} MB/s[/]" : string.Empty;
             string uri = !string.IsNullOrEmpty(value.URI) && value.ProgressPercentage == 0

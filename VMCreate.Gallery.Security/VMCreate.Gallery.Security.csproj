@@ -23,6 +23,7 @@
     <EmbeddedResource Include="Icons\securityonion-logo.svg" />
     <EmbeddedResource Include="Icons\tsurugi-logo.svg" />
     <EmbeddedResource Include="Icons\flarevm-logo.png" />
+    <EmbeddedResource Include="Icons\parrot-security-screenshot.jpg" />
   </ItemGroup>
 
   <ItemGroup>    <ProjectReference Include="..\VMCreate.Gallery.Contracts\VMCreate.Gallery.Contracts.csproj" />

@@ -32,7 +32,14 @@ namespace VMCreate.HyperV.Unattend
 
         public PowerShellExecutor()
         {
-            _initialSessionState = InitialSessionState.CreateDefault();
+            // CreateDefault2() loads only Microsoft.PowerShell.Core — see the
+            // main VMCreate.HyperV.PowerShellExecutor for the rationale and
+            // measured costs. Mount/Dismount-VHD come from the explicit
+            // Hyper-V import below. Get-Partition and the PartitionAccessPath
+            // cmdlets are Storage-module cmdlets that resolve through module
+            // auto-loading, which still works under CreateDefault2 (verified:
+            // auto-loaded Get-Partition from a fresh CreateDefault2 runspace).
+            _initialSessionState = InitialSessionState.CreateDefault2();
             _initialSessionState.ImportPSModule(new[] { "Hyper-V" });
         }
 

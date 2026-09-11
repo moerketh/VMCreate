@@ -22,7 +22,6 @@ namespace VMCreate
         private readonly ILogger _logger;
         private readonly string _vmName;
         private readonly string _username;
-        private readonly string _password;
         private readonly PSCredential _credential;
 
         private static readonly TimeSpan ReadyTimeout = TimeSpan.FromSeconds(600);
@@ -35,8 +34,11 @@ namespace VMCreate
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _vmName = vmName ?? throw new ArgumentNullException(nameof(vmName));
             _username = username ?? throw new ArgumentNullException(nameof(username));
-            _password = password ?? throw new ArgumentNullException(nameof(password));
 
+            // The plaintext password is ONLY used to build the SecureString
+            // credential. It is deliberately NOT retained in a field — a
+            // lingering _password beside the SecureString defeats the point
+            // of the SecureString (dumpable via reflection/heap inspection).
             var securePassword = new SecureString();
             foreach (char c in password)
                 securePassword.AppendChar(c);
@@ -71,6 +73,13 @@ namespace VMCreate
                                     || ex.Message?.Contains("not yet available") == true)
             {
                 _logger.LogDebug("VM {VMName} not yet ready, beginning initial wait...", _vmName);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                // Cancellation must propagate — the old bare catch { } swallowed
+                // it (making shutdown/cancel hangs look like a VM readiness
+                // problem) and then slept 60s anyway.
+                throw;
             }
             catch
             {
@@ -122,8 +131,27 @@ namespace VMCreate
         /// </summary>
         public async Task<string> RunCommandAsync(string command, CancellationToken ct)
         {
-            _logger.LogDebug("Running PowerShell Direct command on VM {VMName}: {Command}", _vmName, Truncate(command, 200));
+            // SECURITY: never log the command body. CopyContentAsync/
+            // CopyFileAsync embed base64 payload (configs, scripts, secrets)
+            // on the command line — a 200-char preview still leaks ~145
+            // characters of it into the plaintext %TEMP% log. Mirrors the
+            // SSH transport (SshGuestShell.RunCommandInternalAsync): log
+            // target and length only.
+            _logger.LogDebug("Running PowerShell Direct command on VM {VMName} ({Length} chars)", _vmName, command?.Length ?? 0);
             string result = await RunCommandInternalAsync(command, CommandTimeout, ct);
+            _logger.LogDebug("PowerShell Direct command completed on VM {VMName} ({Length} chars)", _vmName, result?.Length ?? 0);
+            return result;
+        }
+
+        /// <summary>
+        /// Executes a PowerShell command with an explicit timeout. PowerShell Direct has no
+        /// command-line length cap, so the timeout is the only relevant bound.
+        /// </summary>
+        public async Task<string> RunCommandAsync(string command, TimeSpan timeout, CancellationToken ct)
+        {
+            // SECURITY: length only — see RunCommandAsync above.
+            _logger.LogDebug("Running PowerShell Direct command on VM {VMName} ({Length} chars)", _vmName, command?.Length ?? 0);
+            string result = await RunCommandInternalAsync(command, timeout, ct);
             _logger.LogDebug("PowerShell Direct command completed on VM {VMName} ({Length} chars)", _vmName, result?.Length ?? 0);
             return result;
         }
@@ -145,6 +173,58 @@ namespace VMCreate
             ";
 
             await RunCommandInternalAsync(script, CommandTimeout, ct);
+        }
+
+        /// <summary>
+        /// Writes SECRET string content (keys, credentials) to the guest via
+        /// PowerShell Direct (Windows guests). Honours the IGuestShell
+        /// contract: the file exists only in its final permission state —
+        /// it is created empty, the SYSTEM/Administrators-only ACL is
+        /// applied and VERIFIED (icacls exit code checked, not assumed)
+        /// before any secret bytes are written, so there is never a
+        /// world-readable intermediate. A failed ACL application throws
+        /// instead of returning success: the guarantee must be loud.
+        /// The command is executed on an internal path that never logs the
+        /// command body, so key material cannot reach the plaintext %TEMP%
+        /// log regardless of the configured level.
+        /// </summary>
+        public async Task CopySecretAsync(string content, string guestPath, CancellationToken ct)
+        {
+            _logger.LogInformation("Writing secret content to {Path} on VM {VMName} via PowerShell Direct", guestPath, _vmName);
+
+            // Base64-encode the content to avoid escaping issues
+            string base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(content));
+            string script = $@"
+                $bytes = [Convert]::FromBase64String('{base64}')
+                $dir = Split-Path -Parent '{EscapeForPowerShell(guestPath)}'
+                if (-not (Test-Path $dir)) {{ New-Item -ItemType Directory -Path $dir -Force | Out-Null }}
+                # Create the target EMPTY first so the secret never exists in
+                # an unrestricted state: restrict+verify the empty placeholder
+                # BEFORE the bytes touch disk. Order matters — if the write came
+                # first, the file would carry inherited ACEs (BUILTIN\Users read
+                # from the parent directory) until icacls ran.
+                New-Item -ItemType File -Path '{EscapeForPowerShell(guestPath)}' -Force | Out-Null
+                # Strip inherited ACEs and grant SYSTEM + Administrators only —
+                # the Windows equivalent of the SSH path's root:root 0600.
+                # Well-known SIDs instead of group names: 'SYSTEM'/'Administrators'
+                # are localized on non-English guests (e.g. 'Administratoren').
+                # No (OI)(CI) inheritance flags: the target is a file.
+                icacls '{EscapeForPowerShell(guestPath)}' /inheritance:r /grant:r '*S-1-5-18:F' '*S-1-5-32-544:F' | Out-Null
+                # icacls reports failures on STDOUT with a quiet non-zero
+                # $LASTEXITCODE (native stderr stays empty, so HadErrors at the
+                # host sees nothing). The only reliable failure signal is the
+                # exit code — and a silent failure here would leave the file
+                # world-readable while the method returns success and logs
+                # '(SYSTEM/Administrators only)', a silently-broken guarantee.
+                # Loud failure instead: throw into the PS error stream.
+                if ($LASTEXITCODE -ne 0) {{ throw ""icacls ($LASTEXITCODE) failed setting the file ACL on '{EscapeForPowerShell(guestPath)}'"" }}
+                # ACL verified — safe to write the secret bytes into the
+                # already-restricted file.
+                [System.IO.File]::WriteAllBytes('{EscapeForPowerShell(guestPath)}', $bytes)
+            ";
+
+            await RunCommandInternalAsync(script, CommandTimeout, ct);
+            _logger.LogInformation("Wrote secret -> {Path} on VM {VMName} (SYSTEM/Administrators only)", guestPath, _vmName);
         }
 
         /// <summary>
@@ -225,12 +305,6 @@ namespace VMCreate
             }
 
             return output.ToString();
-        }
-
-        private static string Truncate(string s, int maxLength)
-        {
-            if (string.IsNullOrEmpty(s)) return s;
-            return s.Length <= maxLength ? s : s.Substring(0, maxLength) + "...";
         }
 
         private static string EscapeForPowerShell(string s)

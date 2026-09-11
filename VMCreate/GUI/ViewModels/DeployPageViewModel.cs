@@ -74,6 +74,18 @@ namespace VMCreate
         public const string SubConfigureVpn    = "Sub_ConfigureVpn";
         public const string SubRestoreSsh      = "Sub_RestoreSsh";
 
+        // Lamco (Wayland-native RDP) post-boot sub-step IDs — matched by
+        // InstallLamcoRdpStep/EnableGraphicalAutologinStep ProgressPhaseId.
+        public const string SubInstallLamcoRdp  = "Sub_InstallLamcoRdp";
+        public const string SubEnableAutologin  = "Sub_EnableAutologin";
+
+        // Auto RDP backend: detection + the possible backfilled installs.
+        // Sub_AutoRdpResolve is matched by AutoRdpBackendResolveStep.
+        // ProgressPhaseId; the branch cards are inserted at runtime by
+        // EnsureResolvedRdpBackendPhases once the resolver picks a backend.
+        public const string SubAutoRdpResolve      = "Sub_AutoRdpResolve";
+        public const string SubInstallXrdpPostBoot = "Sub_InstallXrdpPostBoot";
+
         /// <summary>Generates a sub-card phase ID for a distribution-specific option step.</summary>
         public static string DistOptionSubId(string stepName) => $"Sub_Dist_{stepName}";
 
@@ -459,6 +471,61 @@ namespace VMCreate
             InsertPostBootSubStepsAt(doneIndex + 1, _lastCustomizations);
         }
 
+        /// <summary>
+        /// Called at runtime after <c>AutoRdpBackendResolveStep</c> has resolved
+        /// the <see cref="RdpBackend.Auto"/> selection to a concrete backend (it
+        /// mutates the shared <see cref="VmCustomizations"/> instance in place).
+        /// Inserts the chosen branch's install cards after the resolver card so
+        /// the deploy log shows every step that will actually run.
+        /// <para>
+        /// Idempotent and safe to call on EVERY post-boot step report: it is a
+        /// no-op when the deployment is not Auto (no resolver card), when the
+        /// resolver has not run yet (backend still Auto), and when the branch
+        /// cards were already inserted. The presenter does NOT know which
+        /// post-boot step report follows the resolver — it simply calls this
+        /// before completing each post-boot step card.
+        /// </para>
+        /// <para>
+        /// Note the timing: the service reports a step BEFORE executing it,
+        /// so on the resolver's own report the backend is still Auto (no-op);
+        /// the branch cards appear on the report of the next applicable step
+        /// (InstallLamcoRdpStep 235 / InstallXrdpPostBootStep 236 — under
+        /// Auto at least one of them is always applicable once resolved).
+        /// </para>
+        /// </summary>
+        public void EnsureResolvedRdpBackendPhases()
+        {
+            int resolverIndex = -1;
+            for (int i = 0; i < Phases.Count; i++)
+            {
+                if (Phases[i].Id == SubAutoRdpResolve) { resolverIndex = i; break; }
+            }
+            // Not an Auto deployment (no resolver card) — nothing to do.
+            if (resolverIndex < 0) return;
+
+            var backend = _lastCustomizations?.RdpBackend ?? RdpBackend.Auto;
+            // Resolver has not run yet — nothing to insert yet.
+            if (backend == RdpBackend.Auto) return;
+
+            // Already backfilled — idempotent.
+            if (Phases.Any(p => p.Id == SubInstallLamcoRdp || p.Id == SubInstallXrdpPostBoot))
+                return;
+
+            int insertAt = resolverIndex + 1;
+            if (backend == RdpBackend.Lamco)
+            {
+                Phases.Insert(insertAt++, NewPostBootSubStep(SubInstallLamcoRdp, "Install Lamco RDP Server",
+                    "Installing the Wayland-native RDP server (packages, TLS, fork build)", SymbolRegular.Desktop24));
+                Phases.Insert(insertAt++, NewPostBootSubStep(SubEnableAutologin, "Enable Graphical Autologin",
+                    "Configuring automatic desktop login for the RDP session", SymbolRegular.Person24));
+            }
+            else // Xrdp (None can never be reached from Auto — the resolver only picks Lamco or Xrdp).
+            {
+                Phases.Insert(insertAt++, NewPostBootSubStep(SubInstallXrdpPostBoot, "Install xrdp (post-boot)",
+                    "Verifying or backfilling the xrdp install", SymbolRegular.Desktop24));
+            }
+        }
+
         /// <summary>Builds a descriptive string for the post-boot card based on what's enabled.</summary>
         private static string BuildPostBootDescription(VmCustomizations c)
         {
@@ -618,6 +685,23 @@ namespace VMCreate
                 Phases.Add(NewPostBootSubStep(SubConfigureVpn, "Configure VPN",
                     "Deploying VPN configs", SymbolRegular.Globe24));
             }
+            if (c?.RdpBackend == RdpBackend.Lamco)
+            {
+                Phases.Add(NewPostBootSubStep(SubInstallLamcoRdp, "Install Lamco RDP Server",
+                    "Installing the Wayland-native RDP server (packages, TLS, fork build)", SymbolRegular.Desktop24));
+                Phases.Add(NewPostBootSubStep(SubEnableAutologin, "Enable Graphical Autologin",
+                    "Configuring automatic desktop login for the RDP session", SymbolRegular.Person24));
+            }
+            if (c?.RdpBackend == RdpBackend.Auto)
+            {
+                Phases.Add(NewPostBootSubStep(SubAutoRdpResolve, "Auto-select RDP backend",
+                    "Detecting Wayland vs X11 in the guest to choose the RDP backend", SymbolRegular.ArrowSync24));
+            }
+            if (c?.RdpBackend == RdpBackend.Xrdp)
+            {
+                Phases.Add(NewPostBootSubStep(SubInstallXrdpPostBoot, "Install xrdp (post-boot)",
+                    "Verifying or backfilling the xrdp install", SymbolRegular.Desktop24));
+            }
             AddDistributionOptionSubSteps(c);
             Phases.Add(NewPostBootSubStep(SubRestoreSsh, "Restore SSH State",
                 "Restoring the original SSH configuration", SymbolRegular.ShieldKeyhole24));
@@ -676,6 +760,23 @@ namespace VMCreate
             {
                 Phases.Insert(index++, NewPostBootSubStep(SubConfigureVpn, "Configure VPN",
                     "Deploying VPN configs", SymbolRegular.Globe24));
+            }
+            if (c?.RdpBackend == RdpBackend.Lamco)
+            {
+                Phases.Insert(index++, NewPostBootSubStep(SubInstallLamcoRdp, "Install Lamco RDP Server",
+                    "Installing the Wayland-native RDP server (packages, TLS, fork build)", SymbolRegular.Desktop24));
+                Phases.Insert(index++, NewPostBootSubStep(SubEnableAutologin, "Enable Graphical Autologin",
+                    "Configuring automatic desktop login for the RDP session", SymbolRegular.Person24));
+            }
+            if (c?.RdpBackend == RdpBackend.Auto)
+            {
+                Phases.Insert(index++, NewPostBootSubStep(SubAutoRdpResolve, "Auto-select RDP backend",
+                    "Detecting Wayland vs X11 in the guest to choose the RDP backend", SymbolRegular.ArrowSync24));
+            }
+            if (c?.RdpBackend == RdpBackend.Xrdp)
+            {
+                Phases.Insert(index++, NewPostBootSubStep(SubInstallXrdpPostBoot, "Install xrdp (post-boot)",
+                    "Verifying or backfilling the xrdp install", SymbolRegular.Desktop24));
             }
             index = InsertDistributionOptionSubStepsAt(index, c);
             Phases.Insert(index++, NewPostBootSubStep(SubRestoreSsh, "Restore SSH State",

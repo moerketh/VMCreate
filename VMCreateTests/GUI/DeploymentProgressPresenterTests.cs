@@ -164,6 +164,94 @@ namespace VMCreate.Tests.GUI
             Assert.IsTrue(_viewModel.CompletedPhases.Contains(DeployPageViewModel.PhaseCreateVM));
         }
 
+        [TestMethod]
+        public void LamcoSteps_ReportPhaseIds_WithMatchingViewModelConstants()
+        {
+            // Regression guard for the invisible Lamco rollout steps: the steps report
+            // ProgressPhaseId ("Sub_InstallLamcoRdp"/"Sub_EnableAutologin") and the
+            // presenter activates the card with that ID — if DeployPageViewModel has no
+            // matching constant/card, the step runs entirely invisibly (GUI shows only
+            // the parent PostBoot spinner). The constants AND the step IDs must stay
+            // in lockstep; this pins both sides of the contract.
+            var lamcoStep = new InstallLamcoRdpStep();
+            var autologinStep = new EnableGraphicalAutologinStep();
+
+            Assert.AreEqual(DeployPageViewModel.SubInstallLamcoRdp, lamcoStep.ProgressPhaseId,
+                "InstallLamcoRdpStep.ProgressPhaseId must match a DeployPageViewModel card constant");
+            Assert.AreEqual(DeployPageViewModel.SubEnableAutologin, autologinStep.ProgressPhaseId,
+                "EnableGraphicalAutologinStep.ProgressPhaseId must match a DeployPageViewModel card constant");
+        }
+
+        [TestMethod]
+        public void Present_DetectedGen2_WithAutoBackend_NeedsIsoBootTrue()
+        {
+            // Auto is resolved in the guest at post-boot, so the ISO boot
+            // cycle must run (it provisions the automation SSH user the
+            // resolver needs). bare new VmCustomizations() defaults to Auto.
+            _presenter = new DeploymentProgressPresenter(
+                _viewModel,
+                _dispatcher,
+                CreateGalleryItem(DiskImageFormat.Vmdk, false),
+                new VmCustomizations(),
+                new Dictionary<string, ICustomizationStep>(),
+                _logger.Object);
+
+            _presenter.Present(new CreateVMProgressInfo { DetectedGeneration = 2 });
+
+            Assert.AreEqual(2, _viewModel.LastDiskSubStepsGeneration);
+            Assert.IsTrue(_viewModel.LastDiskSubStepsNeedsIsoBoot,
+                "Auto backend requires the ISO boot cycle (automation SSH user)");
+        }
+
+        [TestMethod]
+        public void Present_DetectedGen2_WithNoneBackend_NeedsIsoBootFalse()
+        {
+            // None + zero customizations = the leanest legal deployment: no
+            // xrdp, no VPN/timezone, no ISO cycle.
+            _presenter = new DeploymentProgressPresenter(
+                _viewModel,
+                _dispatcher,
+                CreateGalleryItem(DiskImageFormat.Vmdk, false),
+                new VmCustomizations { RdpBackend = RdpBackend.None },
+                new Dictionary<string, ICustomizationStep>(),
+                _logger.Object);
+
+            _presenter.Present(new CreateVMProgressInfo { DetectedGeneration = 2 });
+
+            Assert.AreEqual(2, _viewModel.LastDiskSubStepsGeneration);
+            Assert.IsFalse(_viewModel.LastDiskSubStepsNeedsIsoBoot);
+        }
+
+        [TestMethod]
+        public void AutoBackendSteps_ReportPhaseIds_WithMatchingViewModelConstants()
+        {
+            // Same lockstep guard as the Lamco test: the Auto resolver and
+            // the xrdp post-boot backfill report ProgressPhaseId, and the
+            // presenter activates their cards with that ID — a missing
+            // DeployPageViewModel constant makes the step run invisibly.
+            var resolver = new AutoRdpBackendResolveStep();
+            var install = new InstallXrdpPostBootStep();
+
+            Assert.AreEqual(DeployPageViewModel.SubAutoRdpResolve, resolver.ProgressPhaseId,
+                "AutoRdpBackendResolveStep.ProgressPhaseId must match a DeployPageViewModel card constant");
+            Assert.AreEqual(DeployPageViewModel.SubInstallXrdpPostBoot, install.ProgressPhaseId,
+                "InstallXrdpPostBootStep.ProgressPhaseId must match a DeployPageViewModel card constants");
+        }
+
+        [TestMethod]
+        public void Present_PostBootStep_CallsEnsureResolvedRdpBackendPhases()
+        {
+            // The presenter must call EnsureResolvedRdpBackendPhases on EVERY
+            // post-boot step report — the lazy insertion seam that backfills
+            // the chosen backend's install cards after the in-guest resolver
+            // mutated the backend in place.
+            _presenter.Present(new CreateVMProgressInfo { Phase = VmDeploymentPhase.PostBoot });
+            _presenter.Present(new CreateVMProgressInfo { Phase = VmDeploymentPhase.PostBoot, StepName = "some-step" });
+
+            Assert.IsTrue(_viewModel.EnsureResolvedRdpBackendPhasesCallCount >= 1,
+                "the presenter must invoke EnsureResolvedRdpBackendPhases on post-boot step reports");
+        }
+
         private sealed class FakeViewModel : IDeploymentProgressViewModel
         {
             public string VmName { get; set; }
@@ -179,6 +267,7 @@ namespace VMCreate.Tests.GUI
             public bool CleanupIsoBootPhaseInserted { get; set; }
             public int LastDiskSubStepsGeneration { get; set; }
             public bool LastDiskSubStepsNeedsIsoBoot { get; set; }
+            public int EnsureResolvedRdpBackendPhasesCallCount { get; set; }
 
             public void InsertDownloadCloningIsoPhase() => DownloadCloningIsoPhaseInserted = true;
             public void InsertPostBootPhase() => PostBootPhaseInserted = true;
@@ -190,6 +279,7 @@ namespace VMCreate.Tests.GUI
             }
             public void InsertCustomizePhase() => CustomizePhaseInserted = true;
             public void InsertCleanupIsoBootPhase() => CleanupIsoBootPhaseInserted = true;
+            public void EnsureResolvedRdpBackendPhases() => EnsureResolvedRdpBackendPhasesCallCount++;
 
             public void ActivatePhase(string id)
             {

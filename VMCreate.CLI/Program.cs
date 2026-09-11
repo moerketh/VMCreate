@@ -9,16 +9,35 @@ using System.CommandLine.Builder;
 using System.CommandLine.Parsing;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using VMCreate;
 using VMCreate.CLI.Commands;
 using VMCreate.Gallery;
+using VMCreate.HyperV.Unattend;
+using VMCreate.HyperV.VmCreation;
 using VMCreate.MediaHandlers;
 
 namespace VMCreate.CLI
 {
     internal static class Program
     {
+        /// <summary>
+        /// Assemblies the CLI scans for auto-discovered gallery loaders and
+        /// customization steps — the CLI's equivalent of App.xaml.cs's
+        /// scannableAssemblies. Exposed internal (InternalsVisibleTo) so
+        /// <c>CliFrontEndParityTests</c> can pin it to the same set the GUI
+        /// scans: a CLI that scans the wrong assembly silently registers
+        /// ZERO customization steps (a Linux deploy then does no post-boot
+        /// work at all, and an Auto deployment never even installs xrdp).
+        /// That shipped once — the parity test makes it impossible to ship
+        /// again unnoticed.
+        /// </summary>
+        internal static System.Reflection.Assembly[] ScannableAssemblies => new[]
+        {
+            typeof(VMCreate.SyncTimezoneStep).Assembly,                 // VMCreate (main — steps + general gallery)
+            typeof(VMCreate.Gallery.BlackArch).Assembly                 // VMCreate.Gallery.Security
+        };
         static async Task<int> Main(string[] args)
         {
             // ── Headless elevated child: --inject-unattend <vhdxPath> ────────
@@ -29,21 +48,29 @@ namespace VMCreate.CLI
             {
                 string vhdxPath = args[1];
                 string injectLogPath = Path.Combine(Path.GetTempPath(), "VMCreate.inject.log");
+                // SECURITY: same plaintext-log discipline as the main
+                // paths — the elevated child carries unattend.xml, which
+                // embeds the local administrator password. Debug stays OFF
+                // by default; turn it on per-run only for injection
+                // debugging.
                 var injectSerilog = new Serilog.LoggerConfiguration()
-                    .MinimumLevel.Debug()
-                    .WriteTo.File(injectLogPath, rollingInterval: RollingInterval.Day, shared: true)
+                    .MinimumLevel.Information()
+                    .WriteTo.File(injectLogPath, rollingInterval: RollingInterval.Day, shared: true, retainedFileCountLimit: 7)
                     .CreateLogger();
 
-                var services = new ServiceCollection();
-                services.AddLogging(b =>
+                // Named differently from the main-path container below to avoid
+                // CS0136 (the main path declares its own `services` local within
+                // the same enclosing method scope).
+                var injectServices = new ServiceCollection();
+                injectServices.AddLogging(b =>
                 {
                     b.ClearProviders();
                     b.AddSerilog(injectSerilog, dispose: true);
                 });
-                services.AddTransient<VMCreate.HyperV.Unattend.IPowerShellExecutor, VMCreate.HyperV.Unattend.PowerShellExecutor>();
-                services.AddTransient<IOfflineRegistryEditor, OfflineRegistryEditor>();
-                services.AddTransient<UnattendInjector>();
-                var sp = services.BuildServiceProvider();
+                injectServices.AddTransient<VMCreate.HyperV.Unattend.IPowerShellExecutor, VMCreate.HyperV.Unattend.PowerShellExecutor>();
+                injectServices.AddTransient<IOfflineRegistryEditor, OfflineRegistryEditor>();
+                injectServices.AddTransient<UnattendInjector>();
+                var sp = injectServices.BuildServiceProvider();
                 var injector = sp.GetRequiredService<UnattendInjector>();
                 var injectLogger = sp.GetRequiredService<ILogger<UnattendInjector>>();
 
@@ -67,10 +94,19 @@ namespace VMCreate.CLI
 
             // ── Logging ──────────────────────────────────────────────────────
             var logPath = Path.Combine(Path.GetTempPath(), "VMCreate.log");
+            // SECURITY: PLAINTEXT rolling log in %TEMP% — the same file name
+            // the GUI hardening closed (App.xaml.cs). The previous Debug
+            // floor captured every SSH command line, including
+            // CopyContentAsync base64 chunks that embed VPN configs with
+            // client certificates and private keys. The CLI was wired into
+            // the solution while this floor was still open, so every
+            // `vmcreate create` run reopened the GUI's leak. Debug stays
+            // OFF; 7-day retention bounds how long plaintext history
+            // lingers on disk (Serilog default: 31).
             Log.Logger = new LoggerConfiguration()
-                .MinimumLevel.Debug()
+                .MinimumLevel.Information()
                 .MinimumLevel.Override("Microsoft.Extensions.Http", Serilog.Events.LogEventLevel.Warning)
-                .WriteTo.File(logPath, rollingInterval: RollingInterval.Day)
+                .WriteTo.File(logPath, rollingInterval: RollingInterval.Day, retainedFileCountLimit: 7)
                 .CreateLogger();
 
             // ── DI container ─────────────────────────────────────────────────
@@ -94,16 +130,23 @@ namespace VMCreate.CLI
             services.AddTransient<IChecksumVerifier, ChecksumVerifier>();
             services.AddTransient<ICloningIsoDownloader, CloningIsoDownloader>();
 
-            // Hyper-V / VM plumbing
-            services.AddSingleton<IHyperVManager, PowerShellHyperVManager>();
-            services.AddSingleton<IVmLifecycleManager>(s => s.GetRequiredService<IHyperVManager>());
-            services.AddSingleton<IVmDiskManager>(s => s.GetRequiredService<IHyperVManager>());
-            services.AddSingleton<IVmBootManager>(s => s.GetRequiredService<IHyperVManager>());
-            services.AddSingleton<IVmNetworkManager>(s => s.GetRequiredService<IHyperVManager>());
-            services.AddSingleton<IVmConfigManager>(s => s.GetRequiredService<IHyperVManager>());
+            // Hyper-V / VM plumbing — mirrors App.xaml.cs: five focused role
+            // managers, then the IHyperVManager facade that wraps them all.
+            // PowerShellHyperVManagerFacade is public in VMCreate but sealed;
+            // the CLI (a separate assembly) needs the same role registrations
+            // the GUI uses because VmDeploymentOrchestrator consumes IHyperVManager.
+            services.AddSingleton<IVmLifecycleManager, PowerShellVmLifecycleManager>();
+            services.AddSingleton<IVmDiskManager, PowerShellVmDiskManager>();
+            services.AddSingleton<IVmBootManager, PowerShellVmBootManager>();
+            services.AddSingleton<IVmNetworkManager, PowerShellVmNetworkManager>();
+            services.AddSingleton<IVmConfigManager, PowerShellVmConfigManager>();
+            services.AddSingleton<IHyperVManager, PowerShellHyperVManagerFacade>();
             services.AddSingleton<IUnattendInjector, ElevatedUnattendInjector>();
             // Fully-qualified because VMCreate.HyperV.Unattend also defines IPowerShellExecutor.
-            services.AddTransient<VMCreate.HyperV.IPowerShellExecutor, VMCreate.HyperV.PowerShellExecutor>();
+            // Singleton, matching App.xaml.cs: InitialSessionState construction is the
+            // expensive part of PowerShell hosting (~600 ms measured); a transient
+            // registration would re-pay it on every Hyper-V cmdlet of a deploy run.
+            services.AddSingleton<VMCreate.HyperV.IPowerShellExecutor, VMCreate.HyperV.PowerShellExecutor>();
             services.AddTransient<VMCreate.HyperV.Unattend.IPowerShellExecutor, VMCreate.HyperV.Unattend.PowerShellExecutor>();
             services.AddTransient<IOfflineRegistryEditor, OfflineRegistryEditor>();
             services.AddTransient<UnattendInjector>();
@@ -136,11 +179,15 @@ namespace VMCreate.CLI
             services.AddTransient<DiskFileDetector>();
 
             // ── Gallery ─────────────────────────────────────────────────────
-            var scannableAssemblies = new[]
-            {
-                System.Reflection.Assembly.GetExecutingAssembly(), // VMCreate.CLI
-                typeof(VMCreate.Gallery.BlackArch).Assembly                // VMCreate.Gallery.Security
-            };
+            // Same single scan set as the GUI (see ScannableAssemblies):
+            // VMCreate main + Gallery.Security. In App.xaml.cs,
+            // GetExecutingAssembly() IS the VMCreate main assembly; the CLI
+            // is a separate assembly, so it must name the main assembly
+            // explicitly — scanning the executing (CLI) assembly instead
+            // previously registered ZERO steps and a gallery missing the
+            // general distros. ScannableAssemblies is the pinned source of
+            // truth (CliFrontEndParityTests).
+            var scannableAssemblies = ScannableAssemblies;
 
             var galleryLoaderTypes = scannableAssemblies
                 .SelectMany(a => a.GetTypes())
@@ -162,6 +209,12 @@ namespace VMCreate.CLI
             services.AddTransient<IGalleryService, GalleryService>();
 
             // ── Customization steps (auto-discovered) ───────────────────────
+            // Same scannableAssemblies as the gallery loaders above — GUI parity:
+            // both front ends must discover the same step set
+            // (CliFrontEndParityTests pins this). AutoRdpBackendResolveStep
+            // (order 232), InstallXrdpPostBootStep (236) and KaliKdeSwitchStep
+            // (231) all live in the VMCreate main assembly; losing it again
+            // means a CLI Auto deployment silently routes to nothing.
             var stepTypes = scannableAssemblies
                 .SelectMany(a => a.GetTypes())
                 .Where(t => typeof(ICustomizationStep).IsAssignableFrom(t)
@@ -179,6 +232,10 @@ namespace VMCreate.CLI
             services.AddHttpClient<IHtbApiClient, HtbApiClient>();
 
             // ── VM creation orchestrator ────────────────────────────────────
+            // VmDeploymentOrchestrator is consumed by HyperVVmCreator; VmGenerationResolver
+            // by MediaHandlerFactory. Without them the container builds but fails at resolve time.
+            services.AddTransient<IVmDeploymentOrchestrator, VmDeploymentOrchestrator>();
+            services.AddSingleton<IVmGenerationResolver, VmGenerationResolver>();
             services.AddTransient<IVmCreator, HyperVVmCreator>();
             services.AddTransient<CreateVM>();
             services.AddSingleton<IPartitionSchemeDetector, PartitionSchemeDetector>();

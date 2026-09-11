@@ -91,11 +91,17 @@ namespace VMCreate
 
         public async Task SetVMLoginNotes(VmDeploymentPlan plan, string initialUsername, string initialPassword, CancellationToken cancellationToken)
         {
+            // The VM Notes field persists in the .vmcx on disk and is readable
+            // by every Hyper-V admin on the host — it must never carry the
+            // initial password (for Parrot that's the published 'parrot', but
+            // the same path carried FLARE's password). Record the username
+            // only; the password is already delivered to the user through the
+            // deployment UI/summary, not the VM's persistent metadata.
             var result = await _executor.RunCommandAsync("Set-VM",
                 new System.Collections.Generic.Dictionary<string, object?>
                 {
                     ["Name"] = plan.VmName,
-                    ["Notes"] = $"Initial Username: {initialUsername}\r\nInitial Password: {initialPassword}",
+                    ["Notes"] = $"Initial Username: {initialUsername}\r\nPassword: (set at deploy time; not stored in VM notes)",
                 }, cancellationToken);
             if (result.HadErrors)
                 throw new Exception($"Failed to set VM login notes: {result.ErrorSummary}");

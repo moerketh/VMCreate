@@ -1,11 +1,8 @@
 using Microsoft.Extensions.Logging;
 using System;
-using System.Diagnostics;
-using System.Linq;
-using System.Management.Automation;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using VMCreate;
 
 namespace CreateVM.HyperV.vmbus
 {
@@ -21,6 +18,12 @@ namespace CreateVM.HyperV.vmbus
     public class GuestDiagnosticsCollector : IGuestDiagnosticsCollector
     {
         private readonly ILogger<GuestDiagnosticsCollector> _logger;
+        // "ubuntu", NOT SshGuestShell's "vmcreate": this collector targets
+        // the ISO boot-cycle guest (the debootstrap environment booted from
+        // the cloning ISO), whose SSH access is set up for the default live
+        // user. It runs while the deployment target is still being cloned —
+        // the vmcreate automation user only exists on the deployed disk,
+        // after the disk is first booted from the real OS.
         private const string GuestUsername = "ubuntu";
         private static readonly TimeSpan SshTimeout = TimeSpan.FromSeconds(30);
 
@@ -30,14 +33,14 @@ namespace CreateVM.HyperV.vmbus
         }
 
         /// <summary>
-        /// Connects to the ISO guest via PowerShell Direct and collects autorun
+        /// Connects to the ISO guest via SSH and collects autorun
         /// service status, journal output, mount state, and recent kernel messages.
         /// Returns a structured diagnostics string, or an error message if the
         /// connection itself fails.
         /// </summary>
         public async Task<GuestDiagnostics> CollectAsync(string vmName, CancellationToken ct, string privateKeyPath = null)
         {
-            _logger.LogInformation("Collecting diagnostics from ISO guest via PowerShell Direct for VM: {VMName}", vmName);
+            _logger.LogInformation("Collecting diagnostics from ISO guest via SSH for VM: {VMName}", vmName);
 
             try
             {
@@ -70,7 +73,7 @@ namespace CreateVM.HyperV.vmbus
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to collect guest diagnostics via PowerShell Direct: {Message}", ex.Message);
+                _logger.LogWarning(ex, "Failed to collect guest diagnostics via SSH: {Message}", ex.Message);
                 return new GuestDiagnostics
                 {
                     RawOutput = ex.Message,
@@ -83,6 +86,10 @@ namespace CreateVM.HyperV.vmbus
         /// <summary>
         /// Executes a command inside the guest VM via native ssh.exe.
         /// Discovers the VM's IP from Hyper-V, then connects with key-based auth.
+        /// Delegates to the shared <see cref="SshTransport"/> (same transport
+        /// as SshGuestShell) and re-adds the diagnostics-only tolerance around
+        /// it: partial output beats a clean failure when the guest is already
+        /// in a bad state.
         /// </summary>
         private async Task<string> RunGuestCommandAsync(string vmName, string linuxCommand, CancellationToken ct, string privateKeyPath = null)
         {
@@ -90,110 +97,34 @@ namespace CreateVM.HyperV.vmbus
                 throw new InvalidOperationException("SSH private key path is required for guest diagnostics collection.");
 
             // Discover the VM's IP address via Get-VMNetworkAdapter
-            string vmIp = await DiscoverVmIpAsync(vmName, ct);
+            string vmIp = await SshTransport.DiscoverVmIpAsync(vmName, ct, preferVmCreateTempAdapter: false);
             if (string.IsNullOrEmpty(vmIp))
                 throw new InvalidOperationException($"Could not discover IP address for VM '{vmName}'. Guest networking may not be ready.");
 
             _logger.LogDebug("Discovered VM IP {IP} for diagnostics on {VMName}", vmIp, vmName);
 
-            // Normalize line endings for bash
-            linuxCommand = linuxCommand.Replace("\r\n", "\n").Replace("\r", "\n").Trim();
+            // NOTE: never log the full ssh argument list — the remote command
+            // can embed guest payload, and the plaintext rolling log lives
+            // in %TEMP%. Transport options only.
+            _logger.LogDebug("SSH diagnostics exec on {VMName}@{IP} ({Length} chars)", vmName, vmIp, linuxCommand.Length);
 
-            var args = new StringBuilder();
-            args.Append($"-i \"{privateKeyPath}\" ");
-            // Host key checking is intentionally disabled: we connect to freshly-created
-            // local Hyper-V guests whose host keys are regenerated on every install.
-            args.Append("-o StrictHostKeyChecking=no ");
-            args.Append("-o BatchMode=yes ");
-            args.Append("-o ConnectTimeout=10 ");
-            args.Append("-o UserKnownHostsFile=NUL ");
-            args.Append($"{GuestUsername}@{vmIp} ");
-            args.Append($"bash -c {EscapeForSsh(linuxCommand)}");
-
-            _logger.LogDebug("SSH diagnostics exec: ssh {Args}", args.ToString());
-
-            var psi = new ProcessStartInfo
-            {
-                FileName = "ssh",
-                Arguments = args.ToString(),
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            };
-
-            using var process = new Process { StartInfo = psi };
-            var stdout = new StringBuilder();
-            var stderr = new StringBuilder();
-
-            process.OutputDataReceived += (_, e) => { if (e.Data != null) stdout.AppendLine(e.Data); };
-            process.ErrorDataReceived += (_, e) => { if (e.Data != null) stderr.AppendLine(e.Data); };
-
-            process.Start();
-            process.BeginOutputReadLine();
-            process.BeginErrorReadLine();
-
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutCts.CancelAfter(SshTimeout);
-
+            // knownHostsFile: null — NO host-key pinning here. The ISO-cycle
+            // guest is a transient boot identity (its host key is the live
+            // ISO environment's, never the deployed disk's), so a pinned file
+            // would store a key that outlives its owner. This exec keeps
+            // StrictHostKeyChecking=no with entries discarded to NUL.
             try
             {
-                await process.WaitForExitAsync(timeoutCts.Token);
+                return await SshTransport.ExecuteAsync(
+                    _logger, vmName, privateKeyPath, vmIp, GuestUsername,
+                    knownHostsFile: null, linuxCommand, SshTimeout, ct,
+                    tolerateNonZeroExit: true);
             }
-            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            catch (TimeoutException)
             {
-                try { process.Kill(entireProcessTree: true); } catch { }
                 throw new TimeoutException(
                     $"SSH diagnostics timed out after {SshTimeout.TotalSeconds}s — guest may not have sshd running or network is unreachable.");
             }
-            catch (OperationCanceledException)
-            {
-                try { process.Kill(entireProcessTree: true); } catch { }
-                throw;
-            }
-
-            string stdoutStr = stdout.ToString();
-            string stderrStr = stderr.ToString();
-
-            if (process.ExitCode != 0)
-            {
-                string errorDetail = !string.IsNullOrWhiteSpace(stderrStr) ? stderrStr.Trim() : stdoutStr.Trim();
-                _logger.LogWarning("SSH diagnostics command exited with code {ExitCode}: {Error}", process.ExitCode, errorDetail);
-                // Still return whatever output we got — partial diagnostics are better than none
-                if (!string.IsNullOrWhiteSpace(stdoutStr))
-                    return stdoutStr;
-                throw new Exception($"SSH diagnostics failed (exit code {process.ExitCode}): {errorDetail}");
-            }
-
-            return stdoutStr;
-        }
-
-        /// <summary>
-        /// Discovers the VM's IPv4 address via Get-VMNetworkAdapter.
-        /// </summary>
-        private async Task<string> DiscoverVmIpAsync(string vmName, CancellationToken ct)
-        {
-            using var ps = PowerShell.Create();
-            ps.AddScript($@"
-                $adapters = Get-VMNetworkAdapter -VMName '{vmName.Replace("'", "''")}' -ErrorAction SilentlyContinue
-                foreach ($a in $adapters) {{
-                    foreach ($ip in $a.IPAddresses) {{
-                        if ($ip -match '^\d+\.\d+\.\d+\.\d+$') {{
-                            $ip
-                            return
-                        }}
-                    }}
-                }}
-            ");
-
-            var result = await Task.Run(() => ps.Invoke(), ct);
-            return result.FirstOrDefault()?.ToString();
-        }
-
-        private static string EscapeForSsh(string command)
-        {
-            string escaped = command.Replace("'", "'\\''");
-            return $"'{escaped}'";
         }
 
         /// <summary>
@@ -244,7 +175,7 @@ namespace CreateVM.HyperV.vmbus
         /// <summary>Human-readable one-line summary (shown in the UI phase card).</summary>
         public string Summary { get; set; }
 
-        /// <summary>True if the PS Direct connection succeeded and data was collected.</summary>
+        /// <summary>True if the SSH connection succeeded and data was collected.</summary>
         public bool CollectedSuccessfully { get; set; }
     }
 }

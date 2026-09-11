@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net10.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
@@ -77,21 +77,30 @@
     <Compile Include="HyperV\SshKeyManager.cs" />
     <Compile Include="HyperV\HtbApiClient.cs" />
     <Compile Include="HyperV\SshGuestShell.cs" />
-    <Compile Include="HyperV\Steps\CleanupTemporaryNicStep.cs" />
-    <Compile Include="HyperV\Steps\DeployVpnConfigsStep.cs" />
-    <Compile Include="HyperV\Steps\DisableKwinCompositingStep.cs" />
-    <Compile Include="HyperV\Steps\DisableSshStep.cs" />
-    <Compile Include="HyperV\Steps\DisableSuspendOnBtrfsStep.cs" />
-    <Compile Include="HyperV\Steps\DisableWaylandSessionsStep.cs" />
-    <Compile Include="HyperV\Steps\FixAccountsServiceStep.cs" />
-    <Compile Include="HyperV\Steps\FixXrdpStep.cs" />
-    <Compile Include="HyperV\Steps\ForceX11Step.cs" />
-    <Compile Include="HyperV\Steps\InstallHypervDaemonsStep.cs" />
-    <Compile Include="HyperV\Steps\InstallOpenVpnStep.cs" />
-    <Compile Include="HyperV\Steps\RemoveAutomationUserStep.cs" />
-    <Compile Include="HyperV\Steps\RemoveVBoxGuestAdditionsStep.cs" />
-    <Compile Include="HyperV\Steps\RemoveVmwareToolsStep.cs" />
-    <Compile Include="HyperV\Steps\SyncTimezoneStep.cs" />
+    <Compile Include="HyperV\SshTransport.cs" />
+    <Compile Include="HyperV\Steps\System\CleanupTemporaryNicStep.cs" />
+    <Compile Include="HyperV\Steps\Vpn\DeployVpnConfigsStep.cs" />
+    <Compile Include="HyperV\Steps\Rdp\Xrdp\DisableKwinCompositingStep.cs" />
+    <Compile Include="HyperV\Steps\System\DisableSshStep.cs" />
+    <Compile Include="HyperV\Steps\GuestIntegration\DisableSuspendOnBtrfsStep.cs" />
+    <Compile Include="HyperV\Steps\Rdp\Xrdp\DisableWaylandSessionsStep.cs" />
+    <Compile Include="HyperV\Steps\Rdp\Lamco\DistroDetector.cs" />
+    <Compile Include="HyperV\Steps\Rdp\Lamco\EnableGraphicalAutologinStep.cs" />
+    <Compile Include="HyperV\Steps\Rdp\Xrdp\FixAccountsServiceStep.cs" />
+    <Compile Include="HyperV\Steps\Rdp\Xrdp\FixXrdpStep.cs" />
+    <Compile Include="HyperV\Steps\Rdp\Xrdp\ForceX11Step.cs" />
+    <Compile Include="HyperV\Steps\GuestIntegration\InstallHypervDaemonsStep.cs" />
+    <Compile Include="HyperV\Steps\Rdp\Lamco\InstallLamcoRdpStep.cs" />
+    <Compile Include="HyperV\Steps\Vpn\InstallOpenVpnStep.cs" />
+    <Compile Include="HyperV\Steps\System\RemoveAutomationUserStep.cs" />
+    <Compile Include="HyperV\Steps\GuestIntegration\RemoveVBoxGuestAdditionsStep.cs" />
+    <Compile Include="HyperV\Steps\GuestIntegration\RemoveVmwareToolsStep.cs" />
+    <Compile Include="HyperV\Steps\ScriptResourceLoader.cs" />
+    <Compile Include="HyperV\Steps\Desktop\KaliKdeSwitchStep.cs" />
+    <Compile Include="HyperV\Steps\Rdp\AutoRdpBackendResolveStep.cs" />
+    <Compile Include="HyperV\Steps\Rdp\Xrdp\InstallXrdpPostBootStep.cs" />
+    <Compile Include="HyperV\Steps\Rdp\Lamco\UsernameValidator.cs" />
+    <Compile Include="HyperV\Steps\System\SyncTimezoneStep.cs" />
     <Compile Include="HyperV\IHyperVManager.cs" />
     <Compile Include="HyperV\IHyperVManagerRoles.cs" />
     <Compile Include="HyperV\IPowerShellExecutor.cs" />
@@ -189,6 +198,20 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="HyperV\Steps\Scripts\install_lamco.sh" />
+    <EmbeddedResource Include="HyperV\Steps\Scripts\detect_display_server.sh" />
+    <EmbeddedResource Include="HyperV\Steps\Scripts\install_xrdp_postboot.sh" />
+    <EmbeddedResource Include="HyperV\Steps\Scripts\kali_kde_switch.sh" />
+    <EmbeddedResource Include="HyperV\Steps\Scripts\enable_autologin.sh" />
+    <EmbeddedResource Include="HyperV\Steps\Scripts\disable_kwin_compositing.sh" />
+    <EmbeddedResource Include="HyperV\Steps\Scripts\disable_suspend_btrfs.sh" />
+    <EmbeddedResource Include="HyperV\Steps\Scripts\disable_wayland.sh" />
+    <EmbeddedResource Include="HyperV\Steps\Scripts\fix_accounts.sh" />
+    <EmbeddedResource Include="HyperV\Steps\Scripts\fix_xrdp.sh" />
+    <EmbeddedResource Include="HyperV\Steps\Scripts\force_x11.sh" />
+    <EmbeddedResource Include="HyperV\Steps\Scripts\install_hyperv_daemons.sh" />
+    <EmbeddedResource Include="HyperV\Steps\Scripts\remove_vbox.sh" />
+    <EmbeddedResource Include="HyperV\Steps\Scripts\remove_vmware.sh" />
     <EmbeddedResource Include="Icons\nixos.svg" />
     <EmbeddedResource Include="Icons\fedora-logo.svg" />
     <EmbeddedResource Include="Icons\alpine-logo.svg" />

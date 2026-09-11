@@ -7,6 +7,11 @@
     <!-- MinVer reads the nearest git tag (e.g. v1.0.0) to set Version automatically.
          Without a tag, defaults to 0.0.0-alpha.0.{height}. -->
     <MinVerTagPrefix>v</MinVerTagPrefix>
+    <!-- The app is English-only; dependency satellite assemblies (WPF-UI,
+         PowerShell SDK translations — cs de es fr it ja ko pl pt-BR ru tr
+         zh-Hans zh-Hant, ~20 MB across the publish) are dead weight in
+         every shipped binary. Keep only the neutral (English) resources. -->
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
 
   <!-- MinVer only works with SDK-style .NET projects, not WiX -->

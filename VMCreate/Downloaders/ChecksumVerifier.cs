@@ -71,7 +71,7 @@ namespace VMCreate
             var checksumContent = await response.Content.ReadAsStringAsync(cancellationToken);
 
             var fileName = expectedFileName ?? Path.GetFileName(filePath);
-            var expectedHash = ParseChecksum(checksumContent, fileName);
+            var expectedHash = ParseChecksum(checksumContent, fileName, algorithm);
 
             if (string.IsNullOrEmpty(expectedHash))
                 throw new InvalidOperationException(
@@ -118,13 +118,26 @@ namespace VMCreate
         /// <list type="bullet">
         ///   <item>GNU coreutils: <c>hash  filename</c> or <c>hash *filename</c></item>
         ///   <item>BSD-style: <c>SHA256 (filename) = hash</c></item>
+        ///   <item>Sectioned files (e.g. Parrot's PGP-cleartext
+        ///   <c>signed-hashes.txt</c>): bare-word headers <c>md5</c> /
+        ///   <c>sha256</c> / <c>sha512</c> followed by the SAME filenames
+        ///   under each algorithm</item>
         ///   <item>Bare hash: single non-empty line containing only a hex string</item>
         /// </list>
         /// </summary>
-        internal static string ParseChecksum(string content, string fileName)
+        /// <param name="algorithm">
+        /// The algorithm the caller will verify with. Hashes of OTHER
+        /// lengths (e.g. md5 lines in a sha256 request) are ignored, so a
+        /// file repeating one filename under several algorithms resolves to
+        /// the requested one rather than the first (md5) section.
+        /// </param>
+        internal static string ParseChecksum(string content, string fileName, string algorithm = "sha256")
         {
             if (string.IsNullOrWhiteSpace(content))
                 return null;
+
+            if (!TryGetExpectedHexLength(algorithm, out int expectedLength))
+                return null; // unknown algorithm: no line can be validated
 
             string bareHash = null;
             int bareHashCount = 0;
@@ -139,7 +152,8 @@ namespace VMCreate
                 var bsdMatch = Regex.Match(trimmed, @"^\w+\s+\((.+?)\)\s*=\s*([0-9a-fA-F]+)$");
                 if (bsdMatch.Success)
                 {
-                    if (string.Equals(bsdMatch.Groups[1].Value, fileName, StringComparison.OrdinalIgnoreCase))
+                    if (string.Equals(bsdMatch.Groups[1].Value, fileName, StringComparison.OrdinalIgnoreCase)
+                        && bsdMatch.Groups[2].Value.Length == expectedLength)
                         return bsdMatch.Groups[2].Value;
                     continue;
                 }
@@ -148,13 +162,14 @@ namespace VMCreate
                 var gnuMatch = Regex.Match(trimmed, @"^([0-9a-fA-F]+)\s+\*?(.+)$");
                 if (gnuMatch.Success)
                 {
-                    if (string.Equals(gnuMatch.Groups[2].Value.Trim(), fileName, StringComparison.OrdinalIgnoreCase))
+                    if (string.Equals(gnuMatch.Groups[2].Value.Trim(), fileName, StringComparison.OrdinalIgnoreCase)
+                        && gnuMatch.Groups[1].Value.Length == expectedLength)
                         return gnuMatch.Groups[1].Value;
                     continue;
                 }
 
                 // Format: bare hash (collect for fallback)
-                if (Regex.IsMatch(trimmed, @"^[0-9a-fA-F]{32,128}$"))
+                if (Regex.IsMatch(trimmed, @"^[0-9a-fA-F]{" + expectedLength + "}$"))
                 {
                     bareHash = trimmed;
                     bareHashCount++;
@@ -163,6 +178,24 @@ namespace VMCreate
 
             // Only use bare hash if there was exactly one
             return bareHashCount == 1 ? bareHash : null;
+        }
+
+        /// <summary>
+        /// Maps an algorithm name to its hex-encoded digest length. Used to
+        /// disambiguate multi-algorithm checksum files (md5=32, sha1=40,
+        /// sha256=64, sha384=96, sha512=128 hex chars).
+        /// </summary>
+        private static bool TryGetExpectedHexLength(string algorithm, out int hexLength)
+        {
+            switch ((algorithm ?? "sha256").ToLowerInvariant())
+            {
+                case "md5":    hexLength = 32;  return true;
+                case "sha1":   hexLength = 40;  return true;
+                case "sha256": hexLength = 64;  return true;
+                case "sha384": hexLength = 96;  return true;
+                case "sha512": hexLength = 128; return true;
+                default:       hexLength = 0;   return false;
+            }
         }
 
         public async Task VerifyInlineAsync(string filePath, string expectedHash, string algorithm,

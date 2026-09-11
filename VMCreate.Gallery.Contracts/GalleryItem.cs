@@ -76,6 +76,16 @@ namespace VMCreate
         public string InitialPassword { get; set; }
 
         /// <summary>
+        /// Hint identifying the Linux distribution family of this gallery item.
+        /// Populated by gallery loaders so customization steps and the pre-deployment
+        /// UI can gate distribution-specific options (e.g. Lamco RDP Server) without
+        /// requiring a live SSH shell. Defaults to <see cref="LinuxDistro.Unknown"/>
+        /// for Windows VMs and unclassified Linux images. Re-verified at execution
+        /// time by <see cref="DistroDetector"/>. Ignored for Windows items.
+        /// </summary>
+        public LinuxDistro LinuxDistro { get; set; } = LinuxDistro.Unknown;
+
+        /// <summary>
         /// URL to a checksum file for verifying download integrity.
         /// Supports GNU coreutils format (<c>hash  filename</c>), BSD-style
         /// (<c>SHA256 (filename) = hash</c>), and bare hash (single-line) files.

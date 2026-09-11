@@ -15,23 +15,25 @@ namespace VMCreate.Tests
         [TestMethod]
         public void ParseChecksum_GnuFormat_MatchesFilename()
         {
-            var content = "abc123def456  debian-12.5.0-amd64-netinst.iso\ndef789abc012  debian-12.5.0-amd64-DVD-1.iso\n";
+            // Full-length hashes required: ParseChecksum now validates digest
+            // length against the algorithm (sha256 = 64 hex chars).
+            var content = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  debian-12.5.0-amd64-netinst.iso\n1111111111111111111111111111111111111111111111111111111111111111  debian-12.5.0-amd64-DVD-1.iso\n";
             var result = ChecksumVerifier.ParseChecksum(content, "debian-12.5.0-amd64-netinst.iso");
-            Assert.AreEqual("abc123def456", result);
+            Assert.AreEqual("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", result);
         }
 
         [TestMethod]
         public void ParseChecksum_GnuFormatWithStar_MatchesFilename()
         {
-            var content = "abc123def456 *linuxmint-22.1-cinnamon-64bit.iso\n";
+            var content = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 *linuxmint-22.1-cinnamon-64bit.iso\n";
             var result = ChecksumVerifier.ParseChecksum(content, "linuxmint-22.1-cinnamon-64bit.iso");
-            Assert.AreEqual("abc123def456", result);
+            Assert.AreEqual("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", result);
         }
 
         [TestMethod]
         public void ParseChecksum_GnuFormat_NoMatchReturnsNull()
         {
-            var content = "abc123def456  other-file.iso\n";
+            var content = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  other-file.iso\n";
             var result = ChecksumVerifier.ParseChecksum(content, "my-file.iso");
             Assert.IsNull(result);
         }
@@ -39,15 +41,15 @@ namespace VMCreate.Tests
         [TestMethod]
         public void ParseChecksum_BsdFormat_MatchesFilename()
         {
-            var content = "# Rocky-9.3-x86_64-minimal.iso: 2046820352 bytes\nSHA256 (Rocky-9.3-x86_64-minimal.iso) = abc123def456\n";
+            var content = "# Rocky-9.3-x86_64-minimal.iso: 2046820352 bytes\nSHA256 (Rocky-9.3-x86_64-minimal.iso) = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n";
             var result = ChecksumVerifier.ParseChecksum(content, "Rocky-9.3-x86_64-minimal.iso");
-            Assert.AreEqual("abc123def456", result);
+            Assert.AreEqual("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", result);
         }
 
         [TestMethod]
         public void ParseChecksum_BsdFormat_NoMatchReturnsNull()
         {
-            var content = "SHA256 (other-file.iso) = abc123def456\n";
+            var content = "SHA256 (other-file.iso) = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n";
             var result = ChecksumVerifier.ParseChecksum(content, "my-file.iso");
             Assert.IsNull(result);
         }
@@ -80,17 +82,17 @@ namespace VMCreate.Tests
         [TestMethod]
         public void ParseChecksum_CommentsIgnored()
         {
-            var content = "# This is a comment\nabc123def456  my-file.iso\n# Another comment\n";
+            var content = "# This is a comment\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  my-file.iso\n# Another comment\n";
             var result = ChecksumVerifier.ParseChecksum(content, "my-file.iso");
-            Assert.AreEqual("abc123def456", result);
+            Assert.AreEqual("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", result);
         }
 
         [TestMethod]
         public void ParseChecksum_CaseInsensitiveFilename()
         {
-            var content = "abc123def456  MyFile.ISO\n";
+            var content = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  MyFile.ISO\n";
             var result = ChecksumVerifier.ParseChecksum(content, "myfile.iso");
-            Assert.AreEqual("abc123def456", result);
+            Assert.AreEqual("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", result);
         }
 
         [TestMethod]
@@ -98,11 +100,73 @@ namespace VMCreate.Tests
         {
             var content = string.Join("\n",
                 "# Checksums for Fedora-42",
-                "SHA256 (Fedora-Workstation-Live-42-1.1.x86_64.iso) = aaa111",
-                "SHA256 (Fedora-Silverblue-ostree-x86_64-42-1.1.iso) = bbb222",
+                "SHA256 (Fedora-Workstation-Live-42-1.1.x86_64.iso) = aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "SHA256 (Fedora-Silverblue-ostree-x86_64-42-1.1.iso) = bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
                 "");
             var result = ChecksumVerifier.ParseChecksum(content, "Fedora-Silverblue-ostree-x86_64-42-1.1.iso");
-            Assert.AreEqual("bbb222", result);
+            Assert.AreEqual("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", result);
+        }
+
+        [TestMethod]
+        public void ParseChecksum_MultiSectionFile_PicksRequestedAlgorithm()
+        {
+            // Parrot's signed-hashes.txt layout: PGP-cleartext wrapper, then
+            // bare-word section headers ("md5", "sha256", "sha512") with the
+            // SAME filename listed under each. A sha256 request must return
+            // the sha256 line, not the first (md5) match.
+            var md5 = "ee748d649d8c2e6a5993862064b59c5e";
+            var sha256 = "c95f8da9dd92a91c637359cacb2b970b36bf3950dac31746b83049ff0ad7a1f4";
+            var content = string.Join("\n",
+                "-----BEGIN PGP SIGNED MESSAGE-----",
+                "Hash: SHA512",
+                "",
+                "Parrot OS 7.3",
+                "",
+                "",
+                "md5",
+                $"{md5}  Parrot-home-7.3_amd64.iso",
+                "",
+                "sha256",
+                $"{sha256}  Parrot-home-7.3_amd64.iso",
+                "",
+                "sha512",
+                "11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111  Parrot-home-7.3_amd64.iso",
+                "");
+
+            var result = ChecksumVerifier.ParseChecksum(content, "Parrot-home-7.3_amd64.iso", "sha256");
+
+            Assert.AreEqual(sha256, result, "must select the sha256 line, not the earlier md5 line");
+        }
+
+        [TestMethod]
+        public void ParseChecksum_MultiSectionFile_RequestedAlgorithmAbsent_ReturnsNull()
+        {
+            // If the requested algorithm's line is somehow missing for a
+            // file that appears under other algorithms, the caller must get
+            // null ("could not find checksum") — never a wrong-algorithm hash
+            // that would fail verification with a confusing md5-vs-sha256
+            // mismatch.
+            var md5 = "ee748d649d8c2e6a5993862064b59c5e";
+            var content = string.Join("\n",
+                "md5",
+                $"{md5}  Parrot-home-7.3_amd64.iso",
+                "");
+
+            var result = ChecksumVerifier.ParseChecksum(content, "Parrot-home-7.3_amd64.iso", "sha256");
+
+            Assert.IsNull(result);
+        }
+
+        [TestMethod]
+        public void ParseChecksum_Sha512Length_Honored()
+        {
+            // sha512 = 128 hex chars exactly.
+            var sha512 = new string('1', 128);
+            var content = $"{sha512}  big-image.iso\n";
+
+            Assert.AreEqual(sha512, ChecksumVerifier.ParseChecksum(content, "big-image.iso", "sha512"));
+            Assert.IsNull(ChecksumVerifier.ParseChecksum(content, "big-image.iso", "sha256"),
+                "a sha512-only file must not satisfy a sha256 request");
         }
 
         #endregion

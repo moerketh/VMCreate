@@ -126,6 +126,161 @@ namespace VMCreate.Tests.HyperV.VmCreation
             _progressMock.Verify(p => p.Report(It.IsAny<CreateVMProgressInfo>()), Times.Never);
         }
 
+        [TestMethod]
+        public async Task RunLinuxPostBootAsync_ThrowingStep_AbortsRemainingStepsAndPropagates()
+        {
+            // The fabricated-success regression guard: a step that throws must
+            // abort every later step and propagate, so the orchestrator reports
+            // Success == false (the HyperVVmCreator comment describes this
+            // exact failure class — failures must never look like a green
+            // deploy).
+            var executed = new List<string>();
+
+            var stepA = CreateExecutableStep("StepA", CustomizationPhase.PostBoot, StepPlatform.Linux, 100,
+                onExecute: () => executed.Add("StepA"));
+            var stepB = CreateExecutableStep("StepB-Throws", CustomizationPhase.PostBoot, StepPlatform.Linux, 200,
+                onExecute: () => { executed.Add("StepB-Throws"); throw new InvalidOperationException("step exploded"); });
+            var stepC = CreateExecutableStep("StepC-After", CustomizationPhase.PostBoot, StepPlatform.Linux, 300,
+                onExecute: () => executed.Add("StepC-After"));
+
+            var service = new PostBootCustomizationService(new[] { stepA, stepB, stepC }, _loggerMock.Object);
+
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.RunLinuxPostBootAsync(
+                    _shellMock.Object,
+                    VmDeploymentPlan.FromSettings(new VmSettings { VMName = "TestVM" }),
+                    new GalleryItem(),
+                    new VmCustomizations(),
+                    _progressMock.Object,
+                    CancellationToken.None));
+
+            Assert.AreEqual("step exploded", ex.Message, "the step's exception propagates unwrapped");
+            CollectionAssert.AreEqual(new[] { "StepA", "StepB-Throws" }, executed,
+                "steps before and including the failure ran; the step AFTER the failure must not execute");
+            _progressMock.Verify(p => p.Report(It.Is<CreateVMProgressInfo>(r => r.ProgressPercentage == 100)), Times.Never,
+                "a failed run must not report 100% completion");
+        }
+
+        [TestMethod]
+        public async Task RunLinuxPostBootAsync_IsApplicableEvaluatedPerStep_ResolverMutationGatesLaterSteps()
+        {
+            // The Auto-backend design hinges on the LIVE IsApplicable loop:
+            // AutoRdpBackendResolveStep (232) mutates the shared
+            // VmCustomizations.RdpBackend in place, and every later step's
+            // gate is re-read at its turn. Here stepA plays the resolver
+            // (Auto → Xrdp) and stepB is gated on Auto — it must be skipped
+            // WITHOUT a warning or an exception, and the run must stay green.
+            var executed = new List<string>();
+            var customizations = new VmCustomizations { RdpBackend = RdpBackend.Auto };
+
+            var stepA = new Mock<ICustomizationStep>();
+            stepA.Setup(s => s.Name).Returns("StepA-Resolver");
+            stepA.Setup(s => s.Phase).Returns(CustomizationPhase.PostBoot);
+            stepA.Setup(s => s.Platform).Returns(StepPlatform.Linux);
+            stepA.Setup(s => s.Order).Returns(100);
+            stepA.Setup(s => s.ProgressPhaseId).Returns((string)null);
+            stepA.Setup(s => s.IsApplicable(It.IsAny<GalleryItem>(), It.IsAny<VmCustomizations>()))
+                .Returns((GalleryItem _, VmCustomizations c) => c.RdpBackend == RdpBackend.Auto);
+            stepA.Setup(s => s.ExecuteAsync(
+                    It.IsAny<IGuestShell>(), It.IsAny<GalleryItem>(), It.IsAny<VmCustomizations>(),
+                    It.IsAny<ILogger>(), It.IsAny<CancellationToken>()))
+                .Callback(() => { executed.Add("StepA-Resolver"); customizations.RdpBackend = RdpBackend.Xrdp; })
+                .Returns(Task.CompletedTask);
+
+            var stepB = new Mock<ICustomizationStep>();
+            stepB.Setup(s => s.Name).Returns("StepB-AutoOnly");
+            stepB.Setup(s => s.Phase).Returns(CustomizationPhase.PostBoot);
+            stepB.Setup(s => s.Platform).Returns(StepPlatform.Linux);
+            stepB.Setup(s => s.Order).Returns(200);
+            stepB.Setup(s => s.ProgressPhaseId).Returns((string)null);
+            stepB.Setup(s => s.IsApplicable(It.IsAny<GalleryItem>(), It.IsAny<VmCustomizations>()))
+                .Returns((GalleryItem _, VmCustomizations c) => c.RdpBackend == RdpBackend.Auto);
+            stepB.Setup(s => s.ExecuteAsync(
+                    It.IsAny<IGuestShell>(), It.IsAny<GalleryItem>(), It.IsAny<VmCustomizations>(),
+                    It.IsAny<ILogger>(), It.IsAny<CancellationToken>()))
+                .Callback(() => executed.Add("StepB-AutoOnly"))
+                .Returns(Task.CompletedTask);
+
+            var service = new PostBootCustomizationService(new[] { stepA.Object, stepB.Object }, _loggerMock.Object);
+
+            await service.RunLinuxPostBootAsync(
+                _shellMock.Object,
+                VmDeploymentPlan.FromSettings(new VmSettings { VMName = "TestVM" }),
+                new GalleryItem(),
+                customizations,
+                _progressMock.Object,
+                CancellationToken.None);
+
+            CollectionAssert.AreEqual(new[] { "StepA-Resolver" }, executed,
+                "stepB's gate is re-read AFTER the mutation — it must not execute");
+            _progressMock.Verify(p => p.Report(It.Is<CreateVMProgressInfo>(
+                r => r.StepName == "StepB-AutoOnly")), Times.Never);
+            _progressMock.Verify(p => p.Report(It.Is<CreateVMProgressInfo>(
+                r => r.ProgressPercentage == 100)), Times.Once,
+                "the mutation is a routing decision, not a failure — the run must complete green");
+        }
+
+        [TestMethod]
+        public async Task RunLinuxPostBootAsync_SkippedCandidatesDoNotDistortTheProgressRange()
+        {
+            // The denominator fix: with 4 candidates of which only 2 are
+            // applicable, the OLD code pinned total=4 and the second
+            // applicable step reported completed/total = 1/4 = 25% as its
+            // STARTING percentage — the bar topped out near 25% and then
+            // jumped to 100% at the end. The skip-shrink walks the
+            // applicable steps across the full 0→100% range: total=4
+            // pre-skip, total=2 once the inapplicable candidates leave.
+            var executed = new List<string>();
+            var reports = new List<int>();
+
+            var stepA = CreateExecutableStep("StepA", CustomizationPhase.PostBoot, StepPlatform.Linux, 100,
+                onExecute: () => executed.Add("StepA"));
+            var skip1 = CreateStep("SkipX", CustomizationPhase.PostBoot, StepPlatform.Linux, 150, applicable: false);
+            var stepB = CreateExecutableStep("StepB", CustomizationPhase.PostBoot, StepPlatform.Linux, 200,
+                onExecute: () => executed.Add("StepB"));
+            var skip2 = CreateStep("SkipY", CustomizationPhase.PostBoot, StepPlatform.Linux, 250, applicable: false);
+
+            _progressMock
+                .Setup(p => p.Report(It.IsAny<CreateVMProgressInfo>()))
+                .Callback<CreateVMProgressInfo>(r => reports.Add(r.ProgressPercentage));
+
+            var service = new PostBootCustomizationService(
+                new[] { stepA, skip1, stepB, skip2 },
+                _loggerMock.Object);
+
+            await service.RunLinuxPostBootAsync(
+                _shellMock.Object,
+                VmDeploymentPlan.FromSettings(new VmSettings { VMName = "TestVM" }),
+                new GalleryItem(),
+                new VmCustomizations(),
+                _progressMock.Object,
+                CancellationToken.None);
+
+            CollectionAssert.AreEqual(new[] { "StepA", "StepB" }, executed,
+                "only the applicable steps execute, in order, in spite of the interleaved skipped candidates");
+
+            // Sequential live semantics: a candidate counts in the
+            // denominator until the loop REACHES and skips it — a later-
+            // ordered skip cannot be pre-known (its gate may mutate
+            // mid-run). So: StepA reports 0/4 = 0%; SkipX leaves (total=3);
+            // StepB reports 1/3 = 33%; SkipY leaves (total=2); the run
+            // closes with 100%. The old fixed-denominator code reported
+            // StepB at 1/4 = 25% — under the new semantics the bar lands
+            // strictly higher for the same work and still ends at 100%.
+            var startingReports = reports.Take(2).ToList();
+            CollectionAssert.AreEqual(new[] { 0, 33 }, startingReports,
+                "with 2 applicable of 4 candidates, the applicable steps start at 0% and 33% — "
+                + "not 0% and 25% (the old fixed denominator bug)");
+
+            // And the final 100% still lands exactly once.
+            Assert.AreEqual(1, reports.Count(p => p == 100),
+                "the run completes with exactly one 100% report");
+
+            CollectionAssert.AreEqual(new[] { 0, 33, 100 }, reports,
+                "skipped candidates produce no report at all — only the applicable steps "
+                + "get starting reports, plus the terminal 100%");
+        }
+
         private static ICustomizationStep CreateStep(
             string name,
             CustomizationPhase phase,

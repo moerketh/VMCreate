@@ -143,6 +143,16 @@ namespace VMCreate
             // Post-boot sub-step by step name
             if (ActivePhaseId == DeployPageViewModel.PhasePostBoot && !string.IsNullOrEmpty(info.StepName))
             {
+                // Auto RDP backend: the resolver (order 232) mutates the
+                // shared customizations in place. The branch install cards
+                // (Lamco pair / xrdp post-boot) are inserted lazily here —
+                // on every post-boot step report — because this handler
+                // fires BEFORE the reported step's cards are completed. On
+                // the resolver's OWN report the backend is still Auto
+                // (no-op); it resolves on the NEXT applicable step's
+                // report, just in time for its card to activate.
+                _dispatcher.Invoke(() => _viewModel.EnsureResolvedRdpBackendPhases());
+
                 string? subId = MapPostBootStepName(info.StepName);
                 if (!string.IsNullOrEmpty(subId) && subId != ActiveSubStepId)
                 {
@@ -216,9 +226,19 @@ namespace VMCreate
 
         private void HandleDetectedGeneration(int generation)
         {
+            // needsIsoBoot mirrors DiskImageVmCreationStrategy: the cloning ISO boot
+            // cycle runs when xrdp is selected (pre-boot install) OR any post-boot
+            // customization is enabled (timezone/VPN/Lamco, which need the SSH path
+            // the ISO boot cycle sets up). ConfigureXrdp is the shim over RdpBackend
+            // (true only for Xrdp; Lamco installs post-boot, not via the ISO chroot).
+            // Under Auto the backend is unknown pre-boot — nothing is pre-installed —
+            // but the resolver runs post-boot, which requires the automation SSH
+            // user that the ISO boot cycle provisions.
             bool needsIsoBoot = _customizations?.ConfigureXrdp == true
                 || _customizations?.ConfigureHtbVpn == true
-                || _customizations?.SyncTimezone == true;
+                || _customizations?.SyncTimezone == true
+                || _customizations?.RdpBackend == RdpBackend.Lamco
+                || _customizations?.RdpBackend == RdpBackend.Auto;
 
             if (generation == 1)
             {

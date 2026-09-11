@@ -10,8 +10,10 @@ namespace VMCreate
     /// Backward-compatibility façade that exposes all Hyper-V role interfaces through
     /// <see cref="IHyperVManager"/>. All work is delegated to the focused role managers.
     /// New code should depend on the narrower role interfaces instead.
+    /// Public because VMCreate.CLI (a separate assembly) registers it as its
+    /// <see cref="IHyperVManager"/> implementation, mirroring App.xaml.cs.
     /// </summary>
-    internal sealed class PowerShellHyperVManagerFacade : IHyperVManager
+    public sealed class PowerShellHyperVManagerFacade : IHyperVManager
     {
         private readonly IVmLifecycleManager _lifecycle;
         private readonly IVmDiskManager _disk;

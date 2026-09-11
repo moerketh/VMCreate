@@ -18,6 +18,13 @@ namespace VMCreate
         void InsertCustomizePhase();
         void InsertCleanupIsoBootPhase();
 
+        /// <summary>
+        /// Ensures the resolved RDP backend's install cards exist (Auto deployments
+        /// only). Safe to call on every post-boot step report — see
+        /// <see cref="DeployPageViewModel.EnsureResolvedRdpBackendPhases"/>.
+        /// </summary>
+        void EnsureResolvedRdpBackendPhases();
+
         void ActivatePhase(string id);
         void CompletePhase(string id);
         void FailPhase(string id, string message);

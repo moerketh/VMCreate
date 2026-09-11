@@ -5,6 +5,7 @@ using CreateVM.HyperV.vmbus;
 using Serilog;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -25,6 +26,24 @@ namespace VMCreate
         /// <summary>When true, VMConnect is launched automatically after the VM starts.</summary>
         internal static bool DemoMode { get; private set; }
 
+        // ── Startup timing (permanent, always-on) ─────────────────────────
+        // Started before any DI construction; milestones are logged at
+        // Information so a normal run's log answers "what took so long"
+        // without a profiler. ElapsedMilliseconds is cheap; the stopwatch
+        // runs for the life of the process. See RecordStartup for details.
+        private static readonly Stopwatch _startupStopwatch = Stopwatch.StartNew();
+
+        /// <summary>
+        /// Logs a startup milestone at Information: elapsed ms since process
+        /// start (first static access) plus the marker name. Called from the
+        /// startup path (App + MainWindow first frame).
+        /// </summary>
+        internal static void RecordStartup(string milestone)
+        {
+            Log.Information("Startup: {ElapsedMs} ms — {Milestone}",
+                _startupStopwatch.ElapsedMilliseconds, milestone);
+        }
+
         private async void App_OnStartup(object sender, StartupEventArgs e)
         {
             // ── Headless elevated child: --inject-unattend <vhdxPath> ────────
@@ -35,9 +54,14 @@ namespace VMCreate
             {
                 string vhdxPath = e.Args[1];
                 string injectLogPath = Path.Combine(Path.GetTempPath(), "VMCreate.inject.log");
+                // SECURITY: same plaintext-log discipline as the main path
+                // below — the elevated child carries unattend.xml, which
+                // embeds the local administrator password. Debug stays OFF
+                // by default; turn it on per-run only for injection
+                // debugging.
                 var injectSerilog = new Serilog.LoggerConfiguration()
-                    .MinimumLevel.Debug()
-                    .WriteTo.File(injectLogPath, rollingInterval: RollingInterval.Day, shared: true)
+                    .MinimumLevel.Information()
+                    .WriteTo.File(injectLogPath, rollingInterval: RollingInterval.Day, shared: true, retainedFileCountLimit: 7)
                     .CreateLogger();
 
                 var injectServices = new ServiceCollection();
@@ -78,13 +102,23 @@ namespace VMCreate
                 a.Equals("/demo", StringComparison.OrdinalIgnoreCase)
                 || a.Equals("--demo", StringComparison.OrdinalIgnoreCase));
             var logPath = Path.Combine(Path.GetTempPath(), "VMCreate.log");
+            // SECURITY: this is a PLAINTEXT rolling log in %TEMP%. The
+            // previous MinimumLevel.Debug() floor captured every SSH command
+            // line — including CopyContentAsync base64 chunks that embed VPN
+            // configs with client certificates and private keys. Debug stays
+            // OFF for the file sink; the transports log the information needed
+            // for diagnosis at Information/Warning.
+            // 7-day retention: these files are plaintext; Serilog's
+            // default 31-day window keeps a month of deployment history on
+            // disk for no diagnostic value.
             Log.Logger = new LoggerConfiguration()
-                .MinimumLevel.Debug()
+                .MinimumLevel.Information()
                 .MinimumLevel.Override("Microsoft.Extensions.Http", Serilog.Events.LogEventLevel.Warning)
-                .WriteTo.File(logPath, rollingInterval: RollingInterval.Day)
+                .WriteTo.File(logPath, rollingInterval: RollingInterval.Day, retainedFileCountLimit: 7)
                 .CreateLogger();
 
             Log.Information("VMCreate {Version} starting", ProductInfo.InformationalVersion);
+            RecordStartup("process-entry"); // the stopwatch itself starts in the static ctor, just before this
 
             var services = new ServiceCollection();
             services.AddLogging(loggingBuilder =>
@@ -224,9 +258,11 @@ namespace VMCreate
             services.AddSingleton<MainWindow>();
 
             _serviceProvider = services.BuildServiceProvider();
+            RecordStartup("di-built");
 
             var mainWindow = _serviceProvider.GetRequiredService<MainWindow>();
             mainWindow.Show();
+            RecordStartup("window-shown");
         }
 
         protected override void OnExit(ExitEventArgs e)

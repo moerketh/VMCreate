@@ -56,7 +56,22 @@ jobs:
           -c Release
           -r win-x64
           --self-contained
+          -p:DebugType=none -p:DebugSymbols=false
           -o publish
+
+      - name: Publish CLI self-contained executable
+        run: >
+          dotnet publish VMCreate.CLI/VMCreate.CLI.csproj
+          -c Release
+          -r win-x64
+          --self-contained
+          -p:DebugType=none -p:DebugSymbols=false
+          -o publish-cli
+
+      - name: Package CLI for distribution
+        shell: pwsh
+        run: |
+          Compress-Archive -Path publish-cli/* -DestinationPath "vmcreate-cli-${{ steps.version.outputs.clean_version }}.zip"
 
       - name: Build MSI installer
         run: >
@@ -122,6 +137,14 @@ jobs:
           retention-days: 5
           path: vmcreate-${{ steps.version.outputs.clean_version }}.exe
 
+      - name: Upload CLI artifact
+        if: github.ref_type == 'branch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: vmcreate-cli-${{ steps.version.outputs.clean_version }}.zip
+          retention-days: 5
+          path: vmcreate-cli-${{ steps.version.outputs.clean_version }}.zip
+
       - name: Upload checksums artifact
         if: github.ref_type == 'branch'
         uses: actions/upload-artifact@v4
@@ -137,5 +160,6 @@ jobs:
           artifacts: >
             vmcreate-${{ steps.version.outputs.clean_version }}.msi,
             vmcreate-${{ steps.version.outputs.clean_version }}.exe,
+            vmcreate-cli-${{ steps.version.outputs.clean_version }}.zip,
             checksums.sha256
           generateReleaseNotes: true

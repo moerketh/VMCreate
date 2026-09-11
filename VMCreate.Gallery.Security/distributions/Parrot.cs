@@ -17,6 +17,7 @@ namespace VMCreate.Gallery
     public class Parrot : IGalleryLoader
     {
         private const string IndexUrl = "https://deb.parrot.sh/parrot/iso/";
+        private const string SignedHashesFileName = "signed-hashes.txt";
         private const string SymbolUrl = "https://www.parrotsec.org/favicon.png";
         private readonly ILogger<Parrot> _logger;
         private readonly IHttpClientFactory _clientFactory;
@@ -45,6 +46,10 @@ namespace VMCreate.Gallery
             }
 
             var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(Parrot).Assembly, "parrot-logo.svg");
+            // Aircrack-ng screenshot from parrotsec.org — used as the detail-pane
+            // preview for the Security edition (WPF has no WebP decoder, so the
+            // embedded copy is a JPEG re-encode).
+            var securityScreenshotUri = await GalleryIcons.ResolveLogoUriAsync(typeof(Parrot).Assembly, "parrot-security-screenshot.jpg");
 
             var response = await client.GetAsync(baseUrl, cancellationToken);
             response.EnsureSuccessStatusCode();
@@ -59,7 +64,8 @@ namespace VMCreate.Gallery
                 versionPattern: @"Parrot-security-([\d\.]+)_amd64\.",
                 editionName: "Parrot Security OS",
                 editionDesc: "includes a full set of penetration testing tools",
-                isRecommended: true);
+                isRecommended: true,
+                thumbnailUri: securityScreenshotUri);
 
             // ── Home Edition ──
             AddEdition(items, htmlContent, baseUrl, logoUri,
@@ -68,7 +74,8 @@ namespace VMCreate.Gallery
                 versionPattern: @"Parrot-home-([\d\.]+)_amd64\.",
                 editionName: "Parrot Home Edition",
                 editionDesc: "for daily use with a focus on privacy and productivity",
-                isRecommended: false);
+                isRecommended: false,
+                thumbnailUri: logoUri);
 
             // ── HTB (Hack The Box) Edition ──
             AddEdition(items, htmlContent, baseUrl, logoUri,
@@ -77,7 +84,8 @@ namespace VMCreate.Gallery
                 versionPattern: @"Parrot-spin-htb-([\d\.]+)_amd64\.",
                 editionName: "Parrot HTB Edition",
                 editionDesc: "Hack The Box edition with pre-configured HTB tools and VPN integration",
-                isRecommended: false);
+                isRecommended: false,
+                thumbnailUri: logoUri);
 
             if (items.Count == 0)
             {
@@ -144,7 +152,7 @@ namespace VMCreate.Gallery
 
         private void AddEdition(List<GalleryItem> items, string html, string baseUrl, string logoUri,
             string isoPattern, string qcow2Pattern, string versionPattern,
-            string editionName, string editionDesc, bool isRecommended)
+            string editionName, string editionDesc, bool isRecommended, string thumbnailUri)
         {
             var isoMatch = Regex.Match(html, isoPattern, RegexOptions.Singleline);
             var qcow2Match = Regex.Match(html, qcow2Pattern, RegexOptions.Singleline);
@@ -160,9 +168,15 @@ namespace VMCreate.Gallery
                     Name = editionName,
                     Publisher = "Parrot Project",
                     Description = $"{editionName} ISO installer, {editionDesc} (version {version})",
-                    ThumbnailUri = logoUri,
+                    ThumbnailUri = thumbnailUri,
                     SymbolUri = SymbolUrl,
                     DiskUri = baseUrl + filename,
+                    // Parrot publishes a PGP-signed multi-algorithm hash file per
+                    // version (md5/sha256/sha512 sections, same filenames under
+                    // each). ChecksumVerifier disambiguates by digest length, so a
+                    // sha256 request resolves to the sha256 section, not the md5 one.
+                    ChecksumUri = baseUrl + SignedHashesFileName,
+                    ChecksumAlgorithm = "SHA256",
                     SecureBoot = "false",
                     EnhancedSessionTransportType = "HvSocket",
                     Version = version,
@@ -170,6 +184,7 @@ namespace VMCreate.Gallery
                     InitialUsername = "user",
                     InitialPassword = "parrot",
                     Category = "Security",
+                    LinuxDistro = LinuxDistro.Parrot,
                     // ISO installers are never recommended — only pre-installed disk images are.
                     IsRecommended = false
                 });
@@ -186,9 +201,14 @@ namespace VMCreate.Gallery
                     Name = $"{editionName}",
                     Publisher = "Parrot Project",
                     Description = $"{editionName} pre-installed disk image, {editionDesc} (version {version})",
-                    ThumbnailUri = logoUri,
+                    ThumbnailUri = thumbnailUri,
                     SymbolUri = SymbolUrl,
                     DiskUri = baseUrl + filename,
+                    // Same multi-algorithm signed hash file as the ISO; verified
+                    // against the downloaded .qcow2.zip archive name, which the
+                    // hash file lists directly.
+                    ChecksumUri = baseUrl + SignedHashesFileName,
+                    ChecksumAlgorithm = "SHA256",
                     SecureBoot = "false",
                     EnhancedSessionTransportType = "HvSocket",
                     Version = version,
@@ -196,6 +216,7 @@ namespace VMCreate.Gallery
                     InitialUsername = "user",
                     InitialPassword = "parrot",
                     Category = "Security",
+                    LinuxDistro = LinuxDistro.Parrot,
                     IsRecommended = isRecommended
                 });
             }

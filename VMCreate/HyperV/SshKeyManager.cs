@@ -114,7 +114,10 @@ namespace VMCreate
 
             var psi = new ProcessStartInfo
             {
-                FileName = "ssh-keygen",
+                // Absolute path: a bare "ssh-keygen" resolves via PATH, which
+                // can be hijacked by a malicious earlier entry or a stale PATH
+                // in service contexts. Windows ships OpenSSH exactly here.
+                FileName = Environment.ExpandEnvironmentVariables(@"%SystemRoot%\System32\OpenSSH\ssh-keygen.exe"),
                 Arguments = $"-t ed25519 -f \"{PrivateKeyPath}\" -N \"\" -C \"vmcreate@{Environment.MachineName}\"",
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
