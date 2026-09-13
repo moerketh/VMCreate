@@ -426,6 +426,42 @@ Licensed under the MIT License. See above for full text.
 
 ---
 
+## lamco-rdp-server (deploy-time download, not bundled)
+
+- **Upstream:** https://github.com/lamco-admin/lamco-rdp-server
+- **Fork deployed by VMCreate:** https://github.com/moerketh/lamco-rdp-server
+  (tag `v1.4.5-hyperv.2`, sha256-pinned in `VMCreate/HyperV/Steps/Scripts/install_lamco.sh`)
+- **License:** Business Source License 1.1 (BSL)
+- **Change Date:** 2029-06-01 — converts to Apache License 2.0
+
+VMCreate does not bundle or redistribute lamco-rdp-server binaries. When the
+Lamco RDP backend is selected, the pinned fork deb is downloaded at deploy
+time directly from the fork's GitHub Releases and installed on the guest VM.
+
+The licensed work is (c) 2025-2026 Lamco Development LLC. The BSL grants the
+right to copy, modify, create derivative works, and redistribute the Licensed
+Work, and permits production use under its Additional Use Grant. In summary:
+
+- **Free** for a single server instance (one running invocation per OS
+  environment — physical host, VM, or container), for non-profit
+  organizations, and for non-commercial education or research.
+- **Paid plans** are required for production use beyond a single server
+  instance (e.g. running Lamco RDP on multiple VMs), unless a non-profit or
+  education/research class applies. See https://lamco.ai for pricing.
+- The Community Edition free-unlimited tier applies only to the Licensor's
+  Flatpak/Snap distributions, not to the fork deb deployed by VMCreate.
+
+VMCreate itself is MIT-licensed and independently developed; it is not a
+Competitive Product under the BSL. Licensing obligations under the BSL attach
+to the deploying user's production use, not to VMCreate. Effective 2029-06-01
+the 1.4.x line converts to Apache-2.0 and these use restrictions lapse.
+
+The fork keeps the full BSL LICENSE text in its repository and the deb ships
+the license in `/usr/share/doc/lamco-rdp-server/LICENSE` on the guest
+(verified against the pinned artifact: BSL 1.1, Change Date 2029-06-01).
+
+---
+
 ## Microsoft.Extensions.Logging.Abstractions
 
 - **Version:** 9.0.6

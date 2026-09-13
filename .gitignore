@@ -3,6 +3,10 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/master/VisualStudio.gitignore
 
+# Offline working documentation (technical research notes kept out of the
+# published repo; agents may consult these locally)
+working-docs/
+
 # User-specific files
 *.rsuser
 *.suo
@@ -362,8 +366,7 @@ MigrationBackup/
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
 
-#Claude AI
+# AI
 .claude/
-
-#Hermes
 .hermes/
+.omo

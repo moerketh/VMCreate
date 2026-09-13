@@ -92,6 +92,10 @@
                                 Message="After the VM first boots, log in at the Hyper-V console once and run 'lamco-rdp-server --grant-permission', then click Allow to authorize screen sharing. This is an interactive Portal dialog that cannot be run over SSH. The server auto-starts on subsequent boots via graphical autologin."
                                 IsOpen="{Binding IsRdpBackendLamco, Mode=OneWay}" IsClosable="False" Margin="0,8,0,0"
                                 Visibility="{Binding LamcoOptionVisible, Converter={StaticResource BoolToVis}}"/>
+                    <ui:InfoBar Title="Lamco license notice" Severity="Warning"
+                                Message="Lamco RDP Server is third-party software under the Business Source License 1.1 (c) Lamco Development LLC. Production use is free for a single server instance (one VM), non-profits, and education/research; running it on multiple VMs requires a commercial license (lamco.ai). It converts to Apache-2.0 on 2029-06-01."
+                                IsOpen="{Binding IsRdpBackendLamco, Mode=OneWay}" IsClosable="False" Margin="0,4,0,0"
+                                Visibility="{Binding LamcoOptionVisible, Converter={StaticResource BoolToVis}}"/>
                     <RadioButton Content="None — no remote desktop (console/SSH only)"
                                  GroupName="RdpBackend" FontSize="14" Margin="0,4,0,0"
                                  IsChecked="{Binding IsRdpBackendNone}"

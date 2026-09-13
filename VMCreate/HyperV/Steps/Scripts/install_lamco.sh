@@ -25,7 +25,7 @@ LAMCO_FORK_DEB_VERSION="1.4.5-hyperv2"
 # (verified on the pinned asset: /usr/bin/lamco-rdp-server --version prints
 # "lamco-rdp-server 1.4.5"), while dpkg reports 1.4.5-hyperv2.
 LAMCO_FORK_CRATE_VERSION="1.4.5"
-LAMCO_FORK_DEB_SHA256="13f119f7c59435abc3be22072122b9adb350b4a60e724462faa9a3d67f2cfb7e"
+LAMCO_FORK_DEB_SHA256="54fa3e10a98ba1e9c678c704572824c573b9802ec73c0e64f1efbc5abc0d6d41"
 LAMCO_FORK_DEB_URL="https://github.com/${LAMCO_FORK_REPO}/releases/download/${LAMCO_FORK_TAG}/lamco-rdp-server_${LAMCO_FORK_DEB_VERSION}_amd64.deb"
 
 # Result contract: 0 = ok, 1 = degraded (install completed with warnings —
@@ -40,6 +40,12 @@ LAMCO_FORK_DEB_URL="https://github.com/${LAMCO_FORK_REPO}/releases/download/${LA
 DEGRADED=0
 
 echo "=== Lamco RDP Server install (pinned fork deb ${LAMCO_FORK_TAG}) ==="
+echo "NOTICE: lamco-rdp-server is third-party software licensed under the"
+echo "        Business Source License 1.1 (BSL 1.1) - (c) Lamco Development LLC."
+echo "        Free production use: single server instance (one VM), non-profit,"
+echo "        or education/research. Multiple instances require a commercial"
+echo "        license - see https://lamco.ai. Converts to Apache-2.0 on 2029-06-01."
+echo "        License text: /usr/share/doc/lamco-rdp-server/LICENSE"
 
 # -- Validate distro: Debian family only ------------------------------------
 if [ ! -f /etc/os-release ]; then

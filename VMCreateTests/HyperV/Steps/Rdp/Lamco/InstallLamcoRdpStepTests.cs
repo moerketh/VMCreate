@@ -338,7 +338,7 @@ namespace VMCreate.Tests.HyperV.Steps
             Assert.IsNotNull(captured);
             StringAssert.Contains(captured, "LAMCO_FORK_TAG=\"v1.4.5-hyperv.2\"",
                 "fork deb tag pinned in the script");
-            StringAssert.Contains(captured, "LAMCO_FORK_DEB_SHA256=\"13f119f7c59435abc3be22072122b9adb350b4a60e724462faa9a3d67f2cfb7e\"",
+            StringAssert.Contains(captured, "LAMCO_FORK_DEB_SHA256=\"54fa3e10a98ba1e9c678c704572824c573b9802ec73c0e64f1efbc5abc0d6d41\"",
                 "fork deb sha256 pinned — whoever can push a release asset must not get root on every VM");
             StringAssert.Contains(captured, "sha256sum \"$FORK_DEB_TMP\"",
                 "digest verified before dpkg -i");

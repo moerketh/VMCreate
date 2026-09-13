@@ -37,6 +37,10 @@ VMCreate's goal is to run Linux VM disk images directly in Hyper-V — without i
 
 Many of these distributions were not designed or tested by their creators to run in Hyper-V. Running them in this way may void any warranty or support provided by the distribution maintainers.
 
+## Third-Party Software License Notice
+
+The optional **Lamco RDP Server** backend installs third-party software on the VM at deploy time. Lamco RDP Server is licensed under the **Business Source License 1.1 (BSL)** — free for production use on a single server instance (one VM), by non-profit organizations, or for non-commercial education/research. Running it on multiple VMs requires a commercial license (see [lamco.ai](https://lamco.ai)). The 1.4.x version line converts to Apache-2.0 on 2029-06-01. VMCreate itself is MIT-licensed and bundles no third-party RDP software; see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for details.
+
 ## Requirements
 
 - Windows 10/11 with Hyper-V enabled
@@ -61,8 +65,8 @@ dotnet publish VMCreate/VMCreate.csproj -c Release -r win-x64 --self-contained
 
 ## Documentation
 
-- [DEPLOYMENT.md](DEPLOYMENT.md) — technical architecture, phase pipeline, KVP delivery, and progress reporting
 - [SECURITY.md](SECURITY.md) — guest-to-host attack surface analysis, Hyper-V integration service hardening, and comparison with VMware/Proxmox
+- [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) — third-party licenses, including the BSL terms for the Lamco RDP Server deploy-time download
 
 ## License
 

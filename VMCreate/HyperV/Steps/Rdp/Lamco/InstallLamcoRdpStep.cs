@@ -34,6 +34,18 @@ namespace VMCreate
     /// (Ubuntu, Debian, Parrot) — the fork pipeline ships amd64 debs only.
     /// </para>
     /// <para>
+    /// Licensing: lamco-rdp-server is third-party software under the Business
+    /// Source License 1.1 (c) Lamco Development LLC (Change Date 2029-06-01,
+    /// converting to Apache-2.0; see THIRD-PARTY-NOTICES.md). VMCreate neither
+    /// bundles nor redistributes it — the pinned fork deb is downloaded at
+    /// deploy time and installed on the guest. Under the BSL Additional Use
+    /// Grant, production use is free for a single server instance (one VM per
+    /// OS environment), non-profit organizations, and non-commercial
+    /// education/research; multiple instances require a commercial license
+    /// (lamco.ai). The install script echoes this notice to the deployment
+    /// console, and the customization GUI shows a license warning InfoBar.
+    /// </para>
+    /// <para>
     /// Runs at Order 235, before <see cref="EnableGraphicalAutologinStep"/> (238)
     /// and before the xrdp block (240-270, skipped for Lamco).
     /// </para>
