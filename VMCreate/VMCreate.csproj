@@ -190,6 +190,7 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Compile Include="Gallery\GalleryItemsParser.cs" />
+    <Compile Include="Unattend\Imapi2Interop.cs" />
     <Compile Include="Unattend\UnattendFloppyBuilder.cs" />
 
   </ItemGroup>

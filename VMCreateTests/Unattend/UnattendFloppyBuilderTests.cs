@@ -495,42 +495,71 @@ namespace VMCreate.Tests.Unattend
 
         #endregion
 
-        #region PowerShell script validation tests
+        #region IMAPI2 typed interop tests (Windows-only)
 
         [TestMethod]
-        public void IMAPI2_AddTree_TakesTwoParameters()
+        public void IMAPI2_AddTree_ImportsDirectoryIntoIso()
         {
-            // Verify that IFsiDirectoryItem.AddTree takes exactly 2 parameters.
-            // This is a documentation/contract test to catch API misuse.
-            // The IMAPI2 COM interface defines AddTree(BSTR sourceDirectory, VARIANT_BOOL includeBaseDirectory)
+            // Real behavioral test for IFsiDirectoryItem.AddTree — the method the
+            // previous inert signature probe could not exercise. AddTree's native
+            // signature is (BSTR sourceDirectory, VARIANT_BOOL includeBaseDirectory),
+            // exactly two parameters; this round-trip guards against both signature
+            // drift and vtable mis-declaration in Imapi2Interop.
             // See: https://learn.microsoft.com/en-us/windows/win32/api/imapi2fs/nf-imapi2fs-ifsidirectoryitem-addtree
+            if (!OperatingSystem.IsWindows())
+            {
+                Assert.Inconclusive("IMAPI2 is only available on Windows");
+                return;
+            }
 
-            // We can verify this by checking the method signature via reflection on the COM interop
-            // or simply by running a test that calls AddTree with the correct number of parameters.
-            // This test serves as a regression guard against the 3-parameter mistake.
+            string testTempDir = Path.Combine(Path.GetTempPath(), "vmcreate-addtree-test-" + Guid.NewGuid().ToString("N").Substring(0, 8));
+            Directory.CreateDirectory(testTempDir);
+            string sourceDir = Path.Combine(testTempDir, "source");
+            Directory.CreateDirectory(sourceDir);
+            string isoPath = Path.Combine(testTempDir, "addtree-direct.iso");
 
-            using var ps = System.Management.Automation.PowerShell.Create();
-            ps.AddScript(@"
-                $fsi = New-Object -ComObject IMAPI2FS.MsftFileSystemImage
-                $root = $fsi.Root
-                # Get the AddTree method signature
-                $method = $root.GetType().InvokeMember('AddTree', [System.Reflection.BindingFlags]::InvokeMethod, $null, $root, @('C:\nonexistent', $false))
-            ");
+            try
+            {
+                lock (_isoLock)
+                {
+                    // Assemble a real staged tree like the builder does, then embed it
+                    // without the base directory (includeBaseDirectory: false), same
+                    // as the production path.
+                    File.WriteAllText(Path.Combine(sourceDir, "autounattend.xml"), "<?xml version=\"1.0\"?><unattend/>");
+                    Imapi2Interop.CreateIsoFromDirectory(sourceDir, isoPath, volumeName: "UNATTEND");
 
-            // The AddTree method signature is documented as taking 2 parameters:
-            //   AddTree(BSTR sourceDirectory, VARIANT_BOOL includeBaseDirectory)
-            // See: https://learn.microsoft.com/en-us/windows/win32/api/imapi2fs/nf-imapi2fs-ifsidirectoryitem-addtree
-            // The actual ISO creation is tested in BuildUnattendIso_CreatesValidIso.
-            // This test serves as a reminder that AddTree takes exactly 2 params, not 3.
+                    Assert.IsTrue(File.Exists(isoPath), "ISO file should exist at the output path");
+                    Assert.IsTrue(new FileInfo(isoPath).Length > 1024,
+                        $"ISO should be >1KB, was {new FileInfo(isoPath).Length} bytes");
+
+                    // A valid multi-file-system ISO contains the volume name marker
+                    // and the file content (Joliet stores names as UCS-2, data bytes
+                    // pass through unchanged).
+                    byte[] isoBytes = File.ReadAllBytes(isoPath);
+                    string isoText = System.Text.Encoding.UTF8.GetString(isoBytes);
+                    Assert.IsTrue(isoText.Contains("<?xml") || isoText.Contains("<unattend"),
+                        "ISO should contain the imported file content");
+                }
+            }
+            finally
+            {
+                try
+                {
+                    if (Directory.Exists(testTempDir))
+                        Directory.Delete(testTempDir, true);
+                }
+                catch { /* best effort */ }
+            }
         }
 
         [TestMethod]
         public void IMAPI2_FsiFileSystemsToCreate_Values()
         {
-            // Verify the IMAPI2 file system type constants we use
-            // FsiFileSystemISO9660 = 1, FsiFileSystemJoliet = 2, FsiFileSystemUDF = 4
-            // We use 7 (1+2+4) for ISO9660 + Joliet + UDF
-            const int expectedFileSystemFlags = 7; // ISO9660 + Joliet + UDF
+            // Verify the IMAPI2 file system flags round-trip through the typed
+            // interop: FsiFileSystemISO9660=1, Joliet=2, UDF=4; combined = 7,
+            // matching what production sets (ISO9660 + Joliet + UDF).
+            const FsiFileSystems ExpectedFileSystemFlags =
+                FsiFileSystems.ISO9660 | FsiFileSystems.Joliet | FsiFileSystems.UDF;
 
             if (!OperatingSystem.IsWindows())
             {
@@ -538,17 +567,12 @@ namespace VMCreate.Tests.Unattend
                 return;
             }
 
-            using var ps = System.Management.Automation.PowerShell.Create();
-            ps.AddScript(@"
-                $fsi = New-Object -ComObject IMAPI2FS.MsftFileSystemImage
-                $fsi.FileSystemsToCreate = 7
-                $fsi.FileSystemsToCreate
-            ");
+            Type imageType = Type.GetTypeFromProgID("IMAPI2FS.MsftFileSystemImage", throwOnError: true);
+            var image = (IFileSystemImage)Activator.CreateInstance(imageType)!;
+            image.FileSystemsToCreate = ExpectedFileSystemFlags;
 
-            var results = ps.Invoke();
-            Assert.IsFalse(ps.HadErrors, $"PowerShell errors: {string.Join("; ", ps.Streams.Error.Select(e => e.ToString()))}");
-            Assert.AreEqual(1, results.Count, "Should return one result");
-            Assert.AreEqual(expectedFileSystemFlags, results[0].BaseObject, "FileSystemsToCreate should be 7");
+            Assert.AreEqual(ExpectedFileSystemFlags, (FsiFileSystems)image.FileSystemsToCreate,
+                "FileSystemsToCreate should round-trip as ISO9660|Joliet|UDF (=7)");
         }
 
         #endregion
