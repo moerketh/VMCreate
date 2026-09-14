@@ -6,6 +6,7 @@ using System.Security;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using VMCreate.HyperV;
 
 namespace VMCreate
 {
@@ -251,11 +252,16 @@ namespace VMCreate
 
         private async Task<string> RunCommandInternalAsync(string script, TimeSpan timeout, CancellationToken ct)
         {
+            // Fresh CreateDefault2 + Hyper-V runspace per call (same shape
+            // as the executor's CreateRunspace). See HostPowerShell for why
+            // host-side hosting must not use the default InitialSessionState.
+            using var runspace = HostPowerShell.CreateRunspace();
             using var ps = PowerShell.Create();
-            ps.AddCommand("Import-Module").AddParameter("Name", "Hyper-V").Invoke();
-            ps.Commands.Clear();
+            ps.Runspace = runspace;
 
-            // Use Invoke-Command to run the script inside the VM via PowerShell Direct
+            // Use Invoke-Command to run the script inside the VM via PowerShell Direct.
+            // Invoke-Command is a Core cmdlet; the Hyper-V module (needed for the
+            // -VMName remoting transport) is pre-imported through the runspace ISS.
             ps.AddCommand("Invoke-Command")
                 .AddParameter("VMName", _vmName)
                 .AddParameter("Credential", _credential)

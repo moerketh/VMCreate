@@ -103,6 +103,7 @@
     <Compile Include="HyperV\Steps\System\SyncTimezoneStep.cs" />
     <Compile Include="HyperV\IHyperVManager.cs" />
     <Compile Include="HyperV\IHyperVManagerRoles.cs" />
+    <Compile Include="HyperV\HostPowerShell.cs" />
     <Compile Include="HyperV\IPowerShellExecutor.cs" />
     <Compile Include="HyperV\PowerShellHyperVManagerFacade.cs" />
     <Compile Include="HyperV\PowerShellVmLifecycleManager.cs" />
@@ -190,6 +191,7 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Compile Include="Gallery\GalleryItemsParser.cs" />
+    <Compile Include="Unattend\Imapi2Interop.cs" />
     <Compile Include="Unattend\UnattendFloppyBuilder.cs" />
 
   </ItemGroup>
@@ -235,7 +237,15 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.8" />
     <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.8" />
-    <PackageReference Include="Microsoft.PowerShell.SDK" Version="7.6.1" />
+    <PackageReference Include="System.Management.Automation" Version="7.6.1" />
+    <!-- PS7 engine assemblies for the CDXML/CIM cmdlet machinery (Storage cmdlets,
+         Hyper-V CDXML). Without them, assembly resolution falls back to the
+         Windows PowerShell 5.1 GAC copies (Microsoft.PowerShell.Commands.Management
+         v3.0.0.0, CimCmdlets v1.0.0.0), whose cmdletization engine JITs against
+         WinPS-only SMA internals (EnumerableExtensions.Append) and dies with
+         MissingMethodException when a CIM method invoke succeeds. -->
+    <PackageReference Include="Microsoft.Management.Infrastructure.CimCmdlets" Version="7.6.1" />
+    <PackageReference Include="Microsoft.PowerShell.Commands.Management" Version="7.6.1" />
     <PackageReference Include="Serilog.Extensions.Logging" Version="10.0.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
     <PackageReference Include="SharpCompress" Version="0.48.1" />

@@ -221,23 +221,13 @@ namespace VMCreate.HyperV.VmCreation
 
         private void TryDismountVhdx(string vhdxPath)
         {
-            try
-            {
-                using var ps = System.Management.Automation.PowerShell.Create();
-                ps.AddCommand("Import-Module").AddParameter("Name", "Hyper-V").Invoke();
-                ps.Commands.Clear();
-                ps.AddCommand("Dismount-VHD").AddParameter("Path", vhdxPath);
-                ps.Invoke();
-                if (ps.HadErrors)
-                    _logger.LogDebug("Dismount-VHD reported errors (VHDX may not have been mounted): {Error}",
-                        string.Join("; ", ps.Streams.Error.Select(e => e.ToString())));
-                else
-                    _logger.LogInformation("Dismounted VHDX during cleanup: {VhdxPath}", vhdxPath);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "Dismount-VHD threw (VHDX may not have been mounted)");
-            }
+            // Shared best-effort dismount helper (CreateDefault2 + Hyper-V
+            // runspace); media preparation uses the same one so the two
+            // paths cannot drift apart. Cleanup logs a successful
+            // dismount at Information (the disk is gone — worth knowing);
+            // failures stay Debug in the helper.
+            if (HostPowerShell.TryDismountVhdx(vhdxPath, _logger))
+                _logger.LogInformation("Dismounted VHDX during cleanup: {VhdxPath}", vhdxPath);
         }
 
         private async Task ReplacePreviousVmAsync(VmDeploymentPlan plan, CancellationToken cancellationToken)

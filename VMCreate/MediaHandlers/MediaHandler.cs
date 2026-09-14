@@ -1,10 +1,9 @@
 ﻿using System;
 using System.IO;
-using System.Linq;
-using System.Management.Automation;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using VMCreate.HyperV;
 
 namespace VMCreate.MediaHandlers
 {
@@ -89,21 +88,12 @@ namespace VMCreate.MediaHandlers
 
         protected void TryDismountVhdx(string vhdxPath)
         {
-            try
-            {
-                using var ps = PowerShell.Create();
-                ps.AddCommand("Import-Module").AddParameter("Name", "Hyper-V").Invoke();
-                ps.Commands.Clear();
-                ps.AddCommand("Dismount-VHD").AddParameter("Path", vhdxPath);
-                ps.Invoke();
-                if (ps.HadErrors)
-                    _logger.LogDebug("Dismount-VHD reported errors (VHDX may not have been mounted): {Error}",
-                        string.Join("; ", ps.Streams.Error.Select(e => e.ToString())));
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "Dismount-VHD threw (VHDX may not have been mounted)");
-            }
+            // Shared best-effort dismount helper (CreateDefault2 + Hyper-V
+            // runspace); failed-deployment cleanup uses the same one so the
+            // two paths cannot drift apart. No success log here (unlike the
+            // cleanup path): reaching this means we are about to delete the
+            // file, and the surrounding code logs that outcome already.
+            HostPowerShell.TryDismountVhdx(vhdxPath, _logger);
         }
     }
 }

@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Logging;
 using System;
 using System.IO;
-using System.Linq;
 
 namespace VMCreate
 {
@@ -55,17 +54,14 @@ namespace VMCreate
 
                 logger.LogInformation("Created autounattend.xml at {Path}", unattendPath);
 
-                // Use oscdimg.exe (Windows ADK) or a fallback approach to create the ISO.
-                // For simplicity, we use PowerShell's Mount-DiskImage + copy approach,
-                // or we can use the built-in IMAPI COM objects.
-                //
-                // However, the most reliable cross-machine approach is to use the
-                // System.IO.Packaging or a third-party ISO library. Since we want
-                // minimal dependencies, we'll use PowerShell to create the ISO.
-                string isoPath = CreateIsoWithPowerShell(stagingDir, outputPath, logger);
+                // Build the ISO with the in-box IMAPI2FS COM component via
+                // direct interop (see Imapi2Interop). IMAPI2 is built into
+                // all modern Windows versions, so this needs no external
+                // tools or bundled dependencies.
+                Imapi2Interop.CreateIsoFromDirectory(stagingDir, outputPath, volumeName: "UNATTEND");
 
-                logger.LogInformation("Created unattend ISO at {Path}", isoPath);
-                return isoPath;
+                logger.LogInformation("Created unattend ISO at {Path}", outputPath);
+                return outputPath;
             }
             finally
             {
@@ -77,97 +73,6 @@ namespace VMCreate
                 }
                 catch { /* best effort */ }
             }
-        }
-
-        /// <summary>
-        /// Creates an ISO image from a directory using PowerShell and Windows IMAPI2.
-        /// IMAPI2 is built into all modern Windows versions.
-        /// </summary>
-        private static string CreateIsoWithPowerShell(string sourceDir, string isoPath, ILogger logger)
-        {
-            // Ensure the output directory exists
-            string isoDir = Path.GetDirectoryName(isoPath);
-            if (!string.IsNullOrEmpty(isoDir))
-                Directory.CreateDirectory(isoDir);
-
-            // Use IMAPI2 COM objects to create the ISO.
-            // Key points about the IMAPI2 API:
-            //   - IFsiDirectoryItem.AddTree(sourceDir, includeBaseDir) takes exactly 2 params
-            //   - IFileSystemImageResult.ImageStream is an IStream COM object
-            //   - PowerShell cannot directly call IStream.Read() on COM objects
-            //   - The reliable approach is to use a .NET helper type that wraps IStream
-            //     and exposes Read/Write as regular methods
-            //
-            // We define a small C# type inline via Add-Type that reads an IStream
-            // and writes it to a file. This avoids all the PowerShell COM interop pitfalls.
-            // Note: The C# type definition uses single-line strings to avoid conflicts
-            // between PowerShell here-strings (@"..."@) and C# verbatim strings (@"...").
-
-            string csharpHelper = "using System; using System.IO; using System.Runtime.InteropServices; using System.Runtime.InteropServices.ComTypes; " +
-                "public static class IStreamHelper { " +
-                "public static void WriteIStreamToFile(object comStream, string filePath) { " +
-                "var stream = (IStream)comStream; " +
-                "using var fs = new FileStream(filePath, FileMode.Create, FileAccess.Write); " +
-                "var buffer = new byte[32768]; " +
-                "var bytesReadPtr = Marshal.AllocHGlobal(4); " +
-                "try { " +
-                "while (true) { " +
-                "stream.Read(buffer, buffer.Length, bytesReadPtr); " +
-                "int bytesRead = Marshal.ReadInt32(bytesReadPtr); " +
-                "if (bytesRead == 0) break; " +
-                "fs.Write(buffer, 0, bytesRead); " +
-                "} " +
-                "} finally { " +
-                "Marshal.FreeHGlobal(bytesReadPtr); " +
-                "} " +
-                "} " +
-                "}";
-
-            string script = $@"
-                $sourceDir = '{sourceDir.Replace("'", "''")}'
-                $isoPath = '{isoPath.Replace("'", "''")}'
-
-                # Define a C# helper type that can read from IStream and write to a file
-                # Use -ErrorAction Ignore to skip if the type is already loaded
-                if (-not ([System.Management.Automation.PSTypeName]'IStreamHelper').Type) {{
-                    Add-Type -TypeDefinition '{csharpHelper}' -ErrorAction Stop
-                }}
-
-                # Create the file system image
-                $fsi = New-Object -ComObject IMAPI2FS.MsftFileSystemImage
-                $fsi.FileSystemsToCreate = 7  # ISO9660 + Joliet + UDF
-                $fsi.VolumeName = 'UNATTEND'
-
-                # Add the entire directory tree (2 params: source path, includeBaseDirectory)
-                $fsi.Root.AddTree($sourceDir, $false)
-
-                # Create the result image
-                $result = $fsi.CreateResultImage()
-                $imageStream = $result.ImageStream
-
-                # Use the C# helper to write the IStream to a file
-                [IStreamHelper]::WriteIStreamToFile($imageStream, $isoPath)
-
-                Write-Output $isoPath
-            ";
-
-            using var ps = System.Management.Automation.PowerShell.Create();
-            ps.AddScript(script);
-
-            var results = ps.Invoke();
-
-            if (ps.HadErrors)
-            {
-                string errors = string.Join("; ", ps.Streams.Error.Select(e => e.ToString()));
-                throw new Exception($"Failed to create unattend ISO: {errors}");
-            }
-
-            if (!File.Exists(isoPath))
-            {
-                throw new Exception($"Unattend ISO was not created at expected path: {isoPath}");
-            }
-
-            return isoPath;
         }
     }
 }

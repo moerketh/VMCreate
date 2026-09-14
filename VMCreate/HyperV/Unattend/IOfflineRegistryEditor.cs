@@ -18,6 +18,14 @@ namespace VMCreate.HyperV.Unattend
         void SetServiceStart(string hiveMountName, string controlSet, string serviceName, int startValue);
     }
 
+    /// <summary>
+    /// Helper for editing offline Windows registry hives via reg.exe. reg.exe is NOT a
+    /// PowerShell cmdlet: it must be invoked with positional arguments
+    /// (<see cref="IPowerShellExecutor.RunApplication"/>), never with AddParameter
+    /// (the historical ("ArgumentList", args) convention passed the literal
+    /// "-ArgumentList" option to reg.exe, which rejected it with
+    /// "ERROR: Invalid Argument/Option - 'ArgumentList'").
+    /// </summary>
     public sealed class OfflineRegistryEditor : IOfflineRegistryEditor
     {
         private readonly IPowerShellExecutor _powerShell;
@@ -34,8 +42,7 @@ namespace VMCreate.HyperV.Unattend
             if (!File.Exists(hivePath))
                 throw new FileNotFoundException("Hive not found", hivePath);
 
-            var result = _powerShell.RunCommand("reg",
-                ("ArgumentList", new[] { "load", $"HKLM\\{mountName}", hivePath }));
+            var result = _powerShell.RunApplication("reg", "load", $"HKLM\\{mountName}", hivePath);
             if (result.HadErrors)
                 throw new InvalidOperationException($"Failed to load hive {hivePath}: {result.ErrorSummary}");
             _logger.LogDebug("Loaded hive {HivePath} as {MountName}", hivePath, mountName);
@@ -43,31 +50,26 @@ namespace VMCreate.HyperV.Unattend
 
         public void UnloadHive(string mountName)
         {
-            var result = _powerShell.RunCommand("reg",
-                ("ArgumentList", new[] { "unload", $"HKLM\\{mountName}" }));
+            var result = _powerShell.RunApplication("reg", "unload", $"HKLM\\{mountName}");
             if (result.HadErrors)
                 _logger.LogWarning("Failed to unload hive {MountName}: {Errors}", mountName, result.ErrorSummary);
         }
 
         public void AddKey(string keyPath)
         {
-            _powerShell.RunCommand("reg", ("ArgumentList", new[] { "add", keyPath, "/f" }));
+            _powerShell.RunApplication("reg", "add", keyPath, "/f");
         }
 
         public void SetDword(string keyPath, string valueName, int value)
         {
-            _powerShell.RunCommand("reg", ("ArgumentList", new[]
-            {
-                "add", keyPath, "/v", valueName, "/t", "REG_DWORD", "/d", value.ToString(), "/f"
-            }));
+            _powerShell.RunApplication("reg",
+                "add", keyPath, "/v", valueName, "/t", "REG_DWORD", "/d", value.ToString(), "/f");
         }
 
         public void SetString(string keyPath, string valueName, string value)
         {
-            _powerShell.RunCommand("reg", ("ArgumentList", new[]
-            {
-                "add", keyPath, "/v", valueName, "/t", "REG_SZ", "/d", value, "/f"
-            }));
+            _powerShell.RunApplication("reg",
+                "add", keyPath, "/v", valueName, "/t", "REG_SZ", "/d", value, "/f");
         }
 
         public void SetServiceStart(string hiveMountName, string controlSet, string serviceName, int startValue)

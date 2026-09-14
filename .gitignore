@@ -182,6 +182,8 @@ DocProject/Help/html
 
 # Click-Once directory
 publish/
+# Local size-measurement publish dirs (publish-baseline, publish-fdd2, ...)
+publish-*/
 
 # Publish Web Output
 *.[Pp]ublish.xml

@@ -24,6 +24,16 @@ namespace VMCreate.HyperV.Unattend
     {
         PowerShellResult RunCommand(string command, params (string Name, object Value)[] parameters);
         PowerShellResult RunScript(string script);
+
+        /// <summary>
+        /// Runs a native executable by name with positional arguments. Unlike
+        /// <see cref="RunCommand"/>, the arguments are appended with AddArgument
+        /// (not AddParameter), so they are passed as-is on the application's command
+        /// line. Required for console applications such as reg.exe, which is NOT a
+        /// cmdlet and rejects literal parameter names like -ArgumentList
+        /// ("ERROR: Invalid Argument/Option - 'ArgumentList'").
+        /// </summary>
+        PowerShellResult RunApplication(string application, params string[] arguments);
     }
 
     public sealed class PowerShellExecutor : IPowerShellExecutor
@@ -92,6 +102,39 @@ namespace VMCreate.HyperV.Unattend
                         ? string.Join("; ", ps.Streams.Error.Select(e => e.ToString()))
                         : string.Empty
                 };
+            }
+            finally
+            {
+                runspace.Dispose();
+            }
+        }
+
+        public PowerShellResult RunApplication(string application, params string[] arguments)
+        {
+            var runspace = RunspaceFactory.CreateRunspace(_initialSessionState);
+            runspace.Open();
+            try
+            {
+                using var ps = PowerShell.Create();
+                ps.Runspace = runspace;
+                ps.AddCommand(application);
+                if (arguments != null)
+                {
+                    foreach (string argument in arguments)
+                        ps.AddArgument(argument);
+                }
+
+                var output = ps.Invoke();
+                var result = new PowerShellResult
+                {
+                    Output = output,
+                    HadErrors = ps.HadErrors,
+                    ErrorSummary = ps.HadErrors
+                        ? string.Join("; ", ps.Streams.Error.Select(e => e.ToString()))
+                        : string.Empty
+                };
+                ps.Streams.Error.Clear();
+                return result;
             }
             finally
             {
