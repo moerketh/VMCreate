@@ -39,7 +39,6 @@ namespace VMCreate
         public const string SubInstallGrub   = "Sub_InstallGrub";
         public const string SubInstallHyperV = "Sub_InstallHyperV";
         public const string SubInstallXrdp   = "Sub_InstallXrdp";
-        public const string SubInstallPwsh   = "Sub_InstallPwsh";
         public const string SubSshSetup      = "Sub_SshSetup";
         public const string SubReboot        = "Sub_Reboot";
 
@@ -634,8 +633,6 @@ namespace VMCreate
                 Phases.Add(new DeploymentPhase(SubInstallXrdp, "Install xRDP",
                     "Installing xRDP for Enhanced Session support", SymbolRegular.Desktop24) { IndentLevel = 1, IsVisible = false });
             }
-            Phases.Add(new DeploymentPhase(SubInstallPwsh, "Install PowerShell",
-                "Installing PowerShell for post-boot management", SymbolRegular.Code24) { IndentLevel = 1, IsVisible = false });
             Phases.Add(new DeploymentPhase(SubSshSetup, "SSH setup",
                 "Creating automation user and injecting SSH key", SymbolRegular.Key24) { IndentLevel = 1, IsVisible = false });
             Phases.Add(new DeploymentPhase(SubReboot, "Reboot",
@@ -652,8 +649,6 @@ namespace VMCreate
                 Phases.Insert(index++, new DeploymentPhase(SubInstallXrdp, "Install xRDP",
                     "Installing xRDP for Enhanced Session support", SymbolRegular.Desktop24) { IndentLevel = 1, IsVisible = false });
             }
-            Phases.Insert(index++, new DeploymentPhase(SubInstallPwsh, "Install PowerShell",
-                "Installing PowerShell for post-boot management", SymbolRegular.Code24) { IndentLevel = 1, IsVisible = false });
             Phases.Insert(index++, new DeploymentPhase(SubSshSetup, "SSH setup",
                 "Creating automation user and injecting SSH key", SymbolRegular.Key24) { IndentLevel = 1, IsVisible = false });
             Phases.Insert(index++, new DeploymentPhase(SubReboot, "Reboot",

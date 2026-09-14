@@ -361,8 +361,6 @@ namespace VMCreate
                 return DeployPageViewModel.SubInstallHyperV;
             if (progress.StartsWith("INSTALL_XRDP", StringComparison.OrdinalIgnoreCase))
                 return DeployPageViewModel.SubInstallXrdp;
-            if (progress.StartsWith("INSTALL_PWSH", StringComparison.OrdinalIgnoreCase))
-                return DeployPageViewModel.SubInstallPwsh;
             if (progress.StartsWith("SSH_SETUP", StringComparison.OrdinalIgnoreCase))
                 return DeployPageViewModel.SubSshSetup;
             if (progress.StartsWith("REBOOT", StringComparison.OrdinalIgnoreCase))
