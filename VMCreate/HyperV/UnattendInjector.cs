@@ -159,7 +159,14 @@ namespace VMCreate
 
             DisableWindowsDefender(partitionMount, windowsDir);
 
+            // Panther\Unattend does not exist in a fresh image and System32\Sysprep may
+            // not either; File.WriteAllText does not create intermediate directories
+            // (live evidence: FLARE Phase D attempt 5, DirectoryNotFoundException on
+            // ...\Windows\Panther\Unattend\Unattend.xml after the reg.exe fix advanced
+            // the inject flow past DisableWindowsDefender for the first time).
             Directory.CreateDirectory(pantherDir);
+            Directory.CreateDirectory(Path.Combine(pantherDir, "Unattend"));
+            Directory.CreateDirectory(Path.Combine(windowsDir, "System32", "Sysprep"));
             File.WriteAllText(Path.Combine(pantherDir, "Unattend.xml"), unattendContent);
             File.WriteAllText(Path.Combine(pantherDir, "Unattend", "Unattend.xml"), unattendContent);
             File.WriteAllText(Path.Combine(windowsDir, "System32", "Sysprep", "Unattend.xml"), unattendContent);
