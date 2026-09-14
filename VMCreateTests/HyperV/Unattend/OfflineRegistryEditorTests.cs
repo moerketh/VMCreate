@@ -27,27 +27,39 @@ namespace VMCreate.Tests.HyperV.Unattend
         public void AddKey_InvokesRegAdd()
         {
             _editor.AddKey("HKLM\\Test\\Key");
-            _powerShell.Verify(p => p.RunCommand("reg",
-                It.Is<(string, object)[]>(args =>
-                    args.Any(a => a.Item1 == "ArgumentList"
-                        && a.Item2.GetType() == typeof(string[])
-                        && ((string[])a.Item2).Contains("add")
-                        && ((string[])a.Item2).Contains("HKLM\\Test\\Key")
-                        && ((string[])a.Item2).Contains("/f")))),
+            _powerShell.Verify(p => p.RunApplication("reg",
+                It.Is<string[]>(args =>
+                    args.Contains("add")
+                    && args.Contains("HKLM\\Test\\Key")
+                    && args.Contains("/f"))),
                 Times.Once);
+        }
+
+        [TestMethod]
+        public void AddKey_NeverUsesRunCommand()
+        {
+            // Regression pin: reg.exe is not a cmdlet; RunCommand passes parameters via
+            // AddParameter, which reg.exe rejects ("Invalid Argument/Option - 'ArgumentList'").
+            _powerShell
+                .Setup(p => p.RunApplication(It.IsAny<string>(), It.IsAny<string[]>()))
+                .Returns(new PowerShellResult());
+            _editor.AddKey("HKLM\\Test\\Key");
+            _editor.SetDword("HKLM\\Test\\Key", "V", 1);
+            _editor.SetString("HKLM\\Test\\Key", "V", "Off");
+            _editor.UnloadHive("Mount");
+            _powerShell.Verify(p => p.RunCommand(
+                It.IsAny<string>(), It.IsAny<(string, object)[]>()), Times.Never);
         }
 
         [TestMethod]
         public void SetDword_InvokesRegAddWithCorrectType()
         {
             _editor.SetDword("HKLM\\Test\\Key", "ValueName", 1);
-            _powerShell.Verify(p => p.RunCommand("reg",
-                It.Is<(string, object)[]>(args =>
-                    args.Any(a => a.Item1 == "ArgumentList"
-                        && a.Item2.GetType() == typeof(string[])
-                        && ((string[])a.Item2).Contains("REG_DWORD")
-                        && ((string[])a.Item2).Contains("ValueName")
-                        && ((string[])a.Item2).Contains("1")))),
+            _powerShell.Verify(p => p.RunApplication("reg",
+                It.Is<string[]>(args =>
+                    args.Contains("REG_DWORD")
+                    && args.Contains("ValueName")
+                    && args.Contains("1"))),
                 Times.Once);
         }
 
@@ -55,13 +67,11 @@ namespace VMCreate.Tests.HyperV.Unattend
         public void SetString_InvokesRegAddWithCorrectType()
         {
             _editor.SetString("HKLM\\Test\\Key", "ValueName", "Off");
-            _powerShell.Verify(p => p.RunCommand("reg",
-                It.Is<(string, object)[]>(args =>
-                    args.Any(a => a.Item1 == "ArgumentList"
-                        && a.Item2.GetType() == typeof(string[])
-                        && ((string[])a.Item2).Contains("REG_SZ")
-                        && ((string[])a.Item2).Contains("ValueName")
-                        && ((string[])a.Item2).Contains("Off")))),
+            _powerShell.Verify(p => p.RunApplication("reg",
+                It.Is<string[]>(args =>
+                    args.Contains("REG_SZ")
+                    && args.Contains("ValueName")
+                    && args.Contains("Off"))),
                 Times.Once);
         }
 
@@ -69,13 +79,11 @@ namespace VMCreate.Tests.HyperV.Unattend
         public void SetServiceStart_InvokesRegAddWithStartDword()
         {
             _editor.SetServiceStart("Mount", "ControlSet001", "WinDefend", 4);
-            _powerShell.Verify(p => p.RunCommand("reg",
-                It.Is<(string, object)[]>(args =>
-                    args.Any(a => a.Item1 == "ArgumentList"
-                        && a.Item2.GetType() == typeof(string[])
-                        && ((string[])a.Item2).Contains("HKLM\\Mount\\ControlSet001\\Services\\WinDefend")
-                        && ((string[])a.Item2).Contains("Start")
-                        && ((string[])a.Item2).Contains("4")))),
+            _powerShell.Verify(p => p.RunApplication("reg",
+                It.Is<string[]>(args =>
+                    args.Contains("HKLM\\Mount\\ControlSet001\\Services\\WinDefend")
+                    && args.Contains("Start")
+                    && args.Contains("4"))),
                 Times.Once);
         }
 
