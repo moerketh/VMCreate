@@ -229,29 +229,68 @@ namespace VMCreate
         /// shell and the diagnostics collector so adapter selection can't
         /// drift; preferVmCreateTempAdapter mirrors SshGuestShell's sort (the
         /// temporary adapter added for post-boot SSH wins over any other).
+        /// Adapter ordering and IPv4 selection run in C# on the host: the
+        /// host-side script is a bare Get-VMNetworkAdapter call from the
+        /// Hyper-V module pre-imported in the shared session state — no
+        /// Utility cmdlets (New-Object, Sort-Object) and no foreach loops,
+        /// so it stays viable under a CreateDefault2 runspace and the
+        /// trimmed hosting package.
         /// </summary>
         public static async Task<string> DiscoverVmIpAsync(string vmName, CancellationToken ct, bool preferVmCreateTempAdapter)
         {
+            // Fresh CreateDefault2 + Hyper-V runspace per call (static method
+            // has no shared ISS — same per-call shape the executor uses per
+            // RunCommandAsync). See HostPowerShell for why host-side hosting
+            // must not use the default InitialSessionState.
+            using var runspace = VMCreate.HyperV.HostPowerShell.CreateRunspace();
             using var ps = PowerShell.Create();
-            string adapterSort = preferVmCreateTempAdapter
-                ? "$sorted = $adapters | Sort-Object { if ($_.Name -eq 'VMCreate Temp') { 0 } else { 1 } }; "
-                : "$sorted = $adapters; ";
-            ps.AddScript($@"
-                $adapters = Get-VMNetworkAdapter -VMName '{vmName.Replace("'", "''")}' -ErrorAction SilentlyContinue
-                {adapterSort}
-                foreach ($a in $sorted) {{
-                    foreach ($ip in $a.IPAddresses) {{
-                        if ($ip -match '^\d+\.\d+\.\d+\.\d+$') {{
-                            $ip
-                            return
-                        }}
-                    }}
-                }}
-            ");
+            ps.Runspace = runspace;
+            // -ErrorAction SilentlyContinue: a missing VM surfaces as an
+            // empty result instead of a terminating error.
+            ps.AddScript($"Get-VMNetworkAdapter -VMName '{vmName.Replace("'", "''")}' -ErrorAction SilentlyContinue");
 
             var result = await Task.Run(() => ps.Invoke(), ct);
-            return result.FirstOrDefault()?.ToString();
+
+            // 'VMCreate Temp' first when preferred, preserving
+            // Get-VMNetworkAdapter's own order otherwise; then the first
+            // adapter reporting any IPv4 wins.
+            var adapters = preferVmCreateTempAdapter
+                ? result
+                    .Where(a => string.Equals(GetNetworkAdapterName(a), "VMCreate Temp", StringComparison.OrdinalIgnoreCase))
+                    .Concat(result.Where(a => !string.Equals(GetNetworkAdapterName(a), "VMCreate Temp", StringComparison.OrdinalIgnoreCase)))
+                : result;
+
+            foreach (var adapter in adapters)
+            {
+                foreach (string ip in GetAdapterIpAddresses(adapter))
+                {
+                    if (!string.IsNullOrEmpty(ip) && IPv4Regex.IsMatch(ip))
+                        return ip;
+                }
+            }
+
+            return null;
         }
+
+        private static string GetNetworkAdapterName(PSObject adapter)
+            => adapter.Properties["Name"]?.Value?.ToString() ?? string.Empty;
+
+        private static System.Collections.Generic.IEnumerable<string> GetAdapterIpAddresses(PSObject adapter)
+        {
+            if (adapter.Properties["IPAddresses"]?.Value is not System.Collections.IEnumerable raw
+                || raw is string)
+            {
+                yield break;
+            }
+
+            foreach (object? ip in raw)
+            {
+                yield return ip?.ToString() ?? string.Empty;
+            }
+        }
+
+        private static readonly System.Text.RegularExpressions.Regex IPv4Regex =
+            new("^\\d+\\.\\d+\\.\\d+\\.\\d+$", System.Text.RegularExpressions.RegexOptions.Compiled);
 
         /// <summary>
         /// Escapes a value for safe embedding inside a single-quoted bash string.

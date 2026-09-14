@@ -94,7 +94,9 @@ namespace VMCreate
         /// </summary>
         private static void CreateIsoOnSta(string sourceDirectory, string isoPath, string volumeName)
         {
-            Type fileSystemImageType = Type.GetTypeFromProgID(FileSystemImageProgId, throwOnError: true);
+            // throwOnError:true guarantees non-null (the annotation is Type? —
+            // the CLR doesn't encode the guarantee), hence the forgiving !.
+            Type fileSystemImageType = Type.GetTypeFromProgID(FileSystemImageProgId, throwOnError: true)!;
             var image = (IFileSystemImage)Activator.CreateInstance(fileSystemImageType)!;
 
             image.FileSystemsToCreate = FsiFileSystems.ISO9660 | FsiFileSystems.Joliet | FsiFileSystems.UDF;
@@ -171,11 +173,17 @@ namespace VMCreate
     internal interface IFsiDirectoryItem
     {
         // ── IFsiItem members slots 7–18 (never invoked from this codebase) ──
-        [return: MarshalAs(UnmanagedType.BStr)]
-        string Name { get; }
+        string Name
+        {
+            [return: MarshalAs(UnmanagedType.BStr)]
+            get;
+        }
 
-        [return: MarshalAs(UnmanagedType.BStr)]
-        string FullPath { get; }
+        string FullPath
+        {
+            [return: MarshalAs(UnmanagedType.BStr)]
+            get;
+        }
 
         double CreationTime { get; set; }           // COM DATE
         double LastAccessedTime { get; set; }      // COM DATE
@@ -222,8 +230,11 @@ namespace VMCreate
     internal interface IFileSystemImage
     {
         // ── invoked members (also anchor the vtable start) ──
-        [return: MarshalAs(UnmanagedType.Interface)]
-        IFsiDirectoryItem Root { get; }             // get_Root — invoked
+        IFsiDirectoryItem Root
+        {
+            [return: MarshalAs(UnmanagedType.Interface)]
+            get;                                        // get_Root — invoked
+        }
 
         // ── vtable filler, never invoked ──
         int SessionStartBlock { get; set; }
@@ -244,8 +255,11 @@ namespace VMCreate
         }
 
         // ── vtable filler, never invoked ──
-        [return: MarshalAs(UnmanagedType.BSTR)]
-        string ImportedVolumeName { get; }
+        string ImportedVolumeName
+        {
+            [return: MarshalAs(UnmanagedType.BStr)]
+            get;
+        }
         IntPtr BootImageOptions { get; set; }
         int FileCount { get; }
         int DirectoryCount { get; }
@@ -283,7 +297,10 @@ namespace VMCreate
     [InterfaceType(ComInterfaceType.InterfaceIsDual)]
     internal interface IFileSystemImageResult
     {
-        [return: MarshalAs(UnmanagedType.Interface)]
-        IStream ImageStream { get; }
+        IStream ImageStream
+        {
+            [return: MarshalAs(UnmanagedType.Interface)]
+            get;
+        }
     }
 }

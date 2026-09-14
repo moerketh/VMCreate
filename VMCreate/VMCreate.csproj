@@ -103,6 +103,7 @@
     <Compile Include="HyperV\Steps\System\SyncTimezoneStep.cs" />
     <Compile Include="HyperV\IHyperVManager.cs" />
     <Compile Include="HyperV\IHyperVManagerRoles.cs" />
+    <Compile Include="HyperV\HostPowerShell.cs" />
     <Compile Include="HyperV\IPowerShellExecutor.cs" />
     <Compile Include="HyperV\PowerShellHyperVManagerFacade.cs" />
     <Compile Include="HyperV\PowerShellVmLifecycleManager.cs" />
