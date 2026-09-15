@@ -91,7 +91,7 @@ namespace VMCreate
                 }
 
                 // Download file
-                createVmProgressInfo.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.Download));
+                createVmProgressInfo?.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.Download));
                 filename = await _downloader.DownloadFileAsync(galleryItem.DiskUri, cancellationToken, createVmProgressInfo, _useCache);
                 _logger.LogInformation("Downloaded file {FileName}", filename);
 
@@ -128,7 +128,7 @@ namespace VMCreate
                 string sourceFile;
                 if (needsExtraction)
                 {
-                    createVmProgressInfo.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.Extract));
+                    createVmProgressInfo?.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.Extract));
 
                     // Determine the final disk directory so we can extract directly there
                     // and avoid a wasteful temp→destination copy. Use a per-VM subdirectory
@@ -136,8 +136,7 @@ namespace VMCreate
                     string extractDest = _pathService.GetVirtualHardDiskPath(plan.VmName);
                     _logger.LogInformation("Extracting directly to per-VM VM disk directory: {Path}", extractDest);
 
-                    await Task.Run(() => _extractor.Extract(filename, extractDest, cancellationToken, createVmProgressInfo));
-                    _logger.LogInformation("Extracted file to {ExtractPath}", extractDest);
+                    await Task.Run(() => _extractor.Extract(filename, extractDest, cancellationToken, createVmProgressInfo));                    _logger.LogInformation("Extracted file to {ExtractPath}", extractDest);
 
                     // Auto-detect the disk file inside the extracted directory.
                     // Handles nested archives (e.g. OVA inside ZIP) automatically.

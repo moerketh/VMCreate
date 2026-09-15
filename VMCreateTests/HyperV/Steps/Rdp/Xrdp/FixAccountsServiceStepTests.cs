@@ -10,12 +10,11 @@ namespace VMCreate.Tests.HyperV.Steps
     [TestClass]
     public sealed class FixAccountsServiceStepTests
     {
-        private FixAccountsServiceStep _step;
-        private Mock<IGuestShell> _shell;
-        private Mock<ILogger<FixAccountsServiceStep>> _logger;
-        private GalleryItem _item;
-        private VmCustomizations _customizations;
-
+        private FixAccountsServiceStep _step = null!;
+        private Mock<IGuestShell> _shell = null!;
+        private Mock<ILogger<FixAccountsServiceStep>> _logger = null!;
+        private GalleryItem _item = null!;
+        private VmCustomizations _customizations = null!;
         [TestInitialize]
         public void Setup()
         {

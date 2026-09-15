@@ -65,7 +65,9 @@ namespace VMCreate.Tests.GalleryTests
         [TestMethod]
         public void IsNativeHyperV_NullUri_ReturnsFalse()
         {
-            var item = new GalleryItem { DiskUri = null };
+            // DiskUri is required by contract; null is only reachable via deserialization gaps.
+            // The defensive getter must still return false rather than throw.
+            var item = new GalleryItem { DiskUri = null! };
             Assert.IsFalse(item.IsNativeHyperV);
         }
 

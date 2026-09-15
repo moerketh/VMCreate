@@ -11,10 +11,9 @@ namespace VMCreate.Tests.HyperV.Unattend
     [TestClass]
     public sealed class OfflineRegistryEditorTests
     {
-        private Mock<IPowerShellExecutor> _powerShell;
-        private Mock<ILogger<OfflineRegistryEditor>> _logger;
-        private OfflineRegistryEditor _editor;
-
+        private Mock<IPowerShellExecutor> _powerShell = null!;
+        private Mock<ILogger<OfflineRegistryEditor>> _logger = null!;
+        private OfflineRegistryEditor _editor = null!;
         [TestInitialize]
         public void Setup()
         {

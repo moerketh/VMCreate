@@ -15,19 +15,20 @@ namespace VMCreate.Tests.HyperV.VmCreation
     [TestClass]
     public sealed class IsoBootCycleRunnerTests
     {
-        private Mock<IKvpSender> _kvpSender;
-        private Mock<IKvpPoller> _kvpPoller;
-        private Mock<IVmShutdownWatcher> _shutdownWatcher;
-        private Mock<IGuestDiagnosticsCollector> _diagnosticsCollector;
-        private Mock<ISshKeyManager> _sshKeyManager;
-        private Mock<IHostNetworkService> _hostNetworkService;
-        private Mock<IVmLifecycleManager> _lifecycleManager;
-        private Mock<IVmDiskManager> _diskManager;
-        private Mock<IVmBootManager> _bootManager;
-        private IsoBootCycleRunner _runner;
-        private VmDeploymentPlan _plan;
-        private VmCustomizations _customizations;
-        private GalleryItem _item;
+        // Fixture fields — assigned in [TestInitialize] Setup() before every test.
+        private Mock<IKvpSender> _kvpSender = null!;
+        private Mock<IKvpPoller> _kvpPoller = null!;
+        private Mock<IVmShutdownWatcher> _shutdownWatcher = null!;
+        private Mock<IGuestDiagnosticsCollector> _diagnosticsCollector = null!;
+        private Mock<ISshKeyManager> _sshKeyManager = null!;
+        private Mock<IHostNetworkService> _hostNetworkService = null!;
+        private Mock<IVmLifecycleManager> _lifecycleManager = null!;
+        private Mock<IVmDiskManager> _diskManager = null!;
+        private Mock<IVmBootManager> _bootManager = null!;
+        private IsoBootCycleRunner _runner = null!;
+        private VmDeploymentPlan _plan = null!;
+        private VmCustomizations _customizations = null!;
+        private GalleryItem _item = null!;
 
         [TestInitialize]
         public void Setup()
@@ -137,7 +138,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
             var result = await RunAsync(generation: 2);
 
             Assert.IsFalse(result.Success);
-            Assert.IsTrue(result.ErrorMessage.Contains("timeout summary"));
+            Assert.IsTrue(result.ErrorMessage!.Contains("timeout summary"));
             Assert.AreEqual("raw output", result.DiagnosticsLog);
             _lifecycleManager.Verify(l => l.StopVMAsync("TestVM", It.IsAny<CancellationToken>()), Times.Once);
         }
@@ -199,7 +200,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
             try
             {
                 await _runner.RunAsync(
-                    null,
+                    null!,
                     2,
                     "media.vhdx",
                     _customizations,
@@ -224,7 +225,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
                     CreateContext(),
                     2,
                     "media.vhdx",
-                    null,
+                    null!,
                     new Progress<CreateVMProgressInfo>(),
                     CancellationToken.None);
             }

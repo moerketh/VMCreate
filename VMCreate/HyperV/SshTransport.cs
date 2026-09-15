@@ -46,7 +46,7 @@ namespace VMCreate
         /// <param name="linuxCommand">Bash command for the guest.</param>
         internal static string BuildArguments(
             string privateKeyPath, string vmIpAddress, string username,
-            string knownHostsFile, string linuxCommand)
+            string? knownHostsFile, string linuxCommand)
         {
             // Normalize Windows CRLF → LF so bash doesn't choke on \r
             linuxCommand = linuxCommand.Replace("\r\n", "\n").Replace("\r", "\n").Trim();
@@ -118,7 +118,7 @@ namespace VMCreate
             string privateKeyPath,
             string vmIpAddress,
             string username,
-            string knownHostsFile,
+            string? knownHostsFile,
             string linuxCommand,
             TimeSpan timeout,
             CancellationToken ct,
@@ -214,7 +214,7 @@ namespace VMCreate
         /// Filters stderr down to significant lines (drops blanks and the
         /// expected "Permanently added" known-hosts notice).
         /// </summary>
-        public static string FilterSignificantStderr(string stderrStr)
+        public static string FilterSignificantStderr(string? stderrStr)
         {
             var significantLines = (stderrStr ?? string.Empty)
                 .Split('\n')
@@ -236,7 +236,7 @@ namespace VMCreate
         /// so it stays viable under a CreateDefault2 runspace and the
         /// trimmed hosting package.
         /// </summary>
-        public static async Task<string> DiscoverVmIpAsync(string vmName, CancellationToken ct, bool preferVmCreateTempAdapter)
+        public static async Task<string?> DiscoverVmIpAsync(string vmName, CancellationToken ct, bool preferVmCreateTempAdapter)
         {
             // Fresh CreateDefault2 + Hyper-V runspace per call (static method
             // has no shared ISS — same per-call shape the executor uses per
@@ -262,7 +262,7 @@ namespace VMCreate
 
             foreach (var adapter in adapters)
             {
-                foreach (string ip in GetAdapterIpAddresses(adapter))
+                foreach (string? ip in GetAdapterIpAddresses(adapter))
                 {
                     if (!string.IsNullOrEmpty(ip) && IPv4Regex.IsMatch(ip))
                         return ip;

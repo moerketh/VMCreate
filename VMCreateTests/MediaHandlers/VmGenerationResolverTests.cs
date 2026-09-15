@@ -11,9 +11,9 @@ namespace VMCreate.Tests.MediaHandlers
     [TestClass]
     public class VmGenerationResolverTests
     {
-        private Mock<IPartitionSchemeDetector> _partitionDetectorMock;
-        private Mock<IDiskConverter> _diskConverterMock;
-        private Mock<ILogger<VmGenerationResolver>> _loggerMock;
+        private Mock<IPartitionSchemeDetector> _partitionDetectorMock = null!;
+        private Mock<IDiskConverter> _diskConverterMock = null!;
+        private Mock<ILogger<VmGenerationResolver>> _loggerMock = null!;
 
         [TestInitialize]
         public void Setup()

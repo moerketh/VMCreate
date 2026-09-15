@@ -10,9 +10,9 @@ namespace VMCreate
     {
         /// <summary>
         /// Returns true when the gallery item has the supplied tag (case-insensitive).
-        /// Null or empty tags are treated as "not present".
+        /// Null or empty tags are treated as "not present"; a null item has no tags.
         /// </summary>
-        public static bool HasTag(this GalleryItem item, string tag)
+        public static bool HasTag(this GalleryItem? item, string tag)
         {
             if (item == null || string.IsNullOrEmpty(tag))
                 return false;

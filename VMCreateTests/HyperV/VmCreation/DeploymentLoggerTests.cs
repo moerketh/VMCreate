@@ -18,7 +18,8 @@ namespace VMCreate.Tests.HyperV.VmCreation
         [TestMethod]
         public void Constructor_NullVmName_FallsBackToUnnamed()
         {
-            var logger = new DeploymentLogger(null);
+            // VmName is non-null by contract; this test pins the defensive fallback.
+            var logger = new DeploymentLogger(null!);
             Assert.AreEqual("Unnamed", logger.VmName);
         }
 

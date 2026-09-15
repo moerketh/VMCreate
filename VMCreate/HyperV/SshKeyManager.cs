@@ -86,7 +86,7 @@ namespace VMCreate
         /// Gets the private key path to use for PowerShell Direct connections.
         /// Returns the custom key path if provided and valid, otherwise the auto-generated key.
         /// </summary>
-        public string GetPrivateKeyPath(string customPublicKeyPath = null)
+        public string GetPrivateKeyPath(string? customPublicKeyPath = null)
         {
             if (!string.IsNullOrEmpty(customPublicKeyPath))
             {

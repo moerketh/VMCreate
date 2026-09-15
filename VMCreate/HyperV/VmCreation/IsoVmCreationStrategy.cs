@@ -85,7 +85,7 @@ namespace VMCreate.HyperV.VmCreation
             progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.AttachBootDvd));
             await _bootManager.AddBootDvd(plan, mediaPath, cancellationToken);
 
-            string unattendIsoPath = null;
+            string? unattendIsoPath = null;
             if (item.IsWindows)
             {
                 _logger.LogInformation("Creating unattend.xml ISO for automated Windows installation on VM {VMName}", plan.VmName);

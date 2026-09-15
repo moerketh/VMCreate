@@ -11,7 +11,7 @@ namespace VMCreate
     {
         private readonly Dispatcher _dispatcher;
 
-        public WpfDispatcher(Dispatcher dispatcher = null)
+        public WpfDispatcher(Dispatcher? dispatcher = null)
         {
             _dispatcher = dispatcher ?? Dispatcher.CurrentDispatcher;
         }

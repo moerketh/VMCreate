@@ -13,17 +13,17 @@ namespace VMCreate
 {
     public partial class DeployPage : Page
     {
-        public event EventHandler<WizardResultEventArgs> WizardCompleted;
+        public event EventHandler<WizardResultEventArgs>? WizardCompleted;
 
         private readonly DeployPageViewModel _viewModel;
         private readonly WizardData _wizardData;
         private readonly CreateVM _createVM;
         private readonly ILogger _logger;
         private readonly IDeploymentProgressPresenter _presenter;
-        private CancellationTokenSource _cts;
+        private CancellationTokenSource? _cts;
         private bool _autoScrollEnabled = true;
         private bool _isScrollingProgrammatically;
-        private string _effectiveVmName;
+        private string _effectiveVmName = "";
 
         public DeployPage(WizardData wizardData, CreateVM createVM, ILoggerFactory loggerFactory, IEnumerable<IConfigurableCustomizationStep> configurableSteps, IReadOnlyDictionary<string, ICustomizationStep> allSteps)
         {
@@ -36,7 +36,7 @@ namespace VMCreate
             _presenter = new DeploymentProgressPresenter(
                 new DeploymentProgressViewModelAdapter(_viewModel),
                 new WpfDispatcher(),
-                wizardData.SelectedItem,
+                wizardData.SelectedItem!,
                 wizardData.Customizations,
                 allSteps,
                 _logger);
@@ -162,7 +162,7 @@ namespace VMCreate
             var result = _presenter.Present(info);
             if (result.IsError)
             {
-                _viewModel.ErrorMessage = info.ErrorMessage;
+                _viewModel.ErrorMessage = info.ErrorMessage ?? "Unknown error";
                 _viewModel.HasFailed = true;
                 _viewModel.IsDeploying = false;
                 BottomSpacer.Height = 0;

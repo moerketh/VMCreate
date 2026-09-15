@@ -34,7 +34,7 @@ namespace VMCreate.Gallery
 
         public string? ProgressPhaseId => (this as IDistributionOptionMetadata)?.DeployPhaseId;
 
-        public bool IsApplicable(GalleryItem item, VmCustomizations customizations)
+        public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
             => IsVisibleFor(item);
 
         public async Task ExecuteAsync(
@@ -43,8 +43,8 @@ namespace VMCreate.Gallery
         {
             logger.LogInformation("Checking Windows license status on VM {VMName}...", shell.VmName);
 
-            string licenseStatus = null;
-            string licenseStatusTrimmed = null;
+            string? licenseStatus = null;
+            string? licenseStatusTrimmed = null;
             try
             {
                 licenseStatus = await shell.RunCommandAsync(
@@ -87,7 +87,7 @@ namespace VMCreate.Gallery
                 "License not active on VM {VMName} (status={Status}). Attempting rearm...",
                 shell.VmName, licenseStatusTrimmed);
 
-            string rearmResult = null;
+            string? rearmResult = null;
             try
             {
                 rearmResult = await shell.RunCommandAsync(
@@ -139,7 +139,7 @@ namespace VMCreate.Gallery
         public int DeployOrder => 50;
         public string? DeployCompletionInfo => null;
 
-        public bool IsVisibleFor(GalleryItem item)
+        public bool IsVisibleFor(GalleryItem? item)
             => item.HasTag("flare-vm")
                || string.Equals(item?.Name, "FLARE VM", StringComparison.OrdinalIgnoreCase);
     }

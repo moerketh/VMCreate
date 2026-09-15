@@ -18,9 +18,9 @@ namespace VMCreate
 
         // Cache HTTP image results so each remote URL is only downloaded once per session.
         // Lazy<T> ensures only a single download races for each key even under concurrent bindings.
-        private static readonly ConcurrentDictionary<string, Lazy<ImageSource>> _httpImageCache = new();
+        private static readonly ConcurrentDictionary<string, Lazy<ImageSource?>> _httpImageCache = new();
 
-        public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
         {
             if (value is string uriString && !string.IsNullOrWhiteSpace(uriString))
             {
@@ -39,8 +39,8 @@ namespace VMCreate
                     return null;
                 }
 
-                string extension = Path.GetExtension(uri.LocalPath);
-                bool isSvg = extension.Equals(".svg", StringComparison.OrdinalIgnoreCase);
+                string? extension = Path.GetExtension(uri.LocalPath);
+                bool isSvg = extension?.Equals(".svg", StringComparison.OrdinalIgnoreCase) == true;
 
                 if (isSvg)
                 {
@@ -51,7 +51,7 @@ namespace VMCreate
                         OptimizePath = true
                     };
 
-                    DrawingGroup drawing = null;
+                    DrawingGroup? drawing = null;
 
                     if (uri.IsFile)
                     {
@@ -71,7 +71,7 @@ namespace VMCreate
                     {
                         var lazy = _httpImageCache.GetOrAdd(
                             uri.OriginalString,
-                            key => new Lazy<ImageSource>(() => LoadHttpSvgSync(uri)));
+                            key => new Lazy<ImageSource?>(() => LoadHttpSvgSync(uri)));
                         return lazy.Value;
                     }
 
@@ -97,7 +97,7 @@ namespace VMCreate
                     // BitmapImage(uri) silently fails for many HTTPS URLs).
                     var lazy = _httpImageCache.GetOrAdd(
                         uri.OriginalString,
-                        key => new Lazy<ImageSource>(() => LoadHttpBitmapSync(uri)));
+                        key => new Lazy<ImageSource?>(() => LoadHttpBitmapSync(uri)));
                     return lazy.Value;
                 }
                 else
@@ -115,11 +115,11 @@ namespace VMCreate
             return null;
         }
 
-        private static ImageSource LoadHttpSvgSync(Uri uri)
+        private static ImageSource? LoadHttpSvgSync(Uri uri)
         {
             try
             {
-                return Task.Run(async () =>
+                return Task.Run<ImageSource?>(async () =>
                 {
                     using var stream = await _httpClient.GetStreamAsync(uri).ConfigureAwait(false);
                     var settings = new WpfDrawingSettings
@@ -145,11 +145,11 @@ namespace VMCreate
             }
         }
 
-        private static ImageSource LoadHttpBitmapSync(Uri uri)
+        private static ImageSource? LoadHttpBitmapSync(Uri uri)
         {
             try
             {
-                return Task.Run(async () =>
+                return Task.Run<ImageSource?>(async () =>
                 {
                     var bytes = await _httpClient.GetByteArrayAsync(uri).ConfigureAwait(false);
                     using var ms = new MemoryStream(bytes);
@@ -168,7 +168,7 @@ namespace VMCreate
             }
         }
 
-        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
         {
             throw new NotImplementedException();
         }

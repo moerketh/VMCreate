@@ -23,7 +23,7 @@ namespace VMCreate.Gallery
 
         public string? ProgressPhaseId => (this as IDistributionOptionMetadata)?.DeployPhaseId;
 
-        public bool IsApplicable(GalleryItem item, VmCustomizations customizations)
+        public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
             => IsVisibleFor(item);
 
         public async Task ExecuteAsync(
@@ -76,7 +76,7 @@ namespace VMCreate.Gallery
             // ── Verify Windows Update is actually disabled ──
             string wuStartType = await shell.RunCommandAsync(
                 "(Get-Service wuauserv -ErrorAction SilentlyContinue).StartType", ct);
-            string wuStartTypeTrimmed = wuStartType?.Trim();
+            string? wuStartTypeTrimmed = wuStartType?.Trim();
             logger.LogInformation("wuauserv start type on VM {VMName}: {StartType}", shell.VmName, wuStartTypeTrimmed);
             bool wuIsDisabled = string.Equals(wuStartTypeTrimmed, "Disabled", StringComparison.OrdinalIgnoreCase)
                 || wuStartTypeTrimmed == "4";
@@ -89,7 +89,7 @@ namespace VMCreate.Gallery
 
             string wuStatus = await shell.RunCommandAsync(
                 "(Get-Service wuauserv -ErrorAction SilentlyContinue).Status", ct);
-            string wuStatusTrimmed = wuStatus?.Trim();
+            string? wuStatusTrimmed = wuStatus?.Trim();
             logger.LogInformation("wuauserv status on VM {VMName}: {Status}", shell.VmName, wuStatusTrimmed);
             bool wuIsStopped = string.Equals(wuStatusTrimmed, "Stopped", StringComparison.OrdinalIgnoreCase)
                 || wuStatusTrimmed == "1";
@@ -102,7 +102,7 @@ namespace VMCreate.Gallery
             // Also verify WaaSMedicSvc is disabled
             string medicStartType = await shell.RunCommandAsync(
                 "(Get-Service WaaSMedicSvc -ErrorAction SilentlyContinue).StartType", ct);
-            string medicStartTypeTrimmed = medicStartType?.Trim();
+            string? medicStartTypeTrimmed = medicStartType?.Trim();
             bool medicIsDisabled = string.Equals(medicStartTypeTrimmed, "Disabled", StringComparison.OrdinalIgnoreCase)
                 || medicStartTypeTrimmed == "4";
             if (!medicIsDisabled)
@@ -131,7 +131,7 @@ namespace VMCreate.Gallery
         public int DeployOrder => 40;
         public string? DeployCompletionInfo => null;
 
-        public bool IsVisibleFor(GalleryItem item)
+        public bool IsVisibleFor(GalleryItem? item)
             => item.HasTag("flare-vm")
                || string.Equals(item?.Name, "FLARE VM", StringComparison.OrdinalIgnoreCase);
     }

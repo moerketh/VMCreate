@@ -32,7 +32,7 @@ namespace VMCreate.Gallery
 
         public string? ProgressPhaseId => (this as IDistributionOptionMetadata)?.DeployPhaseId;
 
-        public bool IsApplicable(GalleryItem item, VmCustomizations customizations)
+        public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
             => IsVisibleFor(item);
 
         public async Task ExecuteAsync(
@@ -63,7 +63,7 @@ namespace VMCreate.Gallery
             // ── 1. Check if Defender service is disabled ──
             string startType = await shell.RunCommandAsync(
                 "(Get-Service WinDefend -ErrorAction SilentlyContinue).StartType", ct);
-            string startTypeTrimmed = startType?.Trim();
+            string? startTypeTrimmed = startType?.Trim();
             logger.LogInformation("WinDefend start type on VM {VMName}: {StartType}", shell.VmName, startTypeTrimmed);
             bool startTypeIsDisabled = string.Equals(startTypeTrimmed, "Disabled", StringComparison.OrdinalIgnoreCase)
                 || startTypeTrimmed == "4";
@@ -71,7 +71,7 @@ namespace VMCreate.Gallery
             // ── 2. Check if Defender is actually running ──
             string svcResult = await shell.RunCommandAsync(
                 "(Get-Service WinDefend -ErrorAction SilentlyContinue).Status", ct);
-            string svcStatusTrimmed = svcResult?.Trim();
+            string? svcStatusTrimmed = svcResult?.Trim();
             logger.LogInformation("WinDefend service status on VM {VMName}: {Status}", shell.VmName, svcStatusTrimmed);
             bool svcStatusIsStopped = string.Equals(svcStatusTrimmed, "Stopped", StringComparison.OrdinalIgnoreCase)
                 || svcStatusTrimmed == "1";
@@ -166,7 +166,7 @@ namespace VMCreate.Gallery
         {
             string startType = await shell.RunCommandAsync(
                 $"(Get-Service {serviceName} -ErrorAction SilentlyContinue).StartType", ct);
-            string startTypeTrimmed = startType?.Trim();
+            string? startTypeTrimmed = startType?.Trim();
             bool isDisabled = string.Equals(startTypeTrimmed, "Disabled", StringComparison.OrdinalIgnoreCase)
                 || startTypeTrimmed == "4";
             if (!isDisabled)
@@ -186,7 +186,7 @@ namespace VMCreate.Gallery
         {
             string ssResult = await shell.RunCommandAsync(
                 "(Get-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer' -Name 'SmartScreenEnabled' -ErrorAction SilentlyContinue).SmartScreenEnabled", ct);
-            string ssValue = ssResult?.Trim();
+            string? ssValue = ssResult?.Trim();
             logger.LogInformation("SmartScreenEnabled value on VM {VMName}: {Value}", shell.VmName, ssValue);
             bool smartScreenDisabled = string.Equals(ssValue, "Off", StringComparison.OrdinalIgnoreCase)
                 || string.IsNullOrEmpty(ssValue);
@@ -212,7 +212,7 @@ namespace VMCreate.Gallery
         public int DeployOrder => 100;
         public string? DeployCompletionInfo => null;
 
-        public bool IsVisibleFor(GalleryItem item)
+        public bool IsVisibleFor(GalleryItem? item)
             => item.HasTag("flare-vm")
                || string.Equals(item?.Name, "FLARE VM", StringComparison.OrdinalIgnoreCase);
     }

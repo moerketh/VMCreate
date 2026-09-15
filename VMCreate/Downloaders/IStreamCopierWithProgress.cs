@@ -15,7 +15,7 @@ namespace VMCreate
             Stream destination,
             long? totalBytes,
             string uri,
-            IProgress<CreateVMProgressInfo> progress,
+            IProgress<CreateVMProgressInfo>? progress,
             CancellationToken cancellationToken);
     }
 }

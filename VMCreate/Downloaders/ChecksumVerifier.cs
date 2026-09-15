@@ -22,8 +22,8 @@ namespace VMCreate
         /// </param>
         Task VerifyAsync(string filePath, string checksumUri, string algorithm,
                          CancellationToken cancellationToken,
-                         IProgress<CreateVMProgressInfo> progress,
-                         string expectedFileName = null);
+                         IProgress<CreateVMProgressInfo>? progress,
+                         string? expectedFileName = null);
 
         /// <summary>
         /// Computes the hash of the local file and verifies it matches the
@@ -31,7 +31,7 @@ namespace VMCreate
         /// </summary>
         Task VerifyInlineAsync(string filePath, string expectedHash, string algorithm,
                                CancellationToken cancellationToken,
-                               IProgress<CreateVMProgressInfo> progress);
+                               IProgress<CreateVMProgressInfo>? progress);
     }
 
     public class ChecksumVerifier : IChecksumVerifier
@@ -47,8 +47,8 @@ namespace VMCreate
 
         public async Task VerifyAsync(string filePath, string checksumUri, string algorithm,
                                       CancellationToken cancellationToken,
-                                      IProgress<CreateVMProgressInfo> progress,
-                                      string expectedFileName = null)
+                                      IProgress<CreateVMProgressInfo>? progress,
+                                      string? expectedFileName = null)
         {
             algorithm ??= "sha256";
 
@@ -131,7 +131,7 @@ namespace VMCreate
         /// file repeating one filename under several algorithms resolves to
         /// the requested one rather than the first (md5) section.
         /// </param>
-        internal static string ParseChecksum(string content, string fileName, string algorithm = "sha256")
+        internal static string? ParseChecksum(string? content, string fileName, string algorithm = "sha256")
         {
             if (string.IsNullOrWhiteSpace(content))
                 return null;
@@ -139,7 +139,7 @@ namespace VMCreate
             if (!TryGetExpectedHexLength(algorithm, out int expectedLength))
                 return null; // unknown algorithm: no line can be validated
 
-            string bareHash = null;
+            string? bareHash = null;
             int bareHashCount = 0;
 
             foreach (var rawLine in content.Split('\n'))
@@ -200,7 +200,7 @@ namespace VMCreate
 
         public async Task VerifyInlineAsync(string filePath, string expectedHash, string algorithm,
                                               CancellationToken cancellationToken,
-                                              IProgress<CreateVMProgressInfo> progress)
+                                              IProgress<CreateVMProgressInfo>? progress)
         {
             algorithm ??= "sha256";
 

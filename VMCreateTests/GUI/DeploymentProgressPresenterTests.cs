@@ -12,11 +12,10 @@ namespace VMCreate.Tests.GUI
     [TestClass]
     public sealed class DeploymentProgressPresenterTests
     {
-        private FakeViewModel _viewModel;
-        private SynchronousDispatcher _dispatcher;
-        private Mock<ILogger> _logger;
-        private DeploymentProgressPresenter _presenter;
-
+        private FakeViewModel _viewModel = null!;
+        private SynchronousDispatcher _dispatcher = null!;
+        private Mock<ILogger> _logger = null!;
+        private DeploymentProgressPresenter _presenter = null!;
         [TestInitialize]
         public void Setup()
         {
@@ -52,7 +51,6 @@ namespace VMCreate.Tests.GUI
             Assert.IsFalse(result.IsError);
             Assert.IsNull(result.ScrollToId);
         }
-
         [TestMethod]
         public void Present_ErrorMessage_MarksErrorAndFailsActive()
         {
@@ -142,7 +140,7 @@ namespace VMCreate.Tests.GUI
             _presenter.Present(new CreateVMProgressInfo { Phase = VmDeploymentPhase.Download, ProgressPercentage = 42, DownloadSpeed = 1.5 });
 
             Assert.AreEqual(42, _viewModel.Progress[DeployPageViewModel.PhaseDownload].Percentage);
-            StringAssert.Contains(_viewModel.Progress[DeployPageViewModel.PhaseDownload].Text, "MB/s");
+            StringAssert.Contains(_viewModel.Progress[DeployPageViewModel.PhaseDownload].Text ?? "", "MB/s");
         }
 
         [TestMethod]
@@ -254,11 +252,11 @@ namespace VMCreate.Tests.GUI
 
         private sealed class FakeViewModel : IDeploymentProgressViewModel
         {
-            public string VmName { get; set; }
+            public string VmName { get; set; } = "";
             public List<string> ActivePhases { get; } = new();
             public List<string> CompletedPhases { get; } = new();
             public Dictionary<string, string> FailedPhases { get; } = new();
-            public Dictionary<string, (int Percentage, string Text)> Progress { get; } = new();
+            public Dictionary<string, (int Percentage, string? Text)> Progress { get; } = new();
 
             public bool DownloadCloningIsoPhaseInserted { get; set; }
             public bool PostBootPhaseInserted { get; set; }
@@ -295,7 +293,7 @@ namespace VMCreate.Tests.GUI
 
             public void FailPhase(string id, string message) => FailedPhases[id] = message;
 
-            public void UpdatePhaseProgress(string id, int percentage, string progressText) => Progress[id] = (percentage, progressText);
+            public void UpdatePhaseProgress(string id, int percentage, string? progressText) => Progress[id] = (percentage, progressText);
         }
 
         private sealed class SynchronousDispatcher : IDispatcher

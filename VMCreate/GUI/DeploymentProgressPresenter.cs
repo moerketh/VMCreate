@@ -29,7 +29,7 @@ namespace VMCreate
         /// Returns the phase/sub-step IDs that were activated (if any) so the view
         /// can scroll to them.
         /// </summary>
-        ProgressPresentationResult Present(CreateVMProgressInfo info);
+        ProgressPresentationResult Present(CreateVMProgressInfo? info);
 
         /// <summary>
         /// Completes the currently active phase and any active sub-step.
@@ -89,7 +89,7 @@ namespace VMCreate
         public string? ActivePhaseId { get; private set; }
         public string? ActiveSubStepId { get; private set; }
 
-        public ProgressPresentationResult Present(CreateVMProgressInfo info)
+        public ProgressPresentationResult Present(CreateVMProgressInfo? info)
         {
             if (info == null) return new ProgressPresentationResult();
 

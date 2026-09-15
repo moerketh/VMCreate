@@ -20,9 +20,9 @@ namespace VMCreate.Gallery.distributions
 
         public string? ProgressPhaseId => (this as IDistributionOptionMetadata)?.DeployPhaseId;
 
-        public bool IsApplicable(GalleryItem item, VmCustomizations customizations)
+        public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
             => IsVisibleFor(item)
-               && customizations.DistributionOptions.Any(o => string.Equals(o.Name, Name, StringComparison.OrdinalIgnoreCase) && o.IsEnabled);
+               && customizations?.DistributionOptions.Any(o => string.Equals(o.Name, Name, StringComparison.OrdinalIgnoreCase) && o.IsEnabled) == true;
 
         public async Task ExecuteAsync(
             IGuestShell shell, GalleryItem item, VmCustomizations customizations,
@@ -91,8 +91,7 @@ namespace VMCreate.Gallery.distributions
         public int DeployOrder => 100;
         public string? DeployCompletionInfo => null;
 
-        public bool IsVisibleFor(GalleryItem item)
+        public bool IsVisibleFor(GalleryItem? item)
             => item.HasTag("pwncloudos")
-               || string.Equals(item?.Name, "PwnCloudOS", StringComparison.OrdinalIgnoreCase);
-    }
+               || string.Equals(item?.Name, "PwnCloudOS", StringComparison.OrdinalIgnoreCase);    }
 }

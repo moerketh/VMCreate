@@ -250,11 +250,13 @@ namespace VMCreate.HyperV.VmCreation
             }
         }
 
-        private IEnumerable<ICustomizationStep> GetPostBootSteps(GalleryItem item, VmCustomizations customizations)
+        private IEnumerable<ICustomizationStep?> GetPostBootSteps(GalleryItem item, VmCustomizations customizations)
         {
+            // The single null element is intentional: it signals the deploy pipeline
+            // that a post-boot phase exists without pinning a concrete step here.
             return _postBootService.HasLinuxPostBootSteps(item, customizations)
-                ? new[] { (ICustomizationStep)null }
-                : Array.Empty<ICustomizationStep>();
+                ? new ICustomizationStep?[] { null }
+                : Array.Empty<ICustomizationStep?>();
         }
     }
 }

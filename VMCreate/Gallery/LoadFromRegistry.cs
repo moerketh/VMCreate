@@ -25,8 +25,8 @@ namespace VMCreate.Gallery
             try
             {
                 string registryPath = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Virtualization";
-                string[] locations = null;
-                using (RegistryKey key = Registry.LocalMachine.OpenSubKey(registryPath))
+                string[]? locations = null;
+                using (RegistryKey? key = Registry.LocalMachine.OpenSubKey(registryPath))
                 {
                     if (key != null)
                     {

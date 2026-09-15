@@ -14,10 +14,10 @@ namespace VMCreate.Tests.HyperV.VmCreation
     [TestClass]
     public class PostBootCustomizationServiceTests
     {
-        private Mock<ILogger<PostBootCustomizationService>> _loggerMock;
-        private Mock<ILogger> _stepLoggerMock;
-        private Mock<IGuestShell> _shellMock;
-        private Mock<IProgress<CreateVMProgressInfo>> _progressMock;
+        private Mock<ILogger<PostBootCustomizationService>> _loggerMock = null!;
+        private Mock<ILogger> _stepLoggerMock = null!;
+        private Mock<IGuestShell> _shellMock = null!;
+        private Mock<IProgress<CreateVMProgressInfo>> _progressMock = null!;
 
         [TestInitialize]
         public void Setup()
@@ -178,7 +178,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
             stepA.Setup(s => s.Phase).Returns(CustomizationPhase.PostBoot);
             stepA.Setup(s => s.Platform).Returns(StepPlatform.Linux);
             stepA.Setup(s => s.Order).Returns(100);
-            stepA.Setup(s => s.ProgressPhaseId).Returns((string)null);
+            stepA.Setup(s => s.ProgressPhaseId).Returns((string?)null);
             stepA.Setup(s => s.IsApplicable(It.IsAny<GalleryItem>(), It.IsAny<VmCustomizations>()))
                 .Returns((GalleryItem _, VmCustomizations c) => c.RdpBackend == RdpBackend.Auto);
             stepA.Setup(s => s.ExecuteAsync(
@@ -192,7 +192,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
             stepB.Setup(s => s.Phase).Returns(CustomizationPhase.PostBoot);
             stepB.Setup(s => s.Platform).Returns(StepPlatform.Linux);
             stepB.Setup(s => s.Order).Returns(200);
-            stepB.Setup(s => s.ProgressPhaseId).Returns((string)null);
+            stepB.Setup(s => s.ProgressPhaseId).Returns((string?)null);
             stepB.Setup(s => s.IsApplicable(It.IsAny<GalleryItem>(), It.IsAny<VmCustomizations>()))
                 .Returns((GalleryItem _, VmCustomizations c) => c.RdpBackend == RdpBackend.Auto);
             stepB.Setup(s => s.ExecuteAsync(
@@ -310,7 +310,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
             mock.Setup(s => s.Phase).Returns(phase);
             mock.Setup(s => s.Platform).Returns(platform);
             mock.Setup(s => s.Order).Returns(order);
-            mock.Setup(s => s.ProgressPhaseId).Returns((string)null);
+            mock.Setup(s => s.ProgressPhaseId).Returns((string?)null);
             mock.Setup(s => s.IsApplicable(It.IsAny<GalleryItem>(), It.IsAny<VmCustomizations>()))
                 .Returns(true);
             mock.Setup(s => s.ExecuteAsync(

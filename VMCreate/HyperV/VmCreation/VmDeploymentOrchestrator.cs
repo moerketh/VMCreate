@@ -44,7 +44,7 @@ namespace VMCreate.HyperV.VmCreation
             VmCustomizations customizations,
             GalleryItem galleryItem,
             CancellationToken cancellationToken,
-            IProgress<CreateVMProgressInfo> progress,
+            IProgress<CreateVMProgressInfo>? progress,
             string sourceFile)
         {
             if (plan == null) throw new ArgumentNullException(nameof(plan));
@@ -75,7 +75,6 @@ namespace VMCreate.HyperV.VmCreation
                 cancellationToken.ThrowIfCancellationRequested();
 
                 IProgress<CreateVMProgressInfo> effectiveProgress = progress ?? new Progress<CreateVMProgressInfo>(_ => { });
-
                 IMediaHandler mediaHandler = _mediaHandlerFactory.CreateHandler(DiskFileDetector.DetectFileType(sourceFileOrUri));
                 DiskImageFormat actualFileType = mediaHandler.FileType;
 

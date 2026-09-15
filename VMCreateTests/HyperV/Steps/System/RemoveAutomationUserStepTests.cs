@@ -10,10 +10,9 @@ namespace VMCreate.Tests.HyperV.Steps
     [TestClass]
     public class RemoveAutomationUserStepTests
     {
-        private Mock<IGuestShell> _shellMock;
-        private Mock<ILogger> _loggerMock;
-        private RemoveAutomationUserStep _step;
-
+        private Mock<IGuestShell> _shellMock = null!;
+        private Mock<ILogger> _loggerMock = null!;
+        private RemoveAutomationUserStep _step = null!;
         [TestInitialize]
         public void Setup()
         {
@@ -42,7 +41,7 @@ namespace VMCreate.Tests.HyperV.Steps
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync("EXISTS\n");
 
-            string cleanupCommand = null;
+            string? cleanupCommand = null;
             _shellMock
                 .Setup(s => s.RunCommandAsync(
                     It.Is<string>(cmd => cmd.Contains("vmcreate-cleanup.service")),

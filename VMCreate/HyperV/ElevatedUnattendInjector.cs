@@ -47,7 +47,7 @@ namespace VMCreate
                 Arguments = $"--inject-unattend \"{vhdxPath}\""
             };
 
-            Process process;
+            Process? process;
             try
             {
                 process = Process.Start(psi);

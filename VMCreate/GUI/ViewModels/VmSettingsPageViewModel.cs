@@ -14,23 +14,23 @@ namespace VMCreate
         private readonly WizardData _wizardData;
         private readonly ILogger _logger;
 
-        private string _vmName;
+        private string _vmName = "";
         private int _memoryMB = 4096;
         private int _cpuCount = 2;
         private bool _virtualizationEnabled = true;
         private bool _replacePreviousVm;
-        private string _newDriveSizeText;
-        private string _validationError;
+        private string _newDriveSizeText = "";
+        private string? _validationError;
         private bool _autoDetectDiskSize;
 
         /// <summary>Raised when the wizard should complete (e.g. Cancel).</summary>
-        public event Action<WizardResult> RequestWizardComplete;
+        public event Action<WizardResult>? RequestWizardComplete;
 
         /// <summary>Raised when the user clicks Next and validation passes.</summary>
-        public event Action RequestNavigateNext;
+        public event Action? RequestNavigateNext;
 
         /// <summary>Raised when the user clicks Back.</summary>
-        public event Action RequestNavigateBack;
+        public event Action? RequestNavigateBack;
 
         public VmSettingsPageViewModel(WizardData wizardData, ILogger logger)
         {
@@ -46,7 +46,7 @@ namespace VMCreate
             CancelCommand = new RelayCommand(() => RequestWizardComplete?.Invoke(WizardResult.Canceled));
         }
 
-        public GalleryItem SelectedItem => _wizardData.SelectedItem;
+        public GalleryItem? SelectedItem => _wizardData.SelectedItem;
 
         public string VmName
         {
@@ -140,7 +140,7 @@ namespace VMCreate
         private DiskImageFormat DetectFormat()
             => DiskFileDetector.DetectFileType(_wizardData.SelectedItem?.DiskUri);
 
-        public string ValidationError
+        public string? ValidationError
         {
             get => _validationError;
             private set
@@ -207,7 +207,7 @@ namespace VMCreate
             _wizardData.Settings.CPUCount = _cpuCount;
             _wizardData.Settings.VirtualizationEnabled = _virtualizationEnabled;
             _wizardData.Settings.ReplacePreviousVm = _replacePreviousVm;
-            _wizardData.Settings.EnhancedSessionTransportType = _wizardData.SelectedItem.EnhancedSessionTransportType;
+            _wizardData.Settings.EnhancedSessionTransportType = _wizardData.SelectedItem?.EnhancedSessionTransportType;
 
             ValidationError = null;
 

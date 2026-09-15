@@ -19,12 +19,11 @@ namespace VMCreate.Tests.HyperV.Steps
     [TestClass]
     public sealed class InstallXrdpPostBootStepTests
     {
-        private InstallXrdpPostBootStep _step;
-        private Mock<IGuestShell> _shell;
-        private Mock<ILogger<InstallXrdpPostBootStep>> _logger;
-        private GalleryItem _item;
-        private VmCustomizations _xrdpCustomizations;
-
+        private InstallXrdpPostBootStep _step = null!;
+        private Mock<IGuestShell> _shell = null!;
+        private Mock<ILogger<InstallXrdpPostBootStep>> _logger = null!;
+        private GalleryItem _item = null!;
+        private VmCustomizations _xrdpCustomizations = null!;
         [TestInitialize]
         public void Setup()
         {

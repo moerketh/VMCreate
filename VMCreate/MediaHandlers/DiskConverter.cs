@@ -70,7 +70,7 @@ namespace VMCreate
             // The converted VHDX can be up to ~1.5× the source size; use that as a safety margin.
             var sourceSize = new FileInfo(sourcePath).Length;
             long requiredBytes = (long)(sourceSize * 1.5);
-            string destRoot = Path.GetPathRoot(destinationPath);
+            string? destRoot = Path.GetPathRoot(destinationPath);
             if (!string.IsNullOrEmpty(destRoot))
             {
                 var driveInfo = new DriveInfo(destRoot);
@@ -99,7 +99,7 @@ namespace VMCreate
                     UseShellExecute = false,
                     CreateNoWindow = true
                 };
-                using var vProc = Process.Start(versionInfo);
+                using var vProc = Process.Start(versionInfo)!;
                 var versionLine = await Task.Run(() => vProc.StandardOutput.ReadLine());
                 vProc.WaitForExit();
                 _logger.LogInformation("Using {QemuVersion}", versionLine);
@@ -279,7 +279,7 @@ namespace VMCreate
                 CreateNoWindow = true
             };
 
-            using var process = Process.Start(processInfo);
+            using var process = Process.Start(processInfo)!;
             string output = await Task.Run(() => process.StandardOutput.ReadToEnd());
             string error = await Task.Run(() => process.StandardError.ReadToEnd());
             await Task.Run(() => process.WaitForExit());

@@ -17,15 +17,15 @@ namespace VMCreate
         public int Order => 100;
         public string? ProgressPhaseId => "Sub_SyncTimezone";
 
-        public bool IsApplicable(GalleryItem item, VmCustomizations customizations)
-            => customizations.SyncTimezone;
+        public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
+            => customizations?.SyncTimezone == true;
 
         public async Task ExecuteAsync(IGuestShell shell, GalleryItem item, VmCustomizations customizations, ILogger logger, CancellationToken ct)
         {
             var localTz = TimeZoneInfo.Local;
             string ianaId;
 
-            if (TimeZoneInfo.TryConvertWindowsIdToIanaId(localTz.Id, out string converted))
+            if (TimeZoneInfo.TryConvertWindowsIdToIanaId(localTz.Id, out string? converted) && converted != null)
             {
                 ianaId = converted;
             }

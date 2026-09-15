@@ -6,16 +6,20 @@ namespace VMCreate
 {
     public class GalleryItem
     {
-        public string Name { get; set; }
-        public string Publisher { get; set; }
-        public string Description { get; set; }
-        public string ThumbnailUri { get; set; }
-        public string DiskUri { get; set; }
-        public string SymbolUri { get; set; }
-        public string SecureBoot { get; set; }
-        public string EnhancedSessionTransportType { get; set; }
-        public string Version { get; set; }
-        public string LastUpdated { get; set; }
+        // JSON-deserialized DTO (gallery.json + loader-parsed items). Fields may
+        // be absent from source JSON; downstream code guards with IsNullOrEmpty.
+        // null! is the documented System.Text.Json DTO pattern — the deserializer
+        // is trusted to populate, and no runtime behavior changes.
+        public string Name { get; set; } = null!;
+        public string Publisher { get; set; } = null!;
+        public string Description { get; set; } = null!;
+        public string? ThumbnailUri { get; set; }
+        public string DiskUri { get; set; } = null!;
+        public string? SymbolUri { get; set; }
+        public string SecureBoot { get; set; } = null!;
+        public string EnhancedSessionTransportType { get; set; } = null!;
+        public string Version { get; set; } = null!;
+        public string? LastUpdated { get; set; }
 
         /// <summary>
         /// Infers the download type from <see cref="DiskUri"/>.
@@ -72,8 +76,8 @@ namespace VMCreate
             return Path.GetFileName(uri);
         }
 
-        public string InitialUsername { get; set; }
-        public string InitialPassword { get; set; }
+        public string? InitialUsername { get; set; }
+        public string? InitialPassword { get; set; }
 
         /// <summary>
         /// Hint identifying the Linux distribution family of this gallery item.
@@ -91,22 +95,22 @@ namespace VMCreate
         /// (<c>SHA256 (filename) = hash</c>), and bare hash (single-line) files.
         /// When set, the downloaded file is verified before extraction.
         /// </summary>
-        public string ChecksumUri { get; set; }
+        public string? ChecksumUri { get; set; }
 
         /// <summary>
         /// Inline expected hash of the downloaded file.
         /// Use this instead of <see cref="ChecksumUri"/> when the hash is known at compile time.
         /// </summary>
-        public string Checksum { get; set; }
+        public string? Checksum { get; set; }
 
         /// <summary>
         /// Hash algorithm used for verification: "sha256" (default) or "sha512".
         /// Applies to both <see cref="ChecksumUri"/> and <see cref="Checksum"/>.
         /// </summary>
-        public string ChecksumAlgorithm { get; set; }
+        public string ChecksumAlgorithm { get; set; } = "sha256";
 
         /// <summary>Category label, e.g. "Security" or "General". Defaults to null (treated as General).</summary>
-        public string Category { get; set; }
+        public string? Category { get; set; }
 
         /// <summary>When true, this item is surfaced at the very top of the list as officially recommended.</summary>
         public bool IsRecommended { get; set; }
@@ -167,7 +171,7 @@ namespace VMCreate
         /// Defaults to "MicrosoftUEFICertificateAuthority" (Linux-friendly).
         /// Set to "MicrosoftWindows" for Windows VMs.
         /// </summary>
-        public string SecureBootTemplate { get; set; }
+        public string SecureBootTemplate { get; set; } = "MicrosoftUEFICertificateAuthority";
 
         /// <summary>
         /// Optional tags that describe the distribution's role or family (e.g. "flare-vm", "pwncloudos").

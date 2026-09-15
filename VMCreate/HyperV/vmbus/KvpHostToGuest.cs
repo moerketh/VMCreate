@@ -17,10 +17,10 @@ namespace CreateVM.HyperV.vmbus
         /// <param name="cancellationToken"></param>
         /// <returns></returns>
         /// <exception cref="Exception"></exception>
-        public async Task SendKVPToGuestAsync(string vmName, string key, string value, CancellationToken cancellationToken = default)
+        public async Task SendKVPToGuestAsync(string vmName, string key, string? value, CancellationToken cancellationToken = default)
         {
             // Poll for VM to be running and get GUID
-            string vmGuid = await WaitForVMRunningAsync(vmName, cancellationToken);
+            string? vmGuid = await WaitForVMRunningAsync(vmName, cancellationToken);
             if (string.IsNullOrEmpty(vmGuid))
             {
                 throw new Exception($"VM '{vmName}' did not start within the timeout or is not running.");
@@ -29,20 +29,18 @@ namespace CreateVM.HyperV.vmbus
             ManagementScope scope = new ManagementScope(@"root\virtualization\v2");
             // Get the virtual system management service
             ManagementPath servicePath = new ManagementPath("Msvm_VirtualSystemManagementService");
-            using (ManagementClass serviceClass = new ManagementClass(scope, servicePath, null))
-            {
-                using (ManagementObject service = serviceClass.GetInstances().Cast<ManagementObject>().First())
-                {
+            using (ManagementClass serviceClass = new ManagementClass(scope, servicePath, null!))            {
+                using (ManagementObject service = serviceClass.GetInstances().Cast<ManagementObject>().First())                {
                     // Get the VM's ComputerSystem object
                     ObjectQuery vmQuery = new ObjectQuery($"SELECT * FROM Msvm_ComputerSystem WHERE Name = '{vmGuid}'");
                     using (ManagementObjectSearcher vmSearcher = new ManagementObjectSearcher(scope, vmQuery))
                     {
-                        ManagementObject vm = vmSearcher.Get().Cast<ManagementObject>().FirstOrDefault();
+                        ManagementObject? vm = vmSearcher.Get().Cast<ManagementObject>().FirstOrDefault();
                         if (vm == null)
                         {
                             throw new Exception("VM ComputerSystem not found.");
                         }
-                        string target = vm.Path.Path;
+                        string? target = vm.Path?.Path;
 
                         const int maxRetries = 5;
                         const int retryDelayMs = 5000; // 5 seconds
@@ -74,16 +72,16 @@ namespace CreateVM.HyperV.vmbus
 
                                         // Prepare parameters for AddKvpItems
                                         ManagementBaseObject inParams = service.GetMethodParameters("AddKvpItems");
-                                        inParams["TargetSystem"] = target;
+                                        inParams["TargetSystem"] = target!;
                                         inParams["DataItems"] = dataItems;
 
                                         // Invoke the method
                                         ManagementBaseObject outParams = service.InvokeMethod("AddKvpItems", inParams, null);
-                                        uint returnValue = (uint)outParams["ReturnValue"];
+                                        uint returnValue = (uint)outParams["ReturnValue"]!;
 
                                         if (returnValue == 4096) // Job started (async)
                                         {
-                                            string jobPath = (string)outParams["Job"];
+                                            string? jobPath = (string?)outParams["Job"];
                                             if (string.IsNullOrEmpty(jobPath))
                                             {
                                                 throw new Exception("Job started but Job path is null or empty.");

@@ -49,7 +49,7 @@ namespace VMCreate
         public int Order => 232;
         public string? ProgressPhaseId => "Sub_AutoRdpResolve";
 
-        public bool IsApplicable(GalleryItem item, VmCustomizations customizations)
+        public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
             => customizations?.RdpBackend == RdpBackend.Auto;
 
         public async Task ExecuteAsync(IGuestShell shell, GalleryItem item, VmCustomizations customizations, ILogger logger, CancellationToken ct)

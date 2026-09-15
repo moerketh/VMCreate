@@ -12,10 +12,10 @@ namespace VMCreate
         public VmDeploymentResult(
             string vmName,
             bool success,
-            string vmPath = null,
-            string vhdxPath = null,
-            string errorMessage = null,
-            string deploymentLog = null)
+            string? vmPath = null,
+            string? vhdxPath = null,
+            string? errorMessage = null,
+            string? deploymentLog = null)
         {
             VmName = vmName ?? throw new ArgumentNullException(nameof(vmName));
             Success = success;
@@ -38,21 +38,21 @@ namespace VMCreate
         /// <summary>
         /// Directory containing the VM configuration files, or null if unavailable.
         /// </summary>
-        public string VmPath { get; }
+        public string? VmPath { get; }
 
         /// <summary>
         /// Path to the primary VHDX attached to the VM, or null if unavailable.
         /// </summary>
-        public string VhdxPath { get; }
+        public string? VhdxPath { get; }
 
         /// <summary>
         /// Human-readable error message when <see cref="Success"/> is false.
         /// </summary>
-        public string ErrorMessage { get; }
+        public string? ErrorMessage { get; }
 
         /// <summary>
         /// Structured deployment log captured during the deployment, or null if unavailable.
         /// </summary>
-        public string DeploymentLog { get; }
+        public string? DeploymentLog { get; }
     }
 }

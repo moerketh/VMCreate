@@ -19,13 +19,14 @@ namespace VMCreate
     {
         private readonly ILogger _logger;
         private readonly string _privateKeyPath;
-        private string _vmIpAddress;
+        // Discovered lazily by WaitForReadyAsync; null until the VM's IP is known.
+        private string? _vmIpAddress;
 
         // Host-key TOFU pinning: per-VM known_hosts path (see
         // ResetHostKeyPinning). Written by ssh itself on first connect
         // (accept-new); every subsequent exec in this deployment then
         // verifies against the recorded key and hard-fails on a mismatch.
-        private string _hostKeyKnownHostsPath;
+        private string? _hostKeyKnownHostsPath;
 
         private const string AutomationUser = "vmcreate";
         // 2026-08-29: 180s proved too tight for the FIRST boot of a freshly
@@ -100,7 +101,7 @@ namespace VMCreate
             ResetHostKeyPinning();
 
             var deadline = DateTime.UtcNow + ReadyTimeout;
-            Exception lastError = null;
+            Exception? lastError = null;
 
             while (DateTime.UtcNow < deadline)
             {
@@ -120,7 +121,7 @@ namespace VMCreate
 
                 try
                 {
-                    string result = await RunCommandInternalAsync("echo 'ssh-ready'", TimeSpan.FromSeconds(15), ct);
+                    string? result = await RunCommandInternalAsync("echo 'ssh-ready'", TimeSpan.FromSeconds(15), ct);
                     if (result != null && result.Contains("ssh-ready"))
                     {
                         _logger.LogInformation("SSH is ready on VM {VMName} ({IP})", VmName, _vmIpAddress);
@@ -313,12 +314,12 @@ namespace VMCreate
 
         /// <summary>Delegates to the shared transport (adapter ordering matters:
         /// post-boot SSH rides the temporary NIC, so 'VMCreate Temp' wins).</summary>
-        private async Task<string> DiscoverVmIpAsync(CancellationToken ct)
+        private async Task<string?> DiscoverVmIpAsync(CancellationToken ct)
             => await SshTransport.DiscoverVmIpAsync(VmName, ct, preferVmCreateTempAdapter: true);
 
         private async Task<string> RunWithRetryAsync(string linuxCommand, TimeSpan timeout, CancellationToken ct)
         {
-            Exception lastEx = null;
+            Exception? lastEx = null;
             for (int attempt = 1; attempt <= MaxRetries; attempt++)
             {
                 try
@@ -372,7 +373,7 @@ namespace VMCreate
             // later exec sees a different key (e.g. another VM took over
             // the IP address mid-deployment).
             return await SshTransport.ExecuteAsync(
-                _logger, VmName, _privateKeyPath, _vmIpAddress, AutomationUser,
+                _logger, VmName, _privateKeyPath, _vmIpAddress!, AutomationUser,
                 _hostKeyKnownHostsPath, linuxCommand, timeout, ct, maxArgumentLength: MaxCommandLength);
         }
     }

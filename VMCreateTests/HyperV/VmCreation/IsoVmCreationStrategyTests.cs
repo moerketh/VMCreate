@@ -14,19 +14,20 @@ namespace VMCreate.Tests.HyperV.VmCreation
     [TestClass]
     public sealed class IsoVmCreationStrategyTests
     {
-        private Mock<IVmLifecycleManager> _lifecycleManager;
-        private Mock<IVmDiskManager> _diskManager;
-        private Mock<IVmBootManager> _bootManager;
-        private Mock<IVmNetworkManager> _networkManager;
-        private Mock<IVmConfigManager> _configManager;
-        private Mock<IGuestShellFactory> _guestShellFactory;
-        private Mock<IPostBootCustomizationService> _postBootService;
-        private IsoVmCreationStrategy _strategy;
-        private VmSettings _vmSettings;
-        private VmDeploymentPlan _plan;
-        private VmCustomizations _customizations;
-        private GalleryItem _item;
-        private string _isoPath;
+        // Fixture fields — assigned in [TestInitialize] Setup() before every test.
+        private Mock<IVmLifecycleManager> _lifecycleManager = null!;
+        private Mock<IVmDiskManager> _diskManager = null!;
+        private Mock<IVmBootManager> _bootManager = null!;
+        private Mock<IVmNetworkManager> _networkManager = null!;
+        private Mock<IVmConfigManager> _configManager = null!;
+        private Mock<IGuestShellFactory> _guestShellFactory = null!;
+        private Mock<IPostBootCustomizationService> _postBootService = null!;
+        private IsoVmCreationStrategy _strategy = null!;
+        private VmSettings _vmSettings = null!;
+        private VmDeploymentPlan _plan = null!;
+        private VmCustomizations _customizations = null!;
+        private GalleryItem _item = null!;
+        private string _isoPath = null!;
 
         [TestInitialize]
         public void Setup()

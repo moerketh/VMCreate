@@ -130,11 +130,11 @@ namespace VMCreate
 
         private static (long AvailableFreeSpace, string DriveName) GetAvailableFreeSpaceDefault(string path)
         {
-            var driveInfo = new DriveInfo(Path.GetPathRoot(path));
+            var driveInfo = new DriveInfo(Path.GetPathRoot(path) ?? path);
             return (driveInfo.AvailableFreeSpace, driveInfo.Name);
         }
 
-        public void Extract(string filePath, string extractPath, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo> progressReportInfo)
+        public void Extract(string filePath, string extractPath, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo>? progressReportInfo)
         {
             try
             {
@@ -213,7 +213,7 @@ namespace VMCreate
                             continue;
                         }
 
-                        string entryName = entry.Key;
+                        string? entryName = entry.Key;
                         string destinationPath;
 
                         if (entryName == null)
@@ -230,7 +230,7 @@ namespace VMCreate
                         }
 
                         // Ensure parent directory exists (in case directory entries were missing)
-                        string parentDir = Path.GetDirectoryName(destinationPath);
+                        string? parentDir = Path.GetDirectoryName(destinationPath);
                         if (!string.IsNullOrEmpty(parentDir))
                         {
                             Directory.CreateDirectory(parentDir);
@@ -260,7 +260,7 @@ namespace VMCreate
                                         lastReportedPercentage = overallPct;
                                         lastReportTimeTicks = now;
 
-                                        progressReportInfo.Report(new CreateVMProgressInfo
+                                        progressReportInfo?.Report(new CreateVMProgressInfo
                                         {
                                             Phase = VmDeploymentPhase.Extract,
                                             URI = destinationPath,
@@ -291,7 +291,7 @@ namespace VMCreate
                     }
 
                     // Report 100% on completion
-                    progressReportInfo.Report(new CreateVMProgressInfo
+                    progressReportInfo?.Report(new CreateVMProgressInfo
                     {
                         Phase = VmDeploymentPhase.Extract,
                         URI = extractPath,

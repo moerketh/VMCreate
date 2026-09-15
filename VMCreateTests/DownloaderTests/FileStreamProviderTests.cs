@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging;
 using Moq;
 
 namespace VMCreate.Tests
@@ -6,9 +6,8 @@ namespace VMCreate.Tests
     [TestClass]
     public class FileStreamProviderTests
     {
-        private Mock<ILogger<FileStreamProvider>> _mockLogger;
-        private FileStreamProvider _provider;
-
+        private Mock<ILogger<FileStreamProvider>> _mockLogger = null!;
+        private FileStreamProvider _provider = null!;
         [TestInitialize]
         public void Setup()
         {
@@ -33,9 +32,9 @@ namespace VMCreate.Tests
                 _mockLogger.Verify(l => l.Log(
                     LogLevel.Information,
                     It.IsAny<EventId>(),
-                    It.Is<It.IsAnyType>((v, t) => v.ToString().Contains("Using cached file")),
-                    null,
-                    It.IsAny<Func<It.IsAnyType, Exception, string>>()), Times.Once);
+                    It.Is<It.IsAnyType>((v, t) => string.Concat(v).Contains("Using cached file")),
+                    (Exception?)null,
+                    It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
             }
             finally
             {

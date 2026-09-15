@@ -9,9 +9,8 @@ namespace VMCreate.Tests.GalleryTests
     [TestClass]
     public sealed class GalleryItemsParserTests
     {
-        private Mock<ILogger<GalleryItemsParser>> _mockLogger;
-        private Mock<IHttpClientFactory> _mockClientFactory;
-
+        private Mock<ILogger<GalleryItemsParser>> _mockLogger = null!;
+        private Mock<IHttpClientFactory> _mockClientFactory = null!;
         [TestInitialize]
         public void Setup()
         {
@@ -21,7 +20,7 @@ namespace VMCreate.Tests.GalleryTests
 
         // ── Helpers ──────────────────────────────────────────────────────────────
 
-        private GalleryItemsParser MakeParser(string httpResponseBody = null)
+        private GalleryItemsParser MakeParser(string? httpResponseBody = null)
         {
             if (httpResponseBody is not null)
             {
@@ -441,7 +440,9 @@ namespace VMCreate.Tests.GalleryTests
         [TestMethod]
         public void FileType_NullDiskUri_ReturnsUnknown()
         {
-            var item = new GalleryItem { DiskUri = null };
+            // DiskUri is required by contract; the defensive FileType getter
+            // must still answer "Unknown" rather than throw on a gap.
+            var item = new GalleryItem { DiskUri = null! };
             Assert.AreEqual("Unknown", item.FileType);
         }
 

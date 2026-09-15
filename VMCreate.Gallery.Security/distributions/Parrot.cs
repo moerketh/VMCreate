@@ -100,7 +100,7 @@ namespace VMCreate.Gallery
         /// version directory (e.g. "https://deb.parrot.sh/parrot/iso/7.2/").
         /// Returns null if the version cannot be determined.
         /// </summary>
-        private async Task<string> DiscoverLatestVersionAsync(HttpClient client, CancellationToken cancellationToken)
+        private async Task<string?> DiscoverLatestVersionAsync(HttpClient client, CancellationToken cancellationToken)
         {
             try
             {
@@ -120,7 +120,7 @@ namespace VMCreate.Gallery
                 var versions = versionMatches
                     .Cast<Match>()
                     .Select(m => m.Groups[1].Value)
-                    .Select(v => Version.TryParse(v, out var parsed) ? (Raw: v, Parsed: parsed) : (Raw: v, Parsed: (Version)null))
+                    .Select(v => Version.TryParse(v, out var parsed) ? (Raw: v, Parsed: parsed) : (Raw: v, Parsed: (Version?)null))
                     .Where(t => t.Parsed != null)
                     .OrderByDescending(t => t.Parsed)
                     .ToList();

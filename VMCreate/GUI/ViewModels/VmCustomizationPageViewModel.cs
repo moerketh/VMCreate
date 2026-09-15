@@ -14,9 +14,9 @@ namespace VMCreate
     /// </summary>
     public class VpnKeyStatusItem
     {
-        public string StatusIcon { get; set; }
-        public string Name { get; set; }
-        public string StatusText { get; set; }
+        public string StatusIcon { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string StatusText { get; set; } = "";
     }
 
     /// <summary>
@@ -30,21 +30,21 @@ namespace VMCreate
         private readonly IHtbApiClient _htbApiClient;
         private readonly List<HtbVpnKey> _downloadedKeys = new();
         private RdpBackend _selectedRdpBackend = RdpBackend.Auto;
-        private string _htbApiToken;
+        private string _htbApiToken = "";
         private bool _isDownloading;
-        private string _ovpnFilePath;
+        private string _ovpnFilePath = "";
         private bool _syncTimezone;
         private bool _useCustomSshKey;
-        private string _customSshPublicKeyPath;
+        private string _customSshPublicKeyPath = "";
         private bool _enableIntegrationServices = true;
         private bool _isCustomDns;
-        private string _customNameservers;
+        private string _customNameservers = "";
 
         /// <summary>Raised when the wizard should complete (Finished or Canceled).</summary>
-        public event Action<WizardResult> RequestWizardComplete;
+        public event Action<WizardResult>? RequestWizardComplete;
 
         /// <summary>Raised when the user clicks Back.</summary>
-        public event Action RequestNavigateBack;
+        public event Action? RequestNavigateBack;
 
         public VmCustomizationPageViewModel(
             WizardData wizardData, IHtbApiClient htbApiClient, ILogger logger,
@@ -72,7 +72,7 @@ namespace VMCreate
             BrowseSshKeyCommand = new RelayCommand(OnBrowseSshKey);
         }
 
-        public GalleryItem SelectedItem => _wizardData.SelectedItem;
+        public GalleryItem? SelectedItem => _wizardData.SelectedItem;
 
         /// <summary>
         /// The RDP server backend selected by the user: Auto (default,
@@ -119,7 +119,7 @@ namespace VMCreate
         /// distros. Evaluated from the
         /// <see cref="GalleryItem.LinuxDistro"/> metadata hint (no live shell yet).
         /// </summary>
-        public bool LamcoOptionVisible => SelectedItem.SupportsLamco();
+        public bool LamcoOptionVisible => SelectedItem?.SupportsLamco() ?? false;
 
         // Legacy binding kept for any XAML still referencing ConfigureXrdp.
         public bool ConfigureXrdp
@@ -306,7 +306,7 @@ namespace VMCreate
                 VpnKeyStatuses.Clear();
                 foreach (var result in results)
                 {
-                    if (result.Success)
+                    if (result.Success && result.Key != null)
                     {
                         _downloadedKeys.Add(result.Key);
                         VpnKeyStatuses.Add(new VpnKeyStatusItem
@@ -322,7 +322,7 @@ namespace VMCreate
                         {
                             StatusIcon = "\u2718",
                             Name = result.EndpointName,
-                            StatusText = result.ErrorMessage
+                            StatusText = result.ErrorMessage ?? "Unknown error"
                         });
                     }
                 }

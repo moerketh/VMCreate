@@ -10,10 +10,9 @@ namespace VMCreate.Tests.HyperV.Steps
     [TestClass]
     public class RemoveVBoxGuestAdditionsStepTests
     {
-        private Mock<IGuestShell> _shellMock;
-        private Mock<ILogger> _loggerMock;
-        private RemoveVBoxGuestAdditionsStep _step;
-
+        private Mock<IGuestShell> _shellMock = null!;
+        private Mock<ILogger> _loggerMock = null!;
+        private RemoveVBoxGuestAdditionsStep _step = null!;
         [TestInitialize]
         public void Setup()
         {
@@ -36,8 +35,8 @@ namespace VMCreate.Tests.HyperV.Steps
         [TestMethod]
         public async Task ExecuteAsync_DeploysRemovalScript_AndRunsIt()
         {
-            string capturedContent = null;
-            string capturedGuestPath = null;
+            string? capturedContent = null;
+            string? capturedGuestPath = null;
 
             _shellMock
                 .Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))

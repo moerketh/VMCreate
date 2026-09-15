@@ -1,12 +1,11 @@
-﻿using Moq;
+using Moq;
 
 namespace VMCreate.Tests
 {
     [TestClass]
     public class StreamCopierWithProgressTests
     {
-        private StreamCopierWithProgress _copier;
-
+        private StreamCopierWithProgress _copier = null!;
         [TestInitialize]
         public void Setup()
         {

@@ -44,8 +44,10 @@ namespace VMCreate
         /// <summary>
         /// Returns true if this step should execute for the given gallery item and customization options.
         /// Called before <see cref="ExecuteAsync"/u003e — steps that return false are skipped entirely.
+        /// Both arguments are nullable: steps must tolerate null (defensive gate for
+        /// gallery items that never populated optional fields).
         /// </summary>
-        bool IsApplicable(GalleryItem item, VmCustomizations customizations);
+        bool IsApplicable(GalleryItem? item, VmCustomizations? customizations);
 
         /// <summary>
         /// Executes the customization step against the guest VM via the provided shell.

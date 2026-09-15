@@ -105,8 +105,7 @@ namespace VMCreate
 
         public async Task<string[]> FindExistingVmsByBaseNameAsync(string baseName, CancellationToken cancellationToken)
         {
-            var result = await _executor.RunCommandAsync("Get-VM", null, cancellationToken);
-            return result.Output
+            var result = await _executor.RunCommandAsync("Get-VM", null, cancellationToken);            return result.Output
                 .Where(vm =>
                 {
                     string name = vm.Properties["Name"]?.Value?.ToString() ?? "";
@@ -115,6 +114,7 @@ namespace VMCreate
                 })
                 .Select(vm => vm.Properties["Name"]?.Value?.ToString())
                 .Where(n => n != null)
+                .Select(n => n!)
                 .ToArray();
         }
     }

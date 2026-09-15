@@ -58,8 +58,8 @@ namespace VMCreate
         public int Order => 235;
         public string? ProgressPhaseId => "Sub_InstallLamcoRdp";
 
-        public bool IsApplicable(GalleryItem item, VmCustomizations customizations)
-            => customizations.RdpBackend == RdpBackend.Lamco && item.SupportsLamco();
+        public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
+            => customizations?.RdpBackend == RdpBackend.Lamco && item.SupportsLamco();
 
         public async Task ExecuteAsync(IGuestShell shell, GalleryItem item, VmCustomizations customizations, ILogger logger, CancellationToken ct)
         {
@@ -77,13 +77,14 @@ namespace VMCreate
             // before it ever reaches the root-run script.
             if (!string.IsNullOrWhiteSpace(item?.InitialUsername))
             {
-                if (!UsernameValidator.IsValidLinuxUsername(item.InitialUsername))
+                string initialUsername = item.InitialUsername;
+                if (!UsernameValidator.IsValidLinuxUsername(initialUsername))
                 {
                     throw new InvalidOperationException(
-                        $"Gallery item InitialUsername '{item.InitialUsername}' is not a valid Linux username. " +
+                        $"Gallery item InitialUsername '{initialUsername}' is not a valid Linux username. " +
                         "Refusing to substitute it into a root-run script.");
                 }
-                script = script.Replace("__AUTOLOGIN_USER__", item.InitialUsername);
+                script = script.Replace("__AUTOLOGIN_USER__", initialUsername);
             }
             else
             {

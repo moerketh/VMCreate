@@ -137,7 +137,6 @@ namespace VMCreate.Tests.HyperV
             Assert.AreEqual("", SshTransport.FilterSignificantStderr(""));
             Assert.AreEqual("", SshTransport.FilterSignificantStderr("   \r\n  \n"));
         }
-
         #endregion
 
         #region ExecuteAsync maxArgumentLength guard
@@ -150,7 +149,7 @@ namespace VMCreate.Tests.HyperV
             // test never touches the network or a live VM).
             string oversized = new string('A', 1000);
 
-            InvalidOperationException ex = null;
+            InvalidOperationException? ex = null;
             try
             {
                 await SshTransport.ExecuteAsync(

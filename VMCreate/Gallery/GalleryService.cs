@@ -28,7 +28,7 @@ namespace VMCreate.Gallery
 
         public List<GalleryItem> LoadFromCache()
         {
-            if (_cache.TryLoadCache(out var items))
+            if (_cache.TryLoadCache(out var items) && items != null)
                 return items;
             return new List<GalleryItem>();
         }

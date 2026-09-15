@@ -12,12 +12,11 @@ namespace VMCreate.Tests.HyperV.Steps
     [TestClass]
     public sealed class ForceX11StepTests
     {
-        private ForceX11Step _step;
-        private Mock<IGuestShell> _shell;
-        private Mock<ILogger<ForceX11Step>> _logger;
-        private GalleryItem _item;
-        private VmCustomizations _customizations;
-
+        private ForceX11Step _step = null!;
+        private Mock<IGuestShell> _shell = null!;
+        private Mock<ILogger<ForceX11Step>> _logger = null!;
+        private GalleryItem _item = null!;
+        private VmCustomizations _customizations = null!;
         [TestInitialize]
         public void Setup()
         {
@@ -76,7 +75,7 @@ namespace VMCreate.Tests.HyperV.Steps
             var scriptContent = _shell.Invocations
                 .First(i => i.Method.Name == "CopyContentAsync")
                 .Arguments[0] as string;
-            Assert.IsTrue(scriptContent.Contains(".desktop.disabled"),
+            Assert.IsTrue(scriptContent!.Contains(".desktop.disabled"),
                 "Script should handle .desktop.disabled files from older scripts");
         }
 

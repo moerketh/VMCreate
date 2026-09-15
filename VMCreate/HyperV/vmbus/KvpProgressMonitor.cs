@@ -21,7 +21,7 @@ namespace VMCreate
         /// <param name="cancellationToken"></param>
         /// <returns></returns>
         /// <exception cref="Exception"></exception>
-        public async Task<bool> PollKVPForProgressAsync(string vmName, IProgress<CreateVMProgressInfo> progressReporter, CancellationToken cancellationToken, int timeoutSeconds = 600)
+        public async Task<bool> PollKVPForProgressAsync(string vmName, IProgress<CreateVMProgressInfo>? progressReporter, CancellationToken cancellationToken, int timeoutSeconds = 600)
         {
             // Initial report
             var initialInfo = new CreateVMProgressInfo
@@ -31,10 +31,10 @@ namespace VMCreate
                 URI = "Waiting for VM...",
                 DownloadSpeed = -1
             };
-            progressReporter.Report(initialInfo);
+            progressReporter?.Report(initialInfo);
 
             // Poll for VM to be running and get GUID
-            string vmGuid = await WaitForVMRunningAsync(vmName, cancellationToken);
+            string? vmGuid = await WaitForVMRunningAsync(vmName, cancellationToken);
             if (string.IsNullOrEmpty(vmGuid))
             {
                 throw new Exception($"VM '{vmName}' did not start within the timeout or is not running.");
@@ -47,7 +47,7 @@ namespace VMCreate
                 URI = $"VM {vmName} running. Waiting for disk clone... (GUID: {vmGuid})",
                 DownloadSpeed = -1
             };
-            progressReporter.Report(vmRunningInfo);
+            progressReporter?.Report(vmRunningInfo);
 
             DateTime startTime = DateTime.UtcNow;
 
@@ -56,7 +56,7 @@ namespace VMCreate
             {
                 // If the VM shut down, the clone must have completed even
                 // if we missed the KVP completion marker.
-                string currentGuid = GetVMGuid(vmName);
+                string? currentGuid = GetVMGuid(vmName);
                 if (string.IsNullOrEmpty(currentGuid))
                     return true;
 
@@ -64,13 +64,13 @@ namespace VMCreate
                 if (timeoutSeconds > 0 && (DateTime.UtcNow - startTime).TotalSeconds > timeoutSeconds)
                     return false;
 
-                Dictionary<string, string> customKvps = GetCustomKVPs(vmGuid);
+                Dictionary<string, string?> customKvps = GetCustomKVPs(vmGuid);
 
-                if (customKvps.TryGetValue("PartcloneProgress", out string progressValue) && !string.IsNullOrEmpty(progressValue))
+                if (customKvps.TryGetValue("PartcloneProgress", out string? progressValue) && !string.IsNullOrEmpty(progressValue))
                 {
                     var info = ParseProgressValue(progressValue);
 
-                    progressReporter.Report(info);
+                    progressReporter?.Report(info);
 
                     // Check for completion
                     if (progressValue.Contains("Completed: 100% | Done"))
@@ -91,21 +91,21 @@ namespace VMCreate
         /// </summary>
         public async Task<bool> WaitForShutdownWithProgressAsync(
             string vmName,
-            IProgress<CreateVMProgressInfo> progressReporter,
+            IProgress<CreateVMProgressInfo>? progressReporter,
             CancellationToken cancellationToken,
             int timeoutSeconds = 600)
         {
-            string vmGuid = await WaitForVMRunningAsync(vmName, cancellationToken);
+            string? vmGuid = await WaitForVMRunningAsync(vmName, cancellationToken);
             if (string.IsNullOrEmpty(vmGuid))
                 return true; // VM already off
 
             DateTime startTime = DateTime.UtcNow;
-            string lastProgress = null;
+            string? lastProgress = null;
 
             while (!cancellationToken.IsCancellationRequested)
             {
                 // Check if VM is still running
-                string currentGuid = GetVMGuid(vmName);
+                string? currentGuid = GetVMGuid(vmName);
                 bool vmOff = string.IsNullOrEmpty(currentGuid);
 
                 // Always do a KVP read (even after shutdown) so we don't
@@ -113,12 +113,12 @@ namespace VMCreate
                 try
                 {
                     var kvps = GetCustomKVPs(vmGuid);
-                    if (kvps.TryGetValue("WorkflowProgress", out string progress)
+                    if (kvps.TryGetValue("WorkflowProgress", out string? progress)
                         && !string.IsNullOrEmpty(progress)
                         && progress != lastProgress)
                     {
                         lastProgress = progress;
-                        progressReporter.Report(new CreateVMProgressInfo
+                        progressReporter?.Report(new CreateVMProgressInfo
                         {
                             Phase = VmDeploymentPhase.Customize,
                             URI = progress
@@ -147,9 +147,9 @@ namespace VMCreate
         /// </summary>
         /// <param name="vmGuid"></param>
         /// <returns></returns>
-        private Dictionary<string, string> GetCustomKVPs(string vmGuid)
+        private Dictionary<string, string?> GetCustomKVPs(string vmGuid)
         {
-            var kvps = new Dictionary<string, string>();
+            var kvps = new Dictionary<string, string?>();
 
             ManagementScope scope = new ManagementScope(@"root\virtualization\v2");
             ObjectQuery query = new ObjectQuery($"SELECT * FROM Msvm_KvpExchangeComponent WHERE SystemName = '{vmGuid}'");
@@ -157,20 +157,20 @@ namespace VMCreate
             {
                 foreach (ManagementObject obj in searcher.Get())
                 {
-                    string[] items = (string[])obj["GuestExchangeItems"];
+                    string[]? items = (string[]?)obj["GuestExchangeItems"];
                     if (items != null)
                     {
                         foreach (string item in items)
                         {
                             // Parse XML
                             XDocument xml = XDocument.Parse(item);
-                            var nameProp = xml.Descendants("PROPERTY").FirstOrDefault(p => (string)p.Attribute("NAME") == "Name");
-                            var dataProp = xml.Descendants("PROPERTY").FirstOrDefault(p => (string)p.Attribute("NAME") == "Data");
+                            var nameProp = xml.Descendants("PROPERTY").FirstOrDefault(p => (string?)p.Attribute("NAME") == "Name");
+                            var dataProp = xml.Descendants("PROPERTY").FirstOrDefault(p => (string?)p.Attribute("NAME") == "Data");
 
                             if (nameProp != null && dataProp != null)
                             {
-                                string kvpKey = nameProp.Element("VALUE")?.Value;
-                                string kvpValue = dataProp.Element("VALUE")?.Value;
+                                string? kvpKey = nameProp.Element("VALUE")?.Value;
+                                string? kvpValue = dataProp.Element("VALUE")?.Value;
                                 if (!string.IsNullOrEmpty(kvpKey))
                                 {
                                     kvps[kvpKey] = kvpValue;

@@ -10,7 +10,7 @@ namespace VMCreate.Tests.HyperV.Steps
     [TestClass]
     public sealed class UsernameValidatorTests
     {
-        [DataTestMethod]
+        [TestMethod]
         [DataRow("user")]
         [DataRow("ubuntu")]
         [DataRow("parrot")]
@@ -23,7 +23,7 @@ namespace VMCreate.Tests.HyperV.Steps
             Assert.IsTrue(UsernameValidator.IsValidLinuxUsername(name), $"'{name}' should be valid");
         }
 
-        [DataTestMethod]
+        [TestMethod]
         [DataRow(null)]
         [DataRow("")]
         [DataRow("   ")]

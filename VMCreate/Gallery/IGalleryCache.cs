@@ -12,7 +12,7 @@ namespace VMCreate.Gallery
         /// Attempts to load cached gallery items from disk.
         /// Returns true when the cache exists and is fresh.
         /// </summary>
-        bool TryLoadCache(out List<GalleryItem> items);
+        bool TryLoadCache(out List<GalleryItem>? items);
 
         /// <summary>
         /// Persists the given gallery items to the local cache file.

@@ -60,7 +60,7 @@ namespace VMCreate
 
                 foreach (var partition in partitionResult.Output)
                 {
-                    string gptType = partition.Properties["GptType"]?.Value?.ToString();
+                    string? gptType = partition.Properties["GptType"]?.Value?.ToString();
                     if (string.Equals(gptType, "C12A7328-F81F-11D2-BA4B-00A0C93EC93B", StringComparison.OrdinalIgnoreCase)
                         || string.Equals(gptType, "E3C9E316-0B5C-4DB8-817D-F92DF00215AE", StringComparison.OrdinalIgnoreCase))
                     {

@@ -11,10 +11,9 @@ namespace VMCreate.Tests.HyperV.Steps
     [TestClass]
     public class SyncTimezoneStepTests
     {
-        private Mock<IGuestShell> _shellMock;
-        private Mock<ILogger> _loggerMock;
-        private SyncTimezoneStep _step;
-
+        private Mock<IGuestShell> _shellMock = null!;
+        private Mock<ILogger> _loggerMock = null!;
+        private SyncTimezoneStep _step = null!;
         [TestInitialize]
         public void Setup()
         {
@@ -78,9 +77,9 @@ namespace VMCreate.Tests.HyperV.Steps
                 x => x.Log(
                     level,
                     It.IsAny<EventId>(),
-                    It.Is<It.IsAnyType>((v, t) => v.ToString().Contains(partialMessage)),
-                    It.IsAny<Exception>(),
-                    It.IsAny<Func<It.IsAnyType, Exception, string>>()),
+                    It.Is<It.IsAnyType>((v, t) => string.Concat(v).Contains(partialMessage)),
+                    It.IsAny<Exception?>(),
+                    It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
                 Times.AtLeastOnce);
         }
     }

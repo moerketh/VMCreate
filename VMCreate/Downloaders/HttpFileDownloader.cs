@@ -10,7 +10,7 @@ namespace VMCreate
 {
     public interface IDownloader
     {
-        Task<string> DownloadFileAsync(string uri, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo> progressReportInfo, bool useCache);
+        Task<string> DownloadFileAsync(string uri, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo>? progressReportInfo, bool useCache);
     }
 
     public class HttpFileDownloader : IDownloader
@@ -28,7 +28,7 @@ namespace VMCreate
             _streamCopier = streamCopier ?? throw new ArgumentNullException(nameof(streamCopier));
         }
 
-        public async Task<string> DownloadFileAsync(string uri, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo> progressReportInfo, bool useCache)
+        public async Task<string> DownloadFileAsync(string uri, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo>? progressReportInfo, bool useCache)
         {
             const int MaxRetries = 3;
             int attempt = 0;
@@ -45,7 +45,7 @@ namespace VMCreate
 
                     using var response = await _streamProvider.GetResponseAsync(uri, cancellationToken);
 
-                    string finalUri = response.RequestMessage.RequestUri.ToString();
+                    string finalUri = response.RequestMessage!.RequestUri!.ToString();
                     long? contentLength = response.Content.Headers.ContentLength;
 
                     var parsedUri = new Uri(finalUri);
@@ -65,7 +65,7 @@ namespace VMCreate
 
                     using (writeStream)
                     {
-                        await _streamCopier.CopyAsync(contentStream, writeStream, contentLength, finalUri, progressReportInfo, cancellationToken);
+                        await _streamCopier.CopyAsync(contentStream, writeStream!, contentLength, finalUri, progressReportInfo, cancellationToken);
                     }
 
                     // Post-download size verification (only when writing to a real file)

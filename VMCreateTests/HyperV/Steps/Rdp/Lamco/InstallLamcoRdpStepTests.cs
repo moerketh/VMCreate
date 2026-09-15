@@ -11,14 +11,13 @@ namespace VMCreate.Tests.HyperV.Steps
     [TestClass]
     public sealed class InstallLamcoRdpStepTests
     {
-        private InstallLamcoRdpStep _step;
-        private Mock<IGuestShell> _shell;
-        private Mock<ILogger<InstallLamcoRdpStep>> _logger;
-        private GalleryItem _supportedItem;
-        private GalleryItem _unsupportedItem;
-        private VmCustomizations _lamcoCustomizations;
-        private VmCustomizations _xrdpCustomizations;
-
+        private InstallLamcoRdpStep _step = null!;
+        private Mock<IGuestShell> _shell = null!;
+        private Mock<ILogger<InstallLamcoRdpStep>> _logger = null!;
+        private GalleryItem _supportedItem = null!;
+        private GalleryItem _unsupportedItem = null!;
+        private VmCustomizations _lamcoCustomizations = null!;
+        private VmCustomizations _xrdpCustomizations = null!;
         [TestInitialize]
         public void Setup()
         {
@@ -67,7 +66,7 @@ namespace VMCreate.Tests.HyperV.Steps
             _logger.Verify(l => l.Log(
                 LogLevel.Warning,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString().Contains("DEGRADED")),
+                It.Is<It.IsAnyType>((v, t) => string.Concat(v).Contains("DEGRADED")),
                 It.IsAny<Exception?>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
         }

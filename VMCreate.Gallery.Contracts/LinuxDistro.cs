@@ -47,9 +47,10 @@ namespace VMCreate
 
         /// <summary>
         /// Convenience overload: returns true when <see cref="GalleryItem.LinuxDistro"/>
-        /// indicates a Lamco-supported distribution.
+        /// indicates a Lamco-supported distribution. Null-safe: a null item
+        /// (or one without a distro hint) is not Lamco-capable.
         /// </summary>
-        public static bool SupportsLamco(this GalleryItem item) =>
+        public static bool SupportsLamco(this GalleryItem? item) =>
             item?.LinuxDistro.SupportsLamco() == true;
     }
 }

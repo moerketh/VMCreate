@@ -10,12 +10,13 @@ namespace VMCreate.Tests.HyperV.Steps
     [TestClass]
     public sealed class EnableGraphicalAutologinStepTests
     {
-        private EnableGraphicalAutologinStep _step;
-        private Mock<IGuestShell> _shell;
-        private Mock<ILogger<EnableGraphicalAutologinStep>> _logger;
-        private GalleryItem _item;
-        private VmCustomizations _lamcoCustomizations;
-        private VmCustomizations _xrdpCustomizations;
+        // Fixture fields — assigned in [TestInitialize] Setup() before every test.
+        private EnableGraphicalAutologinStep _step = null!;
+        private Mock<IGuestShell> _shell = null!;
+        private Mock<ILogger<EnableGraphicalAutologinStep>> _logger = null!;
+        private GalleryItem _item = null!;
+        private VmCustomizations _lamcoCustomizations = null!;
+        private VmCustomizations _xrdpCustomizations = null!;
 
         [TestInitialize]
         public void Setup()
@@ -121,7 +122,7 @@ namespace VMCreate.Tests.HyperV.Steps
             _logger.Verify(l => l.Log(
                 LogLevel.Warning,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString().Contains("InitialUsername")),
+                It.Is<It.IsAnyType>((v, t) => string.Concat(v).Contains("InitialUsername")),
                 It.IsAny<Exception?>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
         }
@@ -159,7 +160,7 @@ namespace VMCreate.Tests.HyperV.Steps
             _logger.Verify(l => l.Log(
                 LogLevel.Warning,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString().Contains("DEGRADED")),
+                It.Is<It.IsAnyType>((v, t) => string.Concat(v).Contains("DEGRADED")),
                 It.IsAny<Exception?>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
         }

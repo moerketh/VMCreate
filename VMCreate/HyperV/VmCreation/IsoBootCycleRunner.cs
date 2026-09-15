@@ -13,7 +13,7 @@ namespace VMCreate.HyperV.VmCreation
     /// </summary>
     public sealed class IsoBootCycleResult
     {
-        public IsoBootCycleResult(bool success, string errorMessage = null, string diagnosticsLog = null)
+        public IsoBootCycleResult(bool success, string? errorMessage = null, string? diagnosticsLog = null)
         {
             Success = success;
             ErrorMessage = errorMessage;
@@ -21,11 +21,11 @@ namespace VMCreate.HyperV.VmCreation
         }
 
         public bool Success { get; }
-        public string ErrorMessage { get; }
-        public string DiagnosticsLog { get; }
+        public string? ErrorMessage { get; }
+        public string? DiagnosticsLog { get; }
 
         public static IsoBootCycleResult Succeeded() => new(true);
-        public static IsoBootCycleResult Failed(string message, string diagnostics = null)
+        public static IsoBootCycleResult Failed(string message, string? diagnostics = null)
             => new(false, message, diagnostics);
     }
 
@@ -121,7 +121,7 @@ namespace VMCreate.HyperV.VmCreation
 
             string vmName = context.Plan.VmName;
             IsoBootCycleState state = IsoBootCycleState.Start;
-            IsoBootCycleResult result = null;
+            IsoBootCycleResult? result = null;
 
             context.Logger.Log($"Starting ISO boot-cycle for {vmName} (Gen {detectedGeneration})");
 
@@ -134,7 +134,7 @@ namespace VMCreate.HyperV.VmCreation
             return result ?? IsoBootCycleResult.Succeeded();
         }
 
-        private async Task<(IsoBootCycleState NextState, IsoBootCycleResult Result)> StepAsync(
+        private async Task<(IsoBootCycleState NextState, IsoBootCycleResult? Result)> StepAsync(
             IsoBootCycleState state,
             VmCreationContext context,
             int detectedGeneration,
@@ -168,7 +168,7 @@ namespace VMCreate.HyperV.VmCreation
                     return (IsoBootCycleState.SendSshKey, null);
 
                 case IsoBootCycleState.SendSshKey:
-                    string sshPublicKey;
+                    string? sshPublicKey;
                     if (!string.IsNullOrEmpty(customizations.CustomSshPublicKeyPath))
                         sshPublicKey = await _sshKeyManager.ReadPublicKeyAsync(customizations.CustomSshPublicKeyPath, cancellationToken);
                     else
@@ -187,7 +187,7 @@ namespace VMCreate.HyperV.VmCreation
                     if (customizations.ConfigureXrdp)
                         await _kvpSender.SendKVPToGuestAsync(vmName, "VMCREATE_XRDP", "true", cancellationToken);
 
-                    string nameservers = customizations.DnsMode switch
+                    string? nameservers = customizations.DnsMode switch
                     {
                         DnsMode.Custom => customizations.CustomNameservers,
                         _ => _hostNetworkService.ResolveHostDnsServers(),

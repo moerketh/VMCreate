@@ -1,4 +1,5 @@
-#nullable enable
+// #nullable enable is now inherited solution-wide from Directory.Build.props
+// (<Nullable>enable</Nullable>), so the file-level directive is no longer needed.
 using System;
 using System.IO;
 using System.Runtime.InteropServices;

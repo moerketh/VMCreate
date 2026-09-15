@@ -11,12 +11,11 @@ namespace VMCreate.Tests.HyperV.Steps
     [TestClass]
     public sealed class DisableKwinCompositingStepTests
     {
-        private DisableKwinCompositingStep _step;
-        private Mock<IGuestShell> _shell;
-        private Mock<ILogger<DisableKwinCompositingStep>> _logger;
-        private GalleryItem _item;
-        private VmCustomizations _customizations;
-
+        private DisableKwinCompositingStep _step = null!;
+        private Mock<IGuestShell> _shell = null!;
+        private Mock<ILogger<DisableKwinCompositingStep>> _logger = null!;
+        private GalleryItem _item = null!;
+        private VmCustomizations _customizations = null!;
         [TestInitialize]
         public void Setup()
         {

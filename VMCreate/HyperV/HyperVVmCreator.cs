@@ -29,8 +29,8 @@ namespace VMCreate
             VmCustomizations vmCustomizations,
             GalleryItem galleryItem,
             CancellationToken cancellationToken = default,
-            IProgress<CreateVMProgressInfo> progress = null,
-            string sourceFile = null)
+            IProgress<CreateVMProgressInfo>? progress = null,
+            string? sourceFile = null)
         {
             if (plan == null) throw new ArgumentNullException(nameof(plan));
             if (vmCustomizations == null) throw new ArgumentNullException(nameof(vmCustomizations));

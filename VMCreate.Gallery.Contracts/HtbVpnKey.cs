@@ -7,8 +7,10 @@ namespace VMCreate
     /// </summary>
     public class HtbVpnKey
     {
-        public string Name { get; set; }
-        public string OvpnContent { get; set; }
-        public string GuestFileName { get; set; }
+        // Populated programmatically (HtbApiClient); string members are always
+        // set before use. null! satisfies nullable initialization analysis.
+        public string Name { get; set; } = null!;
+        public string OvpnContent { get; set; } = null!;
+        public string GuestFileName { get; set; } = null!;
     }
 }

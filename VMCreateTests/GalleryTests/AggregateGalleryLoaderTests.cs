@@ -7,7 +7,7 @@ namespace VMCreate.Tests.GalleryTests
     [TestClass]
     public sealed class AggregateGalleryLoaderTests
     {
-        private Mock<ILogger<AggregateGalleryLoader>> _mockLogger;
+        private Mock<ILogger<AggregateGalleryLoader>> _mockLogger = null!;
 
         [TestInitialize]
         public void Setup()
@@ -73,8 +73,12 @@ namespace VMCreate.Tests.GalleryTests
         public async Task LoadGalleryItems_LoaderReturnsNull_TreatedAsEmpty()
         {
             var nullLoader = new Mock<IGalleryLoader>();
+            // Defensive contract: a badly-behaved loader returning null
+            // (despite the non-nullable contract) must be treated as empty
+            // by the aggregate. null! expresses the deliberate contract
+            // violation this test pins.
             nullLoader.Setup(l => l.LoadGalleryItems(It.IsAny<CancellationToken>()))
-                      .ReturnsAsync((List<GalleryItem>)null);
+                      .ReturnsAsync((List<GalleryItem>)null!);
 
             var aggregate = new AggregateGalleryLoader(
                 _mockLogger.Object,

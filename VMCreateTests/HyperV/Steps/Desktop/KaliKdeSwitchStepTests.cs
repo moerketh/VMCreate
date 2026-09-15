@@ -18,13 +18,12 @@ namespace VMCreate.Tests.HyperV.Steps
     [TestClass]
     public sealed class KaliKdeSwitchStepTests
     {
-        private KaliKdeSwitchStep _step;
-        private Mock<IGuestShell> _shell;
-        private Mock<ILogger<KaliKdeSwitchStep>> _logger;
-        private GalleryItem _kdeItem;
-        private GalleryItem _plainItem;
-        private VmCustomizations _autoCustomizations;
-
+        private KaliKdeSwitchStep _step = null!;
+        private Mock<IGuestShell> _shell = null!;
+        private Mock<ILogger<KaliKdeSwitchStep>> _logger = null!;
+        private GalleryItem _kdeItem = null!;
+        private GalleryItem _plainItem = null!;
+        private VmCustomizations _autoCustomizations = null!;
         [TestInitialize]
         public void Setup()
         {
@@ -107,7 +106,7 @@ namespace VMCreate.Tests.HyperV.Steps
             _logger.Verify(l => l.Log(
                 LogLevel.Warning,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString().Contains("DEGRADED")),
+                It.Is<It.IsAnyType>((v, t) => string.Concat(v).Contains("DEGRADED")),
                 It.IsAny<Exception?>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
         }

@@ -78,7 +78,6 @@ namespace VMCreate.Tests
             Assert.IsNull(ChecksumVerifier.ParseChecksum(null, "file.iso"));
             Assert.IsNull(ChecksumVerifier.ParseChecksum("  \n  \n", "file.iso"));
         }
-
         [TestMethod]
         public void ParseChecksum_CommentsIgnored()
         {
@@ -193,7 +192,7 @@ namespace VMCreate.Tests
                 var verifier = new ChecksumVerifier(factory, logger.Object);
 
                 await verifier.VerifyAsync(tempFile, "http://example.com/SHA256SUMS", "sha256",
-                    CancellationToken.None, null);
+                    CancellationToken.None, null, expectedFileName: null);
 
                 // If we get here, verification passed
                 Assert.IsTrue(File.Exists(tempFile), "File should still exist after successful verification");
@@ -221,7 +220,7 @@ namespace VMCreate.Tests
 
                 var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
                     verifier.VerifyAsync(tempFile, "http://example.com/SHA256SUMS", "sha256",
-                        CancellationToken.None, null));
+                        CancellationToken.None, (IProgress<CreateVMProgressInfo>?)null));
 
                 Assert.IsTrue(ex.Message.Contains("Checksum verification failed"));
                 Assert.IsFalse(File.Exists(tempFile), "File should be deleted after failed verification");
@@ -248,7 +247,7 @@ namespace VMCreate.Tests
 
                 var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
                     verifier.VerifyAsync(tempFile, "http://example.com/SHA256SUMS", "sha256",
-                        CancellationToken.None, null));
+                        CancellationToken.None, (IProgress<CreateVMProgressInfo>?)null));
 
                 Assert.IsTrue(ex.Message.Contains("Could not find checksum"));
                 Assert.IsTrue(File.Exists(tempFile), "File should NOT be deleted when checksum not found");
@@ -277,9 +276,10 @@ namespace VMCreate.Tests
                 var logger = new Mock<ILogger<ChecksumVerifier>>();
                 var verifier = new ChecksumVerifier(factory, logger.Object);
 
-                // Pass null algorithm — should default to sha256
-                await verifier.VerifyAsync(tempFile, "http://example.com/SHA256SUMS", null,
-                    CancellationToken.None, null);
+                // Pass null algorithm — should default to sha256. The param
+                // is non-null by contract; null! pins the defensive default path.
+                await verifier.VerifyAsync(tempFile, "http://example.com/SHA256SUMS", null!,
+                    CancellationToken.None, (IProgress<CreateVMProgressInfo>?)null, expectedFileName: null);
 
                 Assert.IsTrue(File.Exists(tempFile));
             }
@@ -336,7 +336,7 @@ namespace VMCreate.Tests
                 var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
                     verifier.VerifyInlineAsync(tempFile,
                         "0000000000000000000000000000000000000000000000000000000000000000",
-                        "sha256", CancellationToken.None, null));
+                        "sha256", CancellationToken.None, (IProgress<CreateVMProgressInfo>?)null));
 
                 Assert.IsTrue(ex.Message.Contains("Checksum verification failed"));
                 Assert.IsFalse(File.Exists(tempFile), "File should be deleted after failed verification");

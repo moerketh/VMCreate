@@ -7,7 +7,7 @@ namespace VMCreate
 {
     public partial class SelectImagePage : Page
     {
-        public event EventHandler<WizardResultEventArgs> WizardCompleted;
+        public event EventHandler<WizardResultEventArgs>? WizardCompleted;
 
         private readonly SelectImagePageViewModel _viewModel;
         private readonly WizardData _wizardData;

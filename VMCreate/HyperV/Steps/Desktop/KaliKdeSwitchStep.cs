@@ -46,7 +46,7 @@ namespace VMCreate
 
         public string? ProgressPhaseId => (this as IDistributionOptionMetadata)?.DeployPhaseId;
 
-        public bool IsApplicable(GalleryItem item, VmCustomizations? customizations)
+        public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
             => IsVisibleFor(item);
 
         public async Task ExecuteAsync(
@@ -106,7 +106,7 @@ namespace VMCreate
         public int DeployOrder => 231;
         public string? DeployCompletionInfo => null;
 
-        public bool IsVisibleFor(GalleryItem item)
+        public bool IsVisibleFor(GalleryItem? item)
             => item.HasTag("kali-kde");
 
         /// <summary>

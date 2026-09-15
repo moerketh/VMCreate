@@ -21,7 +21,7 @@ namespace VMCreate
         /// native-Hyper-V Windows image is NOT skipped — it is pre-built (no disk conversion)
         /// yet still needs Windows post-boot customization.
         /// </summary>
-        public static bool ShowsCustomizePage(GalleryItem item, IEnumerable<IConfigurableCustomizationStep> steps)
+        public static bool ShowsCustomizePage(GalleryItem? item, IEnumerable<IConfigurableCustomizationStep>? steps)
         {
             if (item == null) return false;
 

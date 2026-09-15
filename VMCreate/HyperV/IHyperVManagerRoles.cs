@@ -59,7 +59,7 @@ namespace VMCreate
         Task EnableGuestServices(VmDeploymentPlan plan, CancellationToken cancellationToken);
         Task EnableVirtualization(VmDeploymentPlan plan, CancellationToken cancellationToken);
         Task SetEnhancedSession(VmDeploymentPlan plan, CancellationToken cancellationToken);
-        Task SetVMLoginNotes(VmDeploymentPlan plan, string initialUsername, string initialPassword, CancellationToken cancellationToken);
+        Task SetVMLoginNotes(VmDeploymentPlan plan, string? initialUsername, string? initialPassword, CancellationToken cancellationToken);
         Task StartVMConnect(VmDeploymentPlan plan, CancellationToken cancellationToken);
     }
 }

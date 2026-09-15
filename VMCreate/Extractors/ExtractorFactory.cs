@@ -27,7 +27,7 @@ namespace VMCreate
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
-        public void Extract(string filePath, string extractPath, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo> progressReportInfo)
+        public void Extract(string filePath, string extractPath, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo>? progressReportInfo)
         {
             _logger.LogDebug("Selecting extractor for file {FilePath}", filePath);
 

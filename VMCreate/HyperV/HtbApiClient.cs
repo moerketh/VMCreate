@@ -15,10 +15,10 @@ namespace VMCreate
     /// </summary>
     public class HtbVpnDownloadResult
     {
-        public string EndpointName { get; set; }
+        public string EndpointName { get; set; } = null!;
         public bool Success { get; set; }
-        public string ErrorMessage { get; set; }
-        public HtbVpnKey Key { get; set; }
+        public string? ErrorMessage { get; set; }
+        public HtbVpnKey? Key { get; set; }
     }
 
     /// <summary>
@@ -201,7 +201,7 @@ namespace VMCreate
                     if (server.TryGetProperty("id", out var idProp))
                     {
                         long serverId = idProp.GetInt64();
-                        string friendlyName = server.TryGetProperty("friendly_name", out var fn)
+                        string? friendlyName = server.TryGetProperty("friendly_name", out var fn)
                             ? fn.GetString() : $"Server {serverId}";
                         string safeName = SanitizeFileName(friendlyName);
 
@@ -223,7 +223,7 @@ namespace VMCreate
                     && server.TryGetProperty("id", out var idProp))
                 {
                     long serverId = idProp.GetInt64();
-                    string friendlyName = server.TryGetProperty("friendly_name", out var fn)
+                    string? friendlyName = server.TryGetProperty("friendly_name", out var fn)
                         ? fn.GetString() : "unknown";
                     string safeName = SanitizeFileName(friendlyName);
                     _logger.LogInformation("{Category}: assigned server = {FriendlyName} (id={Id})",
@@ -243,8 +243,8 @@ namespace VMCreate
         /// <summary>
         /// Converts a friendly server name like "EU Free 1" to a safe filename component "eu_free_1".
         /// </summary>
-        private static string SanitizeFileName(string name) =>
-            name.Trim().Replace(' ', '_').Replace('-', '_').ToLowerInvariant();
+        private static string SanitizeFileName(string? name) =>
+            name?.Trim().Replace(' ', '_').Replace('-', '_').ToLowerInvariant() ?? "unknown";
 
         // ─── Labs .ovpn download ───────────────────────────────────────────
 
@@ -316,7 +316,7 @@ namespace VMCreate
                         {
                             if (doc.RootElement.TryGetProperty(prop, out var val) && val.ValueKind == JsonValueKind.String)
                             {
-                                string inner = val.GetString();
+                                string? inner = val.GetString();
                                 if (!string.IsNullOrEmpty(inner) && inner.Contains("remote "))
                                 {
                                     _logger.LogInformation("Extracted .ovpn from JSON property '{Prop}'", prop);
@@ -440,7 +440,7 @@ namespace VMCreate
         /// Internal + pure so tests can pin the exact classifications (the
         /// 'PEM/key material' branch exists purely to prevent the leak).
         /// </summary>
-        internal static string ClassifyContent(string content)
+        internal static string ClassifyContent(string? content)
         {
             if (string.IsNullOrWhiteSpace(content))
                 return "empty";

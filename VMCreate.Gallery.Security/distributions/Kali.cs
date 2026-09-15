@@ -76,7 +76,7 @@ namespace VMCreate.Gallery
         /// Fetches the stable point release from <c>/current/</c>.
         /// Version format: <c>2026.2</c> (year.quarter).
         /// </summary>
-        private async Task<GalleryItem> LoadStableReleaseAsync(HttpClient client, CancellationToken cancellationToken)
+        private async Task<GalleryItem?> LoadStableReleaseAsync(HttpClient client, CancellationToken cancellationToken)
         {
             var response = await client.GetAsync(StableBaseUrl, cancellationToken);
             response.EnsureSuccessStatusCode();
@@ -117,7 +117,7 @@ namespace VMCreate.Gallery
         /// The directory accumulates multiple weeks; we pick the highest week number.
         /// Version format: <c>2026-W26</c> (ISO year-week).
         /// </summary>
-        private async Task<GalleryItem> LoadWeeklyReleaseAsync(HttpClient client, CancellationToken cancellationToken)
+        private async Task<GalleryItem?> LoadWeeklyReleaseAsync(HttpClient client, CancellationToken cancellationToken)
         {
             try
             {
@@ -133,10 +133,10 @@ namespace VMCreate.Gallery
                 if (matches.Count == 0)
                     return null;
 
-                string bestFileName = null;
-                string bestVersion = null;
+                string? bestFileName = null;
+                string? bestVersion = null;
                 int bestYear = 0, bestWeek = 0;
-                string bestDate = null;
+                string? bestDate = null;
 
                 foreach (Match m in matches)
                 {
@@ -160,7 +160,9 @@ namespace VMCreate.Gallery
                     }
                 }
 
-                if (bestFileName == null)
+                // The three best* locals are always assigned together (same if-block),
+                // so a single guard proves all three non-null to the compiler.
+                if (bestFileName == null || bestVersion == null || bestDate == null)
                     return null;
 
                 return new GalleryItem
@@ -202,7 +204,7 @@ namespace VMCreate.Gallery
         /// differ (the "(KDE)" suffix), disks match.
         /// </para>
         /// </summary>
-        private static GalleryItem CreateKdeTwin(GalleryItem source)
+        private static GalleryItem? CreateKdeTwin(GalleryItem source)
         {
             if (source == null)
                 return null;

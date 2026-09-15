@@ -10,12 +10,11 @@ namespace VMCreate.Tests.HyperV.Steps
     [TestClass]
     public sealed class InstallHypervDaemonsStepTests
     {
-        private InstallHypervDaemonsStep _step;
-        private Mock<IGuestShell> _shell;
-        private Mock<ILogger<InstallHypervDaemonsStep>> _logger;
-        private GalleryItem _item;
-        private VmCustomizations _customizations;
-
+        private InstallHypervDaemonsStep _step = null!;
+        private Mock<IGuestShell> _shell = null!;
+        private Mock<ILogger<InstallHypervDaemonsStep>> _logger = null!;
+        private GalleryItem _item = null!;
+        private VmCustomizations _customizations = null!;
         [TestInitialize]
         public void Setup()
         {

@@ -15,13 +15,14 @@ namespace VMCreate.Tests.HyperV.VmCreation
     [TestClass]
     public sealed class VmDeploymentOrchestratorTests
     {
-        private Mock<IVmPathService> _pathService;
-        private Mock<IMediaHandlerFactory> _mediaHandlerFactory;
-        private Mock<IHyperVManager> _hyperVManager;
-        private Mock<ICloningIsoDownloader> _cloningIsoDownloader;
-        private Mock<IVmCreationStrategy> _strategy;
-        private Mock<ILogger<VmDeploymentOrchestrator>> _logger;
-        private VmDeploymentOrchestrator _orchestrator;
+        // Fixture fields — assigned in [TestInitialize] Setup() before every test.
+        private Mock<IVmPathService> _pathService = null!;
+        private Mock<IMediaHandlerFactory> _mediaHandlerFactory = null!;
+        private Mock<IHyperVManager> _hyperVManager = null!;
+        private Mock<ICloningIsoDownloader> _cloningIsoDownloader = null!;
+        private Mock<IVmCreationStrategy> _strategy = null!;
+        private Mock<ILogger<VmDeploymentOrchestrator>> _logger = null!;
+        private VmDeploymentOrchestrator _orchestrator = null!;
 
         [TestInitialize]
         public void Setup()
@@ -113,14 +114,14 @@ namespace VMCreate.Tests.HyperV.VmCreation
 
             // Assert
             Assert.IsFalse(result.Success);
-            Assert.IsTrue(result.ErrorMessage.Contains("No creation strategy found"));
+            Assert.IsTrue(result.ErrorMessage!.Contains("No creation strategy found"));
         }
         private sealed class FakeMediaHandler : IMediaHandler
         {
             private readonly DiskImageFormat _fileType;
             private readonly MediaPreparationResult _result;
 
-            public FakeMediaHandler(DiskImageFormat fileType, string finalPath = null)
+            public FakeMediaHandler(DiskImageFormat fileType, string? finalPath = null)
             {
                 _fileType = fileType;
                 string ext = fileType.ToString().ToLowerInvariant();

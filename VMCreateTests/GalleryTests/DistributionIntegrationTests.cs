@@ -59,7 +59,7 @@ namespace VMCreate.Tests.GalleryTests
         /// status (< 400). Empty / null URIs are silently skipped.
         /// For file:// URIs, checks that the local file exists instead.
         /// </summary>
-        private static async Task AssertUriRespondsAsync(string uri, string context)
+        private static async Task AssertUriRespondsAsync(string? uri, string context)
         {
             if (string.IsNullOrWhiteSpace(uri)) return;
 

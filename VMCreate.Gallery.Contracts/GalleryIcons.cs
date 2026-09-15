@@ -80,7 +80,7 @@ namespace VMCreate.Gallery
         /// Loaders can use <c>?? fallbackHttpUrl</c> to keep an external URL as
         /// a secondary option.
         /// </summary>
-        public static string TryGetLocalUri(Assembly assembly, string fileName)
+        public static string? TryGetLocalUri(Assembly assembly, string fileName)
         {
             try
             {

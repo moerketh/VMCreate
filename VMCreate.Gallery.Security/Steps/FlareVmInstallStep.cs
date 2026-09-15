@@ -34,9 +34,9 @@ namespace VMCreate.Gallery
 
         public string? ProgressPhaseId => (this as IDistributionOptionMetadata)?.DeployPhaseId;
 
-        public bool IsApplicable(GalleryItem item, VmCustomizations customizations)
+        public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
             => IsVisibleFor(item)
-               && customizations.DistributionOptions.Any(o => string.Equals(o.Name, Name, StringComparison.OrdinalIgnoreCase) && o.IsEnabled);
+               && customizations?.DistributionOptions.Any(o => string.Equals(o.Name, Name, StringComparison.OrdinalIgnoreCase) && o.IsEnabled) == true;
 
         public async Task ExecuteAsync(
             IGuestShell shell, GalleryItem item, VmCustomizations customizations,
@@ -198,7 +198,7 @@ namespace VMCreate.Gallery
         public int DeployOrder => 200;
         public string? DeployCompletionInfo => "Please allow at least one hour for the FLARE VM scripts to finish configuring the machine";
 
-        public bool IsVisibleFor(GalleryItem item)
+        public bool IsVisibleFor(GalleryItem? item)
             => item.HasTag("flare-vm")
                || string.Equals(item?.Name, "FLARE VM", StringComparison.OrdinalIgnoreCase);
     }

@@ -10,10 +10,9 @@ namespace VMCreate.Tests.HyperV.Steps
     [TestClass]
     public sealed class DisableSuspendOnBtrfsStepTests
     {
-        private DisableSuspendOnBtrfsStep _step;
-        private Mock<IGuestShell> _shellMock;
-        private Mock<ILogger> _loggerMock;
-
+        private DisableSuspendOnBtrfsStep _step = null!;
+        private Mock<IGuestShell> _shellMock = null!;
+        private Mock<ILogger> _loggerMock = null!;
         [TestInitialize]
         public void Setup()
         {

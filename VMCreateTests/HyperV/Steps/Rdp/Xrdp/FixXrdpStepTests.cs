@@ -10,12 +10,11 @@ namespace VMCreate.Tests.HyperV.Steps
     [TestClass]
     public sealed class FixXrdpStepTests
     {
-        private FixXrdpStep _step;
-        private Mock<IGuestShell> _shell;
-        private Mock<ILogger<FixXrdpStep>> _logger;
-        private GalleryItem _item;
-        private VmCustomizations _customizations;
-
+        private FixXrdpStep _step = null!;
+        private Mock<IGuestShell> _shell = null!;
+        private Mock<ILogger<FixXrdpStep>> _logger = null!;
+        private GalleryItem _item = null!;
+        private VmCustomizations _customizations = null!;
         [TestInitialize]
         public void Setup()
         {

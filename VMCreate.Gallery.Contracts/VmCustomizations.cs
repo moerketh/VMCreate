@@ -20,7 +20,7 @@ namespace VMCreate
     public class DistributionOptionSelection
     {
         /// <summary>Step name — matches <see cref="ICustomizationStep.Name"/>.</summary>
-        public string Name { get; set; }
+        public string Name { get; set; } = null!;
 
         /// <summary>Whether the user enabled this option.</summary>
         public bool IsEnabled { get; set; }
@@ -78,7 +78,7 @@ namespace VMCreate
         /// Comma-separated nameserver IP addresses for <see cref="DnsMode.Custom"/> mode.
         /// Example: "9.9.9.9,1.1.1.1"
         /// </summary>
-        public string CustomNameservers { get; set; }
+        public string? CustomNameservers { get; set; }
 
         /// <summary>
         /// When true (default), install OpenVPN and the NetworkManager OpenVPN plugin
@@ -91,7 +91,7 @@ namespace VMCreate
         public bool ConfigureHtbVpn { get; set; }
 
         /// <summary>Host path to a manually selected .ovpn file (fallback).</summary>
-        public string OvpnFilePath { get; set; }
+        public string? OvpnFilePath { get; set; }
 
         /// <summary>Pre-downloaded HTB VPN keys to deploy to the VM.</summary>
         public List<HtbVpnKey> HtbVpnKeys { get; set; } = new();
@@ -103,7 +103,7 @@ namespace VMCreate
         /// Optional path to a custom SSH public key file.
         /// When null/empty, the auto-generated per-user key is used.
         /// </summary>
-        public string CustomSshPublicKeyPath { get; set; }
+        public string? CustomSshPublicKeyPath { get; set; }
 
         /// <summary>
         /// When true (default), enable Hyper-V Guest Service Interface and

@@ -19,9 +19,8 @@ namespace VMCreate.Tests
     [TestClass]
     public class ArchiveExtractorTests
     {
-        private Mock<ILogger<ArchiveExtractor>> _mockLogger;
-        private ArchiveExtractor _extractor;
-
+        private Mock<ILogger<ArchiveExtractor>> _mockLogger = null!;
+        private ArchiveExtractor _extractor = null!;
         [TestInitialize]
         public void Setup()
         {

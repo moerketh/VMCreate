@@ -11,10 +11,9 @@ namespace VMCreate.Tests
     [TestClass]
     public class DiskFileDetectorTests
     {
-        private DiskFileDetector _detector;
-        private Mock<IExtractor> _mockExtractor;
-        private string _tempDir;
-
+        private DiskFileDetector _detector = null!;
+        private Mock<IExtractor> _mockExtractor = null!;
+        private string _tempDir = null!;
         [TestInitialize]
         public void Setup()
         {

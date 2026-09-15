@@ -11,7 +11,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
         public void ResolveHostDnsServers_ReturnsNonEmptyStringOrNull()
         {
             var service = new HostNetworkService();
-            string result = service.ResolveHostDnsServers();
+            string? result = service.ResolveHostDnsServers();
 
             if (!string.IsNullOrEmpty(result))
             {
@@ -24,7 +24,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
         public void ResolveHostDnsServers_ReturnsCommaSeparatedIPv4Addresses()
         {
             var service = new HostNetworkService();
-            string result = service.ResolveHostDnsServers();
+            string? result = service.ResolveHostDnsServers();
 
             if (string.IsNullOrEmpty(result))
                 return;

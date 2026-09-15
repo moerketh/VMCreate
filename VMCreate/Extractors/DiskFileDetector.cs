@@ -38,14 +38,14 @@ namespace VMCreate
         /// <returns>Full path to the best-matching disk file.</returns>
         /// <exception cref="FileNotFoundException">No supported disk file found.</exception>
         public string FindDiskFile(string directory, CancellationToken cancellationToken = default,
-            IProgress<CreateVMProgressInfo> progress = null)
+            IProgress<CreateVMProgressInfo>? progress = null)
         {
-            string disk = ScanForDisk(directory);
+            string? disk = ScanForDisk(directory);
             if (disk != null)
                 return disk;
 
             // No disk found — look for a nested archive (e.g. OVA inside a ZIP)
-            string nestedArchive = FindNestedArchive(directory);
+            string? nestedArchive = FindNestedArchive(directory);
             if (nestedArchive != null)
             {
                 _logger.LogInformation("Found nested archive {Archive}, extracting", nestedArchive);
@@ -71,15 +71,15 @@ namespace VMCreate
                     return disk;
             }
 
-            throw new FileNotFoundException(
-                $"No supported disk file found in {directory}. " +
+            throw new FileNotFoundException(                $"No supported disk file found in {directory}. " +
                 $"Expected one of: {string.Join(", ", DiskExtensions)}");
         }
 
         /// <summary>
         /// Determines the media type from an actual file path (by extension).
+        /// Null/empty input maps to <see cref="DiskImageFormat.Other"/>.
         /// </summary>
-        public static DiskImageFormat DetectFileType(string filePath)
+        public static DiskImageFormat DetectFileType(string? filePath)
         {
             if (string.IsNullOrEmpty(filePath))
                 return DiskImageFormat.Other;
@@ -96,7 +96,7 @@ namespace VMCreate
             };
         }
 
-        private string ScanForDisk(string directory)
+        private string? ScanForDisk(string directory)
         {
             if (!Directory.Exists(directory))
                 return null;
@@ -123,7 +123,7 @@ namespace VMCreate
             return null;
         }
 
-        private string FindNestedArchive(string directory)
+        private string? FindNestedArchive(string directory)
         {
             if (!Directory.Exists(directory))
                 return null;

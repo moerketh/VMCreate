@@ -48,7 +48,7 @@ namespace VMCreate
         public int Order => 236;
         public string? ProgressPhaseId => "Sub_InstallXrdpPostBoot";
 
-        public bool IsApplicable(GalleryItem item, VmCustomizations? customizations)
+        public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
             => customizations?.RdpBackend == RdpBackend.Xrdp;
 
         public async Task ExecuteAsync(IGuestShell shell, GalleryItem item, VmCustomizations customizations, ILogger logger, CancellationToken ct)

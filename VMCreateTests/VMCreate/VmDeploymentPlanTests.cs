@@ -13,7 +13,7 @@ namespace VMCreate.Tests.VMCreate
         {
             try
             {
-                _ = new VmDeploymentPlan(null);
+                _ = new VmDeploymentPlan(null!);
                 Assert.Fail("Expected ArgumentException for null VM name.");
             }
             catch (ArgumentException) { }

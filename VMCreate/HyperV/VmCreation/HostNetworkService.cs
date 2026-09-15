@@ -14,12 +14,12 @@ namespace VMCreate.HyperV.VmCreation
         /// Returns a comma-separated list of IPv4 DNS server addresses from active
         /// network interfaces, or null if none can be determined.
         /// </summary>
-        string ResolveHostDnsServers();
+        string? ResolveHostDnsServers();
     }
 
     public class HostNetworkService : IHostNetworkService
     {
-        public string ResolveHostDnsServers()
+        public string? ResolveHostDnsServers()
         {
             var interfaces = NetworkInterface.GetAllNetworkInterfaces()
                 .Where(ni => ni.OperationalStatus == OperationalStatus.Up

@@ -239,7 +239,7 @@ namespace VMCreate.CLI.Commands
         /// CLI deployments exactly as they do in the GUI.
         /// </para>
         /// </summary>
-        private static RdpBackend ResolveRdpBackend(string rdpBackend, bool noXrdp, bool jsonMode, out bool valid)
+        private static RdpBackend ResolveRdpBackend(string? rdpBackend, bool noXrdp, bool jsonMode, out bool valid)
         {
             valid = true;
             if (!string.IsNullOrEmpty(rdpBackend)
@@ -409,7 +409,7 @@ namespace VMCreate.CLI.Commands
             AnsiConsole.MarkupLine(string.Empty);
 
             int exitCode = ExitCodes.Success;
-            ConsoleProgressReporter consoleReporter = null;
+            ConsoleProgressReporter? consoleReporter = null;
 
             var table = new Table().Border(TableBorder.Rounded);
             table.AddColumn("[bold]Phase[/]");
@@ -463,7 +463,7 @@ namespace VMCreate.CLI.Commands
             }
         }
 
-        private static async Task<GalleryItem> ResolveGalleryItemAsync(
+        private static async Task<GalleryItem?> ResolveGalleryItemAsync(
             IServiceProvider services,
             string search,
             bool jsonMode,
@@ -487,14 +487,13 @@ namespace VMCreate.CLI.Commands
             if (match == null)
                 match = items.FirstOrDefault(i =>
                     i.Name != null && i.Name.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0);
-
             if (match == null)
                 PrintError(jsonMode, "ImageNotFound", $"No gallery image found matching '{search}'. Run 'vmcreate list' to see available images.");
 
             return match;
         }
 
-        private static async Task<List<HtbVpnKey>> DownloadHtbKeysAsync(
+        private static async Task<List<HtbVpnKey>?> DownloadHtbKeysAsync(
             IServiceProvider services,
             string token,
             string types,
@@ -514,7 +513,7 @@ namespace VMCreate.CLI.Commands
                     .Where(r => r.Success && r.Key != null &&
                                 (requestedTypes.Count == 0 ||
                                  requestedTypes.Contains(r.EndpointName)))
-                    .Select(r => r.Key)
+                    .Select(r => r.Key!)
                     .ToList();
 
                 return keys;
@@ -553,11 +552,12 @@ namespace VMCreate.CLI.Commands
 
     internal sealed class CreateArgs
     {
-        public string Image { get; set; }
-        public string ImageUri { get; set; }
-        public string Checksum { get; set; }
-        public string ChecksumUri { get; set; }
-        public string Name { get; set; }
+        // All string members are optional CLI options — null means "not provided".
+        public string? Image { get; set; }
+        public string? ImageUri { get; set; }
+        public string? Checksum { get; set; }
+        public string? ChecksumUri { get; set; }
+        public string? Name { get; set; }
         public int MemoryMb { get; set; }
         public int CpuCount { get; set; }
         public int DiskSizeGb { get; set; }
@@ -565,18 +565,18 @@ namespace VMCreate.CLI.Commands
         public bool NoNestedVirt { get; set; }
         public bool Replace { get; set; }
         public bool NoXrdp { get; set; }
-        public string RdpBackend { get; set; }
+        public string? RdpBackend { get; set; }
         public bool NoIntegrationServices { get; set; }
-        public string DnsMode { get; set; }
-        public string Nameservers { get; set; }
-        public string SshKeyPath { get; set; }
+        public string? DnsMode { get; set; }
+        public string? Nameservers { get; set; }
+        public string? SshKeyPath { get; set; }
         public bool NoTimezoneSync { get; set; }
-        public string HtbToken { get; set; }
-        public string HtbVpn { get; set; }
-        public string OvpnPath { get; set; }
+        public string? HtbToken { get; set; }
+        public string? HtbVpn { get; set; }
+        public string? OvpnPath { get; set; }
         public bool NoOpenVpn { get; set; }
-        public string[] Options { get; set; }
-        public string Format { get; set; }
+        public string[] Options { get; set; } = Array.Empty<string>();
+        public string? Format { get; set; }
         public bool Quiet { get; set; }
         public bool NonInteractive { get; set; }
     }

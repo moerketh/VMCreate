@@ -31,7 +31,7 @@ namespace VMCreate
             var response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             response.EnsureSuccessStatusCode();
 
-            string finalUri = response.RequestMessage.RequestUri.ToString();
+            string finalUri = response.RequestMessage!.RequestUri!.ToString();
             _logger.LogInformation("Final URI after redirects: {FinalUri}", finalUri);
 
             long? contentLength = response.Content.Headers.ContentLength;

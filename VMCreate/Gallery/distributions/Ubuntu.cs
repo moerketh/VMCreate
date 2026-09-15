@@ -65,7 +65,7 @@ namespace VMCreate.Gallery
             };
         }
 
-        private async Task<string> ParseBuildInfo(string buildInfoUri, CancellationToken cancellationToken = default)
+        private async Task<string?> ParseBuildInfo(string buildInfoUri, CancellationToken cancellationToken = default)
         {
             var client = _clientFactory.CreateClient();
             client.DefaultRequestHeaders.Add("User-Agent", ProductInfo.UserAgent);

@@ -51,7 +51,7 @@ namespace VMCreate.Tests.GalleryTests
         [TestMethod]
         public void GalleryItem_SupportsLamco_FalseWhenItemNull()
         {
-            GalleryItem item = null;
+            GalleryItem? item = null;
             Assert.IsFalse(item.SupportsLamco());
         }
 

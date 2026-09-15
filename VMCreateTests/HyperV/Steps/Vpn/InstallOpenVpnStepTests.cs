@@ -11,10 +11,9 @@ namespace VMCreate.Tests.HyperV.Steps
     [TestClass]
     public class InstallOpenVpnStepTests
     {
-        private Mock<IGuestShell> _shellMock;
-        private Mock<ILogger> _loggerMock;
-        private InstallOpenVpnStep _step;
-
+        private Mock<IGuestShell> _shellMock = null!;
+        private Mock<ILogger> _loggerMock = null!;
+        private InstallOpenVpnStep _step = null!;
         [TestInitialize]
         public void Setup()
         {

@@ -38,7 +38,7 @@ namespace VMCreate.Gallery
         /// Attempts to load cached gallery items from disk.
         /// Returns <c>true</c> when the cache exists and is younger than <see cref="CacheTtl"/>.
         /// </summary>
-        public bool TryLoadCache(out List<GalleryItem> items)
+        public bool TryLoadCache(out List<GalleryItem>? items)
         {
             items = null;
 
@@ -85,7 +85,8 @@ namespace VMCreate.Gallery
             try
             {
                 var directory = Path.GetDirectoryName(_cacheFilePath);
-                Directory.CreateDirectory(directory);
+                if (!string.IsNullOrEmpty(directory))
+                    Directory.CreateDirectory(directory);
 
                 var tempPath = _cacheFilePath + ".tmp";
                 var json = JsonSerializer.Serialize(items, JsonOptions);

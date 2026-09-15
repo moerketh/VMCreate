@@ -43,7 +43,7 @@ namespace VMCreate.Gallery
                 ?? throw new Exception("Tails API: version field is missing.");
 
             // Find the .img installation path
-            string imgUrl = null;
+            string? imgUrl = null;
             foreach (var path in first.GetProperty("installation-paths").EnumerateArray())
             {
                 if (path.GetProperty("type").GetString() == "img")

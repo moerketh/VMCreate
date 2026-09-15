@@ -14,20 +14,21 @@ namespace VMCreate.Tests.HyperV.VmCreation
     [TestClass]
     public sealed class NativeHyperVVmCreationStrategyTests
     {
-        private Mock<IVmLifecycleManager> _lifecycleManager;
-        private Mock<IVmDiskManager> _diskManager;
-        private Mock<IVmBootManager> _bootManager;
-        private Mock<IVmNetworkManager> _networkManager;
-        private Mock<IVmConfigManager> _configManager;
-        private Mock<IGuestShellFactory> _guestShellFactory;
-        private Mock<IUnattendInjector> _unattendInjector;
-        private Mock<IPostBootCustomizationService> _postBootService;
-        private NativeHyperVVmCreationStrategy _strategy;
-        private VmSettings _vmSettings;
-        private VmDeploymentPlan _plan;
-        private VmCustomizations _customizations;
-        private GalleryItem _item;
-        private string _mediaPath;
+        // Fixture fields — assigned in [TestInitialize] Setup() before every test.
+        private Mock<IVmLifecycleManager> _lifecycleManager = null!;
+        private Mock<IVmDiskManager> _diskManager = null!;
+        private Mock<IVmBootManager> _bootManager = null!;
+        private Mock<IVmNetworkManager> _networkManager = null!;
+        private Mock<IVmConfigManager> _configManager = null!;
+        private Mock<IGuestShellFactory> _guestShellFactory = null!;
+        private Mock<IUnattendInjector> _unattendInjector = null!;
+        private Mock<IPostBootCustomizationService> _postBootService = null!;
+        private NativeHyperVVmCreationStrategy _strategy = null!;
+        private VmSettings _vmSettings = null!;
+        private VmDeploymentPlan _plan = null!;
+        private VmCustomizations _customizations = null!;
+        private GalleryItem _item = null!;
+        private string _mediaPath = null!;
 
         [TestInitialize]
         public void Setup()

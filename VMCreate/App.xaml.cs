@@ -21,7 +21,9 @@ namespace VMCreate
 {
     public partial class App : Application
     {
-        private IServiceProvider _serviceProvider;
+        // Initialized during OnStartup before any consumer access; null only
+        // before startup completes (the process exits if startup fails).
+        private IServiceProvider? _serviceProvider;
 
         /// <summary>When true, VMConnect is launched automatically after the VM starts.</summary>
         internal static bool DemoMode { get; private set; }
@@ -260,7 +262,7 @@ namespace VMCreate
             _serviceProvider = services.BuildServiceProvider();
             RecordStartup("di-built");
 
-            var mainWindow = _serviceProvider.GetRequiredService<MainWindow>();
+            var mainWindow = _serviceProvider!.GetRequiredService<MainWindow>();
             mainWindow.Show();
             RecordStartup("window-shown");
         }

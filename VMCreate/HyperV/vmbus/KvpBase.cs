@@ -15,12 +15,12 @@ namespace CreateVM.HyperV.vmbus
         /// <param name="timeoutSeconds"></param>
         /// <param name="pollIntervalMs"></param>
         /// <returns></returns>
-        public async Task<string> WaitForVMRunningAsync(string vmName, CancellationToken cancellationToken, int timeoutSeconds = 300, int pollIntervalMs = 1000)
+        public async Task<string?> WaitForVMRunningAsync(string vmName, CancellationToken cancellationToken, int timeoutSeconds = 300, int pollIntervalMs = 1000)
         {
             DateTime startTime = DateTime.UtcNow;
             while (!cancellationToken.IsCancellationRequested)
             {
-                string guid = GetVMGuid(vmName);
+                string? guid = GetVMGuid(vmName);
                 if (!string.IsNullOrEmpty(guid))
                 {
                     return guid;
@@ -51,7 +51,7 @@ namespace CreateVM.HyperV.vmbus
             DateTime startTime = DateTime.UtcNow;
             while (!cancellationToken.IsCancellationRequested)
             {
-                string guid = GetVMGuid(vmName);
+                string? guid = GetVMGuid(vmName);
                 if (string.IsNullOrEmpty(guid))
                 {
                     return true;
@@ -72,7 +72,7 @@ namespace CreateVM.HyperV.vmbus
         /// </summary>
         /// <param name="vmName"></param>
         /// <returns></returns>
-        protected string GetVMGuid(string vmName)
+        protected string? GetVMGuid(string vmName)
         {
             ManagementScope scope = new ManagementScope(@"root\virtualization\v2");
             ObjectQuery query = new ObjectQuery($"SELECT * FROM Msvm_ComputerSystem WHERE ElementName = '{vmName}' AND EnabledState = 2");  // Use ElementName for friendly name; 2 = running
@@ -80,7 +80,7 @@ namespace CreateVM.HyperV.vmbus
             {
                 foreach (ManagementObject obj in searcher.Get())
                 {
-                    return obj["Name"].ToString();  // Name is the GUID
+                    return obj["Name"]?.ToString();  // Name is the GUID
                 }
             }
             return null;

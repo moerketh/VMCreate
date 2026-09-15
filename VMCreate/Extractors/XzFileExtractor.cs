@@ -34,7 +34,7 @@ namespace VMCreate
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
-        public void Extract(string filePath, string extractPath, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo> progressReportInfo)
+        public void Extract(string filePath, string extractPath, CancellationToken cancellationToken, IProgress<CreateVMProgressInfo>? progressReportInfo)
         {
             try
             {
@@ -86,7 +86,7 @@ namespace VMCreate
 
                         // // Progress based on estimated uncompressed size
                         var progress = estimatedUncompressedSize > 0 ? (totalBytesWritten / (double)estimatedUncompressedSize) * 100 : 0;
-                        progressReportInfo.Report(new CreateVMProgressInfo
+                        progressReportInfo?.Report(new CreateVMProgressInfo
                         {
                             Phase = VmDeploymentPhase.Extract,
                             URI = outputPath,
@@ -99,7 +99,7 @@ namespace VMCreate
                     var outputFileInfo = new FileInfo(outputPath);
                     _logger.LogDebug("Output file {OutputPath} size: {OutputSize} bytes", outputPath, outputFileInfo.Length);
                 }
-                progressReportInfo.Report(new CreateVMProgressInfo
+                progressReportInfo?.Report(new CreateVMProgressInfo
                 {
                     Phase = VmDeploymentPhase.Extract,
                     URI = outputPath,

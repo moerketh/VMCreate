@@ -7,7 +7,7 @@ namespace VMCreate
 {
     public partial class VmCustomizationPage : Page
     {
-        public event EventHandler<WizardResultEventArgs> WizardCompleted;
+        public event EventHandler<WizardResultEventArgs>? WizardCompleted;
 
         public VmCustomizationPage(WizardData wizardData, IHtbApiClient htbApiClient, IEnumerable<IConfigurableCustomizationStep> configurableSteps, ILoggerFactory loggerFactory)
         {

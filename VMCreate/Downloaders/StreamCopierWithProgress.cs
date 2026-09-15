@@ -10,9 +10,9 @@ namespace VMCreate
     {
         private const int BufferSize = 65536;
         private const int UpdateIntervalMs = 1000;
-        private readonly ILogger<StreamCopierWithProgress> _logger;
+        private readonly ILogger<StreamCopierWithProgress>? _logger;
 
-        public StreamCopierWithProgress(ILogger<StreamCopierWithProgress> logger = null)
+        public StreamCopierWithProgress(ILogger<StreamCopierWithProgress>? logger = null)
         {
             _logger = logger;
         }
@@ -22,7 +22,7 @@ namespace VMCreate
             Stream destination,
             long? totalBytes,
             string uri,
-            IProgress<CreateVMProgressInfo> progress,
+            IProgress<CreateVMProgressInfo>? progress,
             CancellationToken cancellationToken)
         {
             long totalBytesRead = 0;

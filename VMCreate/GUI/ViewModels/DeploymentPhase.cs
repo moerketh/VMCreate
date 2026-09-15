@@ -20,7 +20,7 @@ namespace VMCreate
     {
         private DeploymentPhaseStatus _status = DeploymentPhaseStatus.Pending;
         private int _progressPercentage;
-        private string _progressText;
+        private string? _progressText;
         private bool _isIndeterminate;
         private bool _isVisible = true;
 
@@ -72,7 +72,7 @@ namespace VMCreate
         }
 
         /// <summary>Secondary text shown below the phase name (speed, URI, error message, etc.).</summary>
-        public string ProgressText
+        public string? ProgressText
         {
             get => _progressText;
             set => SetProperty(ref _progressText, value);

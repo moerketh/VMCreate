@@ -35,7 +35,7 @@ namespace VMCreate.HyperV.VmCreation
         /// <summary>
         /// Adds a step entry with a success/failure outcome.
         /// </summary>
-        void LogStep(string stepName, bool success, string details = null);
+        void LogStep(string stepName, bool success, string? details = null);
 
         /// <summary>
         /// All collected log entries, oldest first.
@@ -69,7 +69,7 @@ namespace VMCreate.HyperV.VmCreation
     /// </summary>
     public sealed class DeploymentLogEntry
     {
-        public DeploymentLogEntry(DeploymentLogSeverity severity, string message, string details = null)
+        public DeploymentLogEntry(DeploymentLogSeverity severity, string message, string? details = null)
         {
             Severity = severity;
             Message = message ?? string.Empty;
@@ -78,7 +78,7 @@ namespace VMCreate.HyperV.VmCreation
 
         public DeploymentLogSeverity Severity { get; }
         public string Message { get; }
-        public string Details { get; }
+        public string? Details { get; }
 
         public override string ToString()
         {
@@ -123,7 +123,7 @@ namespace VMCreate.HyperV.VmCreation
         public void LogError(string message)
             => Add(DeploymentLogSeverity.Error, message);
 
-        public void LogStep(string stepName, bool success, string details = null)
+        public void LogStep(string stepName, bool success, string? details = null)
             => Add(DeploymentLogSeverity.Step, $"{stepName}: {(success ? "OK" : "FAIL")}", details);
 
         public string GetLog()
@@ -141,11 +141,13 @@ namespace VMCreate.HyperV.VmCreation
 
         public void SaveToFile(string path)
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)));
+            string? dir = Path.GetDirectoryName(Path.GetFullPath(path));
+            if (!string.IsNullOrEmpty(dir))
+                Directory.CreateDirectory(dir);
             File.WriteAllText(path, GetLog());
         }
 
-        private void Add(DeploymentLogSeverity severity, string message, string details = null)
+        private void Add(DeploymentLogSeverity severity, string message, string? details = null)
         {
             lock (_lock)
             {

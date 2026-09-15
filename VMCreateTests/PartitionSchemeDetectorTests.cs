@@ -11,9 +11,8 @@ namespace VMCreate.Tests
     [TestClass]
     public class PartitionSchemeDetectorTests
     {
-        private PartitionSchemeDetector _detector;
-        private string _tempDir;
-
+        private PartitionSchemeDetector _detector = null!;
+        private string _tempDir = null!;
         // Well-known GPT type GUIDs in mixed-endian on-disk byte order
         private static readonly byte[] EspGuid =
             { 0x28, 0x73, 0x2A, 0xC1, 0x1F, 0xF8, 0xD2, 0x11, 0xBA, 0x4B, 0x00, 0xA0, 0xC9, 0x3E, 0xC9, 0x3B };
@@ -570,7 +569,7 @@ namespace VMCreate.Tests
         /// GPT header fields so the detector can read entry LBA, count, and size.
         /// </summary>
         private string BuildDisk(bool protectiveMbr, bool gptHeader,
-            byte[][] partitionGuids = null, byte mbrPartitionType = 0xEE,
+            byte[][]? partitionGuids = null, byte mbrPartitionType = 0xEE,
             int diskBaseOffset = -1, ulong entryStartLba = 2,
             uint? gptRevision = null, ulong? myLba = null,
             uint? headerSize = null, uint? entryCount = null, uint entrySize = 128)

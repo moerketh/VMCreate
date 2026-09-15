@@ -29,7 +29,7 @@ namespace VMCreate
             VmCustomizations vmCustomizations,
             GalleryItem galleryItem,
             CancellationToken cancellationToken = default,
-            IProgress<CreateVMProgressInfo> progress = null,
-            string sourceFile = null);
+            IProgress<CreateVMProgressInfo>? progress = null,
+            string? sourceFile = null);
     }
 }

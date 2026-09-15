@@ -29,6 +29,6 @@ namespace VMCreate
         void CompletePhase(string id);
         void FailPhase(string id, string message);
 
-        void UpdatePhaseProgress(string id, int percentage, string progressText);
+        void UpdatePhaseProgress(string id, int percentage, string? progressText);
     }
 }

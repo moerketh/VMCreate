@@ -29,6 +29,6 @@ namespace VMCreate
         /// Gets the private key path to use for connections.
         /// Returns the custom key path if provided and valid, otherwise the auto-generated key.
         /// </summary>
-        string GetPrivateKeyPath(string customPublicKeyPath = null);
+        string GetPrivateKeyPath(string? customPublicKeyPath = null);
     }
 }

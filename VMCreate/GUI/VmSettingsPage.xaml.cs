@@ -15,7 +15,7 @@ namespace VMCreate
         private readonly IEnumerable<IConfigurableCustomizationStep> _configurableSteps;
         private readonly ILoggerFactory _loggerFactory;
 
-        public event EventHandler<WizardResultEventArgs> WizardCompleted;
+        public event EventHandler<WizardResultEventArgs>? WizardCompleted;
 
         public VmSettingsPage(WizardData wizardData, IHtbApiClient htbApiClient, IEnumerable<IConfigurableCustomizationStep> configurableSteps, ILoggerFactory loggerFactory)
         {

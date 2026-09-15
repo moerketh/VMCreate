@@ -35,7 +35,7 @@ namespace VMCreate
         public int Order => 270;
         public string? ProgressPhaseId => "Sub_DisableWaylandSessions";
 
-        public bool IsApplicable(GalleryItem item, VmCustomizations customizations)
+        public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
             => customizations?.RdpBackend != RdpBackend.Lamco;
 
         public async Task ExecuteAsync(IGuestShell shell, GalleryItem item, VmCustomizations customizations, ILogger logger, CancellationToken ct)

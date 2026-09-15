@@ -49,7 +49,7 @@ namespace VMCreate.HyperV.VmCreation
             {
                 try
                 {
-                    using RegistryKey key = Registry.LocalMachine.OpenSubKey(regPath);
+                    using RegistryKey? key = Registry.LocalMachine.OpenSubKey(regPath);
                     if (key == null)
                     {
                         _logger.LogDebug("Registry key not found: {Key}", regPath);
@@ -58,14 +58,14 @@ namespace VMCreate.HyperV.VmCreation
 
                     foreach (string valName in valueNames)
                     {
-                        object rawValue = key.GetValue(valName);
+                        object? rawValue = key.GetValue(valName);
                         if (rawValue == null)
                         {
                             _logger.LogDebug("Value {ValueName} not found under {Key}", valName, regPath);
                             continue;
                         }
 
-                        string path = rawValue.ToString();
+                        string? path = rawValue.ToString();
                         if (string.IsNullOrWhiteSpace(path))
                         {
                             _logger.LogDebug("Value {ValueName} is empty under {Key}", valName, regPath);
@@ -130,10 +130,10 @@ namespace VMCreate.HyperV.VmCreation
             try
             {
                 string registryPath = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Virtualization";
-                using RegistryKey key = Registry.LocalMachine.OpenSubKey(registryPath);
+                using RegistryKey? key = Registry.LocalMachine.OpenSubKey(registryPath);
                 if (key != null)
                 {
-                    string path = key.GetValue("DefaultVirtualHardDiskPath") as string;
+                    string? path = key.GetValue("DefaultVirtualHardDiskPath") as string;
                     if (!string.IsNullOrEmpty(path) && Directory.Exists(path))
                     {
                         _logger.LogInformation("Using DefaultVirtualHardDiskPath from registry: {Path}", path);

@@ -10,8 +10,10 @@ namespace VMCreate
 
     public class WizardData
     {
-        public ObservableCollection<GalleryItem> GalleryItems { get; set; }
-        public GalleryItem SelectedItem { get; set; }
+        public ObservableCollection<GalleryItem>? GalleryItems { get; set; }
+        public GalleryItem? SelectedItem { get; set; }
+        // Settings/Customizations are always present: initialized at construction
+        // and only ever replaced with fresh instances by ResetForNewWizard.
         public VmSettings Settings { get; set; } = new VmSettings();
         public VmCustomizations Customizations { get; set; } = new VmCustomizations();
         public bool DemoMode { get; set; }

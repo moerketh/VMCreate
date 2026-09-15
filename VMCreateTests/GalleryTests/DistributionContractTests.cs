@@ -70,7 +70,7 @@ namespace VMCreate.Tests.GalleryTests
             // disposeHandler: false so the shared handler survives multiple CreateClient() calls (e.g. Ubuntu)
             mock.Setup(f => f.CreateClient(It.IsAny<string>()))
                 .Returns(() => new HttpClient(handler, disposeHandler: false));
-            return mock.Object;
+            return mock.Object!;
         }
 
         private static IHttpClientFactory FactoryFor(
@@ -80,7 +80,7 @@ namespace VMCreate.Tests.GalleryTests
             var mock = new Mock<IHttpClientFactory>();
             mock.Setup(f => f.CreateClient(It.IsAny<string>()))
                 .Returns(() => new HttpClient(handler, disposeHandler: false));
-            return mock.Object;
+            return mock.Object!;
         }
 
         private static IHttpClientFactory ServerErrorFactory() =>
@@ -418,7 +418,7 @@ namespace VMCreate.Tests.GalleryTests
 
             // Use try/catch (polymorphic) because MSTest ThrowsAsync uses exact-type matching
             // and HttpClient wraps cancellation as TaskCanceledException : OperationCanceledException.
-            OperationCanceledException caught = null;
+            OperationCanceledException? caught = null;
             try
             {
                 await create(FactoryFor("anything")).LoadGalleryItems(cts.Token);

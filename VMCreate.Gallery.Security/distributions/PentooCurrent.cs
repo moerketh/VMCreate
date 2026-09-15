@@ -38,7 +38,7 @@ namespace VMCreate.Gallery
 
             using var doc = JsonDocument.Parse(json);
 
-            string version = null;
+            string? version = null;
             foreach (var entry in doc.RootElement.EnumerateArray())
             {
                 if (entry.TryGetProperty("name",    out var nameProp)    &&

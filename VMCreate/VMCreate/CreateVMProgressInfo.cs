@@ -48,7 +48,7 @@
     public sealed class CreateVMProgressInfo
     {
         public VmDeploymentPhase Phase { get; init; } = VmDeploymentPhase.None;
-        public string URI { get; init; }
+        public string? URI { get; init; }
         public int ProgressPercentage { get; init; }
         public double DownloadSpeed { get; init; }
 
@@ -61,26 +61,26 @@
         /// Error message from the guest (collected via SSH or PowerShell Direct).
         /// When set, the current phase should transition to Failed.
         /// </summary>
-        public string ErrorMessage { get; init; }
+        public string? ErrorMessage { get; init; }
 
         /// <summary>
         /// Full diagnostic log from the guest (journal, service status, dmesg).
         /// Only populated when an error is detected and diagnostics are collected.
         /// </summary>
-        public string DiagnosticsLog { get; init; }
+        public string? DiagnosticsLog { get; init; }
 
         /// <summary>
         /// Name of the current customization step being executed (e.g. "Sync Timezone").
         /// Used by the Deploy page to show per-step progress text.
         /// </summary>
-        public string StepName { get; init; }
+        public string? StepName { get; init; }
 
         /// <summary>
         /// Effective VM name for this deployment. Reported by the creator once the
         /// timestamped name is known so the UI can display it without mutating
         /// the original settings.
         /// </summary>
-        public string VmName { get; init; }
+        public string? VmName { get; init; }
 
         /// <summary>
         /// Identifies a well-known sub-step within the current phase (e.g. ConnectNic during CreateVM).
@@ -93,13 +93,13 @@
         public static CreateVMProgressInfo ForPhase(
             VmDeploymentPhase phase,
             VmDeploymentSubStep subStep = VmDeploymentSubStep.None,
-            string vmName = null)
+            string? vmName = null)
             => new CreateVMProgressInfo { Phase = phase, SubStep = subStep, VmName = vmName };
 
         /// <summary>
         /// Factory helper for progress within a phase.
         /// </summary>
-        public static CreateVMProgressInfo ForProgress(VmDeploymentPhase phase, int percentage, string uri = null, double downloadSpeed = 0)
+        public static CreateVMProgressInfo ForProgress(VmDeploymentPhase phase, int percentage, string? uri = null, double downloadSpeed = 0)
             => new CreateVMProgressInfo { Phase = phase, ProgressPercentage = percentage, URI = uri, DownloadSpeed = downloadSpeed };
     }
 }

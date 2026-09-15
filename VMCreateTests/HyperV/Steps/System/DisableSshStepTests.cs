@@ -10,10 +10,9 @@ namespace VMCreate.Tests.HyperV.Steps
     [TestClass]
     public class DisableSshStepTests
     {
-        private Mock<IGuestShell> _shellMock;
-        private Mock<ILogger> _loggerMock;
-        private DisableSshStep _step;
-
+        private Mock<IGuestShell> _shellMock = null!;
+        private Mock<ILogger> _loggerMock = null!;
+        private DisableSshStep _step = null!;
         [TestInitialize]
         public void Setup()
         {

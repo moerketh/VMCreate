@@ -17,7 +17,7 @@ namespace VMCreate.CLI.Progress
             PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
         };
 
-        public void Report(CreateVMProgressInfo value)
+        public void Report(CreateVMProgressInfo? value)
         {
             if (value == null) return;
 
@@ -43,17 +43,19 @@ namespace VMCreate.CLI.Progress
 
         private sealed class ProgressPayload
         {
-            public string Phase { get; set; }
+            // Serialized DTO — nullable members are omitted from NDJSON output
+            // via JsonIgnoreCondition.WhenWritingNull.
+            public string Phase { get; set; } = "";
             public int? Percentage { get; set; }
             public double? SpeedMbps { get; set; }
-            public string Uri { get; set; }
-            public string DetectedGeneration { get; set; }
+            public string? Uri { get; set; }
+            public string? DetectedGeneration { get; set; }
         }
 
         private sealed class ErrorPayload
         {
-            public string Phase { get; set; }
-            public string Error { get; set; }
+            public string Phase { get; set; } = "";
+            public string Error { get; set; } = "";
         }
     }
 }

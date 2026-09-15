@@ -89,14 +89,14 @@ namespace VMCreate
         public static string DistOptionSubId(string stepName) => $"Sub_Dist_{stepName}";
 
         /// <summary>Resolves a string icon name from distribution metadata to a WPF UI SymbolRegular.</summary>
-        public static SymbolRegular ResolveIconName(string iconName)
+        public static SymbolRegular ResolveIconName(string? iconName)
         {
             if (string.IsNullOrWhiteSpace(iconName)) return SymbolRegular.ArrowSync24;
             return Enum.TryParse<SymbolRegular>(iconName, out var icon) ? icon : SymbolRegular.ArrowSync24;
         }
 
         /// <summary>Looks up a step by name and returns its deployment metadata, if available.</summary>
-        private IDistributionOptionMetadata GetStepMetadata(string name)
+        private IDistributionOptionMetadata? GetStepMetadata(string name)
         {
             if (_configurableSteps != null
                 && _configurableSteps.TryGetValue(name, out var step)
@@ -111,7 +111,7 @@ namespace VMCreate
         /// Returns distribution option steps that are visible for the selected item.
         /// Includes both optional (user-toggled) and required (always-run) steps.
         /// </summary>
-        private IEnumerable<IConfigurableCustomizationStep> GetApplicableDistributionSteps(VmCustomizations c)
+        private IEnumerable<IConfigurableCustomizationStep> GetApplicableDistributionSteps(VmCustomizations? c)
         {
             if (SelectedItem == null || _configurableSteps == null) return Enumerable.Empty<IConfigurableCustomizationStep>();
 
@@ -127,7 +127,7 @@ namespace VMCreate
         }
 
         /// <summary>Returns enabled distribution options sorted by their deployment order.</summary>
-        private IEnumerable<DistributionOptionSelection> GetEnabledDistributionOptions(VmCustomizations c)
+        private IEnumerable<DistributionOptionSelection> GetEnabledDistributionOptions(VmCustomizations? c)
         {
             if (c?.DistributionOptions == null) return Enumerable.Empty<DistributionOptionSelection>();
             return c.DistributionOptions
@@ -137,17 +137,17 @@ namespace VMCreate
         }
 
         private readonly ILogger _logger;
-        private readonly IReadOnlyDictionary<string, IConfigurableCustomizationStep> _configurableSteps;
+        private readonly IReadOnlyDictionary<string, IConfigurableCustomizationStep>? _configurableSteps;
         private bool _isDeploying;
         private bool _isComplete;
         private bool _hasFailed;
-        private string _vmName;
-        private string _errorMessage;
+        private string _vmName = "";
+        private string _errorMessage = "";
 
-        public event Action<WizardResult> RequestWizardComplete;
-        public event Action RequestCancel;
+        public event Action<WizardResult>? RequestWizardComplete;
+        public event Action? RequestCancel;
 
-        public DeployPageViewModel(WizardData wizardData, ILogger logger, IEnumerable<IConfigurableCustomizationStep> configurableSteps = null)
+        public DeployPageViewModel(WizardData wizardData, ILogger logger, IEnumerable<IConfigurableCustomizationStep>? configurableSteps = null)
         {
             if (wizardData == null) throw new ArgumentNullException(nameof(wizardData));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -158,7 +158,6 @@ namespace VMCreate
             SelectedItem = wizardData.SelectedItem;
             _lastCustomizations = wizardData.Customizations;
             _lastSettings = wizardData.Settings;
-
             CancelCommand = new RelayCommand(OnCancel, () => _isDeploying && !_isComplete);
             ConnectToVmCommand = new RelayCommand(OnConnectToVm);
             OpenHyperVManagerCommand = new RelayCommand(OnOpenHyperVManager);
@@ -169,7 +168,7 @@ namespace VMCreate
 
         public ObservableCollection<DeploymentPhase> Phases { get; } = new ObservableCollection<DeploymentPhase>();
 
-        public GalleryItem SelectedItem { get; }
+        public GalleryItem? SelectedItem { get; }
 
         public bool IsDeploying
         {
@@ -540,10 +539,10 @@ namespace VMCreate
         // ── Sub-step helpers ─────────────────────────────────────────────
 
         /// <summary>Stashed customizations so dynamic Insert* methods can add the right sub-steps.</summary>
-        private VmCustomizations _lastCustomizations;
+        private VmCustomizations? _lastCustomizations;
 
         /// <summary>Stashed settings so dynamic Insert* methods can add conditional sub-steps.</summary>
-        private VmSettings _lastSettings;
+        private VmSettings? _lastSettings;
 
         /// <summary>Appends CreateVM sub-step cards (IndentLevel=1, hidden) after the CreateVM parent phase.</summary>
         private void AddCreateVMSubSteps(WizardData wizardData)
@@ -624,7 +623,7 @@ namespace VMCreate
         }
 
         /// <summary>Appends pre-boot sub-step cards (IndentLevel=1, hidden) to the end of Phases.</summary>
-        private void AddPreBootSubSteps(VmCustomizations c)
+        private void AddPreBootSubSteps(VmCustomizations? c)
         {
             Phases.Add(new DeploymentPhase(SubInstallHyperV, "Install Hyper-V packages",
                 "Installing guest integration services", SymbolRegular.Box24) { IndentLevel = 1, IsVisible = false });
@@ -640,7 +639,7 @@ namespace VMCreate
         }
 
         /// <summary>Inserts pre-boot sub-step cards at a given index (hidden). Returns the next free index.</summary>
-        private int InsertPreBootSubStepsAt(int index, VmCustomizations c)
+        private int InsertPreBootSubStepsAt(int index, VmCustomizations? c)
         {
             Phases.Insert(index++, new DeploymentPhase(SubInstallHyperV, "Install Hyper-V packages",
                 "Installing guest integration services", SymbolRegular.Box24) { IndentLevel = 1, IsVisible = false });
@@ -657,7 +656,7 @@ namespace VMCreate
         }
 
         /// <summary>Appends post-boot sub-step cards (IndentLevel=1, hidden) to the end of Phases.</summary>
-        private void AddPostBootSubSteps(VmCustomizations c)
+        private void AddPostBootSubSteps(VmCustomizations? c)
         {
             Phases.Add(NewPostBootSubStep(SubAddTempNic, "Add Temporary NIC",
                 "Adding temporary network adapter for SSH access", SymbolRegular.PlugConnected24));
@@ -704,7 +703,7 @@ namespace VMCreate
 
         /// <summary>Appends Windows post-boot sub-step cards (IndentLevel=1, hidden): a connect
         /// step plus one per enabled distribution option. No Linux infra steps (NIC/SSH/VBox).</summary>
-        private void AddWindowsPostBootSubSteps(VmCustomizations c)
+        private void AddWindowsPostBootSubSteps(VmCustomizations? c)
         {
             Phases.Add(NewPostBootSubStep(SubWaitForSsh, "Waiting for VM",
                 "Waiting for the VM to accept remote management connections", SymbolRegular.PlugConnected24));
@@ -713,7 +712,7 @@ namespace VMCreate
         }
 
         /// <summary>Adds visible top-level completion/info cards (IndentLevel=0) declared by enabled optional steps.</summary>
-        private void AddCompletionInfoCards(VmCustomizations c)
+        private void AddCompletionInfoCards(VmCustomizations? c)
         {
             foreach (var step in GetApplicableDistributionSteps(c).Where(s => s.IsOptional))
             {
@@ -733,7 +732,7 @@ namespace VMCreate
         }
 
         /// <summary>Inserts post-boot sub-step cards at a given index (hidden). Returns the next free index.</summary>
-        private int InsertPostBootSubStepsAt(int index, VmCustomizations c)
+        private int InsertPostBootSubStepsAt(int index, VmCustomizations? c)
         {
             Phases.Insert(index++, NewPostBootSubStep(SubAddTempNic, "Add Temporary NIC",
                 "Adding temporary network adapter for SSH access", SymbolRegular.PlugConnected24));
@@ -780,7 +779,7 @@ namespace VMCreate
         }
 
         /// <summary>Appends distribution-option sub-steps in deployment order from step metadata.</summary>
-        private void AddDistributionOptionSubSteps(VmCustomizations c)
+        private void AddDistributionOptionSubSteps(VmCustomizations? c)
         {
             foreach (var step in GetApplicableDistributionSteps(c))
             {
@@ -796,7 +795,7 @@ namespace VMCreate
         }
 
         /// <summary>Inserts distribution-option sub-steps at a given index. Returns the next free index.</summary>
-        private int InsertDistributionOptionSubStepsAt(int index, VmCustomizations c)
+        private int InsertDistributionOptionSubStepsAt(int index, VmCustomizations? c)
         {
             foreach (var step in GetApplicableDistributionSteps(c))
             {
@@ -830,7 +829,7 @@ namespace VMCreate
 
         // ── Phase status updates ─────────────────────────────────────────
 
-        public DeploymentPhase FindPhase(string id) =>
+        public DeploymentPhase? FindPhase(string id) =>
             Phases.FirstOrDefault(p => p.Id == id);
 
         public void ActivatePhase(string id)
@@ -911,7 +910,7 @@ namespace VMCreate
             }
         }
 
-        public void UpdatePhaseProgress(string id, int percentage, string text = null)
+        public void UpdatePhaseProgress(string id, int percentage, string? text = null)
         {
             var phase = FindPhase(id);
             if (phase == null) return;

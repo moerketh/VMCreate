@@ -12,6 +12,6 @@ namespace VMCreate
         /// Used both by customization-page card filtering and by deploy-time
         /// applicability checks.
         /// </summary>
-        bool IsVisibleFor(GalleryItem item);
+        bool IsVisibleFor(GalleryItem? item);
     }
 }

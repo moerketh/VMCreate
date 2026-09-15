@@ -19,7 +19,7 @@ namespace VMCreate.HyperV
         /// <summary>
         /// Runs a PowerShell command asynchronously.
         /// </summary>
-        Task<PowerShellResult> RunCommandAsync(string command, IEnumerable<KeyValuePair<string, object?>> parameters, CancellationToken cancellationToken);
+        Task<PowerShellResult> RunCommandAsync(string command, IEnumerable<KeyValuePair<string, object?>>? parameters, CancellationToken cancellationToken);
 
         /// <summary>
         /// Runs a PowerShell script asynchronously.
@@ -80,7 +80,7 @@ namespace VMCreate.HyperV
 
         public Task<PowerShellResult> RunCommandAsync(
             string command,
-            IEnumerable<KeyValuePair<string, object?>> parameters,
+            IEnumerable<KeyValuePair<string, object?>>? parameters,
             CancellationToken cancellationToken)
         {
             ThrowIfDisposed();

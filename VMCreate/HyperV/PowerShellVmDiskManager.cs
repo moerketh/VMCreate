@@ -102,6 +102,7 @@ namespace VMCreate
             return result.Output
                 .Select(d => d.Properties["Path"]?.Value?.ToString())
                 .Where(p => !string.IsNullOrEmpty(p))
+                .Select(p => p!)
                 .ToArray();
         }
     }

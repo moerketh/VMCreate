@@ -101,8 +101,8 @@ namespace VMCreate.Gallery
                             continue;
                         }
 
-                        string name = nameProp.GetString();
-                        string diskUri = diskUriProp.GetString();
+                        string? name = nameProp.GetString();
+                        string? diskUri = diskUriProp.GetString();
                         if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(diskUri))
                         {
                             _logger.LogDebug("Skipping image: Empty name or diskUri");

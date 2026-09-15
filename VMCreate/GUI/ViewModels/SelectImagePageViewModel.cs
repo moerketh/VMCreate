@@ -18,23 +18,23 @@ namespace VMCreate
         private readonly ICollectionView _galleryView;
 
         private string _searchText = string.Empty;
-        private GalleryItem _selectedItem;
+        private GalleryItem? _selectedItem;
         private bool _isLoading = true;
-        private string _errorMessage;
+        private string? _errorMessage;
         private bool _showIsoInstallers;
 
         /// <summary>Raised when the wizard should complete (e.g. Cancel).</summary>
-        public event Action<WizardResult> RequestWizardComplete;
+        public event Action<WizardResult>? RequestWizardComplete;
 
         /// <summary>Raised when the user clicks Next and validation passes.</summary>
-        public event Action RequestNavigateNext;
+        public event Action? RequestNavigateNext;
 
         public SelectImagePageViewModel(WizardData wizardData, ILogger logger)
         {
             _wizardData = wizardData ?? throw new ArgumentNullException(nameof(wizardData));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-            _galleryView = CollectionViewSource.GetDefaultView(_wizardData.GalleryItems);
+            _galleryView = CollectionViewSource.GetDefaultView(_wizardData.GalleryItems!);
             if (_galleryView is ListCollectionView listView)
                 listView.CustomSort = new GalleryItemComparer();
             else
@@ -43,7 +43,7 @@ namespace VMCreate
 
             // If items are already loaded (e.g. wizard reset after VM creation),
             // don't show the loading overlay.
-            if (_wizardData.GalleryItems.Count > 0)
+            if (_wizardData.GalleryItems?.Count > 0)
                 _isLoading = false;
 
             NextCommand = new RelayCommand(OnNext, () => SelectedItem != null);
@@ -67,7 +67,7 @@ namespace VMCreate
             }
         }
 
-        public GalleryItem SelectedItem
+        public GalleryItem? SelectedItem
         {
             get => _selectedItem;
             set
@@ -95,7 +95,7 @@ namespace VMCreate
         }
 
         /// <summary>Error text shown in a dismissible banner at the top of the page.</summary>
-        public string ErrorMessage
+        public string? ErrorMessage
         {
             get => _errorMessage;
             set
@@ -158,7 +158,7 @@ namespace VMCreate
         /// </summary>
         private sealed class GalleryItemComparer : IComparer
         {
-            public int Compare(object x, object y)
+            public int Compare(object? x, object? y)
             {
                 var a = x as GalleryItem;
                 var b = y as GalleryItem;

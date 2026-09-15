@@ -21,7 +21,7 @@ namespace VMCreate.HyperV.VmCreation
             VmCustomizations customizations,
             GalleryItem galleryItem,
             CancellationToken cancellationToken,
-            IProgress<CreateVMProgressInfo> progress,
+            IProgress<CreateVMProgressInfo>? progress,
             string sourceFile);
     }
 }

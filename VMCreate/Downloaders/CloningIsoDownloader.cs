@@ -17,7 +17,7 @@ namespace VMCreate
         /// Downloads the latest release from GitHub if the file is missing.
         /// </summary>
         Task EnsureIsoAsync(VmDeploymentPlan plan, CancellationToken cancellationToken,
-                            IProgress<CreateVMProgressInfo> progress);
+                            IProgress<CreateVMProgressInfo>? progress);
     }
 
     public class CloningIsoDownloader : ICloningIsoDownloader
@@ -45,7 +45,7 @@ namespace VMCreate
         }
 
         public async Task EnsureIsoAsync(VmDeploymentPlan plan, CancellationToken cancellationToken,
-                                         IProgress<CreateVMProgressInfo> progress)
+                                         IProgress<CreateVMProgressInfo>? progress)
         {
             if (plan == null) throw new ArgumentNullException(nameof(plan));
             cancellationToken.ThrowIfCancellationRequested();
@@ -75,8 +75,8 @@ namespace VMCreate
                         cancellationToken, progress, expectedFileName: isoFileName);
                 }
 
-                string directory = Path.GetDirectoryName(isoPath);
-                if (!Directory.Exists(directory))
+                string? directory = Path.GetDirectoryName(isoPath);
+                if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
                     Directory.CreateDirectory(directory);
 
                 File.Move(tempPath, isoPath, overwrite: true);
@@ -90,9 +90,9 @@ namespace VMCreate
             }
         }
 
-        private async Task<(string IsoUrl, string ChecksumUrl)> GetLatestReleaseUrlsAsync(CancellationToken cancellationToken)
+        private async Task<(string IsoUrl, string? ChecksumUrl)> GetLatestReleaseUrlsAsync(CancellationToken cancellationToken)
         {
-            HttpRequestException lastError = null;
+            HttpRequestException? lastError = null;
 
             for (int attempt = 0; attempt < MaxRetries; attempt++)
             {
@@ -108,17 +108,17 @@ namespace VMCreate
                     using var doc = JsonDocument.Parse(json);
                     var assets = doc.RootElement.GetProperty("assets").EnumerateArray().ToList();
 
-                    string isoUrl = null;
-                    string checksumUrl = null;
+                    string? isoUrl = null;
+                    string? checksumUrl = null;
 
                     foreach (var asset in assets)
                     {
-                        string name = asset.GetProperty("name").GetString();
-                        string url = asset.GetProperty("browser_download_url").GetString();
+                        string? name = asset.GetProperty("name").GetString();
+                        string? url = asset.GetProperty("browser_download_url").GetString();
 
-                        if (name.EndsWith(".iso", StringComparison.OrdinalIgnoreCase))
+                        if (name?.EndsWith(".iso", StringComparison.OrdinalIgnoreCase) == true)
                             isoUrl = url;
-                        else if (name.EndsWith(".sha256", StringComparison.OrdinalIgnoreCase))
+                        else if (name?.EndsWith(".sha256", StringComparison.OrdinalIgnoreCase) == true)
                             checksumUrl = url;
                     }
 

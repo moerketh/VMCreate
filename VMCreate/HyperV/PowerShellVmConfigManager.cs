@@ -89,7 +89,7 @@ namespace VMCreate
                 throw new Exception($"Failed to set enhanced session transport: {result.ErrorSummary}");
         }
 
-        public async Task SetVMLoginNotes(VmDeploymentPlan plan, string initialUsername, string initialPassword, CancellationToken cancellationToken)
+        public async Task SetVMLoginNotes(VmDeploymentPlan plan, string? initialUsername, string? initialPassword, CancellationToken cancellationToken)
         {
             // The VM Notes field persists in the .vmcx on disk and is readable
             // by every Hyper-V admin on the host — it must never carry the

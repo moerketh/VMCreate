@@ -18,14 +18,14 @@ namespace VMCreate
         private readonly ObservableCollection<GalleryItem> _galleryItems = new ObservableCollection<GalleryItem>();
         // Tracks (Name, DiskUri) pairs already in _galleryItems to deduplicate streamed batches.
         private readonly HashSet<(string Name, string DiskUri)> _seenItems = new HashSet<(string, string)>();
-        private CancellationTokenSource _galleryCts;
+        private CancellationTokenSource? _galleryCts;
         private readonly ILogger<MainWindow> _logger;
         private readonly ILoggerFactory _loggerFactory;
         private readonly IGalleryService _galleryService;
         private readonly Func<WizardData, DeployPage> _deployPageFactory;
         private readonly IHtbApiClient _htbApiClient;
         private readonly IEnumerable<IConfigurableCustomizationStep> _configurableSteps;
-        private WizardData _wizardData;
+        private WizardData? _wizardData;
 
         public MainWindow(
             IGalleryService galleryService,
@@ -218,7 +218,7 @@ namespace VMCreate
             base.OnClosed(e);
         }
 
-        private async void WizardPage_Completed(object sender, WizardResultEventArgs e)
+        private async void WizardPage_Completed(object? sender, WizardResultEventArgs e)
         {
             if (e.Result == WizardResult.Canceled)
             {
@@ -238,8 +238,8 @@ namespace VMCreate
                 }
 
                 // Otherwise we're on the Customize page — validate & navigate to Deploy.
-                var galleryItem = _wizardData.SelectedItem;
-                var vmSettings = _wizardData.Settings;
+                var galleryItem = _wizardData?.SelectedItem;
+                var vmSettings = _wizardData?.Settings ?? new VmSettings();
 
                 if (galleryItem == null)
                 {
@@ -257,7 +257,7 @@ namespace VMCreate
                     return;
                 }
 
-                var deployPage = _deployPageFactory(_wizardData);
+                var deployPage = _deployPageFactory(_wizardData!);
                 deployPage.WizardCompleted += WizardPage_Completed;
                 _mainFrame.Navigate(deployPage);
 

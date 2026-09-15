@@ -18,8 +18,8 @@ namespace VMCreate
         public int Order => 300;
         public string? ProgressPhaseId => "Sub_ConfigureVpn";
 
-        public bool IsApplicable(GalleryItem item, VmCustomizations customizations)
-            => customizations.ConfigureHtbVpn;
+        public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
+            => customizations?.ConfigureHtbVpn == true;
 
         public async Task ExecuteAsync(IGuestShell shell, GalleryItem item, VmCustomizations customizations, ILogger logger, CancellationToken ct)
         {

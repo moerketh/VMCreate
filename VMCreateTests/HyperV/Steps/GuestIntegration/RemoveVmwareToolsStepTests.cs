@@ -10,12 +10,11 @@ namespace VMCreate.Tests.HyperV.Steps
     [TestClass]
     public sealed class RemoveVmwareToolsStepTests
     {
-        private RemoveVmwareToolsStep _step;
-        private Mock<IGuestShell> _shell;
-        private Mock<ILogger<RemoveVmwareToolsStep>> _logger;
-        private GalleryItem _item;
-        private VmCustomizations _customizations;
-
+        private RemoveVmwareToolsStep _step = null!;
+        private Mock<IGuestShell> _shell = null!;
+        private Mock<ILogger<RemoveVmwareToolsStep>> _logger = null!;
+        private GalleryItem _item = null!;
+        private VmCustomizations _customizations = null!;
         [TestInitialize]
         public void Setup()
         {

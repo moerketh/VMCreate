@@ -20,8 +20,9 @@ namespace VMCreate.MediaHandlers
     {
         /// <summary>
         /// Maps a file extension (with or without leading dot) to a <see cref="DiskImageFormat"/>.
+        /// Null/empty input maps to <see cref="DiskImageFormat.Other"/>.
         /// </summary>
-        public static DiskImageFormat FromExtension(string extension)
+        public static DiskImageFormat FromExtension(string? extension)
         {
             if (string.IsNullOrWhiteSpace(extension))
                 return DiskImageFormat.Other;

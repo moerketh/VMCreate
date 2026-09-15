@@ -54,7 +54,7 @@ namespace VMCreate
         // changes" — the X11/wayland posture is still normalized so headless
         // Hyper-V consoles stay usable. If a future backend needs Wayland
         // without Lamco, this gate must become an explicit allowlist.
-        public bool IsApplicable(GalleryItem item, VmCustomizations customizations)
+        public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
             => customizations?.RdpBackend != RdpBackend.Lamco;
 
         public async Task ExecuteAsync(IGuestShell shell, GalleryItem item, VmCustomizations customizations, ILogger logger, CancellationToken ct)

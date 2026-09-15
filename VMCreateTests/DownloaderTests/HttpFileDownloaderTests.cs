@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging;
 using Moq;
 using System.Net;
 
@@ -7,12 +7,11 @@ namespace VMCreate.Tests
     [TestClass]
     public class HttpFileDownloaderTests
     {
-        private Mock<ILogger<HttpFileDownloader>> _mockLogger;
-        private Mock<IHttpStreamProvider> _mockStreamProvider;
-        private Mock<IFileStreamProvider> _mockFileStreamProvider;
-        private Mock<IStreamCopierWithProgress> _mockStreamCopier;
-        private HttpFileDownloader _downloader;
-
+        private Mock<ILogger<HttpFileDownloader>> _mockLogger = null!;
+        private Mock<IHttpStreamProvider> _mockStreamProvider = null!;
+        private Mock<IFileStreamProvider> _mockFileStreamProvider = null!;
+        private Mock<IStreamCopierWithProgress> _mockStreamCopier = null!;
+        private HttpFileDownloader _downloader = null!;
         [TestInitialize]
         public void Setup()
         {
@@ -54,9 +53,9 @@ namespace VMCreate.Tests
             _mockLogger.Verify(l => l.Log(
                 LogLevel.Information,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString().Contains("Download completed")),
-                null,
-                It.IsAny<Func<It.IsAnyType, Exception, string>>()), Times.Once);
+                It.Is<It.IsAnyType>((v, t) => string.Concat(v).Contains("Download completed")),
+                (Exception?)null,
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
         }
 
         [TestMethod]

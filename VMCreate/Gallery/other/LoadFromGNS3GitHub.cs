@@ -29,7 +29,7 @@ namespace VMCreate.Gallery
                 var client = _clientFactory.CreateClient();
                 client.DefaultRequestHeaders.Add("User-Agent", ProductInfo.UserAgent);
                 string jsonResponse = await client.GetStringAsync(GitHubApiUrl, cancellationToken);
-                JsonDocument doc = null;
+                JsonDocument? doc = null;
                 try
                 {
                     doc = JsonDocument.Parse(jsonResponse);
@@ -40,8 +40,8 @@ namespace VMCreate.Gallery
 
                     JsonElement.ArrayEnumerator assets = root.GetProperty("assets").EnumerateArray();
                     JsonElement vmAsset = assets.FirstOrDefault(asset =>
-                        asset.GetProperty("name").GetString().StartsWith("GNS3.VM.Hyper-V.", StringComparison.OrdinalIgnoreCase) &&
-                        asset.GetProperty("name").GetString().EndsWith(".zip", StringComparison.OrdinalIgnoreCase));
+                        asset.GetProperty("name").GetString()?.StartsWith("GNS3.VM.Hyper-V.", StringComparison.OrdinalIgnoreCase) == true &&
+                        asset.GetProperty("name").GetString()?.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) == true);
 
                     if (vmAsset.ValueKind == JsonValueKind.Undefined)
                     {
@@ -49,11 +49,11 @@ namespace VMCreate.Gallery
                         return items;
                     }
 
-                    string assetName = vmAsset.GetProperty("name").GetString();
+                    string assetName = vmAsset.GetProperty("name").GetString() ?? "GNS3.VM.Hyper-V.zip";
                     string prefix = "GNS3.VM.Hyper-V.";
                     string suffix = ".zip";
                     string version = assetName.Substring(prefix.Length, assetName.Length - prefix.Length - suffix.Length);
-                    string downloadUrl = vmAsset.GetProperty("browser_download_url").GetString();
+                    string downloadUrl = vmAsset.GetProperty("browser_download_url").GetString() ?? "";
 
                     GalleryItem galleryItem = new GalleryItem
                     {

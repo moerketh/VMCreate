@@ -104,7 +104,7 @@ namespace VMCreate
         public Task SetEnhancedSession(VmDeploymentPlan plan, CancellationToken cancellationToken)
             => _config.SetEnhancedSession(plan, cancellationToken);
 
-        public Task SetVMLoginNotes(VmDeploymentPlan plan, string initialUsername, string initialPassword, CancellationToken cancellationToken)
+        public Task SetVMLoginNotes(VmDeploymentPlan plan, string? initialUsername, string? initialPassword, CancellationToken cancellationToken)
             => _config.SetVMLoginNotes(plan, initialUsername, initialPassword, cancellationToken);
 
         public Task StartVMConnect(VmDeploymentPlan plan, CancellationToken cancellationToken)

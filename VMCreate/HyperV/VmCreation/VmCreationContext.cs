@@ -18,7 +18,7 @@ namespace VMCreate.HyperV.VmCreation
             MediaPreparationResult mediaResult,
             CancellationToken cancellationToken,
             IProgress<CreateVMProgressInfo> progress,
-            IDeploymentLogger logger = null)
+            IDeploymentLogger? logger = null)
         {
             Plan = plan ?? throw new ArgumentNullException(nameof(plan));
             Customizations = customizations ?? throw new ArgumentNullException(nameof(customizations));

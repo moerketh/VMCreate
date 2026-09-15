@@ -12,10 +12,9 @@ namespace VMCreate.Tests.HyperV.Steps
     [TestClass]
     public class DeployVpnConfigsStepTests
     {
-        private Mock<IGuestShell> _shellMock;
-        private Mock<ILogger> _loggerMock;
-        private DeployVpnConfigsStep _step;
-
+        private Mock<IGuestShell> _shellMock = null!;
+        private Mock<ILogger> _loggerMock = null!;
+        private DeployVpnConfigsStep _step = null!;
         [TestInitialize]
         public void Setup()
         {

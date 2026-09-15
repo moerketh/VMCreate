@@ -38,7 +38,7 @@ namespace CreateVM.HyperV.vmbus
         /// Returns a structured diagnostics string, or an error message if the
         /// connection itself fails.
         /// </summary>
-        public async Task<GuestDiagnostics> CollectAsync(string vmName, CancellationToken ct, string privateKeyPath = null)
+        public async Task<GuestDiagnostics> CollectAsync(string vmName, CancellationToken ct, string? privateKeyPath = null)
         {
             _logger.LogInformation("Collecting diagnostics from ISO guest via SSH for VM: {VMName}", vmName);
 
@@ -91,13 +91,13 @@ namespace CreateVM.HyperV.vmbus
         /// it: partial output beats a clean failure when the guest is already
         /// in a bad state.
         /// </summary>
-        private async Task<string> RunGuestCommandAsync(string vmName, string linuxCommand, CancellationToken ct, string privateKeyPath = null)
+        private async Task<string> RunGuestCommandAsync(string vmName, string linuxCommand, CancellationToken ct, string? privateKeyPath = null)
         {
             if (string.IsNullOrEmpty(privateKeyPath) || !System.IO.File.Exists(privateKeyPath))
                 throw new InvalidOperationException("SSH private key path is required for guest diagnostics collection.");
 
             // Discover the VM's IP address via Get-VMNetworkAdapter
-            string vmIp = await SshTransport.DiscoverVmIpAsync(vmName, ct, preferVmCreateTempAdapter: false);
+            string? vmIp = await SshTransport.DiscoverVmIpAsync(vmName, ct, preferVmCreateTempAdapter: false);
             if (string.IsNullOrEmpty(vmIp))
                 throw new InvalidOperationException($"Could not discover IP address for VM '{vmName}'. Guest networking may not be ready.");
 
@@ -117,7 +117,7 @@ namespace CreateVM.HyperV.vmbus
             {
                 return await SshTransport.ExecuteAsync(
                     _logger, vmName, privateKeyPath, vmIp, GuestUsername,
-                    knownHostsFile: null, linuxCommand, SshTimeout, ct,
+                    knownHostsFile: (string?)null, linuxCommand, SshTimeout, ct,
                     tolerateNonZeroExit: true);
             }
             catch (TimeoutException)
@@ -136,9 +136,9 @@ namespace CreateVM.HyperV.vmbus
             if (string.IsNullOrWhiteSpace(rawOutput))
                 return "No output from guest.";
 
-            string result = null;
-            string exitStatus = null;
-            string activeState = null;
+            string? result = null;
+            string? exitStatus = null;
+            string? activeState = null;
 
             foreach (string line in rawOutput.Split('\n'))
             {
@@ -170,10 +170,10 @@ namespace CreateVM.HyperV.vmbus
     public class GuestDiagnostics
     {
         /// <summary>Full raw output from the guest commands.</summary>
-        public string RawOutput { get; set; }
+        public string RawOutput { get; set; } = "";
 
         /// <summary>Human-readable one-line summary (shown in the UI phase card).</summary>
-        public string Summary { get; set; }
+        public string Summary { get; set; } = "";
 
         /// <summary>True if the SSH connection succeeded and data was collected.</summary>
         public bool CollectedSuccessfully { get; set; }

@@ -12,6 +12,6 @@ namespace CreateVM.HyperV.vmbus
         /// Connects to the ISO guest and collects autorun service status, journal output,
         /// mount state, and recent kernel messages.
         /// </summary>
-        Task<GuestDiagnostics> CollectAsync(string vmName, CancellationToken ct, string privateKeyPath = null);
+        Task<GuestDiagnostics> CollectAsync(string vmName, CancellationToken ct, string? privateKeyPath = null);
     }
 }

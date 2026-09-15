@@ -65,10 +65,10 @@ namespace VMCreate.CLI.Commands
 
         private static async Task<int> RunAsync(
             IServiceProvider services,
-            string category,
+            string? category,
             bool showIso,
-            string filter,
-            string format,
+            string? filter,
+            string? format,
             bool noCache,
             CancellationToken ct)
         {
@@ -203,7 +203,7 @@ namespace VMCreate.CLI.Commands
             }
         }
 
-        private static string CsvEscape(string value)
+        private static string CsvEscape(string? value)
         {
             if (string.IsNullOrEmpty(value)) return string.Empty;
             if (value.Contains(',') || value.Contains('"') || value.Contains('\n'))

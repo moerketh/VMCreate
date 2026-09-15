@@ -31,7 +31,7 @@ namespace VMCreate
         public void CompletePhase(string id) => _viewModel.CompletePhase(id);
         public void FailPhase(string id, string message) => _viewModel.FailPhase(id, message);
 
-        public void UpdatePhaseProgress(string id, int percentage, string progressText)
+        public void UpdatePhaseProgress(string id, int percentage, string? progressText)
             => _viewModel.UpdatePhaseProgress(id, percentage, progressText);
     }
 }

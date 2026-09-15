@@ -15,27 +15,28 @@ namespace VMCreate.Tests.HyperV.VmCreation
     [TestClass]
     public sealed class DiskImageVmCreationStrategyTests
     {
-        private Mock<IVmLifecycleManager> _lifecycleManager;
-        private Mock<IVmDiskManager> _diskManager;
-        private Mock<IVmBootManager> _bootManager;
-        private Mock<IVmNetworkManager> _networkManager;
-        private Mock<IVmConfigManager> _configManager;
-        private Mock<IGuestShellFactory> _guestShellFactory;
-        private Mock<ISshKeyManager> _sshKeyManager;
-        private Mock<IKvpSender> _kvpSender;
-        private Mock<IKvpPoller> _kvpPoller;
-        private Mock<IVmShutdownWatcher> _shutdownWatcher;
-        private Mock<IGuestDiagnosticsCollector> _diagnosticsCollector;
-        private Mock<IPostBootCustomizationService> _postBootService;
-        private Mock<IHostNetworkService> _hostNetworkService;
-        private Mock<IIsoBootCycleRunner> _isoBootRunner;
-        private DiskImageVmCreationStrategy _strategy;
-        private VmSettings _vmSettings;
-        private VmDeploymentPlan _plan;
-        private VmCustomizations _customizations;
-        private GalleryItem _item;
-        private string _mediaPath;
-        private string _cloningIsoPath;
+        // Fixture fields — assigned in [TestInitialize] Setup() before every test.
+        private Mock<IVmLifecycleManager> _lifecycleManager = null!;
+        private Mock<IVmDiskManager> _diskManager = null!;
+        private Mock<IVmBootManager> _bootManager = null!;
+        private Mock<IVmNetworkManager> _networkManager = null!;
+        private Mock<IVmConfigManager> _configManager = null!;
+        private Mock<IGuestShellFactory> _guestShellFactory = null!;
+        private Mock<ISshKeyManager> _sshKeyManager = null!;
+        private Mock<IKvpSender> _kvpSender = null!;
+        private Mock<IKvpPoller> _kvpPoller = null!;
+        private Mock<IVmShutdownWatcher> _shutdownWatcher = null!;
+        private Mock<IGuestDiagnosticsCollector> _diagnosticsCollector = null!;
+        private Mock<IPostBootCustomizationService> _postBootService = null!;
+        private Mock<IHostNetworkService> _hostNetworkService = null!;
+        private Mock<IIsoBootCycleRunner> _isoBootRunner = null!;
+        private DiskImageVmCreationStrategy _strategy = null!;
+        private VmSettings _vmSettings = null!;
+        private VmDeploymentPlan _plan = null!;
+        private VmCustomizations _customizations = null!;
+        private GalleryItem _item = null!;
+        private string _mediaPath = null!;
+        private string _cloningIsoPath = null!;
 
         [TestInitialize]
         public void Setup()

@@ -7,7 +7,7 @@ namespace VMCreate
 {
     public interface IFileStreamProvider
     {
-        Task<(Stream WriteStream, bool IsCached)> GetWriteStreamAsync(string filePath, bool useCache);
+        Task<(Stream? WriteStream, bool IsCached)> GetWriteStreamAsync(string filePath, bool useCache);
     }
     public class FileStreamProvider : IFileStreamProvider
     {
@@ -19,16 +19,16 @@ namespace VMCreate
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
-        public Task<(Stream WriteStream, bool IsCached)> GetWriteStreamAsync(string filePath, bool useCache)
+        public Task<(Stream? WriteStream, bool IsCached)> GetWriteStreamAsync(string filePath, bool useCache)
         {
             if (useCache && File.Exists(filePath))
             {
                 _logger.LogInformation("Using cached file: {FilePath}", filePath);
-                return Task.FromResult<(Stream, bool)>((null, true));
+                return Task.FromResult<(Stream?, bool)>((null, true));
             }
 
             var writeStream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None, BufferSize, true);
-            return Task.FromResult<(Stream, bool)>((writeStream, false));
+            return Task.FromResult<(Stream?, bool)>((writeStream, false));
         }
     }
 }

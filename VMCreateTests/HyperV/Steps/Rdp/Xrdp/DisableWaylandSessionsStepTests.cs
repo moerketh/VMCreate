@@ -12,12 +12,11 @@ namespace VMCreate.Tests.HyperV.Steps
     [TestClass]
     public sealed class DisableWaylandSessionsStepTests
     {
-        private DisableWaylandSessionsStep _step;
-        private Mock<IGuestShell> _shell;
-        private Mock<ILogger<DisableWaylandSessionsStep>> _logger;
-        private GalleryItem _item;
-        private VmCustomizations _customizations;
-
+        private DisableWaylandSessionsStep _step = null!;
+        private Mock<IGuestShell> _shell = null!;
+        private Mock<ILogger<DisableWaylandSessionsStep>> _logger = null!;
+        private GalleryItem _item = null!;
+        private VmCustomizations _customizations = null!;
         [TestInitialize]
         public void Setup()
         {
@@ -99,7 +98,8 @@ namespace VMCreate.Tests.HyperV.Steps
                 .First(i => i.Method.Name == "CopyContentAsync")
                 .Arguments[0] as string;
 
-            int restoreIndex = content.IndexOf("Restored previously disabled", StringComparison.Ordinal);
+            Assert.IsNotNull(content, "CopyContentAsync should have captured the script content");
+            int restoreIndex = content!.IndexOf("Restored previously disabled", StringComparison.Ordinal);
             int disableIndex = content.IndexOf("Wayland sessions disabled", StringComparison.Ordinal);
 
             Assert.IsTrue(restoreIndex < disableIndex, "Restore step must come before disable step");

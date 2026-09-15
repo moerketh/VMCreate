@@ -4,6 +4,11 @@
     <Authors>moerketh</Authors>
     <Product>VMCreate</Product>
     <Copyright>Copyright © moerketh $([System.DateTime]::Now.Year)</Copyright>
+    <!-- Nullable reference types: the codebase is written nullable-aware
+         (string?, object?, Dictionary<string, object?> throughout) but the
+         feature was never enabled, producing 221 CS8632 warnings. Enabling
+         makes those annotations meaningful and turns on flow analysis. -->
+    <Nullable>enable</Nullable>
     <!-- MinVer reads the nearest git tag (e.g. v1.0.0) to set Version automatically.
          Without a tag, defaults to 0.0.0-alpha.0.{height}. -->
     <MinVerTagPrefix>v</MinVerTagPrefix>

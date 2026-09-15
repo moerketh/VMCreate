@@ -62,7 +62,7 @@ namespace VMCreate
             // (e.g. after a post-boot step that didn't reboot), skip the 60-second sleep.
             try
             {
-                string probe = await RunCommandInternalAsync("Write-Output 'ps-direct-ready'", TimeSpan.FromSeconds(10), ct);
+                string? probe = await RunCommandInternalAsync("Write-Output 'ps-direct-ready'", TimeSpan.FromSeconds(10), ct);
                 if (probe != null && probe.Contains("ps-direct-ready"))
                 {
                     _logger.LogInformation("PowerShell Direct is ready on VM {VMName} (no wait needed)", _vmName);
@@ -100,7 +100,7 @@ namespace VMCreate
 
                 try
                 {
-                    string result = await RunCommandInternalAsync("Write-Output 'ps-direct-ready'", TimeSpan.FromSeconds(15), ct);
+                    string? result = await RunCommandInternalAsync("Write-Output 'ps-direct-ready'", TimeSpan.FromSeconds(15), ct);
                     if (result != null && result.Contains("ps-direct-ready"))
                     {
                         _logger.LogInformation("PowerShell Direct is ready on VM {VMName}", _vmName);
@@ -139,9 +139,9 @@ namespace VMCreate
             // SSH transport (SshGuestShell.RunCommandInternalAsync): log
             // target and length only.
             _logger.LogDebug("Running PowerShell Direct command on VM {VMName} ({Length} chars)", _vmName, command?.Length ?? 0);
-            string result = await RunCommandInternalAsync(command, CommandTimeout, ct);
+            string? result = await RunCommandInternalAsync(command, CommandTimeout, ct);
             _logger.LogDebug("PowerShell Direct command completed on VM {VMName} ({Length} chars)", _vmName, result?.Length ?? 0);
-            return result;
+            return result!;
         }
 
         /// <summary>
@@ -152,9 +152,9 @@ namespace VMCreate
         {
             // SECURITY: length only — see RunCommandAsync above.
             _logger.LogDebug("Running PowerShell Direct command on VM {VMName} ({Length} chars)", _vmName, command?.Length ?? 0);
-            string result = await RunCommandInternalAsync(command, timeout, ct);
+            string? result = await RunCommandInternalAsync(command, timeout, ct);
             _logger.LogDebug("PowerShell Direct command completed on VM {VMName} ({Length} chars)", _vmName, result?.Length ?? 0);
-            return result;
+            return result!;
         }
 
         /// <summary>
@@ -250,7 +250,7 @@ namespace VMCreate
 
         // ── Internal implementation ──────────────────────────────────────
 
-        private async Task<string> RunCommandInternalAsync(string script, TimeSpan timeout, CancellationToken ct)
+        private async Task<string?> RunCommandInternalAsync(string? script, TimeSpan timeout, CancellationToken ct)
         {
             // Fresh CreateDefault2 + Hyper-V runspace per call (same shape
             // as the executor's CreateRunspace). See HostPowerShell for why

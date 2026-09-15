@@ -2,7 +2,6 @@
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <Nullable>disable</Nullable>
     <LangVersion>latest</LangVersion>
     <RootNamespace>VMCreate.Gallery</RootNamespace>
     <AssemblyName>VMCreate.Gallery.Security</AssemblyName>

@@ -567,7 +567,8 @@ namespace VMCreate.Tests.Unattend
                 return;
             }
 
-            Type imageType = Type.GetTypeFromProgID("IMAPI2FS.MsftFileSystemImage", throwOnError: true);
+            Type? imageType = Type.GetTypeFromProgID("IMAPI2FS.MsftFileSystemImage", throwOnError: true);
+            Assert.IsNotNull(imageType, "IMAPI2FS.MsftFileSystemImage ProgID must resolve on Windows");
             var image = (IFileSystemImage)Activator.CreateInstance(imageType)!;
             image.FileSystemsToCreate = ExpectedFileSystemFlags;
 

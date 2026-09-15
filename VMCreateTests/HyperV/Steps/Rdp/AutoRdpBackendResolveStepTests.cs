@@ -26,11 +26,10 @@ namespace VMCreate.Tests.HyperV.Steps
     [TestClass]
     public sealed class AutoRdpBackendResolveStepTests
     {
-        private AutoRdpBackendResolveStep _step;
-        private Mock<IGuestShell> _shell;
-        private Mock<ILogger<AutoRdpBackendResolveStep>> _logger;
-        private GalleryItem _lamcoCapableItem;
-
+        private AutoRdpBackendResolveStep _step = null!;
+        private Mock<IGuestShell> _shell = null!;
+        private Mock<ILogger<AutoRdpBackendResolveStep>> _logger = null!;
+        private GalleryItem _lamcoCapableItem = null!;
         [TestInitialize]
         public void Setup()
         {
