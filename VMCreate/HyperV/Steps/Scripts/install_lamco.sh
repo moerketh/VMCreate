@@ -821,7 +821,7 @@ MONITORS_EOF
                 break
             fi
             if journalctl _UID=$RDY_UID --since "-5 min" --no-pager 2>/dev/null \
-                | grep -aq "permission dialog will appear"; then
+                | grep -aqi "permission dialog will appear"; then
                 RDY_OUTCOME="consent"
                 break
             fi

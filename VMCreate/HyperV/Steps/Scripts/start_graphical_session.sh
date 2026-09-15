@@ -121,9 +121,12 @@ for r in $(seq 1 12); do
             break
         fi
         # Consent prompt surfaced by lamco-grant.service = deployment OK,
-        # one console click pending.
+        # one console click pending. The fork emits several variants
+        # ("Permission dialog will appear (one-time grant)" in server/mod.rs,
+        # "permission dialog will appear" in portal.rs/libei) — match
+        # case-insensitively so no capitalization drift re-breaks the gate.
         if journalctl _UID=$USER_UID --since "-5 min" --no-pager 2>/dev/null \
-            | grep -aq "permission dialog will appear"; then
+            | grep -aqi "permission dialog will appear"; then
             RDY_OUTCOME="consent"
             break
         fi
