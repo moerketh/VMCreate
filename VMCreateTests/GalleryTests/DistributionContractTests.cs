@@ -178,6 +178,12 @@ namespace VMCreate.Tests.GalleryTests
             Assert.AreEqual(items[0].DiskUri, items[1].DiskUri, "Twin shares the base disk");
             Assert.AreEqual(LinuxDistro.Kali, items[1].LinuxDistro);
             Assert.IsFalse(items[1].IsRecommended, "Twin must not steal the recommended slot");
+
+            // InitialUsername: the Kali Hyper-V image's uid-1000 desktop user.
+            // A blank field collapsed every user-unit path on TEST_20260910165003
+            // (units written to /.config) — both base and twin must carry it.
+            Assert.AreEqual("kali", items[0].InitialUsername, "Base item must carry the image's desktop user");
+            Assert.AreEqual("kali", items[1].InitialUsername, "Twin must carry the image's desktop user");
         }
 
         [TestMethod]
@@ -233,6 +239,12 @@ namespace VMCreate.Tests.GalleryTests
             Assert.AreEqual(items[0].DiskUri, items[1].DiskUri, "Stable twin shares the stable disk");
             Assert.AreEqual(items[2].DiskUri, items[3].DiskUri, "Weekly twin shares the weekly disk");
             Assert.AreNotEqual(items[0].DiskUri, items[2].DiskUri, "Stable and weekly base disks differ");
+
+            // All four items (stable/weekly × base/KDE-twin) carry the
+            // image's uid-1000 desktop user — the autologin/user-unit
+            // resolver's authoritative source.
+            foreach (var item in items)
+                Assert.AreEqual("kali", item.InitialUsername, $"'{item.Name}' must carry InitialUsername=kali");
         }
 
         [TestMethod]
