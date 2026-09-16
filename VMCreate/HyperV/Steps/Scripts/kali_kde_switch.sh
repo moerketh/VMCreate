@@ -75,11 +75,45 @@ if command -v systemctl >/dev/null 2>&1 && [ -x /usr/bin/sddm ]; then
     if [ "$current_dm" != "/usr/bin/sddm" ]; then
         echo "/usr/bin/sddm" > /etc/X11/default-display-manager
         echo "Display manager set to sddm (was: ${current_dm:-unset})."
-        systemctl enable sddm.service 2>/dev/null || true
         systemctl disable lightdm.service 2>/dev/null || true
         systemctl disable gdm3.service 2>/dev/null || true
     else
         echo "Display manager already sddm."
+    fi
+    # Enable sddm and VERIFY. A bare `enable || true` silently swallowed
+    # the failure mode where enable never creates the display-manager.service
+    # alias (observed after a wedged handover): the machine then booted to a
+    # text console and the deployment's session-readiness gate hung. The
+    # alias symlink is the ground truth systemd uses to pick the DM at
+    # graphical.target — check it exists, and fail loudly (degraded) if not.
+    echo "Enabling sddm.service..."
+    if ! systemctl enable sddm.service 2>&1; then
+        DEGRADED=1
+        echo "WARNING: systemctl enable sddm.service failed."
+    fi
+    if [ ! -e /etc/systemd/system/display-manager.service ]; then
+        DEGRADED=1
+        echo "WARNING: display-manager.service alias missing after enable — first boot will not start a graphical display manager."
+        # Last-resort repair: create the alias systemd would have made.
+        ln -sf /usr/lib/systemd/system/sddm.service /etc/systemd/system/display-manager.service 2>&1 \
+            || ln -sf /lib/systemd/system/sddm.service /etc/systemd/system/display-manager.service 2>&1 \
+            || true
+        if [ -e /etc/systemd/system/display-manager.service ]; then
+            systemctl daemon-reload 2>&1 || true
+            echo "Repaired display-manager.service alias manually."
+        fi
+    fi
+    # The default target must be graphical — the DM only starts there. A
+    # multi-user default lands on a text console even with sddm enabled.
+    default_target="$(systemctl get-default 2>/dev/null || true)"
+    if [ "$default_target" != "graphical.target" ]; then
+        echo "Default target is '$default_target' — setting graphical.target..."
+        if systemctl set-default graphical.target 2>&1; then
+            echo "Default target set to graphical.target."
+        else
+            DEGRADED=1
+            echo "WARNING: could not set graphical.target as default."
+        fi
     fi
 fi
 
@@ -138,10 +172,11 @@ fi
 # -- Final consistency check ------------------------------------------------
 # The doc's verification step is "reboot and make sure all our changes were
 # made properly". We cannot reboot inside this step (the deploy continues
-# over SSH), but we CAN verify the two facts the DM reads at startup: the
-# display-manager default and the session default. A wrong pair means the
-# first boot lands on XFCE/X11 instead of KDE Wayland — report degraded,
-# never a silent ok.
+# over SSH), but we CAN verify the three facts the DM reads at startup: the
+# display-manager default, the session default, and the systemd wiring
+# (display-manager.service alias + graphical.target default). A wrong set
+# means the first boot lands on XFCE/X11 or a text console instead of KDE
+# Wayland — report degraded, never a silent ok.
 final_dm="$(cat /etc/X11/default-display-manager 2>/dev/null || true)"
 final_sm="$(update-alternatives --query x-session-manager 2>/dev/null | grep '^Value:' | awk '{print $2}')"
 if [ -x /usr/bin/sddm ] && [ "$final_dm" != "/usr/bin/sddm" ]; then
@@ -151,6 +186,15 @@ fi
 if [ "$final_sm" != "/usr/bin/startplasma-wayland" ]; then
     DEGRADED=1
     echo "WARNING: default session manager is '$final_sm', expected /usr/bin/startplasma-wayland."
+fi
+if [ -x /usr/bin/sddm ] && [ ! -e /etc/systemd/system/display-manager.service ]; then
+    DEGRADED=1
+    echo "WARNING: display-manager.service alias is missing — sddm will not start at boot."
+fi
+final_target="$(systemctl get-default 2>/dev/null || true)"
+if [ -x /usr/bin/sddm ] && [ "$final_target" != "graphical.target" ]; then
+    DEGRADED=1
+    echo "WARNING: default target is '$final_target', expected graphical.target — boot lands on a text console."
 fi
 
 if [ "$DEGRADED" = "1" ]; then
