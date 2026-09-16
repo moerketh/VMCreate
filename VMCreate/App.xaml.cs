@@ -19,7 +19,9 @@ namespace VMCreate
     {
         // Initialized during OnStartup before any consumer access; null only
         // before startup completes (the process exits if startup fails).
-        private IServiceProvider? _serviceProvider;
+        // Static: one App per process, and the warmup path below reads it
+        // from MainWindow's ContentRendered handler without an App instance.
+        private static IServiceProvider? _serviceProvider;
 
         /// <summary>When true, VMConnect is launched automatically after the VM starts.</summary>
         internal static bool DemoMode { get; private set; }
@@ -168,6 +170,37 @@ namespace VMCreate
             var mainWindow = _serviceProvider!.GetRequiredService<MainWindow>();
             mainWindow.Show();
             RecordStartup("window-shown");
+        }
+
+        // ── Background PowerShell warmup ─────────────────────────────────
+        // The Hyper-V PowerShellExecutor is a lazily-constructed singleton:
+        // the first resolve pays ~600 ms of InitialSessionState build and
+        // the first command pays ~2.3 s of first-runspace-open (module
+        // import + JIT) — together that's a multi-second stall on the
+        // first Deploy click. Started from MainWindow's ContentRendered
+        // (right after the first-frame milestone) so it never competes
+        // with first render; by the time the user picks an image and
+        // clicks Deploy, both costs are already paid. Warmup() swallows
+        // failures (e.g. no Hyper-V role), and every Run* call opens its
+        // own runspace, so this cannot change later deploy behavior.
+        private static int _warmupStarted;
+
+        internal static void StartPowerShellWarmup()
+        {
+            if (Interlocked.Exchange(ref _warmupStarted, 1) == 1) return;
+            var provider = _serviceProvider;
+            if (provider == null) return;
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    provider.GetRequiredService<VMCreate.HyperV.IPowerShellExecutor>().Warmup();
+                }
+                catch (Exception ex)
+                {
+                    Serilog.Log.Information("Startup: powershell-warmup-skipped (service resolve): {Reason}", ex.GetType().Name);
+                }
+            });
         }
 
         protected override void OnExit(ExitEventArgs e)

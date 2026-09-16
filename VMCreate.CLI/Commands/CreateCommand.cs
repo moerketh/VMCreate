@@ -296,6 +296,20 @@ namespace VMCreate.CLI.Commands
                 return ExitCodes.InvalidArguments;
             }
 
+            // ── PowerShell warmup (overlaps download/extract) ────────────────
+            // The first Hyper-V PowerShell call of the process pays ~600 ms
+            // InitialSessionState build + ~2.3 s first-runspace-open (module
+            // import + JIT). Deploys don't touch PowerShell until CreateVM —
+            // after download and extraction — so warming in the background
+            // now hides that cost entirely. Fire-and-forget: Warmup()
+            // swallows failures (no Hyper-V role), and each Run* call opens
+            // its own runspace, so this cannot affect deploy behavior.
+            _ = Task.Run(() =>
+            {
+                try { services.GetRequiredService<VMCreate.HyperV.IPowerShellExecutor>().Warmup(); }
+                catch { /* warmup is best-effort; deploys keep lazy semantics */ }
+            });
+
             // ── Build VmSettings ─────────────────────────────────────────────
             var vmSettings = new VmSettings
             {

@@ -25,6 +25,17 @@ namespace VMCreate.HyperV
         /// Runs a PowerShell script asynchronously.
         /// </summary>
         Task<PowerShellResult> RunScriptAsync(string script, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Opens and discards a throwaway runspace against the shared session state,
+        /// paying the one-off Hyper-V module import + JIT cost (~2.3 s measured on
+        /// first open) away from the first real command. Safe to call on machines
+        /// without Hyper-V: failures are logged and swallowed, and because every
+        /// Run* call opens its own runspace from the untouched InitialSessionState,
+        /// a failed warmup cannot affect later calls — they keep their normal
+        /// lazy failure semantics.
+        /// </summary>
+        void Warmup();
     }
 
     /// <summary>
@@ -45,6 +56,7 @@ namespace VMCreate.HyperV
     public sealed class PowerShellExecutor : IPowerShellExecutor
     {
         private readonly InitialSessionState _initialSessionState;
+        private readonly object _runspaceGate = new();
         private bool _disposed;
 
         public PowerShellExecutor()
@@ -115,9 +127,38 @@ namespace VMCreate.HyperV
 
         private Runspace CreateRunspace()
         {
-            var runspace = RunspaceFactory.CreateRunspace(_initialSessionState);
-            runspace.Open();
-            return runspace;
+            // Gated: the background Warmup() can overlap a real caller's
+            // first open on the same InitialSessionState; serializing
+            // creation+open removes that race. Worst case a real call waits
+            // for the in-flight warmup (never longer than the cold-open cost
+            // it replaces); all existing callers are sequential anyway.
+            lock (_runspaceGate)
+            {
+                var runspace = RunspaceFactory.CreateRunspace(_initialSessionState);
+                runspace.Open();
+                return runspace;
+            }
+        }
+
+        public void Warmup()
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                // One throwaway open pays the module import + JIT cost of the
+                // first real CreateRunspace() so deploys don't. The runspace is
+                // discarded immediately; _initialSessionState is untouched, so
+                // real commands later behave exactly as without warmup.
+                using var runspace = CreateRunspace();
+                LogStartup("powershell-runspace-warmed", sw);
+            }
+            catch (Exception ex)
+            {
+                // Expected on machines without Hyper-V (module import fails at
+                // open) — a failed warmup must not break a later deploy.
+                Serilog.Log.Information("Startup: {ElapsedMs} ms — powershell-warmup-skipped (PowerShell hosting): {Reason}",
+                    sw.ElapsedMilliseconds, ex.GetType().Name);
+            }
         }
 
         private static PowerShellResult CreateResult(System.Collections.ObjectModel.Collection<PSObject> output, PowerShell ps)
