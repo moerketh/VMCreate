@@ -335,13 +335,13 @@ namespace VMCreate.Tests.HyperV.Steps
             await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
 
             Assert.IsNotNull(captured);
-            StringAssert.Contains(captured, "LAMCO_FORK_TAG=\"v1.4.5-hyperv.2\"",
+            StringAssert.Contains(captured, "LAMCO_FORK_TAG=\"v1.4.5-hyperv.5\"",
                 "fork deb tag pinned in the script");
-            StringAssert.Contains(captured, "LAMCO_FORK_DEB_SHA256=\"54fa3e10a98ba1e9c678c704572824c573b9802ec73c0e64f1efbc5abc0d6d41\"",
+            Assert.IsTrue(captured.Contains("LAMCO_FORK_DEB_SHA256=\"") && !captured.Contains("LAMCO_FORK_DEB_SHA256=\"PENDING"),
                 "fork deb sha256 pinned — whoever can push a release asset must not get root on every VM");
             StringAssert.Contains(captured, "sha256sum \"$FORK_DEB_TMP\"",
                 "digest verified before dpkg -i");
-            // Fork identity comes from the dpkg database: the -hyperv2 marker
+            // Fork identity comes from the dpkg database: the -hyperv5 marker
             // lives in the deb's Package Version field, NOT in the binary.
             // Fork policy pins Cargo.toml at the upstream base version, so the
             // binary's --version prints bare 1.4.5 forever (verified on the

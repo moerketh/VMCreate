@@ -17,15 +17,15 @@ set -o pipefail
 #     rpm/flatpak assets are not built for this lineage).
 
 LAMCO_FORK_REPO="moerketh/lamco-rdp-server"
-LAMCO_FORK_TAG="v1.4.5-hyperv.2"
-LAMCO_FORK_DEB_VERSION="1.4.5-hyperv2"
+LAMCO_FORK_TAG="v1.4.5-hyperv.5"
+LAMCO_FORK_DEB_VERSION="1.4.5-hyperv5"
 # The fork's release policy: the Cargo.toml crate version stays at the
 # upstream base (1.4.5) and the deb's package version carries the lineage
 # suffix — i.e. the BINARY deliberately reports only the base version
 # (verified on the pinned asset: /usr/bin/lamco-rdp-server --version prints
-# "lamco-rdp-server 1.4.5"), while dpkg reports 1.4.5-hyperv2.
+# "lamco-rdp-server 1.4.5"), while dpkg reports 1.4.5-hyperv5.
 LAMCO_FORK_CRATE_VERSION="1.4.5"
-LAMCO_FORK_DEB_SHA256="54fa3e10a98ba1e9c678c704572824c573b9802ec73c0e64f1efbc5abc0d6d41"
+LAMCO_FORK_DEB_SHA256="592b1816d0762a70c3118890d1264163b0227cc0ffe84c34b68310bc20a64dce"
 LAMCO_FORK_DEB_URL="https://github.com/${LAMCO_FORK_REPO}/releases/download/${LAMCO_FORK_TAG}/lamco-rdp-server_${LAMCO_FORK_DEB_VERSION}_amd64.deb"
 
 # Result contract: 0 = ok, 1 = degraded (install completed with warnings —
