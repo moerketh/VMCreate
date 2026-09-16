@@ -10,10 +10,13 @@
     <SelfContained>true</SelfContained>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>false</EnableCompressionInSingleFile>
-    <PublishReadyToRun>true</PublishReadyToRun>
+    <!-- R2R (incl. crossgen2 composite) is only valid for self-contained
+         publishes; a framework-dependent publish that inherits these
+         produces an exe that fail-fasts (0xC0000602) on launch. -->
+    <PublishReadyToRun Condition="'$(SelfContained)' == 'true'">true</PublishReadyToRun>
     <!-- Crossgen2 composite: same measured win as the GUI (~8% faster
          startup at identical single-file size). -->
-    <PublishReadyToRunComposite>true</PublishReadyToRunComposite>
+    <PublishReadyToRunComposite Condition="'$(SelfContained)' == 'true'">true</PublishReadyToRunComposite>
   </PropertyGroup>
 
   <ItemGroup>
