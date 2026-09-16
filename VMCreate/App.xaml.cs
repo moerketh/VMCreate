@@ -1,7 +1,5 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
-using CreateVM.HyperV.vmbus;
 using Serilog;
 using System;
 using System.Collections.Generic;
@@ -14,8 +12,6 @@ using System.Windows;
 using VMCreate;
 using VMCreate.Gallery;
 using VMCreate.HyperV.Unattend;
-using VMCreate.HyperV.VmCreation;
-using VMCreate.MediaHandlers;
 
 namespace VMCreate
 {
@@ -130,103 +126,20 @@ namespace VMCreate
             });
             services.AddHttpClient();
 
-            // ── Configuration ───────────────────────────────────────────────
-            services.AddSingleton(Options.Create(new AppSettings()));
-
-            // ── Infrastructure / low-level services ─────────────────────────
-            services.AddTransient<IFileStreamProvider, FileStreamProvider>();
-            services.AddTransient<IHttpStreamProvider, HttpStreamProvider>();
-            services.AddTransient<IStreamCopierWithProgress, StreamCopierWithProgress>();
-            services.AddTransient<IDownloader, HttpFileDownloader>();
-            services.AddTransient<IChecksumVerifier, ChecksumVerifier>();
-            services.AddTransient<ICloningIsoDownloader, CloningIsoDownloader>();
-
-            // ── Hyper-V / VM plumbing ───────────────────────────────────────
-            // Fully-qualified because VMCreate.HyperV.Unattend also defines IPowerShellExecutor.
-            services.AddSingleton<VMCreate.HyperV.IPowerShellExecutor, VMCreate.HyperV.PowerShellExecutor>();
-            services.AddTransient<VMCreate.HyperV.Unattend.IPowerShellExecutor, VMCreate.HyperV.Unattend.PowerShellExecutor>();
-            services.AddSingleton<IVmLifecycleManager, PowerShellVmLifecycleManager>();
-            services.AddSingleton<IVmDiskManager, PowerShellVmDiskManager>();
-            services.AddSingleton<IVmBootManager, PowerShellVmBootManager>();
-            services.AddSingleton<IVmNetworkManager, PowerShellVmNetworkManager>();
-            services.AddSingleton<IVmConfigManager, PowerShellVmConfigManager>();
-            services.AddSingleton<IHyperVManager, PowerShellHyperVManagerFacade>();
-            services.AddSingleton<IUnattendInjector, ElevatedUnattendInjector>();
-            services.AddTransient<IOfflineRegistryEditor, OfflineRegistryEditor>();
-            services.AddTransient<UnattendInjector>();
-            services.AddSingleton<ISshKeyManager, SshKeyManager>();
-            services.AddTransient<IKvpSender, KvpHostToGuest>();
-            services.AddTransient<IKvpPoller, HyperVKVPPoller>();
-            services.AddTransient<IVmShutdownWatcher, HyperVKVPPoller>();
-            services.AddTransient<IGuestDiagnosticsCollector, GuestDiagnosticsCollector>();
-            services.AddTransient<IGuestShellFactory, GuestShellFactory>();
-            services.AddTransient<PowerShellDirectGuestShellFactory>();
-
-            // ── VM creation services ────────────────────────────────────────
-            services.AddSingleton<IVmPathService, VmPathService>();
-            services.AddSingleton<IHostNetworkService, HostNetworkService>();
-            services.AddTransient<IPostBootCustomizationService, PostBootCustomizationService>();
-            services.AddTransient<IIsoBootCycleRunner, IsoBootCycleRunner>();
-            services.AddTransient<IVmCreationStrategy, IsoVmCreationStrategy>();
-            services.AddTransient<IVmCreationStrategy, NativeHyperVVmCreationStrategy>();
-            services.AddTransient<IVmCreationStrategy, DiskImageVmCreationStrategy>();
-
-            // ── Disk / media handling ───────────────────────────────────────
-            services.AddSingleton<IDiskConverter, DiskConverter>();
-            services.AddSingleton<IMediaHandlerFactory, MediaHandlerFactory>();
-            services.AddTransient<XzFileExtractor>();
-            services.AddTransient<ArchiveExtractor>();
-            services.AddTransient<IExtractor>(provider => new ExtractorFactory(
-                provider.GetRequiredService<XzFileExtractor>(),
-                provider.GetRequiredService<ArchiveExtractor>(),
-                provider.GetRequiredService<ILogger<ExtractorFactory>>()));
-            services.AddTransient<DiskFileDetector>();
-
-            // ── Gallery ─────────────────────────────────────────────────────
-            // Assemblies to scan for auto-discovered implementations
-            var scannableAssemblies = new[]
-            {
-                System.Reflection.Assembly.GetExecutingAssembly(), // VMCreate (main)
-                typeof(BlackArch).Assembly                         // VMCreate.Gallery.Security
-            };
-
-            // Auto-register all IGalleryLoader implementations
-            var galleryLoaderTypes = scannableAssemblies
-                .SelectMany(a => a.GetTypes())
-                .Where(t => typeof(IGalleryLoader).IsAssignableFrom(t)
-                            && !t.IsAbstract
-                            && !t.IsInterface
-                            && t != typeof(AggregateGalleryLoader));
-            foreach (var loaderType in galleryLoaderTypes)
-                services.AddTransient(loaderType);
-
-            services.AddTransient<IGalleryLoader>(provider =>
-            {
-                var logger = provider.GetRequiredService<ILogger<AggregateGalleryLoader>>();
-                var loaders = galleryLoaderTypes.Select(t => (IGalleryLoader)provider.GetRequiredService(t));
-                return new AggregateGalleryLoader(logger, loaders);
-            });
-            services.AddTransient<IGalleryItemsParser, GalleryItemsParser>();
-            services.AddSingleton<IGalleryCache, GalleryCache>();
-            services.AddTransient<IGalleryService, GalleryService>();
-
-            // ── Customization steps (auto-discovered) ───────────────────────
-            var stepTypes = scannableAssemblies
-                .SelectMany(a => a.GetTypes())
-                .Where(t => typeof(ICustomizationStep).IsAssignableFrom(t)
-                            && !t.IsAbstract
-                            && !t.IsInterface);
-            foreach (var stepType in stepTypes)
-                services.AddTransient(typeof(ICustomizationStep), stepType);
-
-            // Also register IConfigurableCustomizationStep so pages can
-            // discover distribution-specific UI options via DI.
-            var configurableStepTypes = stepTypes
-                .Where(t => typeof(IConfigurableCustomizationStep).IsAssignableFrom(t));
-            foreach (var stepType in configurableStepTypes)
-                services.AddTransient(typeof(IConfigurableCustomizationStep), stepType);
+            // ── Core deployment services (shared with the CLI) ──────────────
+            // Single source of truth: AddCoreServices in VMCreate.Core — the
+            // GUI duplicated these registrations verbatim until the Core/GUI
+            // split moved every non-UI service out of this assembly. Scan set =
+            // VMCreate.Core (steps + general gallery) + Gallery.Security,
+            // matching the CLI's ScannableAssemblies (CliFrontEndParityTests
+            // pins the two sets equivalent).
+            services.AddCoreServices(
+                typeof(SyncTimezoneStep).Assembly,   // VMCreate.Core — steps + general gallery
+                typeof(BlackArch).Assembly);         // VMCreate.Gallery.Security
 
             // ── Full customization-step lookup for deploy progress mapping ─────
+            // GUI-only registration (the CLI container never had it): DeployPage
+            // maps running steps by name through this lookup.
             services.AddTransient<IReadOnlyDictionary<string, ICustomizationStep>>(sp =>
             {
                 var allSteps = sp.GetServices<ICustomizationStep>()
@@ -234,16 +147,6 @@ namespace VMCreate
                 // If duplicate names exist, pick the first registered instance.
                 return allSteps.ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
             });
-
-            // ── HTB API client (uses IHttpClientFactory) ────────────────────
-            services.AddHttpClient<IHtbApiClient, HtbApiClient>();
-
-            // ── VM creation orchestrator ────────────────────────────────────
-            services.AddTransient<IVmDeploymentOrchestrator, VmDeploymentOrchestrator>();
-            services.AddTransient<IVmCreator, HyperVVmCreator>();
-            services.AddTransient<CreateVM>();
-            services.AddSingleton<IPartitionSchemeDetector, PartitionSchemeDetector>();
-            services.AddSingleton<IVmGenerationResolver, VmGenerationResolver>();
 
             // ── UI / pages ──────────────────────────────────────────────────
             services.AddSingleton<Func<WizardData, DeployPage>>((Func<IServiceProvider, Func<WizardData, DeployPage>>)(sp => wizardData =>
