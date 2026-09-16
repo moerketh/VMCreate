@@ -20,7 +20,13 @@ namespace VMCreate
     /// - Validate .xz files using magic bytes to prevent misidentification.
     /// SharpCompress 0.40.0 was initially used with ReaderFactory, but due to consistent failures (e.g., InvalidFormatException at ReaderFactory.Open), this implementation switched to XZ.NET, a dedicated XZ decompression library.
     /// An external 'xz' command-line tool fallback was considered but removed to avoid external dependencies.
-    /// XZ.NET requires liblzma.dll, which must be placed in the application's executable directory or system PATH (e.g., download from https://tukaani.org/xz/).
+    /// XZ.NET requires the native liblzma.dll, which ships with the XZ.NET-netstandard NuGet package and is
+    /// auto-copied to the output directory by its build targets; with IncludeNativeLibrariesForSelfExtract=true
+    /// it is carried inside the single-file bundle and self-extracts at startup (verified: single-chain resolution
+    /// works for self-contained single-file publishes).
+    /// SharpCompress 0.48.1 was re-evaluated as a replacement but remains unsuitable: its XZStream correctly
+    /// decompresses single-stream files but silently truncates concatenated multi-stream .xz files, whereas
+    /// XZ.NET handles all stream combinations correctly (validated 2026-09 against a multi-stream corpus).
     /// Progress reporting is implemented using a buffer-based copy to provide incremental updates, as XZ.NET lacks native progress events.
     /// The class integrates with Serilog for detailed logging and uses dependency injection for compatibility with the application's CreateVM workflow.
     /// </remarks>

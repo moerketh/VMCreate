@@ -1,0 +1,59 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>VMCreate.Core</AssemblyName>
+    <RootNamespace>VMCreate</RootNamespace>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="VMCreate" />
+    <InternalsVisibleTo Include="VMCreate.CLI" />
+    <InternalsVisibleTo Include="VMCreate.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VMCreate.Gallery.Contracts\VMCreate.Gallery.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.12" />
+    <!-- Startup-milestone logging (Serilog.Log.Information in the PowerShell
+         executor) — frontends configure the static sink; Core only writes. -->
+    <PackageReference Include="Serilog" Version="4.2.0" />
+    <PackageReference Include="System.Management.Automation" Version="7.6.6" />
+    <!-- PS7 engine assemblies for the CDXML/CIM cmdlet machinery (Storage cmdlets,
+         Hyper-V CDXML). Without them, assembly resolution falls back to the
+         Windows PowerShell 5.1 GAC copies (Microsoft.PowerShell.Commands.Management
+         v3.0.0.0, CimCmdlets v1.0.0.0), whose cmdletization engine JITs against
+         WinPS-only SMA internals (EnumerableExtensions.Append) and dies with
+         MissingMethodException when a CIM method invoke succeeds. -->
+    <PackageReference Include="Microsoft.Management.Infrastructure.CimCmdlets" Version="7.6.6" />
+    <PackageReference Include="Microsoft.PowerShell.Commands.Management" Version="7.6.6" />
+    <PackageReference Include="SharpCompress" Version="0.50.4" />
+    <PackageReference Include="XZ.NET-netstandard" Version="2.0.0.2" />
+  </ItemGroup>
+
+  <!-- Default SDK globs cover .cs only; embedded shell scripts and SVG
+       icons need explicit items. RootNamespace=VMCreate keeps the manifest
+       resource names identical to what ScriptResourceLoader/GalleryIcons
+       matched before the Core/GUI split (VMCreate.HyperV.Steps.Scripts.*,
+       VMCreate.Icons.*). -->
+  <ItemGroup>
+    <EmbeddedResource Include="HyperV\Steps\Scripts\*.sh" />
+    <EmbeddedResource Include="Icons\*.svg" />
+    <Content Include="gallery.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Unattend\autounattend.xml">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Unattend\unattend.xml">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+</Project>

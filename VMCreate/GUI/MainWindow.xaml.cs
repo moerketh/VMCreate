@@ -51,7 +51,15 @@ namespace VMCreate
             SystemThemeWatcher.Watch(this);
 
             Loaded += MyWindow_LoadedAsync;
-            ContentRendered += (_, __) => App.RecordStartup("first-frame");
+            // First-frame milestone, then kick off the background PowerShell
+            // warmup — ordering matters: the warmup thread must not compete
+            // with the first render (it did when started at window-shown and
+            // cost ~270 ms of first-frame).
+            ContentRendered += (_, __) =>
+            {
+                App.RecordStartup("first-frame");
+                App.StartPowerShellWarmup();
+            };
 
             // Sync the theme toggle icon with the current theme at startup
             SyncThemeIcon();

@@ -43,9 +43,9 @@ namespace VMCreate.Tests.HyperV
 
         private static readonly string[] TransportFiles =
         {
-            @"VMCreate\HyperV\SshTransport.cs",
-            @"VMCreate\HyperV\SshGuestShell.cs",
-            @"VMCreate\HyperV\PowerShellDirectGuestShell.cs",
+            @"VMCreate.Core\HyperV\SshTransport.cs",
+            @"VMCreate.Core\HyperV\SshGuestShell.cs",
+            @"VMCreate.Core\HyperV\PowerShellDirectGuestShell.cs",
         };
 
         /// <summary>

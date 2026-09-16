@@ -73,34 +73,6 @@ has waived all copyright and related or neighboring rights to XZ Utils.
 
 ---
 
-## ZstdSharp
-
-- **Version:** 0.8.8
-- **Project:** https://github.com/oleg-st/ZstdSharp
-- **License:** MIT
-
-Copyright (c) 2025 Oleg Stepanischev
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
----
-
 ## WPF UI
 
 - **Version:** 4.3.0
@@ -192,7 +164,7 @@ SOFTWARE.
 
 ## Serilog
 
-- **Version:** 4.2.0+
+- **Version:** 4.2.0+ (transitive: Serilog 4.2.0)
 - **Project:** https://serilog.net/
 - **License:** Apache-2.0
 
@@ -258,7 +230,7 @@ the License.
 
 ## Microsoft.PowerShell.SDK
 
-- **Version:** 7.6.6
+- **Version:** 7.6.6 (System.Management.Automation et al.)
 - **Project:** https://github.com/PowerShell/PowerShell
 - **License:** MIT
 
@@ -369,3 +341,31 @@ the license in `/usr/share/doc/lamco-rdp-server/LICENSE` on the guest
 Copyright (c) Microsoft Corporation. All rights reserved.
 
 Licensed under the MIT License. See above for full text.
+
+---
+
+## Spectre.Console
+
+- **Version:** 0.50.0
+- **Project:** https://github.com/spectreconsole/spectre.console
+- **License:** MIT
+
+Copyright © Patrik Svensson, Mattias Åkerberg, Phil Scott, Nils Andresen and contributors.
+
+Spectre.Console is licensed under the MIT License. See above for full text.
+
+Used by the VMCreate.CLI application.
+
+---
+
+## System.CommandLine
+
+- **Version:** 2.0.0-beta4.22272.1
+- **Project:** https://github.com/dotnet/command-line-api
+- **License:** MIT
+
+Copyright (c) .NET Foundation and contributors
+
+Licensed under the MIT License. See above for full text.
+
+Used by the VMCreate.CLI application.
