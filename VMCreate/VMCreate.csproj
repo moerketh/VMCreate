@@ -11,143 +11,23 @@
 	<SelfContained>true</SelfContained>
 	<IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
 	<EnableCompressionInSingleFile>false</EnableCompressionInSingleFile>
-    <PublishReadyToRun>true</PublishReadyToRun>
+    <!-- R2R (incl. crossgen2 composite) is only valid for self-contained
+         publishes; a framework-dependent publish that inherits these
+         produces an exe that fail-fasts (0xC0000602) on launch. -->
+    <PublishReadyToRun Condition="'$(SelfContained)' == 'true'">true</PublishReadyToRun>
+    <!-- Crossgen2 composite: measured ~8% faster first-frame (959 vs 1047 ms
+         median, 3-round interleaved A/B) at byte-identical single-file size
+         (201,711,994 bytes). Composite merges the app closure into one
+         R2R image, killing per-assembly cross-gen boundaries. -->
+    <PublishReadyToRunComposite Condition="'$(SelfContained)' == 'true'">true</PublishReadyToRunComposite>
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="App.xaml.cs" />
-    <Compile Include="AppSettings.cs" />
     <Compile Include="AssemblyInfo.cs" />
-    <Compile Include="VMCreate\VmSettings.cs" />
-    <Compile Include="VMCreate\VmDeploymentPlan.cs" />
-    <Compile Include="VMCreate\VmDeploymentResult.cs" />
-    <Compile Include="VMCreate\CreateVM.cs" />
-    <Compile Include="VMCreate\CreateVMProgressInfo.cs" />
-    <Compile Include="VMCreate\IVmCreator.cs" />
-    <Compile Include="Downloaders\ChecksumVerifier.cs" />
-    <Compile Include="Downloaders\CloningIsoDownloader.cs" />
-    <Compile Include="Downloaders\FileStreamProvider.cs" />
-    <Compile Include="Downloaders\HttpFileDownloader.cs" />
-    <Compile Include="Downloaders\HttpStreamProvider.cs" />
-    <Compile Include="Downloaders\IStreamCopierWithProgress.cs" />
-    <Compile Include="Downloaders\StreamCopierWithProgress.cs" />
-    <Compile Include="Extractors\ArchiveExtractor.cs" />
-    <Compile Include="Extractors\DiskFileDetector.cs" />
-    <Compile Include="Extractors\ExtractorFactory.cs" />
-    <Compile Include="Extractors\IExtractor.cs" />
-    <Compile Include="Extractors\XzFileExtractor.cs" />
-    <Compile Include="Gallery\AggregateGalleryLoader.cs" />
-    <Compile Include="Gallery\GalleryCache.cs" />
-    <Compile Include="Gallery\distributions\AlpineLinux.cs" />
-    <Compile Include="Gallery\distributions\Arch.cs" />
-    <Compile Include="Gallery\distributions\Debian.cs" />
-    <Compile Include="Gallery\distributions\FedoraSilverblue.cs" />
-    <Compile Include="Gallery\distributions\FedoraWorkstation.cs" />
-    <Compile Include="Gallery\distributions\LinuxMint.cs" />
-    <Compile Include="Gallery\distributions\OpenSuseTumbleweed.cs" />
-    <Compile Include="Gallery\distributions\RockyLinux.cs" />
-    <Compile Include="Gallery\distributions\Ubuntu.cs" />
-    <Compile Include="Gallery\distributions\NixOS.cs" />
     <Compile Include="Gallery\ImageSourceConverter.cs" />
     <Compile Include="Gallery\DateStringConverter.cs" />
-    <Compile Include="Gallery\LoadFromLocalJsonFile.cs" />
-    <Compile Include="Gallery\LoadFromMicrosoftURI.cs" />
-    <Compile Include="Gallery\LoadFromRegistry.cs" />
-    <Compile Include="Gallery\other\LoadFromGNS3GitHub.cs" />
-    <Compile Include="HyperV\ISshKeyManager.cs" />
-    <Compile Include="HyperV\IHtbApiClient.cs" />
-    <Compile Include="HyperV\IGuestShellFactory.cs" />
-    <Compile Include="HyperV\GuestShellFactory.cs" />
-    <Compile Include="HyperV\PowerShellDirectGuestShell.cs" />
-    <Compile Include="HyperV\PowerShellDirectGuestShellFactory.cs" />
-    <Compile Include="HyperV\vmbus\IKvpSender.cs" />
-    <Compile Include="HyperV\vmbus\IKvpPoller.cs" />
-    <Compile Include="HyperV\vmbus\IVmShutdownWatcher.cs" />
-    <Compile Include="HyperV\vmbus\IGuestDiagnosticsCollector.cs" />
-    <Compile Include="MediaHandlers\IDiskConverter.cs" />
-    <Compile Include="MediaHandlers\IMediaHandlerFactory.cs" />
-    <Compile Include="Gallery\IGalleryCache.cs" />
-    <Compile Include="Gallery\IGalleryService.cs" />
-    <Compile Include="Gallery\GalleryService.cs" />
-    <Compile Include="HyperV\BooleanOnOffAdapter.cs" />
-    <Compile Include="HyperV\vmbus\KvpBase.cs" />
-    <Compile Include="HyperV\vmbus\KvpHostToGuest.cs" />
-    <Compile Include="HyperV\vmbus\KvpProgressMonitor.cs" />
-    <Compile Include="HyperV\vmbus\GuestDiagnosticsCollector.cs" />
-    <Compile Include="HyperV\SshKeyManager.cs" />
-    <Compile Include="HyperV\HtbApiClient.cs" />
-    <Compile Include="HyperV\SshGuestShell.cs" />
-    <Compile Include="HyperV\SshTransport.cs" />
-    <Compile Include="HyperV\Steps\System\CleanupTemporaryNicStep.cs" />
-    <Compile Include="HyperV\Steps\Vpn\DeployVpnConfigsStep.cs" />
-    <Compile Include="HyperV\Steps\Rdp\Xrdp\DisableKwinCompositingStep.cs" />
-    <Compile Include="HyperV\Steps\System\DisableSshStep.cs" />
-    <Compile Include="HyperV\Steps\GuestIntegration\DisableSuspendOnBtrfsStep.cs" />
-    <Compile Include="HyperV\Steps\Rdp\Xrdp\DisableWaylandSessionsStep.cs" />
-    <Compile Include="HyperV\Steps\Rdp\Lamco\DistroDetector.cs" />
-    <Compile Include="HyperV\Steps\Rdp\Lamco\EnableGraphicalAutologinStep.cs" />
-    <Compile Include="HyperV\Steps\Rdp\Xrdp\FixAccountsServiceStep.cs" />
-    <Compile Include="HyperV\Steps\Rdp\Xrdp\FixXrdpStep.cs" />
-    <Compile Include="HyperV\Steps\Rdp\Xrdp\ForceX11Step.cs" />
-    <Compile Include="HyperV\Steps\GuestIntegration\InstallHypervDaemonsStep.cs" />
-    <Compile Include="HyperV\Steps\Rdp\Lamco\InstallLamcoRdpStep.cs" />
-    <Compile Include="HyperV\Steps\Rdp\Lamco\StartGraphicalSessionStep.cs" />
-    <Compile Include="HyperV\Steps\Vpn\InstallOpenVpnStep.cs" />
-    <Compile Include="HyperV\Steps\System\RemoveAutomationUserStep.cs" />
-    <Compile Include="HyperV\Steps\GuestIntegration\RemoveVBoxGuestAdditionsStep.cs" />
-    <Compile Include="HyperV\Steps\GuestIntegration\RemoveVmwareToolsStep.cs" />
-    <Compile Include="HyperV\Steps\ScriptResourceLoader.cs" />
-    <Compile Include="HyperV\Steps\Desktop\KaliKdeSwitchStep.cs" />
-    <Compile Include="HyperV\Steps\Rdp\AutoRdpBackendResolveStep.cs" />
-    <Compile Include="HyperV\Steps\Rdp\Xrdp\InstallXrdpPostBootStep.cs" />
-    <Compile Include="HyperV\Steps\Rdp\Lamco\UsernameValidator.cs" />
-    <Compile Include="HyperV\Steps\System\SyncTimezoneStep.cs" />
-    <Compile Include="HyperV\IHyperVManager.cs" />
-    <Compile Include="HyperV\IHyperVManagerRoles.cs" />
-    <Compile Include="HyperV\HostPowerShell.cs" />
-    <Compile Include="HyperV\IPowerShellExecutor.cs" />
-    <Compile Include="HyperV\PowerShellHyperVManagerFacade.cs" />
-    <Compile Include="HyperV\PowerShellVmLifecycleManager.cs" />
-    <Compile Include="HyperV\PowerShellVmDiskManager.cs" />
-    <Compile Include="HyperV\PowerShellVmBootManager.cs" />
-    <Compile Include="HyperV\PowerShellVmNetworkManager.cs" />
-    <Compile Include="HyperV\PowerShellVmConfigManager.cs" />
-    <Compile Include="HyperV\HyperVVmCreator.cs" />
-    <Compile Include="HyperV\VmCreation\HostNetworkService.cs" />
-    <Compile Include="HyperV\VmCreation\IVmCreationStrategy.cs" />
-    <Compile Include="HyperV\VmCreation\IVmPathService.cs" />
-    <Compile Include="HyperV\VmCreation\IsoVmCreationStrategy.cs" />
-    <Compile Include="HyperV\VmCreation\NativeHyperVVmCreationStrategy.cs" />
-    <Compile Include="HyperV\VmCreation\DiskImageVmCreationStrategy.cs" />
-    <Compile Include="HyperV\VmCreation\PostBootCustomizationService.cs" />
-    <Compile Include="HyperV\VmCreation\IsoBootCycleRunner.cs" />
-    <Compile Include="HyperV\VmCreation\VmCreationContext.cs" />
-    <Compile Include="HyperV\VmCreation\VmDeploymentOrchestrator.cs" />
-    <Compile Include="HyperV\VmCreation\IDeploymentLogger.cs" />
-    <Compile Include="HyperV\VmCreation\IVmDeploymentOrchestrator.cs" />
-    <Compile Include="HyperV\VmCreation\VmPathService.cs" />
-    <Compile Include="HyperV\IUnattendInjector.cs" />
-    <Compile Include="HyperV\Unattend\IPowerShellExecutor.cs" />
-    <Compile Include="HyperV\Unattend\IOfflineRegistryEditor.cs" />
-    <Compile Include="HyperV\ElevatedUnattendInjector.cs" />
-    <Compile Include="HyperV\UnattendInjector.cs" />
-    <Compile Include="HyperV\HyperVPermissionException.cs" />
     <Compile Include="GUI\MainWindow.xaml.cs" />
-    <Compile Include="MediaHandlers\DeSparcify.cs" />
-    <Compile Include="MediaHandlers\DiskConverter.cs" />
-    <Compile Include="MediaHandlers\DiskImageFormat.cs" />
-    <Compile Include="MediaHandlers\IMediaHandler.cs" />
-    <Compile Include="MediaHandlers\IsoMediaHandler.cs" />
-    <Compile Include="MediaHandlers\MediaHandler.cs" />
-    <Compile Include="MediaHandlers\MediaPreparationResult.cs" />
-    <Compile Include="MediaHandlers\MediaHandlerFactory.cs" />
-    <Compile Include="MediaHandlers\PartitionSchemeDetector.cs" />
-    <Compile Include="MediaHandlers\Qcow2MediaHandler.cs" />
-    <Compile Include="MediaHandlers\VhdxMediaHandler.cs" />
-    <Compile Include="MediaHandlers\VmdkMediaHandler.cs" />
-    <Compile Include="MediaHandlers\VmGenerationResolver.cs" />
-    <Compile Include="MediaHandlers\VmGenerationResolution.cs" />
-    <Compile Include="MediaHandlers\IVmGenerationResolver.cs" />
     <Compile Include="GUI\ProgressWindow.xaml.cs">
       <DependentUpon>ProgressWindow.xaml</DependentUpon>
   	  <SubType>Code</SubType>
@@ -188,73 +68,25 @@
     <Compile Include="GUI\DeploymentProgressPresenter.cs" />
   </ItemGroup>
   <ItemGroup>
-    <Content Include="gallery.json">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Compile Include="Gallery\GalleryItemsParser.cs" />
-    <Compile Include="Unattend\Imapi2Interop.cs" />
-    <Compile Include="Unattend\UnattendFloppyBuilder.cs" />
-
-  </ItemGroup>
-  <ItemGroup>
     <None Include="app.manifest" />
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="HyperV\Steps\Scripts\install_lamco.sh" />
-    <EmbeddedResource Include="HyperV\Steps\Scripts\detect_display_server.sh" />
-    <EmbeddedResource Include="HyperV\Steps\Scripts\install_xrdp_postboot.sh" />
-    <EmbeddedResource Include="HyperV\Steps\Scripts\kali_kde_switch.sh" />
-    <EmbeddedResource Include="HyperV\Steps\Scripts\enable_autologin.sh" />
-    <EmbeddedResource Include="HyperV\Steps\Scripts\start_graphical_session.sh" />
-    <EmbeddedResource Include="HyperV\Steps\Scripts\disable_kwin_compositing.sh" />
-    <EmbeddedResource Include="HyperV\Steps\Scripts\disable_suspend_btrfs.sh" />
-    <EmbeddedResource Include="HyperV\Steps\Scripts\disable_wayland.sh" />
-    <EmbeddedResource Include="HyperV\Steps\Scripts\fix_accounts.sh" />
-    <EmbeddedResource Include="HyperV\Steps\Scripts\fix_xrdp.sh" />
-    <EmbeddedResource Include="HyperV\Steps\Scripts\force_x11.sh" />
-    <EmbeddedResource Include="HyperV\Steps\Scripts\install_hyperv_daemons.sh" />
-    <EmbeddedResource Include="HyperV\Steps\Scripts\remove_vbox.sh" />
-    <EmbeddedResource Include="HyperV\Steps\Scripts\remove_vmware.sh" />
-    <EmbeddedResource Include="Icons\nixos.svg" />
-    <EmbeddedResource Include="Icons\fedora-logo.svg" />
-    <EmbeddedResource Include="Icons\alpine-logo.svg" />
-    <EmbeddedResource Include="Icons\debian-logo.svg" />
-    <EmbeddedResource Include="Icons\linuxmint-logo.svg" />
-    <EmbeddedResource Include="Icons\opensuse-logo.svg" />
-    <EmbeddedResource Include="Icons\rocky-linux-logo.svg" />
-    <Content Include="Unattend\autounattend.xml">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Unattend\unattend.xml">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\VMCreate.Core\VMCreate.Core.csproj" />
     <ProjectReference Include="..\VMCreate.Gallery.Contracts\VMCreate.Gallery.Contracts.csproj" />
     <ProjectReference Include="..\VMCreate.Gallery.Security\VMCreate.Gallery.Security.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.8" />
-    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.8" />
-    <PackageReference Include="System.Management.Automation" Version="7.6.1" />
-    <!-- PS7 engine assemblies for the CDXML/CIM cmdlet machinery (Storage cmdlets,
-         Hyper-V CDXML). Without them, assembly resolution falls back to the
-         Windows PowerShell 5.1 GAC copies (Microsoft.PowerShell.Commands.Management
-         v3.0.0.0, CimCmdlets v1.0.0.0), whose cmdletization engine JITs against
-         WinPS-only SMA internals (EnumerableExtensions.Append) and dies with
-         MissingMethodException when a CIM method invoke succeeds. -->
-    <PackageReference Include="Microsoft.Management.Infrastructure.CimCmdlets" Version="7.6.1" />
-    <PackageReference Include="Microsoft.PowerShell.Commands.Management" Version="7.6.1" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.12" />
     <PackageReference Include="Serilog.Extensions.Logging" Version="10.0.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
-    <PackageReference Include="SharpCompress" Version="0.48.1" />
-    <PackageReference Include="SharpVectors" Version="1.8.5" />
+    <PackageReference Include="SharpVectors" Version="1.8.6" />
     <PackageReference Include="WPF-UI" Version="4.3.0" />
-    <PackageReference Include="XZ.NET-netstandard" Version="2.0.0.2" />
-    <PackageReference Include="ZstdSharp.Port" Version="0.8.8" />
   </ItemGroup>
 
   <ItemGroup>

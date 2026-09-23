@@ -1,4 +1,4 @@
-<Project Sdk="MSTest.Sdk/4.2.3">
+<Project Sdk="MSTest.Sdk/4.4.1">
 
   <PropertyGroup>
 	<TargetFramework>net10.0-windows</TargetFramework>
@@ -8,12 +8,13 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.8" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.12" />
     <PackageReference Include="Moq" Version="4.20.72" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\VMCreate\VMCreate.csproj" />
+    <ProjectReference Include="..\VMCreate.Core\VMCreate.Core.csproj" />
     <ProjectReference Include="..\VMCreate.CLI\VMCreate.CLI.csproj" />
     <ProjectReference Include="..\VMCreate.Gallery.Contracts\VMCreate.Gallery.Contracts.csproj" />
     <ProjectReference Include="..\VMCreate.Gallery.Security\VMCreate.Gallery.Security.csproj" />

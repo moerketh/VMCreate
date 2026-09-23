@@ -1,22 +1,17 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
-using CreateVM.HyperV.vmbus;
 using Serilog;
 using System;
 using System.CommandLine;
 using System.CommandLine.Builder;
 using System.CommandLine.Parsing;
 using System.IO;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using VMCreate;
 using VMCreate.CLI.Commands;
 using VMCreate.Gallery;
 using VMCreate.HyperV.Unattend;
-using VMCreate.HyperV.VmCreation;
-using VMCreate.MediaHandlers;
 
 namespace VMCreate.CLI
 {
@@ -24,8 +19,8 @@ namespace VMCreate.CLI
     {
         /// <summary>
         /// Assemblies the CLI scans for auto-discovered gallery loaders and
-        /// customization steps — the CLI's equivalent of App.xaml.cs's
-        /// scannableAssemblies. Exposed internal (InternalsVisibleTo) so
+        /// customization steps — the same scan set AddCoreServices receives
+        /// in App.xaml.cs. Exposed internal (InternalsVisibleTo) so
         /// <c>CliFrontEndParityTests</c> can pin it to the same set the GUI
         /// scans: a CLI that scans the wrong assembly silently registers
         /// ZERO customization steps (a Linux deploy then does no post-boot
@@ -35,7 +30,7 @@ namespace VMCreate.CLI
         /// </summary>
         internal static System.Reflection.Assembly[] ScannableAssemblies => new[]
         {
-            typeof(VMCreate.SyncTimezoneStep).Assembly,                 // VMCreate (main — steps + general gallery)
+            typeof(VMCreate.SyncTimezoneStep).Assembly,                 // VMCreate.Core — steps + general gallery
             typeof(VMCreate.Gallery.BlackArch).Assembly                 // VMCreate.Gallery.Security
         };
         static async Task<int> Main(string[] args)
@@ -119,126 +114,12 @@ namespace VMCreate.CLI
             });
             services.AddHttpClient();
 
-            // ── Configuration ───────────────────────────────────────────────
-            services.AddSingleton(Options.Create(new AppSettings()));
-
-            // ── Infrastructure / low-level services ─────────────────────────
-            services.AddTransient<IFileStreamProvider, FileStreamProvider>();
-            services.AddTransient<IHttpStreamProvider, HttpStreamProvider>();
-            services.AddTransient<IStreamCopierWithProgress, StreamCopierWithProgress>();
-            services.AddTransient<IDownloader, HttpFileDownloader>();
-            services.AddTransient<IChecksumVerifier, ChecksumVerifier>();
-            services.AddTransient<ICloningIsoDownloader, CloningIsoDownloader>();
-
-            // Hyper-V / VM plumbing — mirrors App.xaml.cs: five focused role
-            // managers, then the IHyperVManager facade that wraps them all.
-            // PowerShellHyperVManagerFacade is public in VMCreate but sealed;
-            // the CLI (a separate assembly) needs the same role registrations
-            // the GUI uses because VmDeploymentOrchestrator consumes IHyperVManager.
-            services.AddSingleton<IVmLifecycleManager, PowerShellVmLifecycleManager>();
-            services.AddSingleton<IVmDiskManager, PowerShellVmDiskManager>();
-            services.AddSingleton<IVmBootManager, PowerShellVmBootManager>();
-            services.AddSingleton<IVmNetworkManager, PowerShellVmNetworkManager>();
-            services.AddSingleton<IVmConfigManager, PowerShellVmConfigManager>();
-            services.AddSingleton<IHyperVManager, PowerShellHyperVManagerFacade>();
-            services.AddSingleton<IUnattendInjector, ElevatedUnattendInjector>();
-            // Fully-qualified because VMCreate.HyperV.Unattend also defines IPowerShellExecutor.
-            // Singleton, matching App.xaml.cs: InitialSessionState construction is the
-            // expensive part of PowerShell hosting (~600 ms measured); a transient
-            // registration would re-pay it on every Hyper-V cmdlet of a deploy run.
-            services.AddSingleton<VMCreate.HyperV.IPowerShellExecutor, VMCreate.HyperV.PowerShellExecutor>();
-            services.AddTransient<VMCreate.HyperV.Unattend.IPowerShellExecutor, VMCreate.HyperV.Unattend.PowerShellExecutor>();
-            services.AddTransient<IOfflineRegistryEditor, OfflineRegistryEditor>();
-            services.AddTransient<UnattendInjector>();
-            services.AddSingleton<ISshKeyManager, SshKeyManager>();
-            services.AddTransient<IKvpSender, KvpHostToGuest>();
-            services.AddTransient<IKvpPoller, HyperVKVPPoller>();
-            services.AddTransient<IVmShutdownWatcher, HyperVKVPPoller>();
-            services.AddTransient<IGuestDiagnosticsCollector, GuestDiagnosticsCollector>();
-            services.AddTransient<IGuestShellFactory, GuestShellFactory>();
-            services.AddTransient<PowerShellDirectGuestShellFactory>();
-
-            // ── VM creation services ────────────────────────────────────────
-            services.AddSingleton<IVmPathService, VmPathService>();
-            services.AddSingleton<IHostNetworkService, HostNetworkService>();
-            services.AddTransient<IPostBootCustomizationService, PostBootCustomizationService>();
-            services.AddTransient<IIsoBootCycleRunner, IsoBootCycleRunner>();
-            services.AddTransient<IVmCreationStrategy, IsoVmCreationStrategy>();
-            services.AddTransient<IVmCreationStrategy, NativeHyperVVmCreationStrategy>();
-            services.AddTransient<IVmCreationStrategy, DiskImageVmCreationStrategy>();
-
-            // ── Disk / media handling ───────────────────────────────────────
-            services.AddSingleton<IDiskConverter, DiskConverter>();
-            services.AddSingleton<IMediaHandlerFactory, MediaHandlerFactory>();
-            services.AddTransient<XzFileExtractor>();
-            services.AddTransient<ArchiveExtractor>();
-            services.AddTransient<IExtractor>(provider => new ExtractorFactory(
-                provider.GetRequiredService<XzFileExtractor>(),
-                provider.GetRequiredService<ArchiveExtractor>(),
-                provider.GetRequiredService<ILogger<ExtractorFactory>>()));
-            services.AddTransient<DiskFileDetector>();
-
-            // ── Gallery ─────────────────────────────────────────────────────
-            // Same single scan set as the GUI (see ScannableAssemblies):
-            // VMCreate main + Gallery.Security. In App.xaml.cs,
-            // GetExecutingAssembly() IS the VMCreate main assembly; the CLI
-            // is a separate assembly, so it must name the main assembly
-            // explicitly — scanning the executing (CLI) assembly instead
-            // previously registered ZERO steps and a gallery missing the
-            // general distros. ScannableAssemblies is the pinned source of
-            // truth (CliFrontEndParityTests).
-            var scannableAssemblies = ScannableAssemblies;
-
-            var galleryLoaderTypes = scannableAssemblies
-                .SelectMany(a => a.GetTypes())
-                .Where(t => typeof(IGalleryLoader).IsAssignableFrom(t)
-                            && !t.IsAbstract
-                            && !t.IsInterface
-                            && t != typeof(AggregateGalleryLoader));
-            foreach (var loaderType in galleryLoaderTypes)
-                services.AddTransient(loaderType);
-
-            services.AddTransient<IGalleryLoader>(provider =>
-            {
-                var logger = provider.GetRequiredService<ILogger<AggregateGalleryLoader>>();
-                var loaders = galleryLoaderTypes.Select(t => (IGalleryLoader)provider.GetRequiredService(t));
-                return new AggregateGalleryLoader(logger, loaders);
-            });
-            services.AddTransient<IGalleryItemsParser, GalleryItemsParser>();
-            services.AddSingleton<IGalleryCache, GalleryCache>();
-            services.AddTransient<IGalleryService, GalleryService>();
-
-            // ── Customization steps (auto-discovered) ───────────────────────
-            // Same scannableAssemblies as the gallery loaders above — GUI parity:
-            // both front ends must discover the same step set
-            // (CliFrontEndParityTests pins this). AutoRdpBackendResolveStep
-            // (order 232), InstallXrdpPostBootStep (236) and KaliKdeSwitchStep
-            // (231) all live in the VMCreate main assembly; losing it again
-            // means a CLI Auto deployment silently routes to nothing.
-            var stepTypes = scannableAssemblies
-                .SelectMany(a => a.GetTypes())
-                .Where(t => typeof(ICustomizationStep).IsAssignableFrom(t)
-                            && !t.IsAbstract
-                            && !t.IsInterface);
-            foreach (var stepType in stepTypes)
-                services.AddTransient(typeof(ICustomizationStep), stepType);
-
-            var configurableStepTypes = stepTypes
-                .Where(t => typeof(IConfigurableCustomizationStep).IsAssignableFrom(t));
-            foreach (var stepType in configurableStepTypes)
-                services.AddTransient(typeof(IConfigurableCustomizationStep), stepType);
-
-            // ── HTB API client ────────────────────────────────────────────
-            services.AddHttpClient<IHtbApiClient, HtbApiClient>();
-
-            // ── VM creation orchestrator ────────────────────────────────────
-            // VmDeploymentOrchestrator is consumed by HyperVVmCreator; VmGenerationResolver
-            // by MediaHandlerFactory. Without them the container builds but fails at resolve time.
-            services.AddTransient<IVmDeploymentOrchestrator, VmDeploymentOrchestrator>();
-            services.AddSingleton<IVmGenerationResolver, VmGenerationResolver>();
-            services.AddTransient<IVmCreator, HyperVVmCreator>();
-            services.AddTransient<CreateVM>();
-            services.AddSingleton<IPartitionSchemeDetector, PartitionSchemeDetector>();
+            // ── Core deployment services (shared with the GUI) ─────────────
+            // Single source of truth: AddCoreServices in VMCreate.Core — the
+            // CLI duplicated these registrations verbatim until the Core/GUI
+            // split. Scan set: ScannableAssemblies (VMCreate.Core + Gallery
+            // .Security), pinned to the GUI set by CliFrontEndParityTests.
+            services.AddCoreServices(ScannableAssemblies);
 
             IServiceProvider provider = services.BuildServiceProvider();
 

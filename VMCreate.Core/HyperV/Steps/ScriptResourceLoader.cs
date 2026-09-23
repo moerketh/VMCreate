@@ -16,7 +16,7 @@ namespace VMCreate
     /// script must never silently deploy an empty file.
     /// </para>
     /// <para>
-    /// Register every new script in <c>VMCreate.csproj</c> as an
+    /// Register every new script in <c>VMCreate.Core.csproj</c> as an
     /// <c>&lt;EmbeddedResource&gt;</c>; the discovery-based
     /// <c>EmbeddedScriptSyntaxTests</c> picks it up for linting
     /// automatically.

@@ -15,6 +15,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VMCreate.Installer", "VMCre
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VMCreate.CLI", "VMCreate.CLI\VMCreate.CLI.csproj", "{E9D554C3-B557-4F31-9727-D53AC5570BC3}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VMCreate.Core", "VMCreate.Core\VMCreate.Core.csproj", "{818B778A-ADAE-46BC-BB49-AAE58E62C5AD}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -91,6 +93,18 @@ Global
 		{E9D554C3-B557-4F31-9727-D53AC5570BC3}.Release|x64.Build.0 = Release|Any CPU
 		{E9D554C3-B557-4F31-9727-D53AC5570BC3}.Release|x86.ActiveCfg = Release|Any CPU
 		{E9D554C3-B557-4F31-9727-D53AC5570BC3}.Release|x86.Build.0 = Release|Any CPU
+		{818B778A-ADAE-46BC-BB49-AAE58E62C5AD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{818B778A-ADAE-46BC-BB49-AAE58E62C5AD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{818B778A-ADAE-46BC-BB49-AAE58E62C5AD}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{818B778A-ADAE-46BC-BB49-AAE58E62C5AD}.Debug|x64.Build.0 = Debug|Any CPU
+		{818B778A-ADAE-46BC-BB49-AAE58E62C5AD}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{818B778A-ADAE-46BC-BB49-AAE58E62C5AD}.Debug|x86.Build.0 = Debug|Any CPU
+		{818B778A-ADAE-46BC-BB49-AAE58E62C5AD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{818B778A-ADAE-46BC-BB49-AAE58E62C5AD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{818B778A-ADAE-46BC-BB49-AAE58E62C5AD}.Release|x64.ActiveCfg = Release|Any CPU
+		{818B778A-ADAE-46BC-BB49-AAE58E62C5AD}.Release|x64.Build.0 = Release|Any CPU
+		{818B778A-ADAE-46BC-BB49-AAE58E62C5AD}.Release|x86.ActiveCfg = Release|Any CPU
+		{818B778A-ADAE-46BC-BB49-AAE58E62C5AD}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

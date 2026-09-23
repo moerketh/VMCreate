@@ -12,17 +12,19 @@ namespace VMCreate.Tests
     /// <summary>
     /// Pins the CLI-vs-GUI front-end parity introduced when the CLI's
     /// step registration was fixed. <see cref="VMCreate.CLI.Program"/> used
-    /// to scan the CLI assembly itself (instead of the VMCreate main
+    /// to scan the CLI assembly itself (instead of the shared deployment
     /// assembly, where every <see cref="ICustomizationStep"/> lives), so
     /// CLI deployments registered ZERO steps: no post-boot work at all —
     /// and with RDP backend Auto, not even xrdp. That shipped green once;
     /// these tests make a recurrence loud instead of silent.
     /// <para>
-    /// The GUI (App.xaml.cs) scans its executing assembly — which IS the
-    /// VMCreate main assembly — plus Gallery.Security. The CLI must scan
-    /// the same two assemblies (named explicitly, since the CLI has its
-    /// own assembly). Every assertion here compares the two front ends'
-    /// discovery sets, so a drift on EITHER side fails.
+    /// Both front ends scan the same two assemblies (named explicitly since
+    /// each has its own assembly): VMCreate.Core — where the Core/GUI split
+    /// moved every step and general gallery loader, pinned here through
+    /// <see cref="App"/>.xaml.cs's <c>AddCoreServices(typeof(SyncTimezoneStep)
+    /// .Assembly, …)</c> set — plus Gallery.Security. Every assertion here
+    /// compares the two front ends' discovery sets, so a drift on EITHER
+    /// side fails.
     /// </para>
     /// </summary>
     [TestClass]
@@ -31,7 +33,7 @@ namespace VMCreate.Tests
         /// <summary>The GUI's scan set, exactly as App.xaml.cs defines it.</summary>
         private static readonly Assembly[] GuiAssemblies =
         {
-            typeof(SyncTimezoneStep).Assembly,            // VMCreate (main) — the GUI's executing assembly
+            typeof(SyncTimezoneStep).Assembly,            // VMCreate.Core — steps + general gallery
             typeof(FlareVm).Assembly                      // VMCreate.Gallery.Security
         };
 
@@ -126,9 +128,9 @@ namespace VMCreate.Tests
         {
             // The invariant that lets both front ends skip the CLI assembly:
             // it holds only UI/command plumbing. If a step is added to
-            // VMCreate.CLI, it must MOVE to the main VMCreate assembly —
-            // the GUI would otherwise never see it (and neither front end
-            // scans the CLI assembly).
+            // VMCreate.CLI, it must MOVE to VMCreate.Core — the GUI would
+            // otherwise never see it (and neither front end scans the CLI
+            // assembly).
             Assembly cliAssembly = typeof(global::VMCreate.CLI.Program).Assembly;
 
             var steps = cliAssembly.GetTypes()
@@ -138,7 +140,7 @@ namespace VMCreate.Tests
                 .ToList();
             Assert.AreEqual(0, steps.Count,
                 $"Steps defined in the CLI assembly: {string.Join(", ", steps.Select(t => t.FullName))} — "
-                + "move them into the main VMCreate assembly (VMCreate.csproj) where both front ends discover them.");
+                + "move them into VMCreate.Core (VMCreate.Core.csproj) where both front ends discover them.");
 
             var loaders = cliAssembly.GetTypes()
                 .Where(t => typeof(IGalleryLoader).IsAssignableFrom(t)
@@ -147,7 +149,7 @@ namespace VMCreate.Tests
                 .ToList();
             Assert.AreEqual(0, loaders.Count,
                 $"Gallery loaders defined in the CLI assembly: {string.Join(", ", loaders.Select(t => t.FullName))} — "
-                + "move them into the main VMCreate assembly where both front ends discover them.");
+                + "move them into VMCreate.Core where both front ends discover them.");
         }
     }
 }
