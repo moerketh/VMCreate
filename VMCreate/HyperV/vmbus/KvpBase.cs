@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Management;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -7,6 +8,21 @@ namespace CreateVM.HyperV.vmbus
 {
     public class KvpBase : IVmShutdownWatcher
     {
+        // WQL string literals are delimited by single quotes; reject any VM name
+        // that could break out of or alter the query (quote or backslash).
+        private static readonly Regex InvalidVmNameChars = new Regex(@"['\\]", RegexOptions.Compiled);
+
+        /// <summary>
+        /// Throws when <paramref name="vmName"/> contains characters that would
+        /// corrupt the WQL queries used against Msvm_ComputerSystem.
+        /// </summary>
+        protected static void ValidateVmName(string vmName)
+        {
+            if (string.IsNullOrEmpty(vmName))
+                throw new ArgumentException("VM name must not be null or empty.", nameof(vmName));
+            if (InvalidVmNameChars.IsMatch(vmName))
+                throw new ArgumentException($"VM name '{vmName}' contains characters that are invalid for WQL queries.", nameof(vmName));
+        }
         /// <summary>
         /// Poll until VM is running (EnabledState = 2) and return GUID
         /// </summary>
@@ -74,13 +90,19 @@ namespace CreateVM.HyperV.vmbus
         /// <returns></returns>
         protected string? GetVMGuid(string vmName)
         {
+            ValidateVmName(vmName);
+
             ManagementScope scope = new ManagementScope(@"root\virtualization\v2");
             ObjectQuery query = new ObjectQuery($"SELECT * FROM Msvm_ComputerSystem WHERE ElementName = '{vmName}' AND EnabledState = 2");  // Use ElementName for friendly name; 2 = running
             using (ManagementObjectSearcher searcher = new ManagementObjectSearcher(scope, query))
+            using (ManagementObjectCollection results = searcher.Get())
             {
-                foreach (ManagementObject obj in searcher.Get())
+                foreach (ManagementObject obj in results)
                 {
-                    return obj["Name"]?.ToString();  // Name is the GUID
+                    using (obj)
+                    {
+                        return obj["Name"]?.ToString();  // Name is the GUID
+                    }
                 }
             }
             return null;

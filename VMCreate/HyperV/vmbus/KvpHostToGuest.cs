@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Linq;
 using System.Management;
+using System.Security;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -19,6 +20,10 @@ namespace CreateVM.HyperV.vmbus
         /// <exception cref="Exception"></exception>
         public async Task SendKVPToGuestAsync(string vmName, string key, string? value, CancellationToken cancellationToken = default)
         {
+            ValidateVmName(vmName);
+            if (string.IsNullOrEmpty(key))
+                throw new ArgumentException("KVP key must not be null or empty.", nameof(key));
+
             // Poll for VM to be running and get GUID
             string? vmGuid = await WaitForVMRunningAsync(vmName, cancellationToken);
             if (string.IsNullOrEmpty(vmGuid))
@@ -34,13 +39,15 @@ namespace CreateVM.HyperV.vmbus
                     // Get the VM's ComputerSystem object
                     ObjectQuery vmQuery = new ObjectQuery($"SELECT * FROM Msvm_ComputerSystem WHERE Name = '{vmGuid}'");
                     using (ManagementObjectSearcher vmSearcher = new ManagementObjectSearcher(scope, vmQuery))
+                    using (ManagementObjectCollection vmResults = vmSearcher.Get())
                     {
-                        ManagementObject? vm = vmSearcher.Get().Cast<ManagementObject>().FirstOrDefault();
+                        ManagementObject? vm = vmResults.Cast<ManagementObject>().FirstOrDefault();
                         if (vm == null)
                         {
                             throw new Exception("VM ComputerSystem not found.");
                         }
                         string? target = vm.Path?.Path;
+                        vm.Dispose();
 
                         const int maxRetries = 5;
                         const int retryDelayMs = 5000; // 5 seconds
@@ -58,10 +65,10 @@ namespace CreateVM.HyperV.vmbus
                                     {
                                         string kvpXml = $@"<INSTANCE CLASSNAME=""Msvm_KvpExchangeDataItem"">
   <PROPERTY NAME=""Data"" TYPE=""string"">
-    <VALUE>{value}</VALUE>
+    <VALUE>{SecurityElement.Escape(value ?? string.Empty)}</VALUE>
   </PROPERTY>
   <PROPERTY NAME=""Name"" TYPE=""string"">
-    <VALUE>{key}</VALUE>
+    <VALUE>{SecurityElement.Escape(key)}</VALUE>
   </PROPERTY>
   <PROPERTY NAME=""Source"" TYPE=""uint16"">
     <VALUE>0</VALUE>
@@ -88,10 +95,7 @@ namespace CreateVM.HyperV.vmbus
                                             }
                                             using (ManagementObject job = new ManagementObject(scope, new ManagementPath(jobPath), null))
                                             {
-                                                if (!await WaitForJobCompletionAsync(job, cancellationToken))
-                                                {
-                                                    throw new Exception("Failed to add KVP: Job did not complete successfully.");
-                                                }
+                                                await WaitForJobCompletionAsync(job, cancellationToken);
                                             }
                                         }
                                         else if (returnValue != 0)
@@ -122,18 +126,22 @@ namespace CreateVM.HyperV.vmbus
         private async Task<bool> WaitForJobCompletionAsync(ManagementObject job, CancellationToken cancellationToken, int pollIntervalMs = 1000, int timeoutSeconds = 60)
         {
             DateTime startTime = DateTime.UtcNow;
-            while (!cancellationToken.IsCancellationRequested)
+            while (true)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 job.Get(); // Refresh job state
+                // CIM_ConcreteJob.JobState: 2=New, 3=Starting, 4=Running, 5=Suspended,
+                // 6=ShuttingDown, 7=Completed, 8=Terminated, 9=Killed, 10=Exception, 11=Service
                 ushort jobState = (ushort)job["JobState"];
-                if (jobState == 7) // Completed successfully (7 = Completed)
+                if (jobState == 7)
                 {
                     return true;
                 }
-                else if (jobState > 7 && jobState != 10) // Failed or other error states
+                if (jobState is >= 8 and <= 11)
                 {
                     string errorDesc = job["ErrorDescription"]?.ToString() ?? "Unknown error";
-                    throw new Exception($"Job failed: {errorDesc} (ErrorCode: {job["ErrorCode"]})");
+                    throw new Exception($"Job failed: {errorDesc} (ErrorCode: {job["ErrorCode"]}, JobState: {jobState})");
                 }
                 if ((DateTime.UtcNow - startTime).TotalSeconds > timeoutSeconds)
                 {
@@ -141,7 +149,6 @@ namespace CreateVM.HyperV.vmbus
                 }
                 await Task.Delay(pollIntervalMs, cancellationToken);
             }
-            return false;
         }
 
         // Helper to determine if the error is retryable (e.g., transient "device not ready")
