@@ -155,6 +155,19 @@ namespace VMCreate.Tests.HyperV.Steps
             StringAssert.Contains(copiedContent, "kali-desktop-kde", "installs the KDE desktop metapackage");
             StringAssert.Contains(copiedContent, "kali-desktop-xfce", "purges the stock XFCE desktop");
             StringAssert.Contains(copiedContent, "KALI_KDE_RESULT=", "carries the result-line contract");
+
+            // The sddm enable must be verified, not silently swallowed: a
+            // bare `systemctl enable sddm.service || true` shipped machines
+            // that booted to a text console because the display-manager
+            // alias never existed. These assertions pin the hardening.
+            Assert.IsFalse(copiedContent.Contains("systemctl enable sddm.service 2>/dev/null || true"),
+                "sddm enable must not be silently swallowed");
+            StringAssert.Contains(copiedContent, "systemctl enable sddm.service",
+                "sddm is explicitly enabled");
+            StringAssert.Contains(copiedContent, "/etc/systemd/system/display-manager.service",
+                "the display-manager alias is verified to exist");
+            StringAssert.Contains(copiedContent, "graphical.target",
+                "the default target is verified to be graphical");
         }
     }
 }

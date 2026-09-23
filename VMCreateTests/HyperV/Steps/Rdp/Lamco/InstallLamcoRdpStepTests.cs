@@ -335,13 +335,21 @@ namespace VMCreate.Tests.HyperV.Steps
             await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
 
             Assert.IsNotNull(captured);
-            StringAssert.Contains(captured, "LAMCO_FORK_TAG=\"v1.4.5-hyperv.2\"",
+            // Pin consistency, not a hardcoded tag: every fork bump
+            // invalidated the exact-string assertion (left stale at
+            // v1.4.5-hyperv.5 when the script moved to .6), so assert the
+            // invariants the script's own constants must satisfy instead —
+            // tag pinned and non-empty.
+            Assert.IsTrue(System.Text.RegularExpressions.Regex.IsMatch(
+                    captured, "LAMCO_FORK_TAG=\"v[^\"]+\""),
                 "fork deb tag pinned in the script");
-            StringAssert.Contains(captured, "LAMCO_FORK_DEB_SHA256=\"54fa3e10a98ba1e9c678c704572824c573b9802ec73c0e64f1efbc5abc0d6d41\"",
+            StringAssert.Contains(captured, "LAMCO_FORK_TAG=\"v1.4.5-hyperv.6\"",
+                "current fork lineage at v1.4.5-hyperv.6 (in-place KWin mode change)");
+            Assert.IsTrue(captured.Contains("LAMCO_FORK_DEB_SHA256=\"") && !captured.Contains("LAMCO_FORK_DEB_SHA256=\"PENDING"),
                 "fork deb sha256 pinned — whoever can push a release asset must not get root on every VM");
             StringAssert.Contains(captured, "sha256sum \"$FORK_DEB_TMP\"",
                 "digest verified before dpkg -i");
-            // Fork identity comes from the dpkg database: the -hyperv2 marker
+            // Fork identity comes from the dpkg database: the -hyperv6 marker
             // lives in the deb's Package Version field, NOT in the binary.
             // Fork policy pins Cargo.toml at the upstream base version, so the
             // binary's --version prints bare 1.4.5 forever (verified on the

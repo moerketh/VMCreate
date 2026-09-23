@@ -95,6 +95,8 @@ namespace VMCreate.Tests
                 "CLI step discovery is missing InstallXrdpPostBootStep — the post-boot xrdp backfill would never run.");
             Assert.IsTrue(cliSteps.Contains(typeof(KaliKdeSwitchStep)),
                 "CLI step discovery is missing KaliKdeSwitchStep — the Kali KDE desktop switch would never run.");
+            Assert.IsTrue(cliSteps.Contains(typeof(StartGraphicalSessionStep)),
+                "CLI step discovery is missing StartGraphicalSessionStep — Lamco deployments would end at the greeter needing a manual reboot.");
         }
 
         [TestMethod]

@@ -300,7 +300,7 @@ Licensed under the MIT License. See above for full text.
 
 - **Upstream:** https://github.com/lamco-admin/lamco-rdp-server
 - **Fork deployed by VMCreate:** https://github.com/moerketh/lamco-rdp-server
-  (tag `v1.4.5-hyperv.2`, sha256-pinned in `VMCreate/HyperV/Steps/Scripts/install_lamco.sh`)
+  (tag and sha256 pinned in `VMCreate.Core/HyperV/Steps/Scripts/install_lamco.sh` — see its `LAMCO_FORK_*` constants for the current values)
 - **License:** Business Source License 1.1 (BSL)
 - **Change Date:** 2029-06-01 — converts to Apache License 2.0
 

@@ -108,7 +108,14 @@ namespace VMCreate.Gallery
                 Version = version,
                 Category = "Security",
                 IsRecommended = true,
-                LinuxDistro = LinuxDistro.Kali
+                LinuxDistro = LinuxDistro.Kali,
+                // Kali's Hyper-V images ship a uid-1000 desktop user named
+                // 'kali' (toor is the legacy root alias). InstallLamcoRdpStep
+                // substitutes this into the root-run install script and
+                // EnableGraphicalAutologinStep needs it to configure the DM —
+                // a blank field previously collapsed every user-unit path
+                // (TEST_20260910165003: units written to /.config).
+                InitialUsername = "kali"
             };
         }
 
@@ -176,7 +183,8 @@ namespace VMCreate.Gallery
                     Version = bestVersion,
                     Category = "Security",
                     IsRecommended = false,
-                    LinuxDistro = LinuxDistro.Kali
+                    LinuxDistro = LinuxDistro.Kali,
+                    InitialUsername = "kali"
                 };
             }
             catch (OperationCanceledException)
@@ -221,6 +229,9 @@ namespace VMCreate.Gallery
                 Category = source.Category,
                 IsRecommended = false,
                 LinuxDistro = LinuxDistro.Kali,
+                // Same desktop user as the base item — the twin shares the
+                // disk, so it shares the login account.
+                InitialUsername = source.InitialUsername,
                 Tags = new List<string> { "kali-kde" }
             };
         }
