@@ -17,15 +17,15 @@ set -o pipefail
 #     rpm/flatpak assets are not built for this lineage).
 
 LAMCO_FORK_REPO="moerketh/lamco-rdp-server"
-LAMCO_FORK_TAG="v1.4.5-hyperv.5"
-LAMCO_FORK_DEB_VERSION="1.4.5-hyperv5"
+LAMCO_FORK_TAG="v1.4.5-hyperv.6"
+LAMCO_FORK_DEB_VERSION="1.4.5-hyperv6"
 # The fork's release policy: the Cargo.toml crate version stays at the
 # upstream base (1.4.5) and the deb's package version carries the lineage
 # suffix — i.e. the BINARY deliberately reports only the base version
 # (verified on the pinned asset: /usr/bin/lamco-rdp-server --version prints
 # "lamco-rdp-server 1.4.5"), while dpkg reports 1.4.5-hyperv5.
 LAMCO_FORK_CRATE_VERSION="1.4.5"
-LAMCO_FORK_DEB_SHA256="592b1816d0762a70c3118890d1264163b0227cc0ffe84c34b68310bc20a64dce"
+LAMCO_FORK_DEB_SHA256="8439c0a35d1cc89ee5d4e7ba1b1f771cdb1e6185d2e8f9be7239bd3481daaea6"
 LAMCO_FORK_DEB_URL="https://github.com/${LAMCO_FORK_REPO}/releases/download/${LAMCO_FORK_TAG}/lamco-rdp-server_${LAMCO_FORK_DEB_VERSION}_amd64.deb"
 
 # Result contract: 0 = ok, 1 = degraded (install completed with warnings —
@@ -654,6 +654,11 @@ ExecStart=/usr/bin/lamco-rdp-server --config /etc/lamco-rdp-server/config.toml
 Restart=on-failure
 RestartSec=5
 Environment=RUST_LOG=info
+# In-place KWin virtual-output mode change (experiment D, >= v1.4.5-hyperv.6):
+# resizes switch the existing output's mode instead of destroy/recreate, so
+# the desktop relayout is ~30ms and no longer triggers the heal/restart
+# cascade. On by default; LAMCO_KWIN_INPLACE_MODE=0 restores the recreate
+# path (e.g. drop-in 20-inplace-off.conf: Environment=LAMCO_KWIN_INPLACE_MODE=0).
 ProtectSystem=strict
 PrivateTmp=yes
 ProtectProc=invisible
