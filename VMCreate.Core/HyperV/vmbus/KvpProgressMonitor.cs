@@ -154,26 +154,30 @@ namespace VMCreate
             ManagementScope scope = new ManagementScope(@"root\virtualization\v2");
             ObjectQuery query = new ObjectQuery($"SELECT * FROM Msvm_KvpExchangeComponent WHERE SystemName = '{vmGuid}'");
             using (ManagementObjectSearcher searcher = new ManagementObjectSearcher(scope, query))
+            using (ManagementObjectCollection results = searcher.Get())
             {
-                foreach (ManagementObject obj in searcher.Get())
+                foreach (ManagementObject obj in results)
                 {
-                    string[]? items = (string[]?)obj["GuestExchangeItems"];
-                    if (items != null)
+                    using (obj)
                     {
-                        foreach (string item in items)
+                        string[]? items = (string[]?)obj["GuestExchangeItems"];
+                        if (items != null)
                         {
-                            // Parse XML
-                            XDocument xml = XDocument.Parse(item);
-                            var nameProp = xml.Descendants("PROPERTY").FirstOrDefault(p => (string?)p.Attribute("NAME") == "Name");
-                            var dataProp = xml.Descendants("PROPERTY").FirstOrDefault(p => (string?)p.Attribute("NAME") == "Data");
-
-                            if (nameProp != null && dataProp != null)
+                            foreach (string item in items)
                             {
-                                string? kvpKey = nameProp.Element("VALUE")?.Value;
-                                string? kvpValue = dataProp.Element("VALUE")?.Value;
-                                if (!string.IsNullOrEmpty(kvpKey))
+                                // Parse XML
+                                XDocument xml = XDocument.Parse(item);
+                                var nameProp = xml.Descendants("PROPERTY").FirstOrDefault(p => (string?)p.Attribute("NAME") == "Name");
+                                var dataProp = xml.Descendants("PROPERTY").FirstOrDefault(p => (string?)p.Attribute("NAME") == "Data");
+
+                                if (nameProp != null && dataProp != null)
                                 {
-                                    kvps[kvpKey] = kvpValue;
+                                    string? kvpKey = nameProp.Element("VALUE")?.Value;
+                                    string? kvpValue = dataProp.Element("VALUE")?.Value;
+                                    if (!string.IsNullOrEmpty(kvpKey))
+                                    {
+                                        kvps[kvpKey] = kvpValue;
+                                    }
                                 }
                             }
                         }

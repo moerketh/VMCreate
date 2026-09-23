@@ -2,6 +2,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Moq;
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CreateVM.HyperV.vmbus;
@@ -191,6 +193,35 @@ namespace VMCreate.Tests.HyperV.VmCreation
             await RunAsync(generation: 2);
 
             _kvpSender.Verify(k => k.SendKVPToGuestAsync("TestVM", "VMCREATE_MODE", "customize", It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [TestMethod]
+        public async Task RunAsync_SendsPaddingKvpBeforeRealKeys()
+        {
+            _kvpPoller.Setup(p => p.WaitForShutdownWithProgressAsync(
+                It.IsAny<string>(),
+                It.IsAny<IProgress<CreateVMProgressInfo>>(),
+                It.IsAny<CancellationToken>(),
+                It.IsAny<int>()))
+                .ReturnsAsync(true);
+
+            var sentKeys = new List<string>();
+            _kvpSender.Setup(k => k.SendKVPToGuestAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<string?>(),
+                    It.IsAny<CancellationToken>()))
+                .Callback<string, string, string?, CancellationToken>((_, key, _, _) => sentKeys.Add(key))
+                .Returns(Task.CompletedTask);
+
+            await RunAsync(generation: 2);
+
+            // Padding absorbs corruption in the first KVP pool slots at guest boot;
+            // it must be present and must precede all real configuration keys.
+            CollectionAssert.AreEquivalent(
+                new[] { "PADDING_1", "PADDING_2", "PADDING_3" },
+                sentKeys.Take(3).ToList());
+            Assert.IsTrue(sentKeys.IndexOf("VMCREATE_MODE") > 2, "Real keys must be sent after the padding.");
         }
 
         [TestMethod]
