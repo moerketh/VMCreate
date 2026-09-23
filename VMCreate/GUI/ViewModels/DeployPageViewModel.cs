@@ -77,7 +77,6 @@ namespace VMCreate
         // InstallLamcoRdpStep/EnableGraphicalAutologinStep ProgressPhaseId.
         public const string SubInstallLamcoRdp  = "Sub_InstallLamcoRdp";
         public const string SubEnableAutologin  = "Sub_EnableAutologin";
-        public const string SubStartGraphicalSession = "Sub_StartGraphicalSession";
 
         // Auto RDP backend: detection + the possible backfilled installs.
         // Sub_AutoRdpResolve is matched by AutoRdpBackendResolveStep.
@@ -517,8 +516,6 @@ namespace VMCreate
                     "Installing the Wayland-native RDP server (packages, TLS, fork build)", SymbolRegular.Desktop24));
                 Phases.Insert(insertAt++, NewPostBootSubStep(SubEnableAutologin, "Enable Graphical Autologin",
                     "Configuring automatic desktop login for the RDP session", SymbolRegular.Person24));
-                Phases.Insert(insertAt++, NewPostBootSubStep(SubStartGraphicalSession, "Start Graphical Session",
-                    "Restarting the display manager to log into the desktop and bind the RDP listeners (no reboot needed)", SymbolRegular.Play24));
             }
             else // Xrdp (None can never be reached from Auto — the resolver only picks Lamco or Xrdp).
             {
@@ -688,8 +685,6 @@ namespace VMCreate
                     "Installing the Wayland-native RDP server (packages, TLS, fork build)", SymbolRegular.Desktop24));
                 Phases.Add(NewPostBootSubStep(SubEnableAutologin, "Enable Graphical Autologin",
                     "Configuring automatic desktop login for the RDP session", SymbolRegular.Person24));
-                Phases.Add(NewPostBootSubStep(SubStartGraphicalSession, "Start Graphical Session",
-                    "Restarting the display manager to log into the desktop and bind the RDP listeners (no reboot needed)", SymbolRegular.Play24));
             }
             if (c?.RdpBackend == RdpBackend.Auto)
             {
@@ -766,8 +761,6 @@ namespace VMCreate
                     "Installing the Wayland-native RDP server (packages, TLS, fork build)", SymbolRegular.Desktop24));
                 Phases.Insert(index++, NewPostBootSubStep(SubEnableAutologin, "Enable Graphical Autologin",
                     "Configuring automatic desktop login for the RDP session", SymbolRegular.Person24));
-                Phases.Insert(index++, NewPostBootSubStep(SubStartGraphicalSession, "Start Graphical Session",
-                    "Restarting the display manager to log into the desktop and bind the RDP listeners (no reboot needed)", SymbolRegular.Play24));
             }
             if (c?.RdpBackend == RdpBackend.Auto)
             {
