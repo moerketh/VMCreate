@@ -77,5 +77,40 @@ namespace VMCreate.Tests.GalleryTests
             var item = new GalleryItem { DiskUri = "" };
             Assert.IsFalse(item.IsNativeHyperV);
         }
+
+        // ── HasUnattendedInstallPath ─────────────────────────────────────
+
+        [TestMethod]
+        public void HasUnattendedInstallPath_DefaultsToFalse()
+        {
+            // Loaders opt in explicitly; an unset flag must keep ISO items
+            // behind the GUI's "Show ISO installers" toggle.
+            Assert.IsFalse(new GalleryItem().HasUnattendedInstallPath);
+        }
+
+        [TestMethod]
+        public void HasUnattendedInstallPath_SurvivesCacheRoundTrip()
+        {
+            // The gallery cache serializes GalleryItem verbatim; the flag must
+            // round-trip or cached unattended ISOs (Omarchy) would vanish from
+            // the default view for the cache TTL after the first refresh.
+            var serializer = new System.Text.Json.JsonSerializerOptions
+            {
+                PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+                PropertyNameCaseInsensitive = true,
+            };
+            var items = new List<GalleryItem>
+            {
+                new() { Name = "Omarchy 4.0.4", DiskUri = "https://iso.omarchy.org/omarchy-4.0.4.iso", HasUnattendedInstallPath = true },
+                new() { Name = "Athena OS (Arch)", DiskUri = "https://example.com/athena.iso" },
+            };
+
+            string json = System.Text.Json.JsonSerializer.Serialize(items, serializer);
+            var roundTripped = System.Text.Json.JsonSerializer.Deserialize<List<GalleryItem>>(json, serializer);
+
+            Assert.IsNotNull(roundTripped);
+            Assert.IsTrue(roundTripped[0].HasUnattendedInstallPath);
+            Assert.IsFalse(roundTripped[1].HasUnattendedInstallPath);
+        }
     }
 }

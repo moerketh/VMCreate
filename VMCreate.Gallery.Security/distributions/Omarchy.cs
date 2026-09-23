@@ -72,6 +72,7 @@ namespace VMCreate.Gallery
                     // its password (hashed with SHA-512 crypt on the seed).
                     InitialUsername = "omarchy",
                     InitialPassword = "omarchy",
+                    HasUnattendedInstallPath = true,
                     IsRecommended = false,
                 },
             };

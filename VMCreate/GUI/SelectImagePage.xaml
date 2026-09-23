@@ -117,7 +117,7 @@
                       IsChecked="{Binding ShowIsoInstallers}"
                       HorizontalAlignment="Left" VerticalAlignment="Center"
                       FontSize="12" Opacity="0.8"
-                      ToolTip="ISO images require manual OS installation inside the VM"
+                      ToolTip="ISO images without an automated unattended install path require manual OS installation inside the VM"
                       AutomationProperties.Name="Show ISO installer images"/>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
             <Button Content="Cancel" Command="{Binding CancelCommand}" Style="{StaticResource CommonButton}"

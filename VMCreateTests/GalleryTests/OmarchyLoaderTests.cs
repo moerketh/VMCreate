@@ -78,6 +78,10 @@ namespace VMCreate.Tests.GalleryTests
             Assert.IsFalse(string.IsNullOrEmpty(item.InitialPassword));
             Assert.AreEqual("false", item.SecureBoot);
             Assert.AreEqual("4.0.4", item.Version);
+
+            // Unattended via the cidata seed ISO, so it stays visible without
+            // the "Show ISO installers" toggle despite being ISO media.
+            Assert.IsTrue(item.HasUnattendedInstallPath);
         }
 
         [TestMethod]

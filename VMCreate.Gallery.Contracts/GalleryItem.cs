@@ -191,6 +191,16 @@ namespace VMCreate
             string.Equals(Category, "Security", StringComparison.OrdinalIgnoreCase);
 
         /// <summary>
+        /// Set by loaders whose ISO deployment does not require interactive
+        /// console setup: the install is scripted end-to-end (Windows ISOs via
+        /// an attached unattend.xml floppy; Omarchy via its native cidata seed
+        /// ISO). The gallery page shows ISO items only behind the "Show ISO
+        /// installers" toggle unless this flag is set, so unattended ISOs stay
+        /// visible in the default view alongside pre-installed images.
+        /// </summary>
+        public bool HasUnattendedInstallPath { get; set; }
+
+        /// <summary>
         /// Returns true for pre-installed disk images (VHDX, VHD, VMDK, QCOW2, OVA)
         /// as opposed to ISO installers that require manual installation.
         /// </summary>

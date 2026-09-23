@@ -50,7 +50,8 @@ namespace VMCreate
             CancelCommand = new RelayCommand(() => RequestWizardComplete?.Invoke(WizardResult.Canceled));
             DismissErrorCommand = new RelayCommand(() => ErrorMessage = null);
 
-            // Apply the default filter (hides ISO installers)
+            // Apply the default filter (hides ISO installers that lack an
+            // unattended install path)
             ApplyFilter();
         }
 
@@ -127,9 +128,12 @@ namespace VMCreate
                 {
                     if (obj is not GalleryItem item) return false;
 
-                    // Hide ISO installers unless the user toggled them on,
-                    // but always show recommended items regardless.
-                    if (hideIso && !item.IsPreInstalled && !item.IsRecommended) return false;
+                    // Hide ISO installers unless the user toggled them on.
+                    // Always show recommended items and ISOs with an automated
+                    // install path (Windows unattend.xml, Omarchy cidata seed) —
+                    // those deploy hands-off despite being ISO media.
+                    if (hideIso && !item.IsPreInstalled && !item.IsRecommended
+                        && !item.HasUnattendedInstallPath) return false;
 
                     // Text search across name, publisher and description
                     if (hasTextFilter)
