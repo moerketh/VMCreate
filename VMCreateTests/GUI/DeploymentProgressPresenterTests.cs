@@ -173,11 +173,14 @@ namespace VMCreate.Tests.GUI
             // in lockstep; this pins both sides of the contract.
             var lamcoStep = new InstallLamcoRdpStep();
             var autologinStep = new EnableGraphicalAutologinStep();
+            var sessionStep = new StartGraphicalSessionStep();
 
             Assert.AreEqual(DeployPageViewModel.SubInstallLamcoRdp, lamcoStep.ProgressPhaseId,
                 "InstallLamcoRdpStep.ProgressPhaseId must match a DeployPageViewModel card constant");
             Assert.AreEqual(DeployPageViewModel.SubEnableAutologin, autologinStep.ProgressPhaseId,
                 "EnableGraphicalAutologinStep.ProgressPhaseId must match a DeployPageViewModel card constant");
+            Assert.AreEqual(DeployPageViewModel.SubStartGraphicalSession, sessionStep.ProgressPhaseId,
+                "StartGraphicalSessionStep.ProgressPhaseId must match a DeployPageViewModel card constant");
         }
 
         [TestMethod]

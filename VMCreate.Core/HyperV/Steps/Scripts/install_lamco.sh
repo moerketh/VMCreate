@@ -23,7 +23,8 @@ LAMCO_FORK_DEB_VERSION="1.4.5-hyperv6"
 # upstream base (1.4.5) and the deb's package version carries the lineage
 # suffix — i.e. the BINARY deliberately reports only the base version
 # (verified on the pinned asset: /usr/bin/lamco-rdp-server --version prints
-# "lamco-rdp-server 1.4.5"), while dpkg reports 1.4.5-hyperv5.
+# "lamco-rdp-server 1.4.5"), while dpkg reports 1.4.5-hyperv6 (matches
+# LAMCO_FORK_DEB_VERSION below; keep the pin and this sentence in step).
 LAMCO_FORK_CRATE_VERSION="1.4.5"
 LAMCO_FORK_DEB_SHA256="8439c0a35d1cc89ee5d4e7ba1b1f771cdb1e6185d2e8f9be7239bd3481daaea6"
 LAMCO_FORK_DEB_URL="https://github.com/${LAMCO_FORK_REPO}/releases/download/${LAMCO_FORK_TAG}/lamco-rdp-server_${LAMCO_FORK_DEB_VERSION}_amd64.deb"

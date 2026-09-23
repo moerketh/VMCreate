@@ -73,6 +73,12 @@ fi
 if command -v systemctl >/dev/null 2>&1 && [ -x /usr/bin/sddm ]; then
     current_dm="$(cat /etc/X11/default-display-manager 2>/dev/null || true)"
     if [ "$current_dm" != "/usr/bin/sddm" ]; then
+        # Sync debconf BEFORE writing the file directly —
+        # /etc/X11/default-display-manager is dpkg-owned: a later
+        # dpkg-reconfigure/reinstall of the sddm package rewrites it from
+        # debconf state and would silently flip the DM away from sddm.
+        echo "shared/default-x-display-manager select sddm" \
+            | debconf-set-selections 2>/dev/null || true
         echo "/usr/bin/sddm" > /etc/X11/default-display-manager
         echo "Display manager set to sddm (was: ${current_dm:-unset})."
         systemctl disable lightdm.service 2>/dev/null || true
