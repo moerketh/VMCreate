@@ -25,7 +25,8 @@ namespace VMCreate.Gallery
                 EnhancedSessionTransportType = "HvSocket",
                 LastUpdated = DateTime.UtcNow.ToString("o"),
                 InitialUsername = "arch",
-                InitialPassword = "arch"
+                InitialPassword = "arch",
+                LinuxDistro = LinuxDistro.Arch
             };
             return Task.FromResult(new List<GalleryItem> { galleryItem });
         }

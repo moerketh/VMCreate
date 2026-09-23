@@ -29,6 +29,16 @@ namespace VMCreate.Tests.GalleryTests
         }
 
         [TestMethod]
+        public void SupportsLamco_FalseForPacmanAndNixDistros()
+        {
+            // Arch (incl. Athena Arch): the fork pipeline ships no pacman
+            // package yet. NixOs (incl. Athena Nix / NixOS): declarative
+            // distro — no package-manager install path possible.
+            Assert.IsFalse(LinuxDistro.Arch.SupportsLamco());
+            Assert.IsFalse(LinuxDistro.NixOs.SupportsLamco());
+        }
+
+        [TestMethod]
         public void SupportsLamco_FalseForUnknown()
         {
             Assert.IsFalse(LinuxDistro.Unknown.SupportsLamco());

@@ -193,6 +193,10 @@ namespace VMCreate.Tests.GalleryTests
         public async Task Tsurugi_AllUrisResolve()
             => await VerifyAllUrisAsync(await new Tsurugi().LoadGalleryItems(), nameof(Tsurugi));
 
+        [TestMethod, Timeout(60_000)]
+        public async Task AthenaOS_AllUrisResolve()
+            => await VerifyAllUrisAsync(await new AthenaOS().LoadGalleryItems(), nameof(AthenaOS));
+
         [TestMethod, Timeout(120_000)]
         public async Task LoadSecurityOnion_AllUrisResolve()
             => await VerifyAllUrisAsync(

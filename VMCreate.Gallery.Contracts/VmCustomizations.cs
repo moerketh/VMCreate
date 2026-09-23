@@ -39,9 +39,10 @@ namespace VMCreate
         /// The RDP server backend to install on Linux guests. Default is
         /// <see cref="RdpBackend.Auto"/>: no backend is guessed statically —
         /// a detection step resolves <see cref="RdpBackend.Auto"/> to a concrete
-        /// backend (<see cref="RdpBackend.Lamco"/> or <see cref="RdpBackend.Xrdp"/>)
-        /// at deployment time, after the guest is reachable over SSH (see
-        /// <c>AutoRdpBackendResolveStep</c>). When set to
+        /// backend (<see cref="RdpBackend.Lamco"/>, <see cref="RdpBackend.Xrdp"/>,
+        /// or <see cref="RdpBackend.None"/> for Nix-family guests, which have
+        /// no installable RDP backend) at deployment time, after the guest is
+        /// reachable over SSH (see <c>AutoRdpBackendResolveStep</c>). When set to
         /// <see cref="RdpBackend.Lamco"/>, the Wayland-disable / X11-force steps
         /// are skipped (Lamco is Wayland-native) and graphical autologin is
         /// enabled instead so Lamco has a live session to share. When set to

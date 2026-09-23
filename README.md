@@ -27,7 +27,7 @@ These distributions ship disk images and can be deployed without manual installa
 | REMnux | |
 | Whonix | |
 
-Additional ISO-based distributions (Alpine, CAINE, Debian, Fedora, Linux Mint, NixOS, openSUSE, Pentoo, Rocky Linux, Security Onion, Tsurugi) are available but hidden by default as they require manual OS installation. Custom images can also be loaded from the Microsoft gallery, local JSON files, or registry entries.
+Additional ISO-based distributions (Alpine, Athena OS, CAINE, Debian, Fedora, Linux Mint, NixOS, openSUSE, Pentoo, Rocky Linux, Security Onion, Tsurugi) are available but hidden by default as they require manual OS installation. Custom images can also be loaded from the Microsoft gallery, local JSON files, or registry entries.
 
 ## Security & Privacy Notice
 

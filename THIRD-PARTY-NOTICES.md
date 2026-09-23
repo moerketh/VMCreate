@@ -332,6 +332,21 @@ the license in `/usr/share/doc/lamco-rdp-server/LICENSE` on the guest
 
 ---
 
+## Athena OS logo (bundled)
+
+- **Upstream:** https://athenaos.org (official brand assets)
+- **File:** `VMCreate.Gallery.Security/Icons/athena-logo.svg` — the Athena
+  OS shield/helmet mark, embedded as a gallery list icon.
+- **Purpose:** identifies the Athena OS distribution entries in the gallery
+  list, per standard distro-listing practice.
+
+The Athena OS logo and brand are the property of the Athena OS Project. The
+mark is reproduced here at low resolution for compatibility/listing purposes
+only; it is not MIT-licensed as part of VMCreate. The repository itself is
+MIT-licensed software available at https://github.com/Athena-OS/athena.
+
+---
+
 ## Microsoft.Extensions.Logging.Abstractions
 
 - **Version:** 10.0.12

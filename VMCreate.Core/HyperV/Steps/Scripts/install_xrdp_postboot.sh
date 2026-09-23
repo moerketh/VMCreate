@@ -62,7 +62,7 @@ elif command -v pacman >/dev/null 2>&1; then
         exit 0
     fi
     echo "Installing xrdp via pacman..."
-    if ! pacman -S --noconfirm xrdp 2>&1; then
+    if ! pacman -S --noconfirm xrdp xorgxrdp 2>&1; then
         echo "ERROR: pacman install xrdp failed."
         exit 1
     fi

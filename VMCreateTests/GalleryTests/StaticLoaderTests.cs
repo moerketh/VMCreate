@@ -223,5 +223,70 @@ namespace VMCreate.Tests.GalleryTests
 
             StringAssert.Contains(item.Name, "Fedora", StringComparison.OrdinalIgnoreCase);
         }
+
+        // ── AthenaOS ─────────────────────────────────────────────────────────────
+
+        [TestMethod]
+        public async Task AthenaOS_LoadGalleryItems_ReturnsTwoVariants()
+        {
+            var result = await new AthenaOS().LoadGalleryItems();
+
+            Assert.AreEqual(2, result.Count,
+                "Athena should return an Arch and a Nix entry.");
+        }
+
+        [TestMethod]
+        public async Task AthenaOS_LoadGalleryItems_BothVariantsSharePinnedIso()
+        {
+            // Same live ISO boots Dory; the variant is chosen in the installer.
+            var items = await new AthenaOS().LoadGalleryItems();
+
+            var uris = items.Select(i => i.DiskUri).Distinct().ToList();
+            Assert.AreEqual(1, uris.Count, "Both entries must share one DiskUri");
+            StringAssert.Contains(uris[0], "v26.03", StringComparison.Ordinal);
+            Assert.IsTrue(uris[0].EndsWith(".iso", StringComparison.OrdinalIgnoreCase),
+                $"Expected .iso URI, got: {uris[0]}");
+
+            var checksums = items.Select(i => i.ChecksumUri).Distinct().ToList();
+            Assert.AreEqual(1, checksums.Count,
+                "Both entries must pin the same checksum file");
+            StringAssert.Contains(checksums[0], ".sha256", StringComparison.Ordinal);
+        }
+
+        [TestMethod]
+        public async Task AthenaOS_LoadGalleryItems_VariantsHaveDistinctNamesAndDistroHints()
+        {
+            var result = await new AthenaOS().LoadGalleryItems();
+
+            CollectionAssert.AllItemsAreUnique(result.Select(i => i.Name).ToList(),
+                "Name is part of the dedupe key; the two variants must differ");
+
+            var archItem = result.Single(i => i.Name == "Athena OS (Arch)");
+            var nixItem = result.Single(i => i.Name == "Athena OS (Nix)");
+
+            Assert.AreEqual(LinuxDistro.Arch, archItem.LinuxDistro);
+            Assert.AreEqual(LinuxDistro.NixOs, nixItem.LinuxDistro);
+        }
+
+        [TestMethod]
+        public async Task AthenaOS_LoadGalleryItems_ItemsHaveRequiredFields()
+        {
+            foreach (var item in await new AthenaOS().LoadGalleryItems())
+            {
+                Assert.IsFalse(string.IsNullOrEmpty(item.Name));
+                Assert.IsFalse(string.IsNullOrEmpty(item.Description));
+                Assert.AreEqual("Athena OS Project", item.Publisher, $"Publisher wrong on '{item.Name}'");
+                Assert.AreEqual("Security", item.Category, $"Category wrong on '{item.Name}'");
+                Assert.AreEqual("HvSocket", item.EnhancedSessionTransportType);
+                Assert.AreEqual("false", item.SecureBoot);
+                Assert.AreEqual("26.03", item.Version);
+                Assert.IsFalse(item.IsRecommended, $"Athena items must not be recommended: '{item.Name}'");
+                Assert.IsFalse(item.SupportsLamco(), $"Athena is not Lamco-capable: '{item.Name}'");
+                Assert.IsFalse(string.IsNullOrEmpty(item.SymbolUri),
+                    $"SymbolUri (embedded athena-logo.svg) missing on '{item.Name}'");
+                Assert.IsFalse(string.IsNullOrEmpty(item.ThumbnailUri),
+                    $"ThumbnailUri (embedded athena-logo.svg) missing on '{item.Name}'");
+            }
+        }
     }
 }

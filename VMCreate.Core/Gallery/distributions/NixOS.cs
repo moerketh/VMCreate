@@ -33,7 +33,8 @@ namespace VMCreate.Gallery
                 SecureBoot = "false",
                 EnhancedSessionTransportType = "HvSocket",
                 Version = ChannelVersion,
-                LastUpdated = lastModified.ToString("o")
+                LastUpdated = lastModified.ToString("o"),
+                LinuxDistro = LinuxDistro.NixOs
             });
 
             // Minimal ISO
@@ -51,7 +52,8 @@ namespace VMCreate.Gallery
                 SecureBoot = "false",
                 EnhancedSessionTransportType = "HvSocket",
                 Version = ChannelVersion,
-                LastUpdated = lastModified.ToString("o")
+                LastUpdated = lastModified.ToString("o"),
+                LinuxDistro = LinuxDistro.NixOs
             });
 
             return galleryItems;

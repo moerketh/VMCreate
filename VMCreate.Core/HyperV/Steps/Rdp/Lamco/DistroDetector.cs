@@ -82,6 +82,13 @@ namespace VMCreate
                 || Is(id, "opensuse") || Is(id, "suse")) return LinuxDistro.OpenSuse;
             if (Is(id, "parrot")) return LinuxDistro.Parrot;
             if (Is(id, "kali")) return LinuxDistro.Kali;
+            if (Is(id, "arch")) return LinuxDistro.Arch;
+            // Athena OS: the installed Arch variant reports itself either by
+            // its own ID or as plain Arch (ID_LIKE=arch handled below); the
+            // Nix variant reports athenaos (live airootfs and installed hosts).
+            if (Is(id, "athena")) return LinuxDistro.Arch;
+            if (Is(id, "athenaos") || Is(id, "athena-nix")) return LinuxDistro.NixOs;
+            if (Is(id, "nixos")) return LinuxDistro.NixOs;
 
             // ID_LIKE fallbacks for derivatives (e.g. Linux Mint has
             // ID=linuxmint ID_LIKE=ubuntu; Kali has ID=kali ID_LIKE=debian).
@@ -90,6 +97,7 @@ namespace VMCreate
             if (HasLike(idLike, "fedora")) return LinuxDistro.Fedora;
             if (HasLike(idLike, "opensuse") || HasLike(idLike, "suse")) return LinuxDistro.OpenSuse;
             if (HasLike(idLike, "parrot")) return LinuxDistro.Parrot;
+            if (HasLike(idLike, "arch")) return LinuxDistro.Arch;
 
             return LinuxDistro.Unknown;
         }

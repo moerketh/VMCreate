@@ -151,6 +151,45 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
+        public async Task ExecuteAsync_NixOs_ResolvesNoneWithWarning()
+        {
+            // Nix-family guests have no installable RDP backend at all:
+            // post-boot installs through apt/dnf/zypper/pacman are
+            // structurally impossible on the nix store, and Lamco ships
+            // Debian-family debs only. Even a Wayland default — normally
+            // a Lamco verdict — must not pick a backend nothing can
+            // install: the resolver routes to None (console/SSH only)
+            // with a loud warning rather than failing the deployment.
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .ReturnsAsync("ID=nixos\n");
+            SetupScriptOutput("RDP_DETECT=wayland");
+            var item = new GalleryItem { LinuxDistro = LinuxDistro.NixOs };
+            var c = new VmCustomizations { RdpBackend = RdpBackend.Auto };
+
+            await _step.ExecuteAsync(_shell.Object, item, c, _logger.Object, CancellationToken.None);
+
+            Assert.AreEqual(RdpBackend.None, c.RdpBackend, "Nix guests must resolve to None — no backend is installable");
+            Assert.IsTrue(LoggedWarning(_logger), "routing Nix guests to None must warn — RDP silently missing would look like a bug");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_NixOsOnX11_AlsoResolvesNone()
+        {
+            // Display server is irrelevant for Nix guests: no backend can
+            // be installed either way, so x11 must not fall back to xrdp
+            // (the post-boot install would hard-fail on the nix store).
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .ReturnsAsync("ID=nixos\n");
+            SetupScriptOutput("RDP_DETECT=x11");
+            var item = new GalleryItem { LinuxDistro = LinuxDistro.NixOs };
+            var c = new VmCustomizations { RdpBackend = RdpBackend.Auto };
+
+            await _step.ExecuteAsync(_shell.Object, item, c, _logger.Object, CancellationToken.None);
+
+            Assert.AreEqual(RdpBackend.None, c.RdpBackend, "x11 must not fall back to xrdp when nothing can install it");
+        }
+
+        [TestMethod]
         public async Task ExecuteAsync_DistroReadFailure_ResolvesXrdpWithWarning()
         {
             // /etc/os-release unreadable after the resolver's retry: no

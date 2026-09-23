@@ -37,7 +37,14 @@ namespace VMCreate
     /// Gating: only runs when <see cref="VmCustomizations.RdpBackend"/> is
     /// <see cref="RdpBackend.Xrdp"/> — evaluated AFTER the resolver mutated
     /// the backend in place (PostBootCustomizationService checks
-    /// IsApplicable just-in-time per step).
+    /// IsApplicable just-in-time per step) — AND the item is not a
+    /// Nix-family guest (<see cref="LinuxDistro.NixOs"/>): the nix store
+    /// has no apt/dnf/zypper/pacman install path for the package list
+    /// this step's script needs, so the script exits 1 and the
+    /// deployment hard-fails.
+    /// <see cref="AutoRdpBackendResolveStep"/> (order 232) resolves Nix
+    /// guests to <see cref="RdpBackend.None"/> under Auto, so this gate
+    /// is the safety net for a user explicitly forcing xrdp on Nix.
     /// </para>
     /// </summary>
     public class InstallXrdpPostBootStep : ICustomizationStep
@@ -49,7 +56,8 @@ namespace VMCreate
         public string? ProgressPhaseId => "Sub_InstallXrdpPostBoot";
 
         public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
-            => customizations?.RdpBackend == RdpBackend.Xrdp;
+            => customizations?.RdpBackend == RdpBackend.Xrdp
+            && item?.LinuxDistro != LinuxDistro.NixOs;
 
         public async Task ExecuteAsync(IGuestShell shell, GalleryItem item, VmCustomizations customizations, ILogger logger, CancellationToken ct)
         {

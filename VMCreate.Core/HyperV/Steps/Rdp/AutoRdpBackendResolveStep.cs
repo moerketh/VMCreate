@@ -24,6 +24,14 @@ namespace VMCreate
     /// <list type="bullet">
     /// <item><b>Wayland default + Debian-family distro</b> →
     /// <see cref="RdpBackend.Lamco"/> (Wayland-native; the right tool).</item>
+    /// <item><b>Nix-family distro</b> (NixOS / Athena Nix — detected at
+    /// runtime) → <see cref="RdpBackend.None"/>: no installable backend
+    /// exists there (post-boot installs through a package manager are
+    /// structurally impossible on Nix; Lamco ships Debian-family debs
+    /// only), so xrdp is NOT a fallback for these guests. The deployment
+    /// deliberately ends without RDP (console/SSH only) with a loud
+    /// warning, and <see cref="InstallXrdpPostBootStep"/> is gated off
+    /// NixOs items for the same reason.</item>
     /// <item><b>Anything else</b> → <see cref="RdpBackend.Xrdp"/>, and
     /// <see cref="InstallXrdpPostBootStep"/> (order 236) backfills the
     /// install that the skipped chroot step would have done.</item>
@@ -149,10 +157,17 @@ namespace VMCreate
                 && detected.Value.SupportsLamco();
 
             // ── 3. Verdict ────────────────────────────────────────────────
-            RdpBackend resolved =
-                displayServer == "wayland" && lamcoCandidate
+            RdpBackend resolved;
+            if (detected == LinuxDistro.NixOs)
+            {
+                resolved = RdpBackend.None;
+            }
+            else
+            {
+                resolved = displayServer == "wayland" && lamcoCandidate
                     ? RdpBackend.Lamco
                     : RdpBackend.Xrdp;
+            }
 
             // ── 4. Mutate the shared customizations IN PLACE ──────────────
             // The in-place mutation is the whole point: the deploy-progress
@@ -168,6 +183,12 @@ namespace VMCreate
             {
                 logger.LogInformation(
                     "Auto-select RDP backend: VM {VMName} uses a Wayland session by default and runs {Distro} (Lamco-capable). Selected: LAMCO RDP SERVER.",
+                    shell.VmName, detected!.Value);
+            }
+            else if (resolved == RdpBackend.None)
+            {
+                logger.LogWarning(
+                    "Auto-select RDP backend: VM {VMName} runs {Distro} (NixOS / Athena Nix). Selected: NONE — no installable RDP backend exists on the nix store (package-manager post-boot installs are structurally impossible; Lamco ships Debian-family debs only; xrdp cannot be installed either). The VM is deployed console/SSH only; pick another distro if RDP is required.",
                     shell.VmName, detected!.Value);
             }
             else

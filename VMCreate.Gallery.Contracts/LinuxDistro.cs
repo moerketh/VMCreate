@@ -19,7 +19,22 @@ namespace VMCreate
         Fedora,
         OpenSuse,
         Parrot,
-        Kali
+        Kali,
+
+        /// <summary>
+        /// pacman-family distributions (Arch, Athena Arch, Manjaro and other
+        /// ID_LIKE=arch derivatives). Not Lamco-capable yet: the fork pipeline
+        /// ships no pacman package, so Auto resolves these guests to xrdp.
+        /// </summary>
+        Arch,
+
+        /// <summary>
+        /// Declarative Nix-family distributions (NixOS, Athena Nix
+        /// &mdash; ID=athenaos). Post-boot service installs via a package
+        /// manager are structurally impossible there; Nix automation would
+        /// have to flow through the installer's config instead.
+        /// </summary>
+        NixOs
     }
 
     /// <summary>
@@ -37,7 +52,8 @@ namespace VMCreate
         /// pinned deb path works there, including the Kali-KDE image whose
         /// KDE/Plasma 6 desktop defaults to Wayland — the strongest Auto→Lamco
         /// candidate. Fedora/openSUSE regain Lamco support when the fork
-        /// pipeline ships rpms for them.
+        /// pipeline ships rpms for them; Arch likewise once the fork
+        /// pipeline ships a pacman package (Athena Arch included).
         /// </summary>
         public static bool SupportsLamco(this LinuxDistro distro) =>
             distro is LinuxDistro.Ubuntu

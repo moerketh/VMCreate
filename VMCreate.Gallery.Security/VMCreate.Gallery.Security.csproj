@@ -12,6 +12,7 @@
   </ItemGroup>
 
   <ItemGroup>    <EmbeddedResource Include="Icons\parrot-logo.svg" />
+    <EmbeddedResource Include="Icons\athena-logo.svg" />
     <EmbeddedResource Include="Icons\pentoo-logo.svg" />
     <EmbeddedResource Include="Icons\tails-logo.svg" />
     <EmbeddedResource Include="Icons\fedora-logo.svg" />

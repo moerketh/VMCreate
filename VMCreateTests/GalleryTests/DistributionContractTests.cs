@@ -110,6 +110,7 @@ namespace VMCreate.Tests.GalleryTests
             new object[] { new CAINE(),              nameof(CAINE) },
             new object[] { new Whonix(),             nameof(Whonix) },
             new object[] { new Tsurugi(),            nameof(Tsurugi) },
+            new object[] { new AthenaOS(),           nameof(AthenaOS) },
             // General loaders
             new object[] { new FedoraWorkstation(),  nameof(FedoraWorkstation) },
             new object[] { new OpenSuseTumbleweed(), nameof(OpenSuseTumbleweed) },

@@ -60,6 +60,25 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
+        public void IsApplicable_FalseForNixOsItem_EvenWithExplicitXrdp()
+        {
+            // Safety net for the user who forces xrdp on a Nix guest: the
+            // nix store has no apt/dnf/zypper/pacman install path for the
+            // script's package list, so the script would exit 1 and hard-
+            // fail an otherwise healthy deployment. The deployment
+            // intentionally ends RDP-less instead.
+            var nixItem = new GalleryItem { LinuxDistro = LinuxDistro.NixOs };
+            Assert.IsFalse(_step.IsApplicable(nixItem, _xrdpCustomizations));
+
+            // ...and a NixOs item cannot resurrect the step via any other
+            // backend either (None keeps it off; Auto resolves before this
+            // step, to None for Nix).
+            foreach (var backend in new[] { RdpBackend.Auto, RdpBackend.Lamco, RdpBackend.None })
+                Assert.IsFalse(_step.IsApplicable(nixItem, new VmCustomizations { RdpBackend = backend }),
+                    $"IsApplicable must be false for a NixOs item with {backend}");
+        }
+
+        [TestMethod]
         public async Task ExecuteAsync_ResultLine_Installed_Succeeds()
         {
             _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))

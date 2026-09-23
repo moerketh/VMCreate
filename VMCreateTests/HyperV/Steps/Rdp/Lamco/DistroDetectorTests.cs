@@ -46,6 +46,21 @@ namespace VMCreate.Tests.HyperV.Steps
             Assert.AreEqual(LinuxDistro.OpenSuse, DetectWith("ID=opensuse-leap\n").result);
             Assert.AreEqual(LinuxDistro.Parrot, DetectWith("ID=parrot\n").result);
             Assert.AreEqual(LinuxDistro.Kali, DetectWith("ID=kali\n").result);
+            Assert.AreEqual(LinuxDistro.Arch, DetectWith("ID=arch\n").result);
+            Assert.AreEqual(LinuxDistro.NixOs, DetectWith("ID=nixos\n").result);
+        }
+
+        [TestMethod]
+        public void DetectAsync_AthenaVariants_ClassifyToTheirFamilies()
+        {
+            // Athena Arch reports either its own ID or plain arch; the Nix
+            // variant reports athenaos (live airootfs and installed hosts
+            // alike). Both candidate Arch identities must resolve to Arch,
+            // so either install path stays a runtime-gate away from Lamco.
+            Assert.AreEqual(LinuxDistro.Arch, DetectWith("ID=athena\n").result);
+            Assert.AreEqual(LinuxDistro.Arch, DetectWith("ID=athena\nID_LIKE=arch\n").result);
+            Assert.AreEqual(LinuxDistro.NixOs, DetectWith("ID=athenaos\n").result);
+            Assert.AreEqual(LinuxDistro.NixOs, DetectWith("ID=athena-nix\n").result);
         }
 
         [TestMethod]
@@ -53,6 +68,10 @@ namespace VMCreate.Tests.HyperV.Steps
         {
             // Linux Mint: ID=linuxmint (unclassified) + ID_LIKE=ubuntu
             Assert.AreEqual(LinuxDistro.Ubuntu, DetectWith("ID=linuxmint\nID_LIKE=ubuntu\n").result);
+            // Arch derivatives that only declare ID_LIKE (e.g. Manjaro:
+            // ID=manjaro ID_LIKE=arch) fall back to the Arch family.
+            Assert.AreEqual(LinuxDistro.Arch, DetectWith("ID=manjaro\nID_LIKE=arch\n").result);
+            Assert.AreEqual(LinuxDistro.Arch, DetectWith("ID=manjaro-arm\nID_LIKE=arch\n").result);
         }
 
         [TestMethod]
@@ -60,12 +79,15 @@ namespace VMCreate.Tests.HyperV.Steps
         {
             Assert.AreEqual(LinuxDistro.Debian, DetectWith("ID=\"debian\"\n").result);
             Assert.AreEqual(LinuxDistro.Parrot, DetectWith("ID='parrot'\n").result);
+            Assert.AreEqual(LinuxDistro.NixOs, DetectWith("ID=\"athenaos\"\n").result);
         }
 
         [TestMethod]
         public void DetectAsync_UnknownDistroOrEmpty_ReturnsUnknown()
         {
-            Assert.AreEqual(LinuxDistro.Unknown, DetectWith("ID=arch\n").result);
+            // gentoo: a rolling source-based distro outside every family we
+            // classify — genuinely Unknown.
+            Assert.AreEqual(LinuxDistro.Unknown, DetectWith("ID=gentoo\n").result);
             Assert.AreEqual(LinuxDistro.Unknown, DetectWith("").result);
         }
 
