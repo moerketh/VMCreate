@@ -83,6 +83,18 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
+        public void DetectAsync_ArchFamily_ClassifiesArch()
+        {
+            // Omarchy is plain Arch underneath: ID=arch with no ID_LIKE.
+            // Derivatives (Manjaro, EndeavourOS) carry ID_LIKE=arch or
+            // ID_LIKE=archlinux and must land on Arch, not Unknown.
+            Assert.AreEqual(LinuxDistro.Arch, DetectWith(
+                "ID=arch\nPRETTY_NAME=\"Omarchy\"\n").result);
+            Assert.AreEqual(LinuxDistro.Arch, DetectWith("ID=manjaro\nID_LIKE=arch\n").result);
+            Assert.AreEqual(LinuxDistro.Arch, DetectWith("ID=endeavouros\nID_LIKE=\"archlinux\"\n").result);
+        }
+
+        [TestMethod]
         public void DetectAsync_UnknownDistroOrEmpty_ReturnsUnknown()
         {
             // gentoo: a rolling source-based distro outside every family we

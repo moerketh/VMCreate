@@ -97,7 +97,10 @@ namespace VMCreate
             if (HasLike(idLike, "fedora")) return LinuxDistro.Fedora;
             if (HasLike(idLike, "opensuse") || HasLike(idLike, "suse")) return LinuxDistro.OpenSuse;
             if (HasLike(idLike, "parrot")) return LinuxDistro.Parrot;
-            if (HasLike(idLike, "arch")) return LinuxDistro.Arch;
+            // Arch derivatives (e.g. Manjaro, EndeavourOS) ship ID_LIKE=arch.
+            // ID_LIKE=archlinux is rare — CachyOS is one of the few that set it.
+            // Omarchy itself is plain ID=arch.
+            if (HasLike(idLike, "arch") || HasLike(idLike, "archlinux")) return LinuxDistro.Arch;
 
             return LinuxDistro.Unknown;
         }

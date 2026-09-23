@@ -34,6 +34,8 @@ namespace VMCreate.Tests.GalleryTests
             // Arch (incl. Athena Arch): the fork pipeline ships no pacman
             // package yet. NixOs (incl. Athena Nix / NixOS): declarative
             // distro — no package-manager install path possible.
+            // Arch flips to supported when the fork pipeline ships an Arch
+            // package (Omarchy Phase D).
             Assert.IsFalse(LinuxDistro.Arch.SupportsLamco());
             Assert.IsFalse(LinuxDistro.NixOs.SupportsLamco());
         }

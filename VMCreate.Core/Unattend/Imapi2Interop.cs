@@ -63,13 +63,19 @@ namespace VMCreate
             Exception? failure = null;
             var worker = new Thread(() =>
             {
-                try
+                // Concurrent IMAPI2 burns fail during COM activation
+                // (IMAPI_E_STASHFILE_OPEN_FAILURE), so burns are serialized
+                // process-wide. Burns take seconds; callers just wait their turn.
+                lock (BurnGate)
                 {
-                    CreateIsoOnSta(sourceDirectory, isoPath, volumeName);
-                }
-                catch (Exception ex)
-                {
-                    failure = ex;
+                    try
+                    {
+                        CreateIsoOnSta(sourceDirectory, isoPath, volumeName);
+                    }
+                    catch (Exception ex)
+                    {
+                        failure = ex;
+                    }
                 }
             })
             {
@@ -88,12 +94,54 @@ namespace VMCreate
             }
         }
 
+        private static readonly object BurnGate = new();
+
         /// <summary>
         /// Builds the image on the current (STA) thread: file system selection,
         /// volume name, tree import and result streaming — same call sequence
         /// the old PowerShell script performed.
         /// </summary>
         private static void CreateIsoOnSta(string sourceDirectory, string isoPath, string volumeName)
+        {
+            // IMAPI2 composes the image through a "stash" file in its working
+            // directory. Give each burn a dedicated directory so concurrent burns
+            // (e.g. parallel test executions) cannot collide on the shared default.
+            string workingDirectory = Path.Combine(Path.GetTempPath(), "vmcreate-imapi2-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(workingDirectory);
+            try
+            {
+                CreateIsoOnStaCore(sourceDirectory, isoPath, volumeName, workingDirectory);
+            }
+            finally
+            {
+                // IMAPI2 keeps the stash file locked until its RCW is released, so
+                // the first delete can race — retry briefly, then log and leave the
+                // temp directory behind rather than fail the burn that succeeded.
+                for (int i = 0; i < 5; i++)
+                {
+                    try
+                    {
+                        if (!Directory.Exists(workingDirectory)) break;
+                        Directory.Delete(workingDirectory, recursive: true);
+                        break;
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        if (i == 4)
+                            System.Diagnostics.Debug.WriteLine($"IMAPI2 working directory '{workingDirectory}' could not be deleted: {ex.Message}");
+                        else
+                            Thread.Sleep(100);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Builds the image on the current (STA) thread: file system selection,
+        /// volume name, tree import and result streaming — same call sequence
+        /// the old PowerShell script performed.
+        /// </summary>
+        private static void CreateIsoOnStaCore(string sourceDirectory, string isoPath, string volumeName, string workingDirectory)
         {
             // throwOnError:true guarantees non-null (the annotation is Type? —
             // the CLR doesn't encode the guarantee), hence the forgiving !.
@@ -102,6 +150,7 @@ namespace VMCreate
 
             image.FileSystemsToCreate = FsiFileSystems.ISO9660 | FsiFileSystems.Joliet | FsiFileSystems.UDF;
             image.VolumeName = volumeName;
+            image.WorkingDirectory = workingDirectory;
 
             // Embed the entire staging tree. AddTree's native signature is
             // (BSTR sourceDirectory, VARIANT_BOOL includeBaseDirectory) — exactly

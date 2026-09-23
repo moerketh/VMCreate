@@ -8,8 +8,16 @@ namespace VMCreate
         /// <summary>
         /// Creates a new guest shell connected to the specified VM using the given SSH key.
         /// Used for Linux VMs where SSH is the primary remote management transport.
+        /// Connects as the pre-baked <c>vmcreate</c> automation user.
         /// </summary>
         IGuestShell Create(string vmName, string privateKeyPath);
+
+        /// <summary>
+        /// Creates a new guest shell that connects as a specific user. Used for
+        /// distros whose installer creates the login user itself (e.g. Omarchy
+        /// creates the seeded <c>omarchy</c> user instead of <c>vmcreate</c>).
+        /// </summary>
+        IGuestShell Create(string vmName, string privateKeyPath, string username);
 
         /// <summary>
         /// Creates a new guest shell connected to the specified Windows VM using

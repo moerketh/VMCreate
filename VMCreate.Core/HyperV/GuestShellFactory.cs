@@ -21,9 +21,10 @@ namespace VMCreate
         }
 
         public IGuestShell Create(string vmName, string privateKeyPath)
-        {
-            return new SshGuestShell(_logger, vmName, privateKeyPath);
-        }
+            => new SshGuestShell(_logger, vmName, privateKeyPath);
+
+        public IGuestShell Create(string vmName, string privateKeyPath, string username)
+            => new SshGuestShell(_logger, vmName, privateKeyPath, username);
 
         public IGuestShell CreateForWindows(string vmName, string username, string password)
         {

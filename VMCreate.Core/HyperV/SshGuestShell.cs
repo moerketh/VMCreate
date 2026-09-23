@@ -29,6 +29,7 @@ namespace VMCreate
         private string? _hostKeyKnownHostsPath;
 
         private const string AutomationUser = "vmcreate";
+        private readonly string _username;
         // 2026-08-29: 180s proved too tight for the FIRST boot of a freshly
         // cloned distro — a Parrot rollout took ~6.5 min from ISO-cycle
         // shutdown to sshd answering (btrfs first-boot initialization, cold
@@ -49,6 +50,18 @@ namespace VMCreate
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             VmName = vmName ?? throw new ArgumentNullException(nameof(vmName));
             _privateKeyPath = privateKeyPath ?? throw new ArgumentNullException(nameof(privateKeyPath));
+            _username = AutomationUser;
+        }
+
+        /// <summary>
+        /// Creates a shell that connects as an explicit user. Used when the guest's
+        /// installer provisions a different account than the <c>vmcreate</c>
+        /// automation user (e.g. the seeded <c>omarchy</c> user).
+        /// </summary>
+        public SshGuestShell(ILogger logger, string vmName, string privateKeyPath, string username)
+            : this(logger, vmName, privateKeyPath)
+        {
+            _username = username ?? throw new ArgumentNullException(nameof(username));
         }
 
         /// <summary>
@@ -132,9 +145,12 @@ namespace VMCreate
                 {
                     lastError = ex;
                     _logger.LogDebug("SSH not ready yet: {Message}", ex.Message);
-                    if (ex.Message.Contains("refused") || ex.Message.Contains("unreachable")
-                        || ex.Message.Contains("No route") || ex.Message.Contains("timed out"))
-                        _vmIpAddress = null;
+                    // Any connect failure leaves the cached IP suspect: the guest
+                    // may have rebooted into a different SSH identity (new host
+                    // key) or moved to another address, so re-pin (accept-new) and
+                    // re-resolve from Hyper-V on the next attempt.
+                    ResetHostKeyPinning();
+                    _vmIpAddress = null;
                 }
 
                 await Task.Delay(TimeSpan.FromSeconds(5), ct);
@@ -373,7 +389,7 @@ namespace VMCreate
             // later exec sees a different key (e.g. another VM took over
             // the IP address mid-deployment).
             return await SshTransport.ExecuteAsync(
-                _logger, VmName, _privateKeyPath, _vmIpAddress!, AutomationUser,
+                _logger, VmName, _privateKeyPath, _vmIpAddress!, _username,
                 _hostKeyKnownHostsPath, linuxCommand, timeout, ct, maxArgumentLength: MaxCommandLength);
         }
     }

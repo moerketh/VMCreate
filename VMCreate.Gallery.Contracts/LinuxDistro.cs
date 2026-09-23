@@ -25,6 +25,8 @@ namespace VMCreate
         /// pacman-family distributions (Arch, Athena Arch, Manjaro and other
         /// ID_LIKE=arch derivatives). Not Lamco-capable yet: the fork pipeline
         /// ships no pacman package, so Auto resolves these guests to xrdp.
+        /// Omarchy (Arch + Hyprland) uses this value to gate its unattended
+        /// cidata install path while the Lamco deb path still excludes it.
         /// </summary>
         Arch,
 
