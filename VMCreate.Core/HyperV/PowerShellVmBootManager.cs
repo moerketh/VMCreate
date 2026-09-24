@@ -98,16 +98,33 @@ namespace VMCreate
             if (firstDrive == null)
                 throw new Exception("No hard disk drive found for VM. Ensure a VHDX is attached.");
 
+            // -FirstBootDevice only pins slot 1; the remaining entries keep their
+            // prior relative order. New VMs enumerate the network adapter first,
+            // which left the boot list as HDD -> PXE -> DVD: a still-blank disk
+            // (e.g. the unattended Omarchy install) fell through to a seemingly
+            // endless PXE wait instead of booting the installer DVD. Set the full
+            // list explicitly so any fallthrough reaches the DVD before the NIC.
+            var dvds = await _executor.RunCommandAsync("Get-VMDvdDrive",
+                new System.Collections.Generic.Dictionary<string, object?> { ["VMName"] = plan.VmName },
+                cancellationToken);
+            var adapters = await _executor.RunCommandAsync("Get-VMNetworkAdapter",
+                new System.Collections.Generic.Dictionary<string, object?> { ["VMName"] = plan.VmName },
+                cancellationToken);
+            var bootOrder = new object[] { firstDrive }
+                .Concat(dvds.Output.Cast<object>())
+                .Concat(adapters.Output.Cast<object>())
+                .ToArray();
+
             var result = await _executor.RunCommandAsync("Set-VMFirmware",
                 new System.Collections.Generic.Dictionary<string, object?>
                 {
                     ["VMName"] = plan.VmName,
-                    ["FirstBootDevice"] = firstDrive,
+                    ["BootOrder"] = bootOrder,
                 }, cancellationToken);
             if (result.HadErrors)
-                throw new Exception($"Failed to set hard drive as first boot device: {result.ErrorSummary}");
+                throw new Exception($"Failed to set boot order to hard drive, DVD, network: {result.ErrorSummary}");
 
-            _logger.LogInformation("Set first boot device to hard drive for VM: {VMName}", plan.VmName);
+            _logger.LogInformation("Set boot order to hard drive, DVD, network for VM: {VMName}", plan.VmName);
         }
 
         public async Task SetSecureBoot(VmDeploymentPlan plan, string secureBootTemplate, CancellationToken cancellationToken)
