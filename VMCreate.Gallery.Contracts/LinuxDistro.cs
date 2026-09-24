@@ -70,5 +70,23 @@ namespace VMCreate
         /// </summary>
         public static bool SupportsLamco(this GalleryItem? item) =>
             item?.LinuxDistro.SupportsLamco() == true;
+
+        /// <summary>
+        /// Returns true if the wayrdp backend is targetable on this
+        /// distribution. wayrdp is the project's own MIT Wayland-native RDP
+        /// server on FreeRDP 3; its packaging line follows the same amd64
+        /// Debian-deb lineage as the Lamco fork, so the supported set is
+        /// identical for now. (During Phase 0 the install step fails loudly
+        /// regardless of distro — see <c>install_wayrdp.sh</c>.)
+        /// </summary>
+        public static bool SupportsWayrdp(this LinuxDistro distro) =>
+            distro.SupportsLamco();
+
+        /// <summary>
+        /// Convenience overload: returns true when <see cref="GalleryItem.LinuxDistro"/>
+        /// indicates a wayrdp-targetable distribution. Null-safe.
+        /// </summary>
+        public static bool SupportsWayrdp(this GalleryItem? item) =>
+            item?.LinuxDistro.SupportsWayrdp() == true;
     }
 }

@@ -81,6 +81,11 @@ namespace VMCreate
         public const string SubEnableAutologin  = "Sub_EnableAutologin";
         public const string SubStartGraphicalSession = "Sub_StartGraphicalSession";
 
+        // wayrdp (MIT FreeRDP-3 Wayland-native RDP, pre-release) post-boot
+        // sub-step ID — matched by InstallWayrdpRdpStep.ProgressPhaseId.
+        // The session cards (autologin/session start) are shared with Lamco.
+        public const string SubInstallWayrdpRdp = "Sub_InstallWayrdpRdp";
+
         // Auto RDP backend: detection + the possible backfilled installs.
         // Sub_AutoRdpResolve is matched by AutoRdpBackendResolveStep.
         // ProgressPhaseId; the branch cards are inserted at runtime by
@@ -714,6 +719,15 @@ namespace VMCreate
                 Phases.Add(NewPostBootSubStep(SubStartGraphicalSession, "Start Graphical Session",
                     "Restarting the display manager to log in the desktop session", SymbolRegular.Play24));
             }
+            if (c?.RdpBackend == RdpBackend.Wayrdp)
+            {
+                Phases.Add(NewPostBootSubStep(SubInstallWayrdpRdp, "Install wayrdp RDP Server",
+                    "Pre-release: the placeholder install fails loudly with a TODO marker", SymbolRegular.Desktop24));
+                Phases.Add(NewPostBootSubStep(SubEnableAutologin, "Enable Graphical Autologin",
+                    "Configuring automatic desktop login for the RDP session", SymbolRegular.Person24));
+                Phases.Add(NewPostBootSubStep(SubStartGraphicalSession, "Start Graphical Session",
+                    "Restarting the display manager to log in the desktop session", SymbolRegular.Play24));
+            }
             if (c?.RdpBackend == RdpBackend.Auto)
             {
                 Phases.Add(NewPostBootSubStep(SubAutoRdpResolve, "Auto-select RDP backend",
@@ -787,6 +801,15 @@ namespace VMCreate
             {
                 Phases.Insert(index++, NewPostBootSubStep(SubInstallLamcoRdp, "Install Lamco RDP Server",
                     "Installing the Wayland-native RDP server (packages, TLS, fork build)", SymbolRegular.Desktop24));
+                Phases.Insert(index++, NewPostBootSubStep(SubEnableAutologin, "Enable Graphical Autologin",
+                    "Configuring automatic desktop login for the RDP session", SymbolRegular.Person24));
+                Phases.Insert(index++, NewPostBootSubStep(SubStartGraphicalSession, "Start Graphical Session",
+                    "Restarting the display manager to log in the desktop session", SymbolRegular.Play24));
+            }
+            if (c?.RdpBackend == RdpBackend.Wayrdp)
+            {
+                Phases.Insert(index++, NewPostBootSubStep(SubInstallWayrdpRdp, "Install wayrdp RDP Server",
+                    "Pre-release: the placeholder install fails loudly with a TODO marker", SymbolRegular.Desktop24));
                 Phases.Insert(index++, NewPostBootSubStep(SubEnableAutologin, "Enable Graphical Autologin",
                     "Configuring automatic desktop login for the RDP session", SymbolRegular.Person24));
                 Phases.Insert(index++, NewPostBootSubStep(SubStartGraphicalSession, "Start Graphical Session",

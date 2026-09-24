@@ -149,6 +149,16 @@
                                 Message="Lamco RDP Server is third-party software under the Business Source License 1.1 (c) Lamco Development LLC. Production use is free for a single server instance (one VM), non-profits, and education/research; running it on multiple VMs requires a commercial license (lamco.ai). It converts to Apache-2.0 on 2029-06-01."
                                 IsOpen="{Binding IsRdpBackendLamco, Mode=OneWay}" IsClosable="False" Margin="0,4,0,0"
                                 Visibility="{Binding LamcoOptionVisible, Converter={StaticResource BoolToVis}}"/>
+                    <RadioButton Content="wayrdp — MIT Wayland-native RDP on FreeRDP 3 (pre-release: install fails with TODO)"
+                                 GroupName="RdpBackend" FontSize="14" Margin="0,4,0,0"
+                                 IsChecked="{Binding IsRdpBackendWayrdp}"
+                                 Visibility="{Binding WayrdpOptionVisible, Converter={StaticResource BoolToVis}}"
+                                 ToolTip="wayrdp is the project's own MIT-licensed Wayland-native RDP server on FreeRDP 3, intended to replace the Lamco fork. Pre-release: there is no installable artifact yet, so deployment fails loudly with a TODO marker after first boot. Select this only to exercise the deployment pipeline end-to-end."
+                                 AutomationProperties.Name="Configure wayrdp (pre-release)"/>
+                    <ui:InfoBar Title="wayrdp: pre-release — deployment will fail during install" Severity="Warning"
+                                Message="wayrdp has no installable release yet (Phase 0 protocol spike). Choosing this backend exercises the full VMCreate deployment pipeline, but the guest install step intentionally fails with a clear TODO marker instead of silently skipping. Track progress in the wayrdp repository (docs/plan.md)."
+                                IsOpen="{Binding IsRdpBackendWayrdp, Mode=OneWay}" IsClosable="False" Margin="0,8,0,0"
+                                Visibility="{Binding WayrdpOptionVisible, Converter={StaticResource BoolToVis}}"/>
                     <RadioButton Content="None — no remote desktop (console/SSH only)"
                                  GroupName="RdpBackend" FontSize="14" Margin="0,4,0,0"
                                  IsChecked="{Binding IsRdpBackendNone}"

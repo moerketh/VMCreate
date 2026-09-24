@@ -31,9 +31,11 @@ namespace VMCreate
     /// Lamco user unit) start at boot without an interactive SSH login.
     /// </para>
     /// <para>
-    /// Runs at Order 238, after <see cref="InstallLamcoRdpStep"/> (235) and before
-    /// the xrdp block (240-270, which is skipped for Lamco). Safe no-op when no
-    /// display manager or Wayland session is present.
+    /// Runs at Order 238, after the backend install step (Lamco 235 /
+    /// wayrdp 237) and before the xrdp block (240-270, which is skipped for
+    /// both Wayland-native backends). Safe no-op when no display manager or
+    /// Wayland session is present. Applicable to Lamco AND wayrdp: both keep
+    /// Wayland and share a ready graphical session through PipeWire capture.
     /// </para>
     /// </summary>
     public class EnableGraphicalAutologinStep : ICustomizationStep
@@ -45,7 +47,8 @@ namespace VMCreate
         public string? ProgressPhaseId => "Sub_EnableAutologin";
 
         public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
-            => customizations?.RdpBackend == RdpBackend.Lamco && item.SupportsLamco();
+            => (customizations?.RdpBackend == RdpBackend.Lamco && item.SupportsLamco())
+            || (customizations?.RdpBackend == RdpBackend.Wayrdp && item.SupportsWayrdp());
 
         public async Task ExecuteAsync(IGuestShell shell, GalleryItem item, VmCustomizations customizations, ILogger logger, CancellationToken ct)
         {

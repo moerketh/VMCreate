@@ -88,5 +88,35 @@ namespace VMCreate.Tests.GalleryTests
             var c = new VmCustomizations { RdpBackend = RdpBackend.None };
             Assert.IsFalse(c.HasPreBootCustomizations);
         }
+
+        [TestMethod]
+        public void ConfigureXrdp_Shim_ReturnsFalseForWayrdp()
+        {
+            // wayrdp installs post-boot over SSH (same shape as Lamco) — it
+            // never enables the xrdp cloning-ISO path via the legacy shim.
+            var c = new VmCustomizations { RdpBackend = RdpBackend.Wayrdp };
+            Assert.IsFalse(c.ConfigureXrdp);
+        }
+
+        [TestMethod]
+        public void HasPreBootCustomizations_FalseForWayrdp()
+        {
+            // No pre-boot ISO cycle for wayrdp: the install (placeholder
+            // today) runs post-boot, gated by InstallWayrdpRdpStep.
+            var c = new VmCustomizations { RdpBackend = RdpBackend.Wayrdp };
+            Assert.IsFalse(c.HasPreBootCustomizations);
+        }
+
+        [TestMethod]
+        public void Wayrdp_IsNotResolvedFromAuto()
+        {
+            // Regression guard for the explicit-selection design: the Auto
+            // resolver only ever produces Lamco or Xrdp — wayrdp stays
+            // opt-in-only while pre-release. If a future change routes
+            // Auto→Wayrdp, the deploy-progress idempotence guard that keys
+            // on the lamco/xrdp card IDs would need revisiting too.
+            Assert.AreNotEqual(RdpBackend.Wayrdp, new VmCustomizations().RdpBackend,
+                "default must stay Auto, not Wayrdp");
+        }
     }
 }

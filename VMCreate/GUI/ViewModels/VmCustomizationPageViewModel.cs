@@ -119,6 +119,12 @@ namespace VMCreate
             set { if (value) SelectedRdpBackend = RdpBackend.Lamco; }
         }
 
+        public bool IsRdpBackendWayrdp
+        {
+            get => _selectedRdpBackend == RdpBackend.Wayrdp;
+            set { if (value) SelectedRdpBackend = RdpBackend.Wayrdp; }
+        }
+
         public bool IsRdpBackendNone
         {
             get => _selectedRdpBackend == RdpBackend.None;
@@ -133,6 +139,14 @@ namespace VMCreate
         /// <see cref="GalleryItem.LinuxDistro"/> metadata hint (no live shell yet).
         /// </summary>
         public bool LamcoOptionVisible => SelectedItem?.SupportsLamco() ?? false;
+
+        /// <summary>
+        /// True when the selected gallery item is wayrdp-targetable (same
+        /// Debian-family set as Lamco). Hides the wayrdp radio on unsupported
+        /// distros. The backend is pre-release: when selected, the install
+        /// step fails loudly with a TODO marker — see <c>install_wayrdp.sh</c>.
+        /// </summary>
+        public bool WayrdpOptionVisible => SelectedItem?.SupportsWayrdp() ?? false;
 
         // ── Desktop Environment card ────────────────────────────────────
 

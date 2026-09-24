@@ -80,7 +80,7 @@ namespace VMCreate.CLI.Commands
             var rdpBackendOpt = new Option<string>(
                 "--rdp-backend",
                 getDefaultValue: () => "auto",
-                description: "RDP server backend: auto (default — detects Wayland vs X11 in the guest post-boot and picks the best backend), xrdp (disables Wayland), lamco (Wayland-native Lamco RDP Server), or none.");
+                description: "RDP server backend: auto (default — detects Wayland vs X11 in the guest post-boot and picks the best backend), xrdp (disables Wayland), lamco (Wayland-native Lamco RDP Server), wayrdp (MIT FreeRDP-3 successor — pre-release: install step fails loudly with a TODO), or none.");
 
             var desktopOpt = new Option<string>(
                 "--desktop",
@@ -267,12 +267,14 @@ namespace VMCreate.CLI.Commands
                         return RdpBackend.Xrdp;
                     case "lamco":
                         return RdpBackend.Lamco;
+                    case "wayrdp":
+                        return RdpBackend.Wayrdp;
                     case "none":
                         return RdpBackend.None;
                     default:
                         valid = false;
                         PrintError(jsonMode, "validation",
-                            $"Unknown --rdp-backend value '{rdpBackend}'. Valid values: auto, xrdp, lamco, none.");
+                            $"Unknown --rdp-backend value '{rdpBackend}'. Valid values: auto, xrdp, lamco, wayrdp, none.");
                         return RdpBackend.Auto;
                 }
             }

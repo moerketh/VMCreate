@@ -35,10 +35,10 @@ namespace VMCreate
     /// <para>
     /// Runs at Order 239, immediately after
     /// <see cref="EnableGraphicalAutologinStep"/> (238) and before the xrdp
-    /// block (240-270, skipped for Lamco). Gated to
-    /// <see cref="RdpBackend.Lamco"/> + Lamco-capable gallery items — the
-    /// xrdp path creates its session at connect time and must not have its
-    /// DM restarted out from under the greeter.
+    /// block (240-270, skipped for both Wayland backends). Gated to
+    /// <see cref="RdpBackend.Lamco"/> / <see cref="RdpBackend.Wayrdp"/> on
+    /// capable gallery items — the xrdp path creates its session at connect
+    /// time and must not have its DM restarted out from under the greeter.
     /// </para>
     /// <para>
     /// Result contract of <c>start_graphical_session.sh</c>: the terminal
@@ -57,7 +57,8 @@ namespace VMCreate
         public string? ProgressPhaseId => "Sub_StartGraphicalSession";
 
         public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
-            => customizations?.RdpBackend == RdpBackend.Lamco && item.SupportsLamco();
+            => (customizations?.RdpBackend == RdpBackend.Lamco && item.SupportsLamco())
+            || (customizations?.RdpBackend == RdpBackend.Wayrdp && item.SupportsWayrdp());
 
         public async Task ExecuteAsync(
             IGuestShell shell, GalleryItem item, VmCustomizations customizations,

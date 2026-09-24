@@ -1,4 +1,5 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System;
 using VMCreate;
 
 namespace VMCreate.Tests.GalleryTests
@@ -72,6 +73,27 @@ namespace VMCreate.Tests.GalleryTests
         {
             var item = new GalleryItem();
             Assert.AreEqual(LinuxDistro.Unknown, item.LinuxDistro);
+        }
+
+        [TestMethod]
+        public void SupportsWayrdp_MatchesSupportsLamcoSet()
+        {
+            // wayrdp's packaging line follows the same amd64 Debian-deb
+            // lineage — the supported set is defined as identical.
+            foreach (LinuxDistro distro in Enum.GetValues(typeof(LinuxDistro)))
+            {
+                Assert.AreEqual(distro.SupportsLamco(), distro.SupportsWayrdp(),
+                    $"SupportsWayrdp diverged from SupportsLamco for {distro}");
+            }
+        }
+
+        [TestMethod]
+        public void GalleryItem_SupportsWayrdp_NullSafe()
+        {
+            GalleryItem? item = null;
+            Assert.IsFalse(item.SupportsWayrdp());
+            item = new GalleryItem { LinuxDistro = LinuxDistro.Ubuntu };
+            Assert.IsTrue(item.SupportsWayrdp());
         }
     }
 }

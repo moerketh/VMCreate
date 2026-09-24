@@ -36,6 +36,25 @@ namespace VMCreate
         Lamco,
 
         /// <summary>
+        /// wayrdp — the project's own MIT-licensed Wayland-native RDP server
+        /// built on FreeRDP 3 (<c>libfreerdp-server</c>), intended to replace
+        /// the Lamco fork. Captures via compositor-specific backends
+        /// (KDE first: KWin virtual outputs + PipeWire via the shared
+        /// <c>hyperv-rdp-extras</c> crate; generic portal fallback later).
+        /// <para>
+        /// Status: Phase 0 protocol spike — there is no installable artifact
+        /// yet, so the deployment step currently FAILS LOUDLY with a TODO
+        /// marker (same fail-fast contract as the Lamco install; a silently
+        /// absent RDP server is the worse failure). Selecting this option is
+        /// how the eventual E2E deployment path is exercised end-to-end before
+        /// the server itself is finished.
+        /// </para>
+        /// Debian-family distros only (Ubuntu, Debian, Parrot, Kali) — the
+        /// packaging line ships amd64 debs, same as the Lamco lineage.
+        /// </summary>
+        Wayrdp,
+
+        /// <summary>
         /// Auto-select: the backend is resolved at deployment time instead of
         /// chosen statically. A detection step runs post-boot over SSH, inspects
         /// the guest's actual display-server state (Wayland session present,
