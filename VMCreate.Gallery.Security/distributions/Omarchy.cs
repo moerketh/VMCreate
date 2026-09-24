@@ -73,6 +73,11 @@ namespace VMCreate.Gallery
                     InitialUsername = "omarchy",
                     InitialPassword = "omarchy",
                     HasUnattendedInstallPath = true,
+                    // Marks the item for Omarchy-only tailoring: the GUI shows
+                    // the required passwordless-sudo bootstrap card, and the
+                    // post-boot pipeline gates the bootstrap/teardown steps on
+                    // this tag.
+                    Tags = new List<string> { "omarchy" },
                     IsRecommended = false,
                 },
             };

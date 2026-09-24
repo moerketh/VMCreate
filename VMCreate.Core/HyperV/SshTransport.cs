@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Management.Automation;
@@ -123,7 +124,8 @@ namespace VMCreate
             TimeSpan timeout,
             CancellationToken ct,
             int? maxArgumentLength = null,
-            bool tolerateNonZeroExit = false)
+            bool tolerateNonZeroExit = false,
+            string? stdinContent = null)
         {
             string args = BuildArguments(privateKeyPath, vmIpAddress, username, knownHostsFile, linuxCommand);
 
@@ -142,6 +144,7 @@ namespace VMCreate
                 // exactly here.
                 FileName = SshExePath,
                 Arguments = args,
+                RedirectStandardInput = !string.IsNullOrEmpty(stdinContent),
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
@@ -158,6 +161,18 @@ namespace VMCreate
             process.Start();
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
+
+            if (!string.IsNullOrEmpty(stdinContent))
+            {
+                // Secret channel: material such as the sudo password for
+                // `sudo -S` travels ONLY here, on ssh's stdin — never on the
+                // command line (ssh argv, guest bash -c string, guest ps
+                // output) and never in logs. Write + close; ssh closes the
+                // remote end after the bytes flush.
+                await process.StandardInput.WriteAsync(stdinContent);
+                await process.StandardInput.FlushAsync();
+                process.StandardInput.Close();
+            }
 
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeoutCts.CancelAfter(timeout);
@@ -236,6 +251,13 @@ namespace VMCreate
         /// so it stays viable under a CreateDefault2 runspace and the
         /// trimmed hosting package.
         /// </summary>
+        /// <remarks>
+        /// When KVP reports no IPv4 for any adapter, falls back to matching
+        /// the VM's MAC addresses against the host neighbor table
+        /// (Get-NetNeighbor, also pre-imported — see HostPowerShell). This is
+        /// what makes first-boot SSH discovery work on guests without
+        /// hv_kvp_daemon yet running (Omarchy's installed system).
+        /// </remarks>
         public static async Task<string?> DiscoverVmIpAsync(string vmName, CancellationToken ct, bool preferVmCreateTempAdapter)
         {
             // Fresh CreateDefault2 + Hyper-V runspace per call (static method
@@ -254,11 +276,11 @@ namespace VMCreate
             // 'VMCreate Temp' first when preferred, preserving
             // Get-VMNetworkAdapter's own order otherwise; then the first
             // adapter reporting any IPv4 wins.
-            var adapters = preferVmCreateTempAdapter
+            var adapters = (preferVmCreateTempAdapter
                 ? result
                     .Where(a => string.Equals(GetNetworkAdapterName(a), "VMCreate Temp", StringComparison.OrdinalIgnoreCase))
                     .Concat(result.Where(a => !string.Equals(GetNetworkAdapterName(a), "VMCreate Temp", StringComparison.OrdinalIgnoreCase)))
-                : result;
+                : result).ToList();
 
             foreach (var adapter in adapters)
             {
@@ -269,8 +291,96 @@ namespace VMCreate
                 }
             }
 
+            // KVP blind fallback: the guest is up and talking (DHCP/ARP), but
+            // hv_kvp_daemon is not running, so Hyper-V reports no IPAddresses.
+            // That is exactly the freshly-installed Omarchy system — its
+            // installer never adds the 'hyperv' package — so without this
+            // fallback WaitForReadyAsync would poll forever. The host's own
+            // neighbor table still learns the guest's MAC via the vmSwitch
+            // (Dynamic on external switches, Permanent on the Default Switch),
+            // so match the VM's adapter MACs against Get-NetNeighbor rows and
+            // take the bound IPv4. MAC collision is a non-issue: Hyper-V
+            // allocates 00-15-5D MACs per host, and a fabricated entry would
+            // at worst send our SSH connect to a wrong address that TOFU
+            // (per-VM known_hosts, fresh per deployment) then rejects.
+            var vmMacs = adapters
+                .Select(GetAdapterMacAddress)
+                .Where(m => !string.IsNullOrEmpty(m))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (vmMacs.Count == 0)
+                return null;
+
+            using var ps2 = PowerShell.Create();
+            ps2.Runspace = runspace;
+            // IPv4 rows only; the state filtering runs in C# below (no
+            // Utility cmdlets under the trimmed runspace — the script is the
+            // bare cmdlet call only, same contract as the adapter query).
+            ps2.AddScript("Get-NetNeighbor -AddressFamily IPv4 -ErrorAction SilentlyContinue");
+
+            var neighbors = await Task.Run(() => ps2.Invoke(), ct);
+            var rows = neighbors
+                .Where(n => n is not null)
+                .Select(n => (
+                    Ip: n.Properties["IPAddress"]?.Value?.ToString() ?? string.Empty,
+                    Mac: n.Properties["LinkLayerAddress"]?.Value?.ToString() ?? string.Empty,
+                    State: n.Properties["State"]?.Value?.ToString() ?? string.Empty))
+                .ToList();
+
+            return PickNeighborMacMatch(vmMacs, rows);
+        }
+
+        /// <summary>
+        /// Pure neighbor-table match, extracted for unit tests. Returns the
+        /// IPv4 bound to any of <paramref name="vmMacs"/> (best state first:
+        /// Reachable over Permanent over Stale/Delay), or null when no row
+        /// matches. Incomplete/Failed rows and link-local (APIPA) addresses
+        /// are excluded: neither can carry a usable SSH session.
+        /// </summary>
+        internal static string? PickNeighborMacMatch(
+            System.Collections.Generic.IEnumerable<string> vmMacs,
+            System.Collections.Generic.IEnumerable<(string Ip, string Mac, string State)> neighbors)
+        {
+            var wanted = new HashSet<string>(
+                vmMacs.Select(NormalizeMacAddress).Where(m => m.Length > 0),
+                StringComparer.OrdinalIgnoreCase);
+            if (wanted.Count == 0)
+                return null;
+
+            foreach (string stateRank in new[] { "Reachable", "Permanent", "Stale", "Delay" })
+            {
+                foreach (var (ip, mac, state) in neighbors)
+                {
+                    if (!state.Equals(stateRank, StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    if (!IPv4Regex.IsMatch(ip) || ip.StartsWith("169.254.", StringComparison.Ordinal))
+                        continue;
+                    if (wanted.Contains(NormalizeMacAddress(mac)))
+                        return ip;
+                }
+            }
+
             return null;
         }
+
+        /// <summary>
+        /// Normalizes a MAC to uppercase hex without separators so that
+        /// Hyper-V's "00155DA1B2C3" and NetNeighbor's "00-15-5d-a1-b2-c3"
+        /// representations compare equal.
+        /// </summary>
+        internal static string NormalizeMacAddress(string? mac)
+        {
+            if (string.IsNullOrEmpty(mac))
+                return string.Empty;
+            var sb = new StringBuilder(12);
+            foreach (char c in mac)
+                if (char.IsAsciiHexDigit(c))
+                    sb.Append(char.ToUpperInvariant(c));
+            return sb.ToString();
+        }
+
+        private static string GetAdapterMacAddress(PSObject adapter)
+            => adapter.Properties["MacAddress"]?.Value?.ToString() ?? string.Empty;
 
         private static string GetNetworkAdapterName(PSObject adapter)
             => adapter.Properties["Name"]?.Value?.ToString() ?? string.Empty;

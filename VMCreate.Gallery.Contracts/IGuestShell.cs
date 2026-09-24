@@ -31,6 +31,19 @@ namespace VMCreate
         Task<string> RunCommandAsync(string command, TimeSpan timeout, CancellationToken ct);
 
         /// <summary>
+        /// Executes a command with material piped to the remote stdin. This is
+        /// the ONLY sanctioned secret channel: the payload never appears on any
+        /// command line (host argv, guest shell string, guest process list) and
+        /// implementations must never log it. Used by the passwordless-sudo
+        /// bootstrap, which feeds the deploy password to <c>sudo -S</c>.
+        /// Not every transport supports a stdin stream (PowerShell Direct
+        /// doesn't); unsupported transports throw <see cref="NotSupportedException"/>.
+        /// </summary>
+        Task<string> RunCommandWithStdinAsync(string command, string stdinContent, CancellationToken ct)
+            => throw new NotSupportedException(
+                "This guest-shell transport does not support streaming stdin to the guest command.");
+
+        /// <summary>
         /// Writes string content to a file on the guest (creates parent directories, sets 644).
         /// Used for API-downloaded configs that exist only in memory.
         /// </summary>

@@ -92,6 +92,26 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
+        public async Task ExecuteAsync_WaylandOnOmarchy_ResolvesNone()
+        {
+            // Omarchy installs Arch + Hyprland (Wayland): not Lamco-capable,
+            // and xrdp cannot start the Hyprland session — resolving to Xrdp
+            // would install a server that never comes up. Gate: Wayland +
+            // Arch → None until a Hyprland-compatible backend lands.
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .ReturnsAsync("ID=omarchy\nID_LIKE=arch\n");
+            SetupScriptOutput("RDP_DETECT=wayland");
+
+            var c = new VmCustomizations { RdpBackend = RdpBackend.Auto };
+            var item = new GalleryItem { LinuxDistro = LinuxDistro.Arch, Tags = new System.Collections.Generic.List<string> { "omarchy" } };
+
+            await _step.ExecuteAsync(_shell.Object, item, c, _logger.Object, CancellationToken.None);
+
+            Assert.AreEqual(RdpBackend.None, c.RdpBackend, "Wayland on a non-Lamco-capable Arch guest resolves to no RDP backend");
+            Assert.IsTrue(LoggedWarning(_logger), "the None resolution must be announced loudly");
+        }
+
+        [TestMethod]
         public async Task ExecuteAsync_X11_ResolvesXrdp()
         {
             SetupScriptOutput("RDP_DETECT=x11");

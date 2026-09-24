@@ -23,8 +23,8 @@ namespace VMCreate.HyperV
     /// host-side runspace is constructed.
     ///
     /// The shape mirrors <see cref="PowerShellExecutor"/>'s
-    /// CreateRunspace (fresh runspace per call, ISS with Core + an
-    /// explicit Hyper-V import), for code paths that build a runspace
+    /// CreateRunspace (fresh runspace per call, ISS with Core + explicit
+    /// Hyper-V / NetTCPIP imports), for code paths that build a runspace
     /// per call instead of resolving the process-wide executor.
     ///
     /// Guest-side scripts (executed inside the guest by PowerShell Direct
@@ -35,12 +35,15 @@ namespace VMCreate.HyperV
         /// <summary>
         /// Builds the shared InitialSessionState for host-side PowerShell
         /// work: CreateDefault2 (only Microsoft.PowerShell.Core built-ins)
-        /// plus an explicit Hyper-V module import.
+        /// plus explicit Hyper-V and NetTCPIP module imports. Hyper-V is the
+        /// main tooling; NetTCPIP provides Get-NetNeighbor for the SSH IP-
+        /// discovery fallback path (SshTransport.DiscoverVmIpAsync) when the
+        /// guest does not run hv_kvp_daemon yet.
         /// </summary>
         private static InitialSessionState CreateSessionState()
         {
             var iss = InitialSessionState.CreateDefault2();
-            iss.ImportPSModule(new[] { "Hyper-V" });
+            iss.ImportPSModule(new[] { "Hyper-V", "NetTCPIP" });
             return iss;
         }
 

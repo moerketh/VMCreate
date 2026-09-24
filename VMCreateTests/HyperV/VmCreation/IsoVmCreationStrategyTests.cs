@@ -257,8 +257,12 @@ namespace VMCreate.Tests.HyperV.VmCreation
         }
 
         [TestMethod]
-        public async Task CreateVMAsync_Omarchy_DoesNotRunGenericLinuxPostBoot()
+        public async Task CreateVMAsync_Omarchy_RunsLinuxPostBootAfterSsh()
         {
+            // Omarchy joins the shared Linux post-boot pipeline: the pipeline's
+            // order-45 passwordless-sudo bootstrap (omarchy-tagged) makes every
+            // later sudo-based step work on the installed system's passworded
+            // sudo — the historical blocker for running these steps here.
             _item = CreateOmarchyItem();
 
             await ExecuteAsync();
@@ -266,7 +270,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
             _postBootService.Verify(s => s.RunLinuxPostBootAsync(
                 It.IsAny<IGuestShell>(), It.IsAny<VmDeploymentPlan>(), It.IsAny<GalleryItem>(),
                 It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(), It.IsAny<CancellationToken>()),
-                Times.Never);
+                Times.Once);
         }
 
         [TestMethod]

@@ -210,15 +210,15 @@ namespace VMCreate.HyperV.VmCreation
         }
 
         /// <summary>
-        /// Waits for the unattended Omarchy install to finish, then detaches and
-        /// deletes the seed ISO. The live ISO environment has no SSH server — sshd
-        /// only comes up on the installed system (enabled because the seed carried
-        /// authorized_keys), after the installer downloaded all packages and
-        /// rebooted. That can far exceed a single WaitForReadyAsync window, so the
-        /// wait is retried with fresh IP discovery each round. Generic Linux
-        /// post-boot steps are intentionally not run: Omarchy's installer grants
-        /// sudo only with a password, and every shared step shells out through
-        /// non-interactive sudo.
+        /// Waits for the unattended Omarchy install to finish, runs the shared
+        /// Linux post-boot pipeline (opening with the passwordless-sudo
+        /// bootstrap that authorizes itself once via <c>sudo -S</c> over ssh
+        /// stdin), then detaches and deletes the seed ISO. The live ISO
+        /// environment has no SSH server — sshd only comes up on the installed
+        /// system (enabled because the seed carried authorized_keys), after
+        /// the installer downloaded all packages and rebooted. That can far
+        /// exceed a single WaitForReadyAsync window, so the wait is retried
+        /// with fresh IP discovery each round.
         /// </summary>
         private async Task WaitForOmarchyInstallAsync(VmCreationContext ctx, string cidataIsoPath)
         {
@@ -245,6 +245,9 @@ namespace VMCreate.HyperV.VmCreation
                             ctx.Plan.VmName, attempt, maxAttempts);
                     }
                 }
+
+                await _postBootService.RunLinuxPostBootAsync(
+                    shell, ctx.Plan, ctx.GalleryItem, ctx.Customizations, ctx.Progress, ctx.CancellationToken);
             }
             finally
             {

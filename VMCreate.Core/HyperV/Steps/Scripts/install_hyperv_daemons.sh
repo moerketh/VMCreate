@@ -9,6 +9,13 @@ elif command -v dnf >/dev/null 2>&1; then
     dnf install -y hyperv-daemons 2>&1 || true
 elif command -v pacman >/dev/null 2>&1; then
     pacman -S --noconfirm hyperv 2>&1 || true
+    # Arch's hyperv package ships the three integration daemons disabled.
+    # Without hv_kvp_daemon, Hyper-V never learns the guest IP and VMCreate's
+    # SSH discovery stays dark (this is what stranded Omarchy deployments in
+    # "Waiting for SSH"); VSS and fcopy round out the integration services.
+    for daemon in hv_kvp_daemon hv_vss_daemon hv_fcopy_daemon; do
+        systemctl enable --now "$daemon" 2>&1 || true
+    done
 fi
 
 # -- Regenerate initramfs (applies blacklist + module changes) ------------

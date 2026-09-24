@@ -179,6 +179,29 @@ namespace VMCreate
 
         // ── IGuestShell implementation ───────────────────────────────────
 
+        /// <summary>
+        /// Executes a command with material piped on ssh's stdin. The ONLY
+        /// sanctioned secret channel: the payload never appears on any
+        /// command line (host ssh argv, guest bash -c string, guest ps),
+        /// and the transport never logs stdin. Used by the passwordless-
+        /// sudo bootstrap, which feeds the gallery password to `sudo -S`.
+        /// </summary>
+        public async Task<string> RunCommandWithStdinAsync(string command, string stdinContent, CancellationToken ct)
+        {
+            if (string.IsNullOrEmpty(_vmIpAddress))
+                throw new InvalidOperationException("VM IP address not discovered yet. Call WaitForReadyAsync first.");
+
+            // Same no-logging invariant as RunCommandInternalAsync; log
+            // length only (stdin length included — never the content).
+            _logger.LogDebug("SSH exec with stdin on VM {VMName} ({Length}+{StdinLength} chars)",
+                VmName, command.Length, stdinContent.Length);
+
+            return await SshTransport.ExecuteAsync(
+                _logger, VmName, _privateKeyPath, _vmIpAddress!, _username,
+                _hostKeyKnownHostsPath, command, CommandTimeout, ct,
+                maxArgumentLength: MaxCommandLength, stdinContent: stdinContent);
+        }
+
         /// <inheritdoc/>
         public async Task<string> RunCommandAsync(string command, CancellationToken ct)
         {

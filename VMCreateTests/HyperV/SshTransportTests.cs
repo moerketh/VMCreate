@@ -226,5 +226,102 @@ namespace VMCreate.Tests.HyperV
         }
 
         #endregion
+
+        #region PickNeighborMacMatch (KVP-blind ARP fallback)
+
+        [TestMethod]
+        public void PickNeighborMacMatch_MatchesAcrossMacRepresentations()
+        {
+            // Hyper-V reports "00155DB7346A"; Get-NetNeighbor reports
+            // "00-15-5d-b7-34-6a". Both must match.
+            var vmMacs = new[] { "00155DB7346A" };
+            var neighbors = new[]
+            {
+                ("192.168.42.7", "00-15-5d-b7-34-6a", "Reachable"),
+            };
+
+            Assert.AreEqual("192.168.42.7", SshTransport.PickNeighborMacMatch(vmMacs, neighbors));
+        }
+
+        [TestMethod]
+        public void PickNeighborMacMatch_PrefersReachableOverStaleRow()
+        {
+            var vmMacs = new[] { "00155DB7346A" };
+            var neighbors = new[]
+            {
+                // Stale row listed first: a re-leased DHCP address leaves a
+                // stale binding behind; the live Reachable one must win.
+                ("192.168.42.99", "00-15-5d-b7-34-6a", "Stale"),
+                ("192.168.42.7", "00:15:5d:b7:34:6a", "Reachable"),
+            };
+
+            Assert.AreEqual("192.168.42.7", SshTransport.PickNeighborMacMatch(vmMacs, neighbors));
+        }
+
+        [TestMethod]
+        public void PickNeighborMacMatch_UsesAnyVmAdapterMac_TempFirstUnneeded()
+        {
+            // The caller passes all adapter MACs; any of them matching wins.
+            var vmMacs = new[] { "00155D000001", "00155DB7346A" };
+            var neighbors = new[]
+            {
+                ("192.168.42.7", "00-15-5D-B7-34-6A", "Permanent"),
+            };
+
+            Assert.AreEqual("192.168.42.7", SshTransport.PickNeighborMacMatch(vmMacs, neighbors));
+        }
+
+        [TestMethod]
+        public void PickNeighborMacMatch_IgnoresIncompleteAndFailedRows()
+        {
+            // An Incomplete row means ARP never resolved — no SSH will ever
+            // answer there.
+            var vmMacs = new[] { "00155DB7346A" };
+            var neighbors = new[]
+            {
+                ("10.0.0.55", "00-15-5d-b7-34-6a", "Incomplete"),
+                ("10.0.0.56", "00-15-5d-b7-34-6a", "Unreachable"),
+                ("192.168.42.7", "00-15-5d-b7-34-6a", "Delay"),
+            };
+
+            Assert.AreEqual("192.168.42.7", SshTransport.PickNeighborMacMatch(vmMacs, neighbors));
+        }
+
+        [TestMethod]
+        public void PickNeighborMacMatch_SkipsApipaAndNonMatchingMacs()
+        {
+            var vmMacs = new[] { "00155DB7346A" };
+            var neighbors = new[]
+            {
+                // Link-local can never carry SSH for us.
+                ("169.254.10.20", "00-15-5d-b7-34-6a", "Reachable"),
+                // A different host's VM — never match.
+                ("192.168.42.8", "00-15-5d-aa-bb-cc", "Reachable"),
+            };
+
+            Assert.IsNull(SshTransport.PickNeighborMacMatch(vmMacs, neighbors));
+        }
+
+        [TestMethod]
+        public void PickNeighborMacMatch_EmptyInputs_ReturnsNull()
+        {
+            Assert.IsNull(SshTransport.PickNeighborMacMatch(
+                Array.Empty<string>(),
+                new[] { ("192.168.42.7", "00-15-5d-b7-34-6a", "Reachable") }));
+            Assert.IsNull(SshTransport.PickNeighborMacMatch(
+                new[] { "00155DB7346A" }, Array.Empty<(string, string, string)>()));
+        }
+
+        [TestMethod]
+        public void NormalizeMacAddress_StripsSeparatorsAndUnifiesCase()
+        {
+            Assert.AreEqual("00155DB7346A", SshTransport.NormalizeMacAddress("00-15-5d-b7-34-6a"));
+            Assert.AreEqual("00155DB7346A", SshTransport.NormalizeMacAddress("00:15:5D:b7:34:6a"));
+            Assert.AreEqual("00155DB7346A", SshTransport.NormalizeMacAddress("00155DB7346A"));
+            Assert.AreEqual("", SshTransport.NormalizeMacAddress(null));
+            Assert.AreEqual("", SshTransport.NormalizeMacAddress(""));
+        }
+
+        #endregion
     }
 }

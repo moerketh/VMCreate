@@ -162,6 +162,15 @@ namespace VMCreate
             {
                 resolved = RdpBackend.None;
             }
+            else if (displayServer == "wayland" && detected == LinuxDistro.Arch)
+            {
+                // Wayland + not Lamco-capable (Arch/Omarchy): the xrdp verdict
+                // below cannot lift Hyprland into an xrdp session, so resolving
+                // to Xrdp would install a server that never comes up. Resolve
+                // to None for now — a Hyprland-compatible backend remains
+                // follow-up work.
+                resolved = RdpBackend.None;
+            }
             else
             {
                 resolved = displayServer == "wayland" && lamcoCandidate
@@ -185,10 +194,16 @@ namespace VMCreate
                     "Auto-select RDP backend: VM {VMName} uses a Wayland session by default and runs {Distro} (Lamco-capable). Selected: LAMCO RDP SERVER.",
                     shell.VmName, detected!.Value);
             }
-            else if (resolved == RdpBackend.None)
+            else if (resolved == RdpBackend.None && detected == LinuxDistro.NixOs)
             {
                 logger.LogWarning(
                     "Auto-select RDP backend: VM {VMName} runs {Distro} (NixOS / Athena Nix). Selected: NONE — no installable RDP backend exists on the nix store (package-manager post-boot installs are structurally impossible; Lamco ships Debian-family debs only; xrdp cannot be installed either). The VM is deployed console/SSH only; pick another distro if RDP is required.",
+                    shell.VmName, detected!.Value);
+            }
+            else if (resolved == RdpBackend.None)
+            {
+                logger.LogWarning(
+                    "Auto-select RDP backend: VM {VMName} reports a Wayland session on {Distro} (not Lamco-capable). xrdp cannot start a Hyprland session, so RDP is disabled for this deployment — console/SSH only until a Hyprland-compatible backend is integrated.",
                     shell.VmName, detected!.Value);
             }
             else
