@@ -113,6 +113,18 @@ namespace VMCreate
         public bool EnableIntegrationServices { get; set; } = true;
 
         /// <summary>
+        /// The desktop environment to switch the Linux guest to, as an id from
+        /// the distribution's <see cref="IDesktopEnvironmentCatalog"/> ("kde",
+        /// "gnome", "xfce", …). Null (default) keeps the image's stock desktop.
+        /// Not a <see cref="DistributionOptionSelection"/>: the desktop choice
+        /// is a single exclusive pick, not an enable/disable toggle, and it
+        /// couples with <see cref="RdpBackend"/> (an X11-only desktop rules out
+        /// the Wayland-native Lamco backend). Resolved and applied post-boot by
+        /// <c>DesktopSwitchStep</c>, before the RDP backend auto-resolution.
+        /// </summary>
+        public string? DesktopEnvironmentId { get; set; }
+
+        /// <summary>
         /// Per-distribution options selected by the user on the customization page.
         /// Order is preserved so the deployment UI can show cards in the intended sequence.
         /// </summary>
@@ -134,6 +146,8 @@ namespace VMCreate
         /// (i.e. options that require SSH into the running VM).
         /// </summary>
         public bool HasPostBootCustomizations =>
-            InstallOpenVpn || ConfigureHtbVpn || SyncTimezone || DistributionOptions.Any(o => o.IsEnabled);
+            InstallOpenVpn || ConfigureHtbVpn || SyncTimezone
+            || !string.IsNullOrEmpty(DesktopEnvironmentId)
+            || DistributionOptions.Any(o => o.IsEnabled);
     }
 }

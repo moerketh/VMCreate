@@ -14,12 +14,14 @@ namespace VMCreate
         private readonly ILoggerFactory _loggerFactory;
         private readonly IHtbApiClient _htbApiClient;
         private readonly IEnumerable<IConfigurableCustomizationStep> _configurableSteps;
+        private readonly IEnumerable<IDesktopEnvironmentCatalog> _desktopCatalogs;
 
-        public SelectImagePage(WizardData wizardData, IHtbApiClient htbApiClient, IEnumerable<IConfigurableCustomizationStep> configurableSteps, ILoggerFactory loggerFactory)
+        public SelectImagePage(WizardData wizardData, IHtbApiClient htbApiClient, IEnumerable<IConfigurableCustomizationStep> configurableSteps, IEnumerable<IDesktopEnvironmentCatalog> desktopCatalogs, ILoggerFactory loggerFactory)
         {
             _wizardData = wizardData ?? throw new ArgumentNullException(nameof(wizardData));
             _htbApiClient = htbApiClient ?? throw new ArgumentNullException(nameof(htbApiClient));
             _configurableSteps = configurableSteps ?? throw new ArgumentNullException(nameof(configurableSteps));
+            _desktopCatalogs = desktopCatalogs ?? throw new ArgumentNullException(nameof(desktopCatalogs));
             _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
 
             _viewModel = new SelectImagePageViewModel(
@@ -41,7 +43,7 @@ namespace VMCreate
 
         private void OnNavigateNext()
         {
-            var nextPage = new VmSettingsPage(_wizardData, _htbApiClient, _configurableSteps, _loggerFactory);
+            var nextPage = new VmSettingsPage(_wizardData, _htbApiClient, _configurableSteps, _desktopCatalogs, _loggerFactory);
             nextPage.WizardCompleted += (s, args) => WizardCompleted?.Invoke(s, args);
             NavigationService.Navigate(nextPage);
         }

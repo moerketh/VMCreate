@@ -78,8 +78,21 @@ namespace VMCreate.CLI.Commands
 
             if (!noCache)
             {
-                items = galleryService.LoadFromCache();
-                if (items.Count == 0)
+                var droppedLegacy = false;
+                items = new List<GalleryItem>();
+                foreach (var cached in galleryService.LoadFromCache())
+                {
+                    // Migration: pre-variant caches hold the old Kali
+                    // stable/weekly twins; drop them and refetch so the
+                    // single multi-release item shows immediately.
+                    if (cached.IsLegacyReleaseCacheEntry())
+                    {
+                        droppedLegacy = true;
+                        continue;
+                    }
+                    items.Add(cached);
+                }
+                if (items.Count == 0 || droppedLegacy)
                     items = await LoadFromSourcesAsync(galleryService, ct);
             }
             else
@@ -154,7 +167,9 @@ namespace VMCreate.CLI.Commands
                     Markup.Escape(item.Publisher ?? string.Empty),
                     item.FileType ?? string.Empty,
                     item.IsSecurity ? "[red]Security[/]" : "General",
-                    Markup.Escape(item.Version ?? string.Empty),
+                    Markup.Escape(item.Version ?? string.Empty) + (item.ReleaseVariants is { Count: > 1 } vs
+                        ? $" (+{string.Join("/", vs.Where(v => !v.IsDefault).Select(v => v.Id))})"
+                        : ""),
                     item.IsRecommended ? "[yellow]★[/]" : string.Empty);
             }
 
@@ -183,6 +198,13 @@ namespace VMCreate.CLI.Commands
                     isRecommended = item.IsRecommended,
                     isPreInstalled = item.IsPreInstalled,
                     diskUri = item.DiskUri,
+                    releaseVariants = item.ReleaseVariants?.Select(v => new
+                    {
+                        id = v.Id,
+                        displayName = v.DisplayName,
+                        version = v.Version,
+                        isDefault = v.IsDefault,
+                    }),
                 }, opts));
             }
         }

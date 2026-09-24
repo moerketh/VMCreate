@@ -29,7 +29,9 @@ namespace VMCreate
         private readonly ILogger _logger;
         private readonly IHtbApiClient _htbApiClient;
         private readonly List<HtbVpnKey> _downloadedKeys = new();
+        private readonly IDesktopEnvironmentCatalog? _desktopCatalog;
         private RdpBackend _selectedRdpBackend = RdpBackend.Auto;
+        private string? _selectedDesktopEnvironmentId;
         private string _htbApiToken = "";
         private bool _isDownloading;
         private string _ovpnFilePath = "";
@@ -48,11 +50,21 @@ namespace VMCreate
 
         public VmCustomizationPageViewModel(
             WizardData wizardData, IHtbApiClient htbApiClient, ILogger logger,
-            IEnumerable<IConfigurableCustomizationStep> configurableSteps)
+            IEnumerable<IConfigurableCustomizationStep> configurableSteps,
+            IEnumerable<IDesktopEnvironmentCatalog>? desktopCatalogs = null)
         {
             _wizardData = wizardData ?? throw new ArgumentNullException(nameof(wizardData));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _htbApiClient = htbApiClient ?? throw new ArgumentNullException(nameof(htbApiClient));
+
+            // Resolve the desktop catalog for the selected image (null when
+            // the distro offers no desktop switching — card hidden).
+            _desktopCatalog = desktopCatalogs.ForItem(wizardData.SelectedItem);
+            if (_desktopCatalog != null)
+            {
+                foreach (var option in _desktopCatalog.Options)
+                    DesktopOptions.Add(new DesktopOptionItem(option));
+            }
 
             // Build the list of distribution-specific options visible for the selected image.
             var selectedItem = wizardData.SelectedItem;
@@ -65,6 +77,7 @@ namespace VMCreate
             FinishCommand = new RelayCommand(OnFinish);
             BackCommand = new RelayCommand(() => RequestNavigateBack?.Invoke());
             CancelCommand = new RelayCommand(() => RequestWizardComplete?.Invoke(WizardResult.Canceled));
+            SelectDesktopCommand = new RelayCommand<string>(id => SelectDesktop(string.IsNullOrEmpty(id) ? null : id));
             DownloadVpnKeysCommand = new RelayCommand(
                 () => _ = DownloadVpnKeysAsync(),
                 () => !_isDownloading && !string.IsNullOrWhiteSpace(_htbApiToken));
@@ -120,6 +133,121 @@ namespace VMCreate
         /// <see cref="GalleryItem.LinuxDistro"/> metadata hint (no live shell yet).
         /// </summary>
         public bool LamcoOptionVisible => SelectedItem?.SupportsLamco() ?? false;
+
+        // ── Desktop Environment card ────────────────────────────────────
+
+        /// <summary>
+        /// The desktop options offered by the selected image's catalog
+        /// (empty when the distro ships no catalog — card hidden).
+        /// </summary>
+        public ObservableCollection<DesktopOptionItem> DesktopOptions { get; } = new();
+
+        /// <summary>
+        /// True when the Desktop Environment card should render: a Linux
+        /// image with a desktop catalog.
+        /// </summary>
+        public bool ShowDesktopOptions => _desktopCatalog != null && ShowLinuxOptions;
+
+        /// <summary>Name of the image's stock desktop, for the keep-default radio.</summary>
+        public string DefaultDesktopName => _desktopCatalog?.Default?.DisplayName ?? "default";
+
+        /// <summary>
+        /// The desktop that will actually be active after deployment: the
+        /// selected one, or the catalog default when none was picked. Drives
+        /// the RDP-backend coupling (Lamco needs a Lamco-capable desktop).
+        /// </summary>
+        public DesktopEnvironmentOption? EffectiveDesktop
+        {
+            get
+            {
+                if (_desktopCatalog == null)
+                    return null;
+                foreach (var option in _desktopCatalog.Options)
+                    if (option.Id == _selectedDesktopEnvironmentId)
+                        return option;
+                return _desktopCatalog.Default;
+            }
+        }
+
+        /// <summary>
+        /// True when the Lamco radio is selectable: the distro supports
+        /// Lamco AND the effective desktop is Lamco-capable (Wayland session
+        /// + supported portal stack). An X11-only desktop (e.g. Xfce) can
+        /// never be served by the Wayland-native Lamco server.
+        /// </summary>
+        public bool LamcoOptionEnabled =>
+            LamcoOptionVisible
+            && (_desktopCatalog == null || (EffectiveDesktop?.LamcoSupported ?? false));
+
+        /// <summary>
+        /// True when the Auto-backend hint should render: only meaningful
+        /// when a desktop catalog influences the outcome.
+        /// </summary>
+        public bool ShowAutoRdpHint => ShowDesktopOptions && LamcoOptionVisible;
+
+        /// <summary>
+        /// Predictive hint under the Auto radio: what Auto will resolve to
+        /// given the effective desktop (X11-only desktops always land on
+        /// xrdp regardless of detection).
+        /// </summary>
+        public string AutoRdpHint
+        {
+            get
+            {
+                if (!LamcoOptionVisible)
+                    return "";
+                return LamcoOptionEnabled
+                    ? "Auto will detect the session after boot — typically the Lamco RDP Server for this desktop."
+                    : "This desktop is X11-only — Auto will install xrdp (the Lamco RDP Server needs Wayland).";
+            }
+        }
+
+        /// <summary>
+        /// The selected desktop id (null = keep the stock desktop). Set by
+        /// the radio group via <see cref="SelectDesktop"/>; changing it
+        /// re-evaluates the Lamco coupling: an explicit Lamco choice that
+        /// becomes impossible is reset to Auto rather than failing at
+        /// deploy time.
+        /// </summary>
+        public string? SelectedDesktopEnvironmentId
+        {
+            get => _selectedDesktopEnvironmentId;
+            private set
+            {
+                if (SetProperty(ref _selectedDesktopEnvironmentId, value))
+                {
+                    OnPropertyChanged(nameof(EffectiveDesktop));
+                    OnPropertyChanged(nameof(LamcoOptionEnabled));
+                    OnPropertyChanged(nameof(AutoRdpHint));
+                    OnPropertyChanged(nameof(ShowAutoRdpHint));
+                    if (!LamcoOptionEnabled && _selectedRdpBackend == RdpBackend.Lamco)
+                        SelectedRdpBackend = RdpBackend.Auto;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Radio-group setter: the keep-default radio passes null; each
+        /// option radio passes its id and flips its IsSelected flag.
+        /// </summary>
+        public void SelectDesktop(string? desktopId)
+        {
+            SelectedDesktopEnvironmentId = desktopId;
+            foreach (var option in DesktopOptions)
+                option.IsSelected = option.Id == desktopId;
+            OnPropertyChanged(nameof(IsKeepDefaultDesktop));
+        }
+
+        /// <summary>Bound to the keep-default radio; true when no switch was picked.</summary>
+        public bool IsKeepDefaultDesktop
+        {
+            get => _selectedDesktopEnvironmentId == null;
+            set
+            {
+                if (value)
+                    SelectDesktop(null);
+            }
+        }
 
         // Legacy binding kept for any XAML still referencing ConfigureXrdp.
         public bool ConfigureXrdp
@@ -242,12 +370,34 @@ namespace VMCreate
         public ICommand FinishCommand { get; }
         public ICommand BackCommand { get; }
         public ICommand CancelCommand { get; }
+        /// <summary>Radio-group command: selects a desktop by id (null/"" = keep default).</summary>
+        public ICommand SelectDesktopCommand { get; }
         public ICommand DownloadVpnKeysCommand { get; }
         public ICommand BrowseOvpnCommand { get; }
         public ICommand BrowseSshKeyCommand { get; }
 
         private void OnFinish()
         {
+            // Normalize: picking the stock desktop explicitly is the same as
+            // keeping the default — no switch step should run for it.
+            bool keepDefault = _selectedDesktopEnvironmentId == null
+                || _selectedDesktopEnvironmentId.Equals(
+                    _desktopCatalog?.Default?.Id, StringComparison.OrdinalIgnoreCase);
+
+            _wizardData.Customizations.DesktopEnvironmentId = keepDefault
+                ? null
+                : _selectedDesktopEnvironmentId;
+
+            // The desktop/RDP coupling is enforced at selection time (an
+            // X11-only desktop resets an explicit Lamco choice to Auto);
+            // re-check defensively in case state was set programmatically.
+            if (!LamcoOptionEnabled && _selectedRdpBackend == RdpBackend.Lamco)
+            {
+                _logger.LogWarning(
+                    "Explicit Lamco RDP backend with a non-Lamco desktop — resetting to Auto.");
+                _selectedRdpBackend = RdpBackend.Auto;
+            }
+
             _wizardData.Customizations.RdpBackend = _selectedRdpBackend;
             _wizardData.Customizations.HtbVpnKeys = new List<HtbVpnKey>(_downloadedKeys);
             _wizardData.Customizations.OvpnFilePath = _ovpnFilePath;
@@ -271,8 +421,9 @@ namespace VMCreate
             }
 
             _logger.LogDebug(
-                "Finished customization: RdpBackend={RdpBackend}, HtbVpnKeys={KeyCount}, ManualOvpn={ManualPath}, SyncTimezone={Tz}, CustomKey={Key}, IntegrationServices={IntSvc}, DnsMode={DnsMode}, DistOptions={DistOpts}",
-                _selectedRdpBackend, _downloadedKeys.Count, _ovpnFilePath, _syncTimezone, _useCustomSshKey, _enableIntegrationServices,
+                "Finished customization: RdpBackend={RdpBackend}, Desktop={Desktop}, HtbVpnKeys={KeyCount}, ManualOvpn={ManualPath}, SyncTimezone={Tz}, CustomKey={Key}, IntegrationServices={IntSvc}, DnsMode={DnsMode}, DistOptions={DistOpts}",
+                _selectedRdpBackend, _wizardData.Customizations.DesktopEnvironmentId ?? "(default)",
+                _downloadedKeys.Count, _ovpnFilePath, _syncTimezone, _useCustomSshKey, _enableIntegrationServices,
                 _isCustomDns ? "Custom" : "Host",
                 string.Join(", ", DistributionOptions.Select(o => $"{o.Name}={o.IsEnabled}")));
 

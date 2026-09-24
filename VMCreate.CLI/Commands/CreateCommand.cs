@@ -82,6 +82,18 @@ namespace VMCreate.CLI.Commands
                 getDefaultValue: () => "auto",
                 description: "RDP server backend: auto (default — detects Wayland vs X11 in the guest post-boot and picks the best backend), xrdp (disables Wayland), lamco (Wayland-native Lamco RDP Server), or none.");
 
+            var desktopOpt = new Option<string>(
+                "--desktop",
+                description: "Desktop environment to install post-boot (e.g. xfce, kde, gnome). " +
+                             "Only valid for images that offer desktop switching — run without the flag to keep the image's stock desktop. " +
+                             "Couples with --rdp-backend: X11-only desktops cannot use lamco.");
+
+            var releaseOpt = new Option<string>(
+                "--release",
+                description: "Release variant of the image to download (e.g. kali: stable, weekly). " +
+                             "Also accepts the exact version string (e.g. 2026-W26). " +
+                             "Defaults to the image's recommended release; only valid for images that offer multiple releases.");
+
             var noIntegrationSvcOpt = new Option<bool>(
                 "--no-integration-services",
                 getDefaultValue: () => false,
@@ -164,6 +176,8 @@ namespace VMCreate.CLI.Commands
             cmd.AddOption(replaceOpt);
             cmd.AddOption(noXrdpOpt);
             cmd.AddOption(rdpBackendOpt);
+            cmd.AddOption(desktopOpt);
+            cmd.AddOption(releaseOpt);
             cmd.AddOption(noIntegrationSvcOpt);
             cmd.AddOption(dnsModeOpt);
             cmd.AddOption(nameserversOpt);
@@ -198,6 +212,8 @@ namespace VMCreate.CLI.Commands
                     Replace = r.GetValueForOption(replaceOpt),
                     NoXrdp = r.GetValueForOption(noXrdpOpt),
                     RdpBackend = r.GetValueForOption(rdpBackendOpt),
+                    Desktop = r.GetValueForOption(desktopOpt),
+                    Release = r.GetValueForOption(releaseOpt),
                     NoIntegrationServices = r.GetValueForOption(noIntegrationSvcOpt),
                     DnsMode = r.GetValueForOption(dnsModeOpt),
                     Nameservers = r.GetValueForOption(nameserversOpt),
@@ -282,6 +298,13 @@ namespace VMCreate.CLI.Commands
                     ChecksumUri = args.ChecksumUri,
                     ChecksumAlgorithm = "sha256",
                 };
+
+                if (!string.IsNullOrEmpty(args.Release))
+                {
+                    PrintError(jsonMode, "validation",
+                        "--release cannot be combined with --image-uri — a custom URI is already one specific release.");
+                    return ExitCodes.InvalidArguments;
+                }
             }
             else if (!string.IsNullOrEmpty(args.Image))
             {
@@ -309,6 +332,40 @@ namespace VMCreate.CLI.Commands
                 try { services.GetRequiredService<VMCreate.HyperV.IPowerShellExecutor>().Warmup(); }
                 catch { /* warmup is best-effort; deploys keep lazy semantics */ }
             });
+
+            // ── Validate & resolve --release against the item's variants ──
+            // Same fail-loudly contract as --desktop: an unknown or unoffered
+            // release must not silently deploy the default release.
+            if (!string.IsNullOrEmpty(args.Release))
+            {
+                // Accept the variant id ("weekly") or the exact version
+                // string ("2026-W26").
+                var variant = galleryItem.ReleaseVariants?.FirstOrDefault(v =>
+                    string.Equals(v.Id, args.Release, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(v.Version, args.Release, StringComparison.OrdinalIgnoreCase));
+
+                if (variant == null)
+                {
+                    string offered = galleryItem.ReleaseVariants is { Count: > 0 } vs
+                        ? $"valid values for this image: {string.Join(", ", vs.Select(v => v.Id))}"
+                        : "this image offers no release variants";
+                    PrintError(jsonMode, "validation",
+                        $"Unknown --release value '{args.Release}' ({offered}).");
+                    return ExitCodes.InvalidArguments;
+                }
+
+                if (!variant.IsDefault)
+                {
+                    var effective = galleryItem.ResolveRelease(variant.Id);
+                    if (effective == null)
+                    {
+                        PrintError(jsonMode, "validation",
+                            $"Failed to resolve release '{variant.Id}' for image '{galleryItem.Name}'.");
+                        return ExitCodes.InvalidArguments;
+                    }
+                    galleryItem = effective;
+                }
+            }
 
             // ── Build VmSettings ─────────────────────────────────────────────
             var vmSettings = new VmSettings
@@ -354,9 +411,48 @@ namespace VMCreate.CLI.Commands
             if (!rdpBackendValid)
                 return ExitCodes.InvalidArguments;
 
+            // ── Validate & resolve --desktop against the image's catalog ────
+            // Same fail-loudly contract as --rdp-backend: an unknown or
+            // unoffered desktop must not silently deploy the stock desktop.
+            string? desktopEnvironmentId = null;
+            DesktopEnvironmentOption? desktopOption = null;
+            if (!string.IsNullOrEmpty(args.Desktop))
+            {
+                var catalogs = services.GetServices<IDesktopEnvironmentCatalog>();
+                var catalog = catalogs.ForItem(galleryItem);
+                desktopOption = catalog?.Resolve(args.Desktop);
+
+                if (desktopOption == null)
+                {
+                    string offered = catalog == null
+                        ? "this image offers no desktop switching"
+                        : $"valid values for this image: {string.Join(", ", catalog.Options.Select(o => o.Id))}";
+                    PrintError(jsonMode, "validation",
+                        $"Unknown --desktop value '{args.Desktop}' ({offered}).");
+                    return ExitCodes.InvalidArguments;
+                }
+
+                // Desktop/RDP coupling: the Wayland-native Lamco backend
+                // cannot serve an X11-only desktop (the GUI enforces the
+                // same rule at selection time).
+                if (rdpBackend == RdpBackend.Lamco && !desktopOption.LamcoSupported)
+                {
+                    PrintError(jsonMode, "validation",
+                        $"--rdp-backend lamco cannot be combined with the X11-only desktop " +
+                        $"'{desktopOption.DisplayName}' — use auto or xrdp.");
+                    return ExitCodes.InvalidArguments;
+                }
+
+                // Selecting the stock desktop explicitly is the same as
+                // keeping the default — no switch step needed.
+                if (!desktopOption.IsDefault)
+                    desktopEnvironmentId = desktopOption.Id;
+            }
+
             var vmCustomizations = new VmCustomizations
             {
                 RdpBackend = rdpBackend,
+                DesktopEnvironmentId = desktopEnvironmentId,
                 EnableIntegrationServices = !args.NoIntegrationServices,
                 DnsMode = string.Equals(args.DnsMode, "custom", StringComparison.OrdinalIgnoreCase)
                     ? DnsMode.Custom
@@ -417,7 +513,10 @@ namespace VMCreate.CLI.Commands
 
             // Rich console output
             AnsiConsole.MarkupLine($"[bold]Creating VM:[/] {Markup.Escape(vmSettings.VMName)}");
-            AnsiConsole.MarkupLine($"  Image    : {Markup.Escape(galleryItem.Name ?? string.Empty)}");
+            AnsiConsole.MarkupLine($"  Image    : {Markup.Escape(galleryItem.Name ?? string.Empty)}" +
+                (string.IsNullOrEmpty(galleryItem.Version) || galleryItem.Version == "Unknown"
+                    ? ""
+                    : $" ({Markup.Escape(galleryItem.Version)})"));
             AnsiConsole.MarkupLine($"  Memory   : {vmSettings.MemoryInMB} MB");
             AnsiConsole.MarkupLine($"  CPUs     : {vmSettings.CPUCount}");
             AnsiConsole.MarkupLine(string.Empty);
@@ -484,8 +583,21 @@ namespace VMCreate.CLI.Commands
             CancellationToken ct)
         {
             var galleryService = services.GetRequiredService<IGalleryService>();
-            var items = galleryService.LoadFromCache();
-            if (items.Count == 0)
+            var items = new List<GalleryItem>();
+            var droppedLegacy = false;
+            foreach (var cached in galleryService.LoadFromCache())
+            {
+                // Migration: pre-variant caches hold the old Kali stable/weekly
+                // twins; drop them and refetch so the single multi-release
+                // item is available immediately instead of after the TTL.
+                if (cached.IsLegacyReleaseCacheEntry())
+                {
+                    droppedLegacy = true;
+                    continue;
+                }
+                items.Add(cached);
+            }
+            if (items.Count == 0 || droppedLegacy)
             {
                 var all = new List<GalleryItem>();
                 var seen = new HashSet<(string, string)>();
@@ -502,7 +614,9 @@ namespace VMCreate.CLI.Commands
                 match = items.FirstOrDefault(i =>
                     i.Name != null && i.Name.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0);
             if (match == null)
-                PrintError(jsonMode, "ImageNotFound", $"No gallery image found matching '{search}'. Run 'vmcreate list' to see available images.");
+                PrintError(jsonMode, "ImageNotFound",
+                    $"No gallery image found matching '{search}'. Run 'vmcreate list' to see available images. " +
+                    "Release variants (e.g. Kali weekly) are chosen with --release, not as a separate image name.");
 
             return match;
         }
@@ -580,6 +694,8 @@ namespace VMCreate.CLI.Commands
         public bool Replace { get; set; }
         public bool NoXrdp { get; set; }
         public string? RdpBackend { get; set; }
+        public string? Desktop { get; set; }
+        public string? Release { get; set; }
         public bool NoIntegrationServices { get; set; }
         public string? DnsMode { get; set; }
         public string? Nameservers { get; set; }

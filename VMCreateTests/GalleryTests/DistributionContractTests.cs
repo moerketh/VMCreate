@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Moq;
+using System.Linq;
 using System.Net;
 using VMCreate;
 using VMCreate.Gallery;
@@ -167,24 +168,19 @@ namespace VMCreate.Tests.GalleryTests
 
             AssertContractInvariants(items, nameof(Kali));
 
-            // Stable XFCE + its KDE twin (the weekly fetch fails on the
-            // same-content fixture and degrades to null).
-            Assert.AreEqual(2, items.Count);
+            // Stable only (the weekly fetch fails on the same-content
+            // fixture and degrades to a single-variant item). One item per
+            // distro — the release choice lives on the settings page, the
+            // desktop choice on the customization page.
+            Assert.AreEqual(1, items.Count);
             Assert.AreEqual(LinuxDistro.Kali, items[0].LinuxDistro);
-            Assert.IsFalse(items[0].HasTag("kali-kde"), "Base item must stay untagged");
-
-            // The KDE twin: same disk, tagged, named with the (KDE) suffix.
-            Assert.IsTrue(items[1].HasTag("kali-kde"), "Twin must carry the kali-kde tag");
-            StringAssert.Contains(items[1].Name, "(KDE)", StringComparison.Ordinal);
-            Assert.AreEqual(items[0].DiskUri, items[1].DiskUri, "Twin shares the base disk");
-            Assert.AreEqual(LinuxDistro.Kali, items[1].LinuxDistro);
-            Assert.IsFalse(items[1].IsRecommended, "Twin must not steal the recommended slot");
+            Assert.IsFalse(items[0].HasTag("kali-kde"), "No desktop-flavor tags — desktop choice moved to the customization page");
+            Assert.AreEqual(1, items[0].ReleaseVariants!.Count, "Weekly scrape failed — stable-only variant list");
 
             // InitialUsername: the Kali Hyper-V image's uid-1000 desktop user.
             // A blank field collapsed every user-unit path on TEST_20260910165003
-            // (units written to /.config) — both base and twin must carry it.
-            Assert.AreEqual("kali", items[0].InitialUsername, "Base item must carry the image's desktop user");
-            Assert.AreEqual("kali", items[1].InitialUsername, "Twin must carry the image's desktop user");
+            // (units written to /.config) — the single item must carry it.
+            Assert.AreEqual("kali", items[0].InitialUsername, "Item must carry the image's desktop user");
         }
 
         [TestMethod]
@@ -201,7 +197,7 @@ namespace VMCreate.Tests.GalleryTests
                    <td class=""size"">3.6G</td>
                    <td class=""date"">2024-09-11</td>
                    <a href=""kali-linux-2024-W38-hyperv-amd64.7z"">kali-linux-2024-W38-hyperv-amd64.7z</a>
-                   <td class=""size"">3.6G</td>
+                   <td class=""size"">3.7G</td>
                    <td class=""date"">2024-09-18</td>";
 
             var factory = FactoryFor(req =>
@@ -218,34 +214,51 @@ namespace VMCreate.Tests.GalleryTests
             var items = await new Kali(factory).LoadGalleryItems();
 
             AssertContractInvariants(items, nameof(Kali));
-            Assert.AreEqual(4, items.Count);
 
-            // Stable item is first, its KDE twin second, weekly third, weekly twin fourth.
-            Assert.AreEqual("2024.3", items[0].Version);
-            Assert.IsTrue(items[0].IsRecommended, "Stable release should be recommended");
-            Assert.IsTrue(items[1].HasTag("kali-kde"));
-            StringAssert.Contains(items[1].Name, "2024.3", StringComparison.Ordinal);
+            // One item per distro: the item describes stable (default
+            // variant), weekly rides along as a variant chosen on the
+            // settings page or via --release.
+            Assert.AreEqual(1, items.Count);
+            var kali = items[0];
+            Assert.AreEqual(LinuxDistro.Kali, kali.LinuxDistro);
+            Assert.AreEqual("Kali Linux", kali.Name);
+            Assert.AreEqual("2024.3", kali.Version);
+            Assert.IsTrue(kali.IsRecommended, "Stable release should be recommended");
+            Assert.IsFalse(kali.HasTag("kali-kde"));
 
-            Assert.AreEqual("2024-W38", items[2].Version);
-            Assert.IsFalse(items[2].IsRecommended, "Weekly build should not be recommended");
-            StringAssert.Contains(items[2].Name, "Weekly", StringComparison.OrdinalIgnoreCase);
-            Assert.IsTrue(items[3].HasTag("kali-kde"));
-            StringAssert.Contains(items[3].Name, "Weekly", StringComparison.OrdinalIgnoreCase);
+            var variants = kali.ReleaseVariants!;
+            Assert.AreEqual(2, variants.Count, "Stable + weekly variants");
 
-            // Every item is Kali, and each twin shares the disk with its
-            // base (stable lives under /current/, weekly under /kali-weekly/
-            // — the two bases differ by design).
-            foreach (var item in items)
-                Assert.AreEqual(LinuxDistro.Kali, item.LinuxDistro);
-            Assert.AreEqual(items[0].DiskUri, items[1].DiskUri, "Stable twin shares the stable disk");
-            Assert.AreEqual(items[2].DiskUri, items[3].DiskUri, "Weekly twin shares the weekly disk");
-            Assert.AreNotEqual(items[0].DiskUri, items[2].DiskUri, "Stable and weekly base disks differ");
+            // The resolved item inherits the image's uid-1000 desktop user
+            // (the autologin/user-unit resolver's authoritative source).
+            Assert.AreEqual("kali", kali.InitialUsername, "Item must carry InitialUsername=kali");
+            Assert.AreEqual("kali", kali.ResolveRelease("weekly")!.InitialUsername,
+                "Resolved weekly variant keeps the same desktop user — same image account");
 
-            // All four items (stable/weekly × base/KDE-twin) carry the
-            // image's uid-1000 desktop user — the autologin/user-unit
-            // resolver's authoritative source.
-            foreach (var item in items)
-                Assert.AreEqual("kali", item.InitialUsername, $"'{item.Name}' must carry InitialUsername=kali");
+            var stable = variants.Single(v => v.Id == "stable");
+            Assert.IsTrue(stable.IsDefault, "Stable is the default variant");
+            Assert.AreEqual("2024.3", stable.Version);
+            Assert.AreEqual(kali.DiskUri, stable.DiskUri, "The item's own disk is the default variant's disk");
+            Assert.AreEqual("3.5G", stable.DownloadSizeText, "Scraped size column surfaces on the variant");
+
+            var weekly = variants.Single(v => v.Id == "weekly");
+            Assert.IsFalse(weekly.IsDefault);
+            Assert.AreEqual("2024-W38", weekly.Version, "Latest week wins over W37");
+            StringAssert.Contains(weekly.DiskUri, "kali-weekly/", StringComparison.OrdinalIgnoreCase);
+            StringAssert.Contains(weekly.DiskUri, "2024-W38", StringComparison.OrdinalIgnoreCase);
+            Assert.AreEqual("3.7G", weekly.DownloadSizeText);
+
+            // Release resolution: default → the item itself; weekly → an
+            // effective clone with the weekly disk and no nested variants.
+            Assert.AreSame(kali, kali.ResolveRelease(null));
+            Assert.AreSame(kali, kali.ResolveRelease("stable"));
+            var effective = kali.ResolveRelease("weekly");
+            Assert.IsNotNull(effective);
+            Assert.AreNotEqual(kali.DiskUri, effective.DiskUri, "Stable and weekly base disks differ");
+            Assert.AreEqual("2024-W38", effective.Version);
+            Assert.AreEqual(LinuxDistro.Kali, effective.LinuxDistro, "Variant resolution keeps distro identity");
+            Assert.IsNull(effective.ReleaseVariants, "Effective item is a concrete image, not a picker");
+            Assert.IsNull(kali.ResolveRelease("nightly"), "Unknown release id resolves to null — callers fail loudly");
         }
 
         [TestMethod]

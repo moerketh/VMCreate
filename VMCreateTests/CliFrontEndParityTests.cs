@@ -55,6 +55,13 @@ namespace VMCreate.Tests
                             && !t.IsInterface
                             && t != typeof(AggregateGalleryLoader)));
 
+        private static HashSet<Type> DiscoverDesktopCatalogTypes(IEnumerable<Assembly> assemblies) =>
+            new(assemblies
+                .SelectMany(a => a.GetTypes())
+                .Where(t => typeof(IDesktopEnvironmentCatalog).IsAssignableFrom(t)
+                            && !t.IsAbstract
+                            && !t.IsInterface));
+
         [TestMethod]
         public void BothFrontEnds_DiscoverTheSameCustomizationSteps()
         {
@@ -82,6 +89,24 @@ namespace VMCreate.Tests
         }
 
         [TestMethod]
+        public void BothFrontEnds_DiscoverTheSameDesktopCatalogs()
+        {
+            // Desktop catalogs drive the --desktop flag and the desktop
+            // card on the customization page. A front end that misses one
+            // offers no (or partial) desktop switching for that distro.
+            var guiCatalogs = DiscoverDesktopCatalogTypes(GuiAssemblies);
+            var cliCatalogs = DiscoverDesktopCatalogTypes(CliAssemblies);
+
+            var missingInCli = guiCatalogs.Except(cliCatalogs).ToList();
+            var missingInGui = cliCatalogs.Except(guiCatalogs).ToList();
+
+            Assert.AreEqual(0, missingInCli.Count,
+                $"Desktop catalogs the GUI registers but the CLI does not (CLI --desktop silently offers nothing for these distros): {string.Join(", ", missingInCli.Select(t => t.Name))}");
+            Assert.AreEqual(0, missingInGui.Count,
+                $"Desktop catalogs the CLI registers but the GUI does not: {string.Join(", ", missingInGui.Select(t => t.Name))}");
+        }
+
+        [TestMethod]
         public void CliDiscovers_TheReleaseCriticalLinuxSteps()
         {
             // The RDP-backend Auto pipeline: if any of these three is
@@ -93,8 +118,8 @@ namespace VMCreate.Tests
                 "CLI step discovery is missing AutoRdpBackendResolveStep — RDP Auto would never resolve to a backend.");
             Assert.IsTrue(cliSteps.Contains(typeof(InstallXrdpPostBootStep)),
                 "CLI step discovery is missing InstallXrdpPostBootStep — the post-boot xrdp backfill would never run.");
-            Assert.IsTrue(cliSteps.Contains(typeof(KaliKdeSwitchStep)),
-                "CLI step discovery is missing KaliKdeSwitchStep — the Kali KDE desktop switch would never run.");
+            Assert.IsTrue(cliSteps.Contains(typeof(DesktopSwitchStep)),
+                "CLI step discovery is missing DesktopSwitchStep — the desktop switch from --desktop would never run.");
             Assert.IsTrue(cliSteps.Contains(typeof(StartGraphicalSessionStep)),
                 "CLI step discovery is missing StartGraphicalSessionStep — Lamco deployments would end at the greeter needing a manual reboot.");
         }

@@ -44,6 +44,7 @@
                         <Run Text="{Binding SelectedItem.Name, Mode=OneWay}"/>
                         <Run Text=" · "/>
                         <Run Text="{Binding SelectedItem.Publisher, Mode=OneWay}"/>
+                        <Run Text="{Binding SelectedItemVersionText, Mode=OneWay}"/>
                     </TextBlock>
                 </StackPanel>
             </Grid>

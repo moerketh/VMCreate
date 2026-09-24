@@ -113,6 +113,11 @@ namespace VMCreate
         /// <summary>
         /// Returns distribution option steps that are visible for the selected item.
         /// Includes both optional (user-toggled) and required (always-run) steps.
+        /// Applicability is honored for both kinds: an optional step needs an
+        /// enabled selection, and a required step (e.g. DesktopSwitchStep, or
+        /// the Flare-VM steps on Windows images) needs
+        /// <see cref="IStepVisibility"/>-style applicability against the
+        /// actual customizations — required does not mean unconditional.
         /// </summary>
         private IEnumerable<IConfigurableCustomizationStep> GetApplicableDistributionSteps(VmCustomizations? c)
         {
@@ -123,7 +128,7 @@ namespace VMCreate
                 .Where(s =>
                 {
                     if (s.IsOptional) return c?.DistributionOptions?.Any(o => string.Equals(o.Name, s.Name, StringComparison.OrdinalIgnoreCase) && o.IsEnabled) == true;
-                    return true;
+                    return s.IsApplicable(SelectedItem, c);
                 })
                 .OrderBy(s => (s as IDistributionOptionMetadata)?.DeployOrder ?? int.MaxValue)
                 .ThenBy(s => s.Name, StringComparer.OrdinalIgnoreCase);
@@ -172,6 +177,22 @@ namespace VMCreate
         public ObservableCollection<DeploymentPhase> Phases { get; } = new ObservableCollection<DeploymentPhase>();
 
         public GalleryItem? SelectedItem { get; }
+
+        /// <summary>
+        /// Version suffix for the deploy header (e.g. "2026-W26" for a
+        /// non-default release variant). Empty when the item reports no
+        /// meaningful version.
+        /// </summary>
+        public string SelectedItemVersionText
+        {
+            get
+            {
+                var version = SelectedItem?.Version;
+                return string.IsNullOrEmpty(version) || version == "Unknown"
+                    ? ""
+                    : $" · {version}";
+            }
+        }
 
         public bool IsDeploying
         {

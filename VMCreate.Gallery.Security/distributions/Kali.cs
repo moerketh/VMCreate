@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -11,7 +11,10 @@ namespace VMCreate.Gallery
 {
     /// <summary>
     /// Gallery loader for Kali Linux Hyper-V images.
-    /// Returns both the stable point release and the latest weekly build.
+    /// Returns a single item whose <see cref="GalleryItem.ReleaseVariants"/>
+    /// list offers the stable point release (default) and the latest weekly
+    /// build; the release is chosen on the VM settings page or via the CLI
+    /// <c>--release</c> flag.
     /// </summary>
     public class Kali : IGalleryLoader
     {
@@ -44,39 +47,79 @@ namespace VMCreate.Gallery
             var client = _clientFactory.CreateClient();
             client.DefaultRequestHeaders.Add("User-Agent", ProductInfo.UserAgent);
 
-            var items = new List<GalleryItem>();
+            // ── Stable point release (required — the item itself describes it) ──
+            var stable = await ScrapeStableAsync(client, cancellationToken)
+                         ?? throw new Exception("Could not find any Kali Linux Hyper-V images.");
 
-            // ── Stable point release (required) ──
-            var stable = await LoadStableReleaseAsync(client, cancellationToken);
-            if (stable != null)
+            var variants = new List<ReleaseVariant>
             {
-                items.Add(stable);
-                var stableKde = CreateKdeTwin(stable);
-                if (stableKde != null)
-                    items.Add(stableKde);
-            }
+                new()
+                {
+                    Id = "stable",
+                    DisplayName = $"Stable ({stable.Version})",
+                    Description = "Fully-tested point release (quarterly).",
+                    DiskUri = stable.DiskUri,
+                    Version = stable.Version,
+                    LastUpdated = ParseDate(stable.DateText),
+                    DownloadSizeText = stable.SizeText,
+                    IsDefault = true
+                }
+            };
 
             // ── Latest weekly build (best-effort) ──
-            var weekly = await LoadWeeklyReleaseAsync(client, cancellationToken);
+            var weekly = await TryScrapeWeeklyAsync(client, cancellationToken);
             if (weekly != null)
             {
-                items.Add(weekly);
-                var weeklyKde = CreateKdeTwin(weekly);
-                if (weeklyKde != null)
-                    items.Add(weeklyKde);
+                variants.Add(new ReleaseVariant
+                {
+                    Id = "weekly",
+                    DisplayName = $"Weekly ({weekly.Version})",
+                    Description = "Untested build with the latest updates.",
+                    DiskUri = weekly.DiskUri,
+                    Version = weekly.Version,
+                    LastUpdated = ParseDate(weekly.DateText),
+                    DownloadSizeText = weekly.SizeText,
+                    IsDefault = false
+                });
             }
 
-            if (items.Count == 0)
-                throw new Exception("Could not find any Kali Linux Hyper-V images.");
-
-            return items;
+            return new List<GalleryItem>
+            {
+                new()
+                {
+                    Name = "Kali Linux",
+                    Description = "Kali Linux Hyper-V image — stable point release plus untested weekly builds with the latest updates.",
+                    Publisher = Publisher,
+                    DiskUri = stable.DiskUri,
+                    SymbolUri = SymbolUrl,
+                    LastUpdated = ParseDate(stable.DateText),
+                    Version = stable.Version,
+                    Category = "Security",
+                    IsRecommended = true,
+                    LinuxDistro = LinuxDistro.Kali,
+                    // Kali's Hyper-V images ship a uid-1000 desktop user named
+                    // 'kali' (toor is the legacy root alias). InstallLamcoRdpStep
+                    // substitutes this into the root-run install script and
+                    // EnableGraphicalAutologinStep needs it to configure the DM —
+                    // a blank field previously collapsed every user-unit path
+                    // (TEST_20260910165003: units written to /.config).
+                    InitialUsername = "kali",
+                    ReleaseVariants = variants
+                }
+            };
         }
 
         /// <summary>
-        /// Fetches the stable point release from <c>/current/</c>.
-        /// Version format: <c>2026.2</c> (year.quarter).
+        /// One scraped row of a cdimage directory listing.
         /// </summary>
-        private async Task<GalleryItem?> LoadStableReleaseAsync(HttpClient client, CancellationToken cancellationToken)
+        private sealed record ScrapedRelease(string DiskUri, string Version, string DateText, string SizeText);
+
+        /// <summary>
+        /// Fetches the stable point release from <c>/current/</c>.
+        /// Version format: <c>2026.2</c> (year.quarter). Returns null when the
+        /// listing has no Hyper-V image; HTTP failures propagate.
+        /// </summary>
+        private async Task<ScrapedRelease?> ScrapeStableAsync(HttpClient client, CancellationToken cancellationToken)
         {
             var response = await client.GetAsync(StableBaseUrl, cancellationToken);
             response.EnsureSuccessStatusCode();
@@ -89,42 +132,17 @@ namespace VMCreate.Gallery
             if (!match.Success)
                 return null;
 
-            var fileName = match.Groups[1].Value;
-            var date = match.Groups[4].Value;
-
-            string version = "Unknown";
-            var versionMatch = StableVersionRegex.Match(fileName);
-            if (versionMatch.Success)
-                version = versionMatch.Groups[1].Value;
-
-            return new GalleryItem
-            {
-                Name = $"Kali Linux {version}",
-                Description = $"Kali Linux Hyper-V Image ({fileName}) - Released: {date}",
-                Publisher = Publisher,
-                DiskUri = baseUrl + fileName,
-                SymbolUri = SymbolUrl,
-                LastUpdated = ParseDate(date),
-                Version = version,
-                Category = "Security",
-                IsRecommended = true,
-                LinuxDistro = LinuxDistro.Kali,
-                // Kali's Hyper-V images ship a uid-1000 desktop user named
-                // 'kali' (toor is the legacy root alias). InstallLamcoRdpStep
-                // substitutes this into the root-run install script and
-                // EnableGraphicalAutologinStep needs it to configure the DM —
-                // a blank field previously collapsed every user-unit path
-                // (TEST_20260910165003: units written to /.config).
-                InitialUsername = "kali"
-            };
+            return FromMatch(match, baseUrl, StableVersionRegex,
+                m => m.Groups[1].Value);
         }
 
         /// <summary>
         /// Fetches the latest weekly build from <c>/kali-weekly/</c>.
-        /// The directory accumulates multiple weeks; we pick the highest week number.
-        /// Version format: <c>2026-W26</c> (ISO year-week).
+        /// The directory accumulates multiple weeks; we pick the highest week
+        /// number. Version format: <c>2026-W26</c> (ISO year-week). Returns
+        /// null on any failure — weekly is best-effort.
         /// </summary>
-        private async Task<GalleryItem?> LoadWeeklyReleaseAsync(HttpClient client, CancellationToken cancellationToken)
+        private async Task<ScrapedRelease?> TryScrapeWeeklyAsync(HttpClient client, CancellationToken cancellationToken)
         {
             try
             {
@@ -136,56 +154,23 @@ namespace VMCreate.Gallery
                     .GetLeftPart(UriPartial.Path).TrimEnd('/') + "/";
 
                 // The weekly page lists multiple weeks — find all and pick the latest.
-                var matches = HyperVRegex.Matches(html);
-                if (matches.Count == 0)
-                    return null;
-
-                string? bestFileName = null;
-                string? bestVersion = null;
-                int bestYear = 0, bestWeek = 0;
-                string? bestDate = null;
-
-                foreach (Match m in matches)
+                var candidates = new List<(int Year, int Week, Match Match)>();
+                foreach (Match m in HyperVRegex.Matches(html))
                 {
-                    var fileName = m.Groups[1].Value;
-                    var date = m.Groups[4].Value;
-
-                    var vm = WeeklyVersionRegex.Match(fileName);
+                    var vm = WeeklyVersionRegex.Match(m.Groups[1].Value);
                     if (!vm.Success)
                         continue;
 
-                    int year = int.Parse(vm.Groups[1].Value, CultureInfo.InvariantCulture);
-                    int week = int.Parse(vm.Groups[2].Value, CultureInfo.InvariantCulture);
-
-                    if (year > bestYear || (year == bestYear && week > bestWeek))
-                    {
-                        bestYear = year;
-                        bestWeek = week;
-                        bestFileName = fileName;
-                        bestVersion = $"{year}-W{week:D2}";
-                        bestDate = date;
-                    }
+                    candidates.Add((int.Parse(vm.Groups[1].Value, CultureInfo.InvariantCulture),
+                        int.Parse(vm.Groups[2].Value, CultureInfo.InvariantCulture), m));
                 }
 
-                // The three best* locals are always assigned together (same if-block),
-                // so a single guard proves all three non-null to the compiler.
-                if (bestFileName == null || bestVersion == null || bestDate == null)
+                if (candidates.Count == 0)
                     return null;
 
-                return new GalleryItem
-                {
-                    Name = $"Kali Linux Weekly ({bestVersion})",
-                    Description = $"Kali Linux weekly Hyper-V Image — untested build with the latest updates ({bestFileName}) - Released: {bestDate}",
-                    Publisher = Publisher,
-                    DiskUri = baseUrl + bestFileName,
-                    SymbolUri = SymbolUrl,
-                    LastUpdated = ParseDate(bestDate),
-                    Version = bestVersion,
-                    Category = "Security",
-                    IsRecommended = false,
-                    LinuxDistro = LinuxDistro.Kali,
-                    InitialUsername = "kali"
-                };
+                var best = candidates.OrderByDescending(c => c.Year).ThenByDescending(c => c.Week).First();
+                return FromMatch(best.Match, baseUrl, WeeklyVersionRegex,
+                    m => $"{int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture)}-W{int.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture):D2}");
             }
             catch (OperationCanceledException)
             {
@@ -193,47 +178,22 @@ namespace VMCreate.Gallery
             }
             catch
             {
-                // Graceful degradation: weekly is best-effort, stable is the primary item.
+                // Graceful degradation: weekly is best-effort, stable is the item.
                 return null;
             }
         }
 
-        /// <summary>
-        /// Creates the KDE Plasma twin of a Kali item: same disk image,
-        /// same release, but tagged <c>kali-kde</c> so the
-        /// <c>KaliKdeSwitchStep</c> post-boot customization swaps the stock
-        /// XFCE desktop for KDE Plasma (and, under the Auto RDP backend,
-        /// the Wayland-default Plasma session steers detection to the
-        /// Lamco RDP Server).
-        /// <para>
-        /// The twin shares the base item's <c>DiskUri</c> — the desktop is
-        /// switched post-boot, it is not a separate download — so the
-        /// aggregate loader's (Name, DiskUri) dedupe keeps both: names
-        /// differ (the "(KDE)" suffix), disks match.
-        /// </para>
-        /// </summary>
-        private static GalleryItem? CreateKdeTwin(GalleryItem source)
+        private static ScrapedRelease FromMatch(
+            Match match, string baseUrl, Regex versionRegex, Func<Match, string> formatVersion)
         {
-            if (source == null)
-                return null;
+            var fileName = match.Groups[1].Value;
+            var versionMatch = versionRegex.Match(fileName);
 
-            return new GalleryItem
-            {
-                Name = $"{source.Name} (KDE)",
-                Description = $"Kali Linux with the KDE Plasma desktop, switched from XFCE after deployment. Same disk image as {source.Name}.",
-                Publisher = source.Publisher,
-                DiskUri = source.DiskUri,
-                SymbolUri = source.SymbolUri,
-                LastUpdated = source.LastUpdated,
-                Version = source.Version,
-                Category = source.Category,
-                IsRecommended = false,
-                LinuxDistro = LinuxDistro.Kali,
-                // Same desktop user as the base item — the twin shares the
-                // disk, so it shares the login account.
-                InitialUsername = source.InitialUsername,
-                Tags = new List<string> { "kali-kde" }
-            };
+            return new ScrapedRelease(
+                DiskUri: baseUrl + fileName,
+                Version: versionMatch.Success ? formatVersion(versionMatch) : "Unknown",
+                DateText: match.Groups[4].Value,
+                SizeText: match.Groups[3].Value.Trim());
         }
 
         private static string ParseDate(string date)

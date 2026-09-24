@@ -41,8 +41,8 @@ ls /usr/share/wayland-sessions/ 2>/dev/null || true
 
 # -- 2. Would the default session manager start Wayland? ---------------------
 # The Debian update-alternatives slot 'x-session-manager' is the canonical
-# default session manager; kali_kde_switch.sh deliberately points it at
-# startplasma-wayland, so this check also carries user intent.
+# default session manager; desktop_switch_apt.sh deliberately points it at
+# the switched desktop's starter, so this check also carries user intent.
 default_sm=""
 if command -v update-alternatives >/dev/null 2>&1; then
     default_sm=$(update-alternatives --query x-session-manager 2>/dev/null \

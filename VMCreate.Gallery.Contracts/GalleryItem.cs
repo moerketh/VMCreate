@@ -180,6 +180,16 @@ namespace VMCreate
         public List<string> Tags { get; set; } = new();
 
         /// <summary>
+        /// Downloadable releases offered for this item (e.g. Kali stable +
+        /// weekly), populated by gallery loaders. Null or empty for
+        /// single-release images. The item's own fields always describe the
+        /// <c>IsDefault</c> variant; resolve a non-default release via
+        /// <see cref="GalleryItemReleaseExtensions.ResolveRelease"/> when
+        /// deployment starts.
+        /// </summary>
+        public List<ReleaseVariant>? ReleaseVariants { get; set; }
+
+        /// <summary>
         /// True when this gallery item represents a Windows VM.
         /// Used to select PowerShell Direct (instead of SSH) for post-boot
         /// customization and to attach an unattend.xml floppy for automated install.

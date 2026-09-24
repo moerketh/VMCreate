@@ -140,6 +140,19 @@ namespace VMCreate
             foreach (var stepType in configurableStepTypes)
                 services.AddTransient(typeof(IConfigurableCustomizationStep), stepType);
 
+            // ── Desktop environment catalogs (auto-discovered) ─────────────
+            // Catalogs ship with the distro's gallery loader assembly (e.g.
+            // KaliDesktopCatalog in Gallery.Security) and drive both the
+            // desktop card on the customization page and DesktopSwitchStep /
+            // the CLI --desktop validation.
+            var desktopCatalogTypes = scannableAssemblies
+                .SelectMany(a => a.GetTypes())
+                .Where(t => typeof(IDesktopEnvironmentCatalog).IsAssignableFrom(t)
+                            && !t.IsAbstract
+                            && !t.IsInterface);
+            foreach (var catalogType in desktopCatalogTypes)
+                services.AddTransient(typeof(IDesktopEnvironmentCatalog), catalogType);
+
             // ── HTB API client (uses IHttpClientFactory) ────────────────────
             services.AddHttpClient<IHtbApiClient, HtbApiClient>();
 

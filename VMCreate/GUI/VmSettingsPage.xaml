@@ -33,6 +33,48 @@
                 </StackPanel>
             </Border>
 
+            <!-- Release card (images offering more than one release, e.g. Kali stable/weekly) -->
+            <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
+                    CornerRadius="8" Padding="20,16" Margin="0,0,0,12"
+                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1"
+                    Visibility="{Binding ShowReleaseOptions, Converter={StaticResource BoolToVis}}">
+                <StackPanel>
+                    <TextBlock Text="Release" FontSize="14" FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,0,4"/>
+                    <TextBlock Text="Choose which release of this image to download. The default is the fully-tested release; other channels trade testing for freshness."
+                               FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,10"
+                               TextWrapping="Wrap"/>
+                    <ItemsControl ItemsSource="{Binding ReleaseOptions}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Margin="0,0,0,4">
+                                    <RadioButton GroupName="Release" FontSize="14"
+                                                 IsChecked="{Binding IsSelected, Mode=OneWay}"
+                                                 Command="{Binding DataContext.SelectReleaseCommand, RelativeSource={RelativeSource AncestorType=Page}}"
+                                                 CommandParameter="{Binding Id}"
+                                                 ToolTip="{Binding Description}"
+                                                 AutomationProperties.Name="{Binding DisplayName}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                            <TextBlock Text="{Binding DateText}" FontSize="11" Margin="8,0,0,0" VerticalAlignment="Center"
+                                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+                                            <TextBlock Text="{Binding SizeText}" FontSize="11" Margin="8,0,0,0" VerticalAlignment="Center"
+                                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+                                            <TextBlock Text="recommended" FontSize="11" Margin="8,0,0,0" VerticalAlignment="Center"
+                                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                                       Visibility="{Binding IsDefault, Converter={StaticResource BoolToVis}}"/>
+                                        </StackPanel>
+                                    </RadioButton>
+                                    <TextBlock Text="{Binding Description}" FontSize="12" Margin="22,2,0,0"
+                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                               TextWrapping="Wrap"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+
             <ui:InfoBar Title="Conversion required" Severity="Warning"
                         Message="The selected VM is not in VHDX format. It will be converted to VHDX using QEMU. If the disk is MBR partitioned it will be cloned to a new GPT partitioned disk using a converter DVD on first VM boot."
                         IsOpen="{Binding IsNotVhdx, Mode=OneWay}" IsClosable="False" Margin="0,0,0,8"/>

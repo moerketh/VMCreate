@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Logging;
 using System;
+using System.Collections.ObjectModel;
+using System.Linq;
 using System.Windows.Input;
 using VMCreate.MediaHandlers;
 
@@ -22,6 +24,7 @@ namespace VMCreate
         private string _newDriveSizeText = "";
         private string? _validationError;
         private bool _autoDetectDiskSize;
+        private string? _selectedReleaseId;
 
         /// <summary>Raised when the wizard should complete (e.g. Cancel).</summary>
         public event Action<WizardResult>? RequestWizardComplete;
@@ -41,12 +44,49 @@ namespace VMCreate
             _newDriveSizeText = _wizardData.Settings.NewDriveSizeInGB.ToString();
             _autoDetectDiskSize = IsDiskImage;
 
+            // Release picker: offered when the distro publishes more than one
+            // release (e.g. Kali stable + weekly). The default variant needs
+            // no selection — the item's own fields already describe it.
+            var variants = _wizardData.SelectedItem?.ReleaseVariants;
+            if (variants is { Count: > 1 })
+            {
+                _selectedReleaseId = _wizardData.SelectedReleaseId
+                                      ?? variants.FirstOrDefault(v => v.IsDefault)?.Id
+                                      ?? variants[0].Id;
+                foreach (var variant in variants)
+                {
+                    var option = new ReleaseOptionItem(variant);
+                    option.IsSelected = option.Id == _selectedReleaseId;
+                    ReleaseOptions.Add(option);
+                }
+            }
+
             NextCommand = new RelayCommand(OnNext);
             BackCommand = new RelayCommand(() => RequestNavigateBack?.Invoke());
             CancelCommand = new RelayCommand(() => RequestWizardComplete?.Invoke(WizardResult.Canceled));
+            SelectReleaseCommand = new RelayCommand<string>(id => SelectRelease(id));
         }
 
         public GalleryItem? SelectedItem => _wizardData.SelectedItem;
+
+        /// <summary>Releases offered for the selected image; empty for single-release images.</summary>
+        public ObservableCollection<ReleaseOptionItem> ReleaseOptions { get; } = new();
+
+        /// <summary>True when the selected image offers a release choice.</summary>
+        public bool ShowReleaseOptions => ReleaseOptions.Count > 1;
+
+        /// <summary>Selection changed on the release radio group.</summary>
+        public ICommand SelectReleaseCommand { get; }
+
+        private void SelectRelease(string? id)
+        {
+            if (string.IsNullOrEmpty(id))
+                return;
+
+            _selectedReleaseId = id;
+            foreach (var option in ReleaseOptions)
+                option.IsSelected = option.Id == id;
+        }
 
         public string VmName
         {
@@ -208,6 +248,16 @@ namespace VMCreate
             _wizardData.Settings.VirtualizationEnabled = _virtualizationEnabled;
             _wizardData.Settings.ReplacePreviousVm = _replacePreviousVm;
             _wizardData.Settings.EnhancedSessionTransportType = _wizardData.SelectedItem?.EnhancedSessionTransportType;
+
+            // Persist the release choice; the default variant normalizes to
+            // null so the wizard data always describes the item itself.
+            var defaultReleaseId = _wizardData.SelectedItem?.ReleaseVariants?
+                .FirstOrDefault(v => v.IsDefault)?.Id;
+            _wizardData.SelectedReleaseId = _selectedReleaseId != null
+                                            && !string.Equals(_selectedReleaseId, defaultReleaseId,
+                                                StringComparison.OrdinalIgnoreCase)
+                ? _selectedReleaseId
+                : null;
 
             ValidationError = null;
 

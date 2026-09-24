@@ -25,6 +25,7 @@ namespace VMCreate
         private readonly Func<WizardData, DeployPage> _deployPageFactory;
         private readonly IHtbApiClient _htbApiClient;
         private readonly IEnumerable<IConfigurableCustomizationStep> _configurableSteps;
+        private readonly IEnumerable<IDesktopEnvironmentCatalog> _desktopCatalogs;
         private WizardData? _wizardData;
 
         public MainWindow(
@@ -32,6 +33,7 @@ namespace VMCreate
             Func<WizardData, DeployPage> deployPageFactory,
             IHtbApiClient htbApiClient,
             IEnumerable<IConfigurableCustomizationStep> configurableSteps,
+            IEnumerable<IDesktopEnvironmentCatalog> desktopCatalogs,
             ILogger<MainWindow> logger,
             ILoggerFactory loggerFactory)
         {
@@ -39,6 +41,7 @@ namespace VMCreate
             _deployPageFactory = deployPageFactory ?? throw new ArgumentNullException(nameof(deployPageFactory));
             _htbApiClient = htbApiClient ?? throw new ArgumentNullException(nameof(htbApiClient));
             _configurableSteps = configurableSteps ?? throw new ArgumentNullException(nameof(configurableSteps));
+            _desktopCatalogs = desktopCatalogs ?? throw new ArgumentNullException(nameof(desktopCatalogs));
             _logger = logger;
             _loggerFactory = loggerFactory;
 
@@ -153,7 +156,7 @@ namespace VMCreate
             // Navigate to the first page IMMEDIATELY so the UI is visible straight away.
             // Gallery items will stream into _galleryItems in the background below.
             _wizardData = new WizardData { GalleryItems = _galleryItems, DemoMode = App.DemoMode };
-            var firstPage = new SelectImagePage(_wizardData, _htbApiClient, _configurableSteps, _loggerFactory);
+            var firstPage = new SelectImagePage(_wizardData, _htbApiClient, _configurableSteps, _desktopCatalogs, _loggerFactory);
             firstPage.WizardCompleted += WizardPage_Completed;
             _mainFrame.Navigate(firstPage);
 
@@ -164,6 +167,12 @@ namespace VMCreate
                 foreach (var item in cachedItems)
                 {
                     if (item.Name == null || item.DiskUri == null) continue;
+                    // Migration: caches written before releases became variants
+                    // hold the old Kali stable/weekly twins; the live source
+                    // now supplies the single "Kali Linux" item. Drop the
+                    // legacy twins so both shapes never coexist in the list.
+                    if (item.IsLegacyReleaseCacheEntry())
+                        continue;
                     if (_seenItems.Add((item.Name, item.DiskUri)))
                         _galleryItems.Add(item);
                 }
@@ -239,7 +248,7 @@ namespace VMCreate
                 {
                     _wizardData = new WizardData { GalleryItems = _galleryItems, DemoMode = App.DemoMode };
                     _wizardData.ResetForNewWizard();
-                    var firstPage = new SelectImagePage(_wizardData, _htbApiClient, _configurableSteps, _loggerFactory);
+                    var firstPage = new SelectImagePage(_wizardData, _htbApiClient, _configurableSteps, _desktopCatalogs, _loggerFactory);
                     firstPage.WizardCompleted += WizardPage_Completed;
                     _mainFrame.Navigate(firstPage);
                     return;
@@ -264,6 +273,23 @@ namespace VMCreate
                     ShowBanner($"Invalid disk URI: {galleryItem.DiskUri}", isError: true);
                     return;
                 }
+
+                // ── Release boundary ──
+                // The wizard carried the distro-level item plus the chosen
+                // release id; deployment needs the concrete image. Swapping
+                // the item here is safe: back-navigation is disabled during
+                // deployment and a fresh WizardData is built for the next run.
+                var effectiveItem = galleryItem.ResolveRelease(_wizardData!.SelectedReleaseId);
+                if (effectiveItem == null)
+                {
+                    var offered = galleryItem.ReleaseVariants is { Count: > 0 } variants
+                        ? string.Join(", ", variants.Select(v => v.Id))
+                        : "none";
+                    ShowBanner($"Unknown release '{_wizardData.SelectedReleaseId}' for {galleryItem.Name} (available: {offered}).", isError: true);
+                    return;
+                }
+                _wizardData.SelectedItem = effectiveItem;
+                galleryItem = effectiveItem;
 
                 var deployPage = _deployPageFactory(_wizardData!);
                 deployPage.WizardCompleted += WizardPage_Completed;
