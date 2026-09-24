@@ -65,6 +65,9 @@ namespace VMCreate
         public Task AddBootDvd(VmDeploymentPlan plan, string mediaPath, CancellationToken cancellationToken)
             => _boot.AddBootDvd(plan, mediaPath, cancellationToken);
 
+        public Task AttachIsoToNewDvdDrive(VmDeploymentPlan plan, string mediaPath, CancellationToken cancellationToken)
+            => _boot.AttachIsoToNewDvdDrive(plan, mediaPath, cancellationToken);
+
         public Task RemoveBootDvd(VmDeploymentPlan plan, string mediaPath, CancellationToken cancellationToken)
             => _boot.RemoveBootDvd(plan, mediaPath, cancellationToken);
 

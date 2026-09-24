@@ -48,7 +48,7 @@ namespace VMCreate.Tests.HyperV
         {
             "Set-VMFirmware" when _failSetFirmware => new PowerShellResult { HadErrors = true, ErrorSummary = "firmware exploded" },
             "Get-VMHardDiskDrive" => new PowerShellResult { Output = _hasHardDrive ? Devices("hdd0") : new Collection<PSObject>() },
-            "Get-VMDvdDrive" => new PowerShellResult { Output = Devices("installer-dvd", "cidata-dvd") },
+            "Get-VMDvdDrive" => new PowerShellResult { Output = DvdDevices(@"D:\media\installer.iso", @"D:\media\cidata.iso") },
             "Get-VMNetworkAdapter" => new PowerShellResult { Output = Devices("nic0") },
             _ => new PowerShellResult(),
         };
@@ -58,6 +58,20 @@ namespace VMCreate.Tests.HyperV
             var collection = new Collection<PSObject>();
             foreach (var id in ids)
                 collection.Add(new PSObject(new TestDevice(id)));
+            return collection;
+        }
+
+        private static Collection<PSObject> DvdDevices(params string[] paths)
+        {
+            var collection = new Collection<PSObject>();
+            for (var i = 0; i < paths.Length; i++)
+            {
+                var pso = new PSObject(new TestDevice(paths[i]));
+                pso.Properties.Add(new PSNoteProperty("Path", paths[i]));
+                pso.Properties.Add(new PSNoteProperty("ControllerNumber", 0));
+                pso.Properties.Add(new PSNoteProperty("ControllerLocation", i));
+                collection.Add(pso);
+            }
             return collection;
         }
 
@@ -77,7 +91,7 @@ namespace VMCreate.Tests.HyperV
             var value = firmware.Single(p => p.Key == "BootOrder").Value;
             Assert.IsInstanceOfType(value, typeof(object[]));
             var actualOrder = ((object[])value!).Cast<PSObject>().Select(o => ((TestDevice)o.BaseObject).Id).ToArray();
-            CollectionAssert.AreEqual(new[] { "hdd0", "installer-dvd", "cidata-dvd", "nic0" }, actualOrder);
+            CollectionAssert.AreEqual(new[] { "hdd0", @"D:\media\installer.iso", @"D:\media\cidata.iso", "nic0" }, actualOrder);
         }
 
         [TestMethod]
@@ -100,6 +114,47 @@ namespace VMCreate.Tests.HyperV
                 () => _bootManager.SetFirstBootToHardDrive(Plan(), CancellationToken.None));
             StringAssert.Contains(ex.Message, "Failed to set boot order");
             StringAssert.Contains(ex.Message, "firmware exploded");
+        }
+
+        [TestMethod]
+        public async Task AttachIsoToNewDvdDrive_AlwaysAddsDrive_NeverRetargetsExisting()
+        {
+            // Auxiliary media (cidata/unattend seeds) must not reuse the installer's
+            // drive — a bare Set-VMDvdDrive acts on the first drive and would swap
+            // the (bootable) installer ISO for the non-bootable seed.
+            await _bootManager.AttachIsoToNewDvdDrive(Plan(), @"C:\iso\seed.iso", CancellationToken.None);
+
+            var add = _captured["Add-VMDvdDrive"];
+            Assert.AreEqual(@"C:\iso\seed.iso", add.Single(p => p.Key == "Path").Value);
+            Assert.IsFalse(_captured.ContainsKey("Set-VMDvdDrive"), "must not retarget an existing drive");
+        }
+
+        [TestMethod]
+        public async Task RemoveBootDvd_DetachesOnlyTheDriveHoldingTheMedia()
+        {
+            await _bootManager.RemoveBootDvd(Plan(), @"D:\media\installer.iso", CancellationToken.None);
+
+            var set = _captured["Set-VMDvdDrive"];
+            Assert.AreEqual(0, set.Single(p => p.Key == "ControllerNumber").Value);
+            Assert.AreEqual(0, set.Single(p => p.Key == "ControllerLocation").Value, "installer.iso is on the first emulated drive");
+            Assert.IsNull(set.Single(p => p.Key == "Path").Value);
+        }
+
+        [TestMethod]
+        public async Task RemoveBootDvd_MatchesSecondDrive_ByPath()
+        {
+            await _bootManager.RemoveBootDvd(Plan(), @"D:\media\cidata.iso", CancellationToken.None);
+
+            var set = _captured["Set-VMDvdDrive"];
+            Assert.AreEqual(1, set.Single(p => p.Key == "ControllerLocation").Value);
+        }
+
+        [TestMethod]
+        public async Task RemoveBootDvd_WhenMediaNotAttached_DoesNotTouchAnyDrive()
+        {
+            await _bootManager.RemoveBootDvd(Plan(), @"D:\media\nope.iso", CancellationToken.None);
+
+            Assert.IsFalse(_captured.ContainsKey("Set-VMDvdDrive"));
         }
     }
 }

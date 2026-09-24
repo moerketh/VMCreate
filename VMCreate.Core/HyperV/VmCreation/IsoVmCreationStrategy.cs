@@ -104,7 +104,7 @@ namespace VMCreate.HyperV.VmCreation
                         unattendIsoPath,
                         File.ReadAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Unattend", "autounattend.xml")),
                         _logger);
-                    await _bootManager.AddBootDvd(plan, unattendIsoPath, cancellationToken);
+                    await _bootManager.AttachIsoToNewDvdDrive(plan, unattendIsoPath, cancellationToken);
                     _logger.LogInformation("Attached unattend.xml ISO to VM {VMName}", plan.VmName);
                 }
                 catch (Exception ex)
@@ -129,8 +129,8 @@ namespace VMCreate.HyperV.VmCreation
                 {
                     CidataSeedOptions seedOptions = await BuildCidataSeedOptionsAsync(plan, item, vmCustomizations, cancellationToken);
                     CidataSeedBuilder.BuildCidataIso(cidataIsoPath, seedOptions, _logger);
-                    await _bootManager.AddBootDvd(plan, cidataIsoPath, cancellationToken);
-                    _logger.LogInformation("Attached cidata seed ISO to VM {VMName}", plan.VmName);
+                    await _bootManager.AttachIsoToNewDvdDrive(plan, cidataIsoPath, cancellationToken);
+                    _logger.LogInformation("Attached cidata seed ISO to VM {VMName} on a dedicated drive — installer ISO stays bootable", plan.VmName);
                 }
                 catch (Exception ex)
                 {

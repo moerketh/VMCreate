@@ -197,13 +197,29 @@ namespace VMCreate.Tests.HyperV.VmCreation
             string seedPath = Path.Combine(_vhdxPath, $"{_plan.VmName}_cidata.iso");
             string? attachedSeed = null;
             _bootManager
-                .Setup(b => b.AddBootDvd(_plan, It.Is<string>(p => p.EndsWith("_cidata.iso")), It.IsAny<CancellationToken>()))
+                .Setup(b => b.AttachIsoToNewDvdDrive(_plan, It.Is<string>(p => p.EndsWith("_cidata.iso")), It.IsAny<CancellationToken>()))
                 .Callback<VmDeploymentPlan, string, CancellationToken>((_, path, _) => attachedSeed = path)
                 .Returns(Task.CompletedTask);
 
             await ExecuteAsync();
 
             Assert.AreEqual(seedPath, attachedSeed, $"cidata seed ISO must be built at the expected path and attached. Logs: {string.Join(" | ", _logs)}");
+        }
+
+        [TestMethod]
+        public async Task CreateVMAsync_Omarchy_CidataSeedGoesToDedicatedDrive_InstallerStaysAttached()
+        {
+            // Regression pin for the PXE stall: attaching the seed through AddBootDvd
+            // retargeted the single DVD drive, swapping the installer ISO for the
+            // non-bootable seed — HDD-first then fell through to PXE.
+            _item = CreateOmarchyItem();
+            string seedPath = Path.Combine(_vhdxPath, $"{_plan.VmName}_cidata.iso");
+
+            await ExecuteAsync();
+
+            _bootManager.Verify(b => b.AddBootDvd(_plan, _isoPath, It.IsAny<CancellationToken>()), Times.Once);
+            _bootManager.Verify(b => b.AttachIsoToNewDvdDrive(_plan, seedPath, It.IsAny<CancellationToken>()), Times.Once);
+            _bootManager.Verify(b => b.AddBootDvd(_plan, seedPath, It.IsAny<CancellationToken>()), Times.Never);
         }
 
         [TestMethod]
@@ -262,7 +278,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
             string? attachedSeed = null;
             long attachedLength = -1;
             _bootManager
-                .Setup(b => b.AddBootDvd(_plan, It.Is<string>(p => p.EndsWith("_cidata.iso")), It.IsAny<CancellationToken>()))
+                .Setup(b => b.AttachIsoToNewDvdDrive(_plan, It.Is<string>(p => p.EndsWith("_cidata.iso")), It.IsAny<CancellationToken>()))
                 .Callback<VmDeploymentPlan, string, CancellationToken>((_, path, _) =>
                 {
                     attachedSeed = path;

@@ -32,6 +32,16 @@ namespace VMCreate
     public interface IVmBootManager
     {
         Task AddBootDvd(VmDeploymentPlan plan, string mediaPath, CancellationToken cancellationToken);
+        /// <summary>
+        /// Attaches the ISO to a newly added DVD drive, leaving every existing drive
+        /// untouched. Use for auxiliary media (unattend/cidata seeds) so the primary
+        /// installer drive keeps its ISO.
+        /// </summary>
+        Task AttachIsoToNewDvdDrive(VmDeploymentPlan plan, string mediaPath, CancellationToken cancellationToken);
+        /// <summary>
+        /// Detaches media from the specific DVD drive that currently holds it,
+        /// leaving any other DVD drives attached.
+        /// </summary>
         Task RemoveBootDvd(VmDeploymentPlan plan, string mediaPath, CancellationToken cancellationToken);
         Task SetFirstBootToDvd(VmDeploymentPlan plan, CancellationToken cancellationToken);
         Task SetFirstBootToHardDrive(VmDeploymentPlan plan, CancellationToken cancellationToken);

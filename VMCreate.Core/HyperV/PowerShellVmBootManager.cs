@@ -56,12 +56,54 @@ namespace VMCreate
             _logger.LogInformation("Attached ISO to DVD drive: {MediaPath}", mediaPath);
         }
 
+        public async Task AttachIsoToNewDvdDrive(VmDeploymentPlan plan, string mediaPath, CancellationToken cancellationToken)
+        {
+            // Always add a fresh drive instead of reusing one: Set-VMDvdDrive without a
+            // controller/location acts on the FIRST drive, so retargeting here would
+            // silently swap the installer ISO for this (non-bootable seed) media —
+            // which is exactly how VMs ended up PXE-booting past an empty DVD.
+            var result = await _executor.RunCommandAsync("Add-VMDvdDrive",
+                new System.Collections.Generic.Dictionary<string, object?>
+                {
+                    ["VMName"] = plan.VmName,
+                    ["Path"] = mediaPath,
+                }, cancellationToken);
+            if (result.HadErrors)
+                throw new Exception($"Failed to attach ISO to a new DVD drive: {result.ErrorSummary}");
+
+            _logger.LogInformation("Attached ISO on a new DVD drive: {MediaPath}", mediaPath);
+        }
+
         public async Task RemoveBootDvd(VmDeploymentPlan plan, string mediaPath, CancellationToken cancellationToken)
         {
+            // Multiple DVD drives may be attached (installer + aux seed), so detaching
+            // must target the drive that actually holds this media — Set-VMDvdDrive
+            // without a controller/location would error on ambiguity or clear the
+            // wrong (installer) drive.
+            var dvds = await _executor.RunCommandAsync("Get-VMDvdDrive",
+                new System.Collections.Generic.Dictionary<string, object?> { ["VMName"] = plan.VmName },
+                cancellationToken);
+            if (dvds.HadErrors)
+                throw new Exception($"Failed to query DVD drives: {dvds.ErrorSummary}");
+
+            var match = dvds.Output
+                .Select(d => (
+                    Path: d.Properties["Path"]?.Value as string,
+                    ControllerNumber: System.Convert.ToInt32(d.Properties["ControllerNumber"]?.Value ?? 0),
+                    ControllerLocation: System.Convert.ToInt32(d.Properties["ControllerLocation"]?.Value ?? 0)))
+                .FirstOrDefault(t => t.Path != null && string.Equals(t.Path, mediaPath, StringComparison.OrdinalIgnoreCase));
+            if (match.Path == null)
+            {
+                _logger.LogWarning("No DVD drive holding {MediaPath} on VM {VMName} — nothing to detach", mediaPath, plan.VmName);
+                return;
+            }
+
             var result = await _executor.RunCommandAsync("Set-VMDvdDrive",
                 new System.Collections.Generic.Dictionary<string, object?>
                 {
                     ["VMName"] = plan.VmName,
+                    ["ControllerNumber"] = match.ControllerNumber,
+                    ["ControllerLocation"] = match.ControllerLocation,
                     ["Path"] = null,
                 }, cancellationToken);
             if (result.HadErrors)
