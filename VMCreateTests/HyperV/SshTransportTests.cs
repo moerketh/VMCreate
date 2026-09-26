@@ -313,6 +313,54 @@ namespace VMCreate.Tests.HyperV
         }
 
         [TestMethod]
+        public void PickNeighborMacMatch_IgnoresAllZeroPlaceholderMacRow()
+        {
+            // The observed production bug: the host keeps an Unreachable row for a
+            // dead address whose LinkLayerAddress is the shared all-zero
+            // placeholder (00-00-00-00-00-00). If any VM adapter reports a zero MAC
+            // (NIC not yet initialized), that row matches and discovery pins a dead
+            // IP — Omarchy reported 172.23.186.21 while the guest was 172.23.180.201.
+            var vmMacs = new[] { "00155D100182", "000000000000" };
+            var neighbors = new[]
+            {
+                ("172.23.186.21", "00-00-00-00-00-00", "Unreachable"),
+                ("172.23.180.201", "00-15-5D-10-01-82", "Permanent"),
+            };
+
+            Assert.AreEqual("172.23.180.201", SshTransport.PickNeighborMacMatch(vmMacs, neighbors),
+                "the zero-MAC placeholder row must never win over the real adapter binding");
+        }
+
+        [TestMethod]
+        public void PickNeighborMacMatch_ZeroMacVmAdapter_Alone_ReturnsNull()
+        {
+            // A VM whose only adapter reports the zero placeholder MAC has no
+            // usable identity in the neighbor table — better to keep polling than
+            // to latch onto a shared placeholder row.
+            var vmMacs = new[] { "000000000000" };
+            var neighbors = new[]
+            {
+                ("172.23.186.21", "00-00-00-00-00-00", "Unreachable"),
+            };
+
+            Assert.IsNull(SshTransport.PickNeighborMacMatch(vmMacs, neighbors));
+        }
+
+        [TestMethod]
+        public void PickNeighborMacMatch_IgnoresBroadcastMacRow()
+        {
+            var vmMacs = new[] { "FFFFFFFFFFFF", "00155DB7346A" };
+            var neighbors = new[]
+            {
+                ("172.23.191.255", "FF-FF-FF-FF-FF-FF", "Permanent"),
+                ("192.168.42.7", "00-15-5d-b7-34-6a", "Reachable"),
+            };
+
+            Assert.AreEqual("192.168.42.7", SshTransport.PickNeighborMacMatch(vmMacs, neighbors),
+                "the broadcast MAC row must never match");
+        }
+
+        [TestMethod]
         public void NormalizeMacAddress_StripsSeparatorsAndUnifiesCase()
         {
             Assert.AreEqual("00155DB7346A", SshTransport.NormalizeMacAddress("00-15-5d-b7-34-6a"));
@@ -320,6 +368,21 @@ namespace VMCreate.Tests.HyperV
             Assert.AreEqual("00155DB7346A", SshTransport.NormalizeMacAddress("00155DB7346A"));
             Assert.AreEqual("", SshTransport.NormalizeMacAddress(null));
             Assert.AreEqual("", SshTransport.NormalizeMacAddress(""));
+        }
+
+        [TestMethod]
+        public void IsUsableMacAddress_RejectsPlaceholderAndBroadcast()
+        {
+            Assert.IsFalse(SshTransport.IsUsableMacAddress("00-00-00-00-00-00"));
+            Assert.IsFalse(SshTransport.IsUsableMacAddress("000000000000"));
+            Assert.IsFalse(SshTransport.IsUsableMacAddress("FF-FF-FF-FF-FF-FF"));
+            Assert.IsFalse(SshTransport.IsUsableMacAddress("ffffffffffff"));
+            Assert.IsFalse(SshTransport.IsUsableMacAddress(null));
+            Assert.IsFalse(SshTransport.IsUsableMacAddress(""));
+            Assert.IsFalse(SshTransport.IsUsableMacAddress("00-15-5d"), "too short to be a real EUI-48");
+
+            Assert.IsTrue(SshTransport.IsUsableMacAddress("00-15-5d-b7-34-6a"));
+            Assert.IsTrue(SshTransport.IsUsableMacAddress("00155DB7346A"));
         }
 
         #endregion
