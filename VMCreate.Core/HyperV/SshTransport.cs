@@ -303,9 +303,16 @@ namespace VMCreate
             // allocates 00-15-5D MACs per host, and a fabricated entry would
             // at worst send our SSH connect to a wrong address that TOFU
             // (per-VM known_hosts, fresh per deployment) then rejects.
+            // Drop placeholder/zero and broadcast adapter MACs: a NIC that has
+            // no burned-in MAC yet (a Hyper-V adapter before the guest driver
+            // initializes it) can report 00-00-00-00-00-00, and the host's
+            // neighbor table keeps that same zero MAC on its own Unreachable
+            // rows. Matching a zero MAC against those rows pins discovery to a
+            // dead, shared address — that is the Omarchy "Discovered VM IP
+            // 172.23.186.21 while the guest really is 172.23.180.201" bug.
             var vmMacs = adapters
                 .Select(GetAdapterMacAddress)
-                .Where(m => !string.IsNullOrEmpty(m))
+                .Where(IsUsableMacAddress)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
             if (vmMacs.Count == 0)
@@ -333,21 +340,24 @@ namespace VMCreate
         /// <summary>
         /// Pure neighbor-table match, extracted for unit tests. Returns the
         /// IPv4 bound to any of <paramref name="vmMacs"/> (best state first:
-        /// Reachable over Permanent over Stale/Delay), or null when no row
-        /// matches. Incomplete/Failed rows and link-local (APIPA) addresses
-        /// are excluded: neither can carry a usable SSH session.
+        /// Reachable over Permanent over Delay over Stale), or null when no row
+        /// matches. Incomplete/Failed/Unreachable rows and link-local (APIPA) addresses
+        /// are excluded: neither can carry a usable SSH session. Placeholder
+        /// MACs (all-zero / broadcast) are excluded from BOTH the candidate
+        /// set and the match rows — such a MAC is shared by every host on the
+        /// segment and binds to dead Unreachable rows, never to a usable guest.
         /// </summary>
         internal static string? PickNeighborMacMatch(
             System.Collections.Generic.IEnumerable<string> vmMacs,
             System.Collections.Generic.IEnumerable<(string Ip, string Mac, string State)> neighbors)
         {
             var wanted = new HashSet<string>(
-                vmMacs.Select(NormalizeMacAddress).Where(m => m.Length > 0),
+                vmMacs.Select(NormalizeMacAddress).Where(IsUsableMacAddress),
                 StringComparer.OrdinalIgnoreCase);
             if (wanted.Count == 0)
                 return null;
 
-            foreach (string stateRank in new[] { "Reachable", "Permanent", "Stale", "Delay" })
+            foreach (string stateRank in new[] { "Reachable", "Permanent", "Delay", "Stale" })
             {
                 foreach (var (ip, mac, state) in neighbors)
                 {
@@ -355,12 +365,28 @@ namespace VMCreate
                         continue;
                     if (!IPv4Regex.IsMatch(ip) || ip.StartsWith("169.254.", StringComparison.Ordinal))
                         continue;
-                    if (wanted.Contains(NormalizeMacAddress(mac)))
+                    string rowMac = NormalizeMacAddress(mac);
+                    if (!IsUsableMacAddress(rowMac))
+                        continue;
+                    if (wanted.Contains(rowMac))
                         return ip;
                 }
             }
 
             return null;
+        }
+
+        /// <summary>
+        /// True when a MAC (already normalized or not) is a real, non-shared
+        /// hardware address. Rejects empty, all-zero placeholder, and broadcast
+        /// MACs — none of which can identify a specific guest over ARP.
+        /// </summary>
+        internal static bool IsUsableMacAddress(string? mac)
+        {
+            string normalized = NormalizeMacAddress(mac);
+            return normalized.Length == 12
+                && normalized != "000000000000"
+                && normalized != "FFFFFFFFFFFF";
         }
 
         /// <summary>
