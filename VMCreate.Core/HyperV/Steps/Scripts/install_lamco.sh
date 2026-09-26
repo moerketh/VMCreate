@@ -4,30 +4,43 @@ set -o pipefail
 # =========================================================================
 # Lamco RDP Server — install + configure (Wayland-native)
 # =========================================================================
-# Installs the PINNED fork deb from GitHub Releases (sha256-verified), sets
-# up TLS certs, config.toml, the systemd user units, and linger. The one-time
-# portal consent dialog is automated by lamco-grant.service (see below).
+# Installs the PINNED fork package from GitHub Releases (sha256-verified),
+# sets up TLS certs, config.toml, the systemd user units, and linger. The
+# one-time portal consent dialog is automated by lamco-grant.service
+# (see below).
 #
 # SECURITY/RELIABILITY CONTRACT:
-#   - The deb tag, version, and sha256 are pinned below. A re-pointed tag,
-#     a missing asset, or a digest mismatch FAILS THIS SCRIPT LOUDLY.
-#     There is no source-build fallback and no upstream fallback: silently
-#     shipping a stock/broken binary is the worse failure.
-#   - Lamco is Debian-family-only (the fork pipeline ships amd64 debs;
-#     rpm/flatpak assets are not built for this lineage).
+#   - The tag, version, and sha256 of every supported artifact are pinned
+#     below. A re-pointed tag, a missing asset, or a digest mismatch FAILS
+#     THIS SCRIPT LOUDLY. There is no source-build fallback and no upstream
+#     fallback: silently shipping a stock/broken binary is the worse
+#     failure.
+#   - Supported packaging: amd64 Debian debs (Debian/Ubuntu/Parrot/Kali
+#     lineage) and the amd64 Arch pacman package (Arch/Athena-Arch/Omarchy
+#     lineage), both built by the same fork release pipeline. The rpm/
+#     flatpak assets are not built for this lineage.
 
 LAMCO_FORK_REPO="moerketh/lamco-rdp-server"
 LAMCO_FORK_TAG="v1.4.5-hyperv.6"
 LAMCO_FORK_DEB_VERSION="1.4.5-hyperv6"
 # The fork's release policy: the Cargo.toml crate version stays at the
-# upstream base (1.4.5) and the deb's package version carries the lineage
-# suffix — i.e. the BINARY deliberately reports only the base version
-# (verified on the pinned asset: /usr/bin/lamco-rdp-server --version prints
-# "lamco-rdp-server 1.4.5"), while dpkg reports 1.4.5-hyperv6 (matches
-# LAMCO_FORK_DEB_VERSION below; keep the pin and this sentence in step).
+# upstream base (1.4.5) and the distribution package versions carry the
+# lineage suffix — i.e. the BINARY deliberately reports only the base
+# version (verified on the pinned assets: /usr/bin/lamco-rdp-server
+# --version prints "lamco-rdp-server 1.4.5"), while dpkg reports
+# 1.4.5-hyperv6 and pacman reports 1.4.5-hyperv6-1 (the .PKGINFO pkgver —
+# same upstream version plus the pkgrel '-1'; keep the pins and this
+# sentence in step).
 LAMCO_FORK_CRATE_VERSION="1.4.5"
 LAMCO_FORK_DEB_SHA256="8439c0a35d1cc89ee5d4e7ba1b1f771cdb1e6185d2e8f9be7239bd3481daaea6"
 LAMCO_FORK_DEB_URL="https://github.com/${LAMCO_FORK_REPO}/releases/download/${LAMCO_FORK_TAG}/lamco-rdp-server_${LAMCO_FORK_DEB_VERSION}_amd64.deb"
+# Same release, pacman packaging. Built by the same workflow from the same
+# tag and carrying the same binary payload; the .PKGINFO pkgver is
+# 1.4.5-hyperv6-1 (upstream version + pkgrel), so pacman -Q reports the
+# full "1.4.5-hyperv6-1" string.
+LAMCO_FORK_PKG_VERSION="1.4.5-hyperv6-1"
+LAMCO_FORK_PKG_SHA256="d66b900e055bc94e76f465c5d3d1631b4ef9c3f44dc571f26d1f05bb2f0ac4a3"
+LAMCO_FORK_PKG_URL="https://github.com/${LAMCO_FORK_REPO}/releases/download/${LAMCO_FORK_TAG}/lamco-rdp-server-${LAMCO_FORK_PKG_VERSION}-x86_64.pkg.tar.zst"
 
 # Result contract: 0 = ok, 1 = degraded (install completed with warnings —
 # the host step logs these). Hard failures exit non-zero BEFORE the terminal
@@ -40,7 +53,7 @@ LAMCO_FORK_DEB_URL="https://github.com/${LAMCO_FORK_REPO}/releases/download/${LA
 # captured — it flows into the thrown SSH exception).
 DEGRADED=0
 
-echo "=== Lamco RDP Server install (pinned fork deb ${LAMCO_FORK_TAG}) ==="
+echo "=== Lamco RDP Server install (pinned fork ${LAMCO_FORK_TAG}) ==="
 echo "NOTICE: lamco-rdp-server is third-party software licensed under the"
 echo "        Business Source License 1.1 (BSL 1.1) - (c) Lamco Development LLC."
 echo "        Free production use: single server instance (one VM), non-profit,"
@@ -48,7 +61,7 @@ echo "        or education/research. Multiple instances require a commercial"
 echo "        license - see https://lamco.ai. Converts to Apache-2.0 on 2029-06-01."
 echo "        License text: /usr/share/doc/lamco-rdp-server/LICENSE"
 
-# -- Validate distro: Debian family only ------------------------------------
+# -- Validate distro: Debian family or pacman family ------------------------
 if [ ! -f /etc/os-release ]; then
     echo "ERROR: /etc/os-release not found — cannot determine distro." >&2
     exit 1
@@ -65,10 +78,23 @@ is_debian_family() {
     esac
     return 1
 }
-if ! is_debian_family; then
-    echo "ERROR: distro '${DISTRO_ID}' (ID_LIKE='${DISTRO_LIKE}') is not Debian-family." >&2
-    echo "       The pinned fork deb is amd64 Debian packaging; Lamco support" >&2
-    echo "       for rpm distros awaits a fork release pipeline for them." >&2
+# pacman family: Arch itself, ID=omarchy (Omarchy 4.x identifies itself in
+# /etc/os-release), Athena Arch (ID=athenaos) and other ID_LIKE=arch
+# derivatives.
+is_arch_family() {
+    case "$DISTRO_ID" in
+        arch|omarchy|athenaos) return 0 ;;
+    esac
+    case " $DISTRO_LIKE " in
+        *" arch"*) return 0 ;;
+    esac
+    return 1
+}
+if ! is_debian_family && ! is_arch_family; then
+    echo "ERROR: distro '${DISTRO_ID}' (ID_LIKE='${DISTRO_LIKE}') is neither Debian-family nor pacman-family." >&2
+    echo "       The pinned fork artifacts are amd64 Debian packaging and amd64 Arch" >&2
+    echo "       packaging; Lamco support for rpm distros awaits a fork release" >&2
+    echo "       pipeline for them." >&2
     exit 1
 fi
 
@@ -98,21 +124,26 @@ case "$ARCH" in
     *) echo "ERROR: unsupported arch $ARCH (the pinned fork deb is amd64 only)." >&2; exit 1 ;;
 esac
 
-# -- Install the pinned fork deb --------------------------------------------
-# The ONLY install path. Download, verify the sha256 against the pinned
-# digest, dpkg -i, then apt-get -f for any missing runtime deps. Verification
-# is then layered, each layer proving a different thing:
+# -- Install the pinned fork package ----------------------------------------
+# The ONLY install path, one per package-manager family. Download, verify
+# the sha256 against the pinned digest, then let the package manager do the
+# install (dpkg -i + apt-get fixup on the Debian lineage; pacman -U on the
+# pacman lineage — pacman resolves the package's hard deps from the sync
+# repositories itself). Verification is then layered, each layer proving a
+# different thing:
 #   1. sha256 of the download — this EXACT fork artifact, not a re-pointed tag
-#   2. dpkg database — the fork marker (1.4.5-hyperv2) lives in the deb's
-#      Package Version field; the binary only reports the bare crate version
-#      per fork policy, so the marker MUST be read from dpkg, not from
-#      `--version`
-#   3. binary payload — the /usr/bin binary runs and reports the pinned crate
-#      version, so the registered deb actually delivered a working payload
+#   2. the package database — the fork marker (-hypervN) lives only in the
+#      package's version field (dpkg: Package Version; pacman: pkgver); the
+#      binary only reports the bare crate version per fork policy, so the
+#      marker MUST be read from the database, not from `--version`
+#   3. binary payload — the /usr/bin binary runs and reports the pinned
+#      crate version, so the registered package actually delivered a
+#      working payload
 # A partial install that leaves a stock upstream 1.4.5 package or a broken
 # binary in place cannot pass. Any failure aborts the deployment loudly: no
 # fallback exists, and silently shipping a stock/broken binary is strictly
 # worse than failing.
+if is_debian_family; then
 FORK_DEB_TMP="$(mktemp /tmp/lamco-fork.XXXXXX.deb)"
 fetch_url "$LAMCO_FORK_DEB_URL" "$FORK_DEB_TMP" \
     || { echo "ERROR: download failed for $LAMCO_FORK_DEB_URL" >&2; rm -f "$FORK_DEB_TMP"; exit 1; }
@@ -147,12 +178,11 @@ DEBIAN_FRONTEND=noninteractive apt-get install -f -y -q 2>&1 \
     || { echo "ERROR: apt-get dependency resolution failed after dpkg -i (dpkg rc=$dpkg_rc)." >&2; rm -f "$FORK_DEB_TMP"; exit 1; }
 rm -f "$FORK_DEB_TMP"
 
-# -- Verify: fork identity (dpkg) + payload sanity (binary) -----------------
 # FORK IDENTITY — authoritative: the dpkg database must report EXACTLY the
 # pinned fork deb version, in state 'install ok installed'. The marker
-# suffix (-hyperv2) exists only in the deb's Package Version field; grepping
-# the binary for it can NEVER pass on a genuine fork build (the fork pins the
-# Cargo crate version at the upstream base), which is precisely how the
+# suffix (-hypervN) exists only in the deb's Package Version field; grepping
+# the binary for it can NEVER pass on a genuine fork build (the fork pins
+# the Cargo crate version at the upstream base), which is precisely how the
 # previous binary-grep check broke this deployment.
 installed_status="$(dpkg-query -W -f='${Status}' lamco-rdp-server 2>/dev/null)"
 installed_pkg_ver="$(dpkg-query -W -f='${Version}' lamco-rdp-server 2>/dev/null)"
@@ -163,14 +193,58 @@ if [ "$installed_pkg_ver" != "$LAMCO_FORK_DEB_VERSION" ] || [ "$installed_status
     echo "       apt-get fixup resolved by removing it). Aborting — no silent degradation." >&2
     exit 1
 fi
+else
+FORK_PKG_TMP="$(mktemp /tmp/lamco-fork.XXXXXX.pkg.tar.zst)"
+fetch_url "$LAMCO_FORK_PKG_URL" "$FORK_PKG_TMP" \
+    || { echo "ERROR: download failed for $LAMCO_FORK_PKG_URL" >&2; rm -f "$FORK_PKG_TMP"; exit 1; }
+echo "Verifying sha256 of the fork pacman package..."
+actual_sha=$(sha256sum "$FORK_PKG_TMP" | awk '{print $1}')
+if [ "$actual_sha" != "$LAMCO_FORK_PKG_SHA256" ]; then
+    echo "ERROR: sha256 mismatch for the fork pacman package." >&2
+    echo "       expected: $LAMCO_FORK_PKG_SHA256" >&2
+    echo "       actual:   $actual_sha" >&2
+    echo "       The tag may have been re-pointed or the asset replaced. Pin the" >&2
+    echo "       new digest in the install script only after verifying the release." >&2
+    rm -f "$FORK_PKG_TMP"
+    exit 1
+fi
+echo "sha256 OK ($LAMCO_FORK_PKG_SHA256)"
+# Refresh the sync database (best-effort, matching the apt-get update on
+# the Debian path): a freshly installed guest has current DBs from its own
+# install, but a stale-DB guest gets "target not found" for the hard deps
+# otherwise. pacman -U then installs the verified file and resolves its
+# hard deps (glibc, pipewire, xdg-desktop-portal, ...) from the sync
+# repositories in one transaction.
+pacman -Sy --noconfirm >/dev/null 2>&1 || true
+if ! pacman -U --noconfirm "$FORK_PKG_TMP" 2>&1; then
+    echo "ERROR: pacman -U failed installing the fork pacman package." >&2
+    rm -f "$FORK_PKG_TMP"
+    exit 1
+fi
+rm -f "$FORK_PKG_TMP"
+
+# FORK IDENTITY (pacman lineage, same rationale as the dpkg check): pacman
+# must report EXACTLY 'name pkgver' with the pkgrel included —
+# 'lamco-rdp-server 1.4.5-hyperv6-1'.
+installed_status="install ok installed"
+installed_pkg_ver="$(pacman -Q lamco-rdp-server 2>/dev/null || true)"
+if [ "$installed_pkg_ver" != "lamco-rdp-server $LAMCO_FORK_PKG_VERSION" ]; then
+    echo "ERROR: installed lamco-rdp-server does not report the fork marker" >&2
+    echo "       'lamco-rdp-server $LAMCO_FORK_PKG_VERSION' in the pacman database (pacman says: '$installed_pkg_ver')." >&2
+    echo "       The pacman package may not have fully installed. Aborting — no" >&2
+    echo "       silent degradation." >&2
+    exit 1
+fi
+fi
 # PAYLOAD SANITY — the registered package must have delivered a binary that
-# executes and reports the pinned crate generation.
+# executes and reports the pinned crate generation. Both packages ship the
+# same /usr/bin/lamco-rdp-server built from the same tag.
 if ! /usr/bin/lamco-rdp-server --version 2>/dev/null | grep -aq " $LAMCO_FORK_CRATE_VERSION"; then
     echo "ERROR: installed binary /usr/bin/lamco-rdp-server does not run or does not" >&2
     echo "       report crate version '$LAMCO_FORK_CRATE_VERSION' (got: $(/usr/bin/lamco-rdp-server --version 2>/dev/null | head -1))." >&2
     exit 1
 fi
-echo "Installed fork deb lamco-rdp-server_${LAMCO_FORK_DEB_VERSION}_amd64 (dpkg reports '$installed_pkg_ver', binary reports '$LAMCO_FORK_CRATE_VERSION', sha256-verified download)."
+echo "Installed fork package lamco-rdp-server (package database reports '$installed_pkg_ver', binary reports '$LAMCO_FORK_CRATE_VERSION', sha256-verified download)."
 
 # -- Retire any preinstalled xrdp: lamco owns vsock:3389 --------------------
 # Kali's Hyper-V images bake xrdp in (apt history on the W37 image shows
@@ -232,16 +306,42 @@ if [ -z "$desktop" ]; then
         desktop="GNOME"
     elif [ -f /usr/share/wayland-sessions/plasma.desktop ] || [ -f /usr/share/xsessions/plasma.desktop ]; then
         desktop="KDE"
+    elif [ -f /usr/share/wayland-sessions/hyprland.desktop ] || [ -f /usr/share/wayland-sessions/hyprland-uwsm.desktop ] || command -v Hyprland >/dev/null 2>&1; then
+        desktop="Hyprland"
     fi
 fi
 
-DEBIAN_FRONTEND=noninteractive apt-get update -y 2>&1 || true
-DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    pipewire wireplumber xdg-desktop-portal \
-    python3-dbus \
-    $([ "$desktop" = "GNOME" ] && echo "xdg-desktop-portal-gnome") \
-    $([ "$desktop" = "KDE" ] && echo "xdg-desktop-portal-kde") \
-    2>&1 || true
+if is_debian_family; then
+    DEBIAN_FRONTEND=noninteractive apt-get update -y 2>&1 || true
+    DEBIAN_FRONTEND=noninteractive apt-get install -y \
+        pipewire wireplumber xdg-desktop-portal \
+        python3-dbus \
+        $([ "$desktop" = "GNOME" ] && echo "xdg-desktop-portal-gnome") \
+        $([ "$desktop" = "KDE" ] && echo "xdg-desktop-portal-kde") \
+        2>&1 || true
+else
+    if [ "$desktop" = "Hyprland" ]; then
+        portal_backend="xdg-desktop-portal-hyprland"
+    elif [ "$desktop" = "GNOME" ]; then
+        portal_backend="xdg-desktop-portal-gnome"
+    elif [ "$desktop" = "KDE" ]; then
+        portal_backend="xdg-desktop-portal-kde"
+    else
+        # Unknown compositor on the pacman lineage: the wlroots portal
+        # backend covers sway/generic-wlroots sessions.
+        portal_backend="xdg-desktop-portal-wlr"
+    fi
+    # --needed makes this idempotent: pipewire/xdg-desktop-portal are hard
+    # deps of the fork package itself and are already satisfied after
+    # pacman -U, so this mostly installs the portal BACKEND (an optdep that
+    # -U deliberately does not pull — Omarchy usually ships the hyprland
+    # backend already, but a plain Arch guest might not).
+    pacman -S --needed --noconfirm \
+        pipewire wireplumber xdg-desktop-portal \
+        python-dbus \
+        "$portal_backend" \
+        2>&1 || { echo "DEGRADED: pacman could not install the PipeWire/portal runtime deps."; DEGRADED=1; }
+fi
 
 # -- Generate TLS certificates ---------------------------------------------
 # The server requires cert.pem + key.pem to start. Try the shipped setup-certs
@@ -724,6 +824,35 @@ WantedBy=graphical-session.target
 GRANT_EOF
     chown "$AUTOLOGIN_USER" "$USER_HOME/.config/systemd/user/lamco-grant.service"
 
+    # -- Display resolution: force 1920x1080@60 ----------------------------
+    # The hyperv_drm driver reports 1024x768 as the preferred mode, which
+    # every compositor picks by default. The override is per-compositor.
+    if is_arch_family; then
+        # Hyprland (Omarchy / Arch): monitors.xml (mutter) and kscreen-doctor
+        # (KScreen/KWin) do not apply. Write a Hyprland monitor fragment and
+        # source it from the END of hyprland.conf so it wins over any
+        # distro-shipped rules. The empty-name rule is Hyprland's wildcard
+        # fallback for whatever connector name the kernel reports (Virtual-1
+        # or HyperV-1, depending on the hyperv_drm generation).
+        mkdir -p "$USER_HOME/.config/hypr"
+        cat > "$USER_HOME/.config/hypr/vmcreate-monitors.conf" << 'HYPR_MONITORS_EOF'
+# Installed by VMCreate install_lamco.sh — forced RDP resolution on Hyper-V.
+monitor = Virtual-1, 1920x1080@60, 0x0, 1
+monitor = , 1920x1080@60, auto, 1
+HYPR_MONITORS_EOF
+        chown "$AUTOLOGIN_USER" "$USER_HOME/.config/hypr/vmcreate-monitors.conf"
+        if [ -f "$USER_HOME/.config/hypr/hyprland.conf" ]; then
+            if ! grep -q 'vmcreate-monitors.conf' "$USER_HOME/.config/hypr/hyprland.conf"; then
+                printf '\nsource = %s\n' "$USER_HOME/.config/hypr/vmcreate-monitors.conf" >> "$USER_HOME/.config/hypr/hyprland.conf"
+                echo "Appended vmcreate-monitors.conf source line to hyprland.conf."
+            fi
+        else
+            printf 'source = %s\n' "$USER_HOME/.config/hypr/vmcreate-monitors.conf" > "$USER_HOME/.config/hypr/hyprland.conf"
+            chown "$AUTOLOGIN_USER" "$USER_HOME/.config/hypr/hyprland.conf"
+            echo "Created minimal hyprland.conf sourcing vmcreate-monitors.conf."
+        fi
+        echo "Created Hyprland monitor config for 1920x1080@60 resolution."
+    else
     # -- Create monitors.xml to force 1920x1080@60 resolution ------------
     # The hyperv_drm driver reports 1024x768 as the preferred mode, which
     # mutter/GNOME picks by default. This overrides it to 1920x1080.
@@ -771,6 +900,7 @@ MONITORS_EOF
         echo "Set KScreen resolution to 1920x1080@60 via kscreen-doctor."
     else
         echo "kscreen-doctor not found — KWin will use DRM default (1024x768)."
+    fi
     fi
 
     # -- Restart the service under the freshly installed binary ------------
@@ -976,6 +1106,10 @@ UNITEOF
     fi
 
     # -- KWin private-interface grant (zkde-screencast) ----------------------
+    # KWin-only; Hyprland does not gate screencast interfaces behind an
+    # executable allowlist, so this file is meaningless (though harmless)
+    # there.
+    if ! is_arch_family; then
     # KWin 6.x gates private Wayland interfaces behind an allowlist:
     # zkde_screencast_unstable_v1 is only advertised to clients whose
     # .desktop file lists it under X-KDE-Wayland-Interfaces (matched by the
@@ -1001,6 +1135,7 @@ DESKTOPEOF
             kbuildsycoca6 --noincremental 2>/dev/null || true
     fi
     echo "KWin private-interface grant installed (zkde_screencast_unstable_v1 for /usr/bin/lamco-rdp-server)."
+    fi
 
     # linger + enable (the service starts on next graphical-session target)
     loginctl enable-linger "$AUTOLOGIN_USER" 2>/dev/null || true
@@ -1041,6 +1176,9 @@ fi
 # journald burst raise (the old /etc/systemd/journald.conf.d/99-lamco-
 # ratelimit.conf) let the spam through at full rate and kept the journal
 # 90% spam.
+# The drop-in is KWin-only: Hyprland (Arch/pacman lineage) spam does not
+# exist, and plasma-kwin_wayland.service never runs there.
+if ! is_arch_family; then
 mkdir -p /etc/systemd/user/plasma-kwin_wayland.service.d
 cat > /etc/systemd/user/plasma-kwin_wayland.service.d/lamco-logfilter.conf << 'KWIN_LOGFILTER_EOF'
 [Service]
@@ -1050,10 +1188,11 @@ if [ -n "$AUTOLOGIN_USER" ] && command -v systemctl >/dev/null 2>&1; then
     sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
         systemctl --user daemon-reload 2>/dev/null || true
 fi
-# Remove a stale global override from older provisioning runs, so journald
-# defaults are restored.
-rm -f /etc/systemd/journald.conf.d/99-lamco-ratelimit.conf
 echo "Scoped kwin framebuffer log filter installed (journald defaults untouched)."
+fi
+# Remove a stale global override from older provisioning runs, so journald
+# defaults are restored (family-agnostic cleanup).
+rm -f /etc/systemd/journald.conf.d/99-lamco-ratelimit.conf
 
 echo "=== Lamco RDP Server install complete ==="
 # The one-time Portal consent is automated: lamco-grant.service runs

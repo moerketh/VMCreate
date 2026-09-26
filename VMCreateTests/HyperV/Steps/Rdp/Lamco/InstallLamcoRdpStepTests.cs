@@ -321,12 +321,14 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
-        public async Task ExecuteAsync_InstallsPinnedForkDeb_OnlyPath()
+        public async Task ExecuteAsync_InstallsPinnedForkPackage_OnlyPath()
         {
-            // The install path is EXACTLY ONE: the pinned fork deb, verified
-            // by sha256 before dpkg. There is no source-build fallback and no
-            // upstream fallback — a missing/re-pinned asset must fail the
-            // deployment loudly, never silently ship a stock binary.
+            // The install path is EXACTLY ONE per lineage: the pinned fork
+            // deb (dpkg/apt lineage) or the pinned fork pacman package
+            // (Arch lineage), each verified by sha256 before install. There
+            // is no source-build fallback and no upstream fallback — a
+            // missing/re-pinned asset must fail the deployment loudly, never
+            // silently ship a stock binary.
             string? captured = null;
             _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                   .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
@@ -362,6 +364,19 @@ namespace VMCreate.Tests.HyperV.Steps
                 "package must be in 'install ok installed' state — a half-configured or removed package fails");
             StringAssert.Contains(captured, "grep -aq \" $LAMCO_FORK_CRATE_VERSION\"",
                 "binary payload sanity gate: --version must report the pinned crate generation");
+            // Arch/pacman lineage: the same fork tag ships an amd64 pacman
+            // package; install_lamco.sh branches on is_arch_family and
+            // installs the sha256-verified download via pacman -U.
+            StringAssert.Contains(captured, "LAMCO_FORK_PKG_VERSION=\"1.4.5-hyperv6-1\"",
+                "fork pacman pkgver pinned in the script");
+            Assert.IsTrue(captured.Contains("LAMCO_FORK_PKG_SHA256=\"") && !captured.Contains("LAMCO_FORK_PKG_SHA256=\"PENDING"),
+                "fork pacman package sha256 pinned");
+            StringAssert.Contains(captured, "sha256sum \"$FORK_PKG_TMP\"",
+                "pacman package digest verified before pacman -U");
+            StringAssert.Contains(captured, "pacman -U --noconfirm \"$FORK_PKG_TMP\"",
+                "Arch lineage installs via pacman -U");
+            StringAssert.Contains(captured, "pacman -Q lamco-rdp-server",
+                "fork identity on the Arch lineage is read from the pacman database");
             // No fallback paths may exist
             Assert.IsFalse(captured.Contains("cargo build"), "no on-VM source build");
             Assert.IsFalse(captured.Contains("rustup"), "no curl|sh toolchain");
@@ -546,11 +561,12 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
-        public async Task ExecuteAsync_DistroGate_IsDebianFamilyOnly()
+        public async Task ExecuteAsync_DistroGate_IsDebOrPacmanFamilyOnly()
         {
-            // The pinned fork deb is amd64 Debian packaging; rpm/flatpak
-            // assets are not built for this lineage. A non-Debian distro must
-            // be rejected at the top of the script, not after a download.
+            // The pinned fork artifacts are amd64 Debian and Arch packaging;
+            // rpm/flatpak assets are not built for this lineage. A distro on
+            // neither lineage must be rejected at the top of the script, not
+            // after a download.
             string? captured = null;
             _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                   .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
@@ -559,8 +575,8 @@ namespace VMCreate.Tests.HyperV.Steps
             await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
 
             Assert.IsNotNull(captured);
-            StringAssert.Contains(captured, "is not Debian-family",
-                "non-Debian distros are refused with exit 1");
+            StringAssert.Contains(captured, "is neither Debian-family nor pacman-family",
+                "distros off both lineages are refused with exit 1");
             Assert.IsFalse(captured.Contains("dnf"), "no rpm package manager paths");
             Assert.IsFalse(captured.Contains("zypper"), "no rpm package manager paths");
             Assert.IsFalse(captured.Contains("flatpak install"), "no flatpak fallback");

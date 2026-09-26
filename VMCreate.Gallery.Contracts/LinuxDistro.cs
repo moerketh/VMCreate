@@ -23,10 +23,10 @@ namespace VMCreate
 
         /// <summary>
         /// pacman-family distributions (Arch, Athena Arch, Manjaro and other
-        /// ID_LIKE=arch derivatives). Not Lamco-capable yet: the fork pipeline
-        /// ships no pacman package, so Auto resolves these guests to xrdp.
-        /// Omarchy (Arch + Hyprland) uses this value to gate its unattended
-        /// cidata install path while the Lamco deb path still excludes it.
+        /// ID_LIKE=arch derivatives). Lamco-capable via the fork pipeline's
+        /// amd64 Arch pacman package (lamco-rdp-server-1.4.5-hyperv6-1),
+        /// which Omarchy (Arch + Hyprland) and Athena Arch install through
+        /// pacman -U.
         /// </summary>
         Arch,
 
@@ -48,20 +48,21 @@ namespace VMCreate
     {
         /// <summary>
         /// Returns true if the Lamco RDP Server backend is supported on this
-        /// distribution. The install path is a pinned amd64 Debian deb; the
-        /// fork release pipeline does not build rpm/flatpak assets for this
-        /// lineage. Kali is Debian-family (ID_LIKE=debian, dpkg/apt) and the
-        /// pinned deb path works there, including the Kali-KDE image whose
-        /// KDE/Plasma 6 desktop defaults to Wayland — the strongest Auto→Lamco
-        /// candidate. Fedora/openSUSE regain Lamco support when the fork
-        /// pipeline ships rpms for them; Arch likewise once the fork
-        /// pipeline ships a pacman package (Athena Arch included).
+        /// distribution. The install path is a pinned amd64 Debian deb on the
+        /// Debian lineage and a pinned amd64 Arch pacman package on the pacman
+        /// lineage (Omarchy, Athena Arch); the fork release pipeline does not
+        /// build rpm/flatpak assets for this lineage. Kali is Debian-family
+        /// (ID_LIKE=debian, dpkg/apt) and the pinned deb path works there,
+        /// including the Kali-KDE image whose KDE/Plasma 6 desktop defaults
+        /// to Wayland — the strongest Auto→Lamco candidate. Fedora/openSUSE
+        /// regain Lamco support when the fork pipeline ships rpms for them.
         /// </summary>
         public static bool SupportsLamco(this LinuxDistro distro) =>
             distro is LinuxDistro.Ubuntu
                 or LinuxDistro.Debian
                 or LinuxDistro.Parrot
-                or LinuxDistro.Kali;
+                or LinuxDistro.Kali
+                or LinuxDistro.Arch;
 
         /// <summary>
         /// Convenience overload: returns true when <see cref="GalleryItem.LinuxDistro"/>

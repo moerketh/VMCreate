@@ -12,14 +12,17 @@ namespace VMCreate.Tests.GalleryTests
     public sealed class LinuxDistroTests
     {
         [TestMethod]
-        public void SupportsLamco_TrueForDebianFamilyDistros()
+        public void SupportsLamco_TrueForDebAndPacmanFamilyDistros()
         {
-            // The Lamco install path is a pinned amd64 Debian deb; rpm distros
-            // are gated off until the fork pipeline ships rpms.
+            // The Lamco install path is a pinned amd64 Debian deb on the
+            // Debian lineage and a pinned amd64 pacman package on the Arch
+            // lineage (Omarchy Phase D shipped the fork's Arch package); rpm
+            // distros are gated off until the fork pipeline ships rpms.
             Assert.IsTrue(LinuxDistro.Ubuntu.SupportsLamco());
             Assert.IsTrue(LinuxDistro.Debian.SupportsLamco());
             Assert.IsTrue(LinuxDistro.Parrot.SupportsLamco());
             Assert.IsTrue(LinuxDistro.Kali.SupportsLamco());
+            Assert.IsTrue(LinuxDistro.Arch.SupportsLamco());
         }
 
         [TestMethod]
@@ -30,14 +33,12 @@ namespace VMCreate.Tests.GalleryTests
         }
 
         [TestMethod]
-        public void SupportsLamco_FalseForPacmanAndNixDistros()
+        public void SupportsLamco_FalseForNixDistros()
         {
-            // Arch (incl. Athena Arch): the fork pipeline ships no pacman
-            // package yet. NixOs (incl. Athena Nix / NixOS): declarative
-            // distro — no package-manager install path possible.
-            // Arch flips to supported when the fork pipeline ships an Arch
-            // package (Omarchy Phase D).
-            Assert.IsFalse(LinuxDistro.Arch.SupportsLamco());
+            // NixOs (incl. Athena Nix / NixOS): declarative distro — no
+            // package-manager install path possible. Arch-family distros
+            // ARE supported since the fork pipeline ships an amd64 pacman
+            // package (lamco-rdp-server-1.4.5-hyperv6-1; Omarchy Phase D).
             Assert.IsFalse(LinuxDistro.NixOs.SupportsLamco());
         }
 

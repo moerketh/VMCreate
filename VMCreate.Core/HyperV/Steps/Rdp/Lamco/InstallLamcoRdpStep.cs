@@ -7,7 +7,8 @@ namespace VMCreate
 {
     /// <summary>
     /// Installs and configures the Lamco RDP Server (Wayland-native RDP) on the
-    /// guest VM from a pinned fork release deb.
+    /// guest VM from a pinned fork release package (Debian deb or Arch pacman
+    /// package, matched to the guest's package-manager family).
     /// <para>
     /// Unlike xrdp (which installs via the external cloning-ISO chroot), Lamco
     /// installs post-boot over SSH. It is a Wayland-native server built on IronRDP
@@ -16,10 +17,11 @@ namespace VMCreate
     /// steps are skipped via <see cref="VmCustomizations.RdpBackend"/> gating).
     /// </para>
     /// <para>
-    /// The install path is exactly one: the pinned fork deb
+    /// The install path is exactly one per lineage: the pinned fork package
     /// (tag + version + sha256 pinned in <c>Scripts/install_lamco.sh</c>) from
     /// <c>github.com/moerketh/lamco-rdp-server/releases</c>, sha256-verified
-    /// before <c>dpkg -i</c>. There is no source-build fallback and no upstream
+    /// before <c>dpkg -i</c> (Debian family) or <c>pacman -U</c> (Arch/pacman
+    /// family: Omarchy, Athena Arch). There is no source-build fallback and no upstream
     /// fallback — a missing or re-pinned asset fails the deployment loudly
     /// rather than silently shipping a stock binary. After the install the
     /// script installs Portal/PipeWire runtime deps, generates TLS
@@ -30,14 +32,15 @@ namespace VMCreate
     /// <para>
     /// Gating: only runs when <see cref="VmCustomizations.RdpBackend"/> is
     /// <see cref="RdpBackend.Lamco"/> and the gallery item's
-    /// <see cref="GalleryItem.LinuxDistro"/> is Debian-family
-    /// (Ubuntu, Debian, Parrot) — the fork pipeline ships amd64 debs only.
+    /// <see cref="GalleryItem.LinuxDistro"/> is Lamco-capable
+    /// (Ubuntu, Debian, Parrot, Kali via the amd64 deb; Arch + derivatives
+    /// via the amd64 pacman package).
     /// </para>
     /// <para>
     /// Licensing: lamco-rdp-server is third-party software under the Business
     /// Source License 1.1 (c) Lamco Development LLC (Change Date 2029-06-01,
     /// converting to Apache-2.0; see THIRD-PARTY-NOTICES.md). VMCreate neither
-    /// bundles nor redistributes it — the pinned fork deb is downloaded at
+    /// bundles nor redistributes it — the pinned fork package is downloaded at
     /// deploy time and installed on the guest. Under the BSL Additional Use
     /// Grant, production use is free for a single server instance (one VM per
     /// OS environment), non-profit organizations, and non-commercial
@@ -92,8 +95,9 @@ namespace VMCreate
             }
 
             // Runtime distro re-verification: the gallery metadata is a HINT
-            // (some loaders scrape mirror pages); the pinned fork deb is
-            // Debian-family-only, so a mismatched hint must fail HERE rather
+            // (some loaders scrape mirror pages); the pinned fork package
+            // exists only for the Debian and pacman lineages, so a mismatched
+            // hint must fail HERE rather
             // than inside the root-run script after packages are half-staged.
             // DetectAsync distinguishes a verdict (Unknown = guest answered
             // but isn't Lamco-compatible) from no-verdict (null = the SSH read
@@ -119,7 +123,7 @@ namespace VMCreate
             if (detected == LinuxDistro.Unknown || !detected.Value.SupportsLamco())
             {
                 throw new InvalidOperationException(
-                    $"VM {shell.VmName} reports distro '{detected.Value}' from /etc/os-release at runtime — not a Lamco-supported (Debian-family) distro. " +
+                    $"VM {shell.VmName} reports distro '{detected.Value}' from /etc/os-release at runtime — not a Lamco-supported distro (no pinned fork package for this lineage). " +
                     "The gallery item's distro hint disagrees with the actual guest; aborting the Lamco install.");
             }
 

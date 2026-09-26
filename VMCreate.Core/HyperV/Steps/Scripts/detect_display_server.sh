@@ -6,8 +6,9 @@ set -o pipefail
 # login on this guest land on a Wayland session?
 #
 #   yes → the Wayland-native Lamco RDP Server is a candidate
-#         (AutoRdpBackendResolveStep additionally requires a Debian-family
-#          distro before committing to it)
+#         (AutoRdpBackendResolveStep additionally requires a Lamco-capable
+#          distro — Debian-family deb or Arch-family pacman — before
+#          committing to it)
 #   no  → xrdp (X11) is the only workable backend
 #
 # This is deliberately a STATIC capability check of the installed desktop

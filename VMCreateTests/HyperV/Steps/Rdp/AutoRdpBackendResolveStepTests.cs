@@ -88,16 +88,16 @@ namespace VMCreate.Tests.HyperV.Steps
 
             await _step.ExecuteAsync(_shell.Object, _lamcoCapableItem, c, _logger.Object, CancellationToken.None);
 
-            Assert.AreEqual(RdpBackend.Lamco, c.RdpBackend, "Wayland default + Debian-family distro → Lamco");
+            Assert.AreEqual(RdpBackend.Lamco, c.RdpBackend, "Wayland default + Lamco-capable distro → Lamco");
         }
 
         [TestMethod]
-        public async Task ExecuteAsync_WaylandOnOmarchy_ResolvesNone()
+        public async Task ExecuteAsync_WaylandOnOmarchy_ResolvesLamco()
         {
-            // Omarchy installs Arch + Hyprland (Wayland): not Lamco-capable,
-            // and xrdp cannot start the Hyprland session — resolving to Xrdp
-            // would install a server that never comes up. Gate: Wayland +
-            // Arch → None until a Hyprland-compatible backend lands.
+            // Omarchy installs Arch + Hyprland (Wayland). Since the fork
+            // pipeline ships the amd64 pacman package
+            // (lamco-rdp-server-1.4.5-hyperv6-1, built from the same tag as
+            // the deb), Arch is Lamco-capable: Wayland + Arch → Lamco.
             _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                   .ReturnsAsync("ID=omarchy\nID_LIKE=arch\n");
             SetupScriptOutput("RDP_DETECT=wayland");
@@ -107,8 +107,7 @@ namespace VMCreate.Tests.HyperV.Steps
 
             await _step.ExecuteAsync(_shell.Object, item, c, _logger.Object, CancellationToken.None);
 
-            Assert.AreEqual(RdpBackend.None, c.RdpBackend, "Wayland on a non-Lamco-capable Arch guest resolves to no RDP backend");
-            Assert.IsTrue(LoggedWarning(_logger), "the None resolution must be announced loudly");
+            Assert.AreEqual(RdpBackend.Lamco, c.RdpBackend, "Wayland on an Arch-lineage guest (Omarchy) resolves to Lamco via the fork pacman package");
         }
 
         [TestMethod]
@@ -157,8 +156,9 @@ namespace VMCreate.Tests.HyperV.Steps
         [TestMethod]
         public async Task ExecuteAsync_WaylandOnLamcoIncapableDistro_ResolvesXrdp()
         {
-            // Wayland alone is not enough: Lamco ships Debian-family debs
-            // only. Fedora/KDE is Wayland by default but not Lamco-capable.
+            // Wayland alone is not enough: the fork pipeline ships only the
+            // Debian deb and the Arch pacman package. Fedora/KDE is Wayland
+            // by default but not Lamco-capable (rpm lineage).
             SetupScriptOutput("RDP_DETECT=wayland");
             _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                   .ReturnsAsync("ID=fedora\n");
@@ -175,8 +175,8 @@ namespace VMCreate.Tests.HyperV.Steps
         {
             // Nix-family guests have no installable RDP backend at all:
             // post-boot installs through apt/dnf/zypper/pacman are
-            // structurally impossible on the nix store, and Lamco ships
-            // Debian-family debs only. Even a Wayland default — normally
+            // structurally impossible on the nix store, and the fork
+            // pipeline ships no nix package. Even a Wayland default — normally
             // a Lamco verdict — must not pick a backend nothing can
             // install: the resolver routes to None (console/SSH only)
             // with a loud warning rather than failing the deployment.

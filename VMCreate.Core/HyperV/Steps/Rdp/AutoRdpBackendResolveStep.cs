@@ -22,13 +22,14 @@ namespace VMCreate
     /// step decides post-boot:
     /// </para>
     /// <list type="bullet">
-    /// <item><b>Wayland default + Debian-family distro</b> →
+    /// <item><b>Wayland default + Lamco-capable distro</b> (Debian-family
+    /// deb or Arch-family pacman package) →
     /// <see cref="RdpBackend.Lamco"/> (Wayland-native; the right tool).</item>
     /// <item><b>Nix-family distro</b> (NixOS / Athena Nix — detected at
     /// runtime) → <see cref="RdpBackend.None"/>: no installable backend
     /// exists there (post-boot installs through a package manager are
-    /// structurally impossible on Nix; Lamco ships Debian-family debs
-    /// only), so xrdp is NOT a fallback for these guests. The deployment
+    /// structurally impossible on Nix; the fork pipeline ships no nix
+    /// package), so xrdp is NOT a fallback for these guests. The deployment
     /// deliberately ends without RDP (console/SSH only) with a loud
     /// warning, and <see cref="InstallXrdpPostBootStep"/> is gated off
     /// NixOs items for the same reason.</item>
@@ -108,9 +109,10 @@ namespace VMCreate
             }
 
             // ── 2. Confirm a Lamco-capable distro (runtime re-verification) ──
-            // Lamco ships Debian-family debs only; the gallery hint is not
+            // Lamco support is gated on the fork pipeline's pinned Debian
+            // deb / Arch pacman package; the gallery hint is not
             // trusted. DetectAsync distinguishes a verdict (Unknown = guest
-            // answered, not Debian-family) from no-verdict (null = SSH read
+            // answered, not Lamco-capable) from no-verdict (null = SSH read
             // failed; one retry for a transport hiccup). A no-verdict guest
             // routes to xrdp with a loud warning — Lamco would have no
             // business on a guest we cannot even read.
@@ -148,7 +150,7 @@ namespace VMCreate
             else if (detected == LinuxDistro.Unknown || !detected.Value.SupportsLamco())
             {
                 logger.LogInformation(
-                    "Auto-select RDP backend: VM {VMName} reports distro '{Distro}' — not Lamco-capable (Debian-family only). Lamco is excluded regardless of display server.",
+                    "Auto-select RDP backend: VM {VMName} reports distro '{Distro}' — not Lamco-capable (no pinned fork package for this lineage). Lamco is excluded regardless of display server.",
                     shell.VmName, detected.Value);
             }
 
@@ -160,15 +162,6 @@ namespace VMCreate
             RdpBackend resolved;
             if (detected == LinuxDistro.NixOs)
             {
-                resolved = RdpBackend.None;
-            }
-            else if (displayServer == "wayland" && detected == LinuxDistro.Arch)
-            {
-                // Wayland + not Lamco-capable (Arch/Omarchy): the xrdp verdict
-                // below cannot lift Hyprland into an xrdp session, so resolving
-                // to Xrdp would install a server that never comes up. Resolve
-                // to None for now — a Hyprland-compatible backend remains
-                // follow-up work.
                 resolved = RdpBackend.None;
             }
             else
@@ -197,13 +190,7 @@ namespace VMCreate
             else if (resolved == RdpBackend.None && detected == LinuxDistro.NixOs)
             {
                 logger.LogWarning(
-                    "Auto-select RDP backend: VM {VMName} runs {Distro} (NixOS / Athena Nix). Selected: NONE — no installable RDP backend exists on the nix store (package-manager post-boot installs are structurally impossible; Lamco ships Debian-family debs only; xrdp cannot be installed either). The VM is deployed console/SSH only; pick another distro if RDP is required.",
-                    shell.VmName, detected!.Value);
-            }
-            else if (resolved == RdpBackend.None)
-            {
-                logger.LogWarning(
-                    "Auto-select RDP backend: VM {VMName} reports a Wayland session on {Distro} (not Lamco-capable). xrdp cannot start a Hyprland session, so RDP is disabled for this deployment — console/SSH only until a Hyprland-compatible backend is integrated.",
+                    "Auto-select RDP backend: VM {VMName} runs {Distro} (NixOS / Athena Nix). Selected: NONE — no installable RDP backend exists on the nix store (package-manager post-boot installs are structurally impossible; the fork pipeline ships no nix package; xrdp cannot be installed either). The VM is deployed console/SSH only; pick another distro if RDP is required.",
                     shell.VmName, detected!.Value);
             }
             else

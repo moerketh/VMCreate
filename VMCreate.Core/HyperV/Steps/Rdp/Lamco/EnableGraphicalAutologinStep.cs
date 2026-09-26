@@ -18,7 +18,8 @@ namespace VMCreate
     /// needs the user logged in at the console — hence autologin ON.
     /// </para>
     /// <para>
-    /// Detects the active display manager at runtime (GDM, SDDM, or LightDM) and
+    /// Detects the active display manager at runtime (GDM, SDDM, LightDM, or
+    /// greetd — the Omarchy 4.x greeter on the Arch lineage) and
     /// configures autologin for the VM's initial user
     /// (<see cref="GalleryItem.InitialUsername"/>), selecting a Wayland session
     /// from <c>/usr/share/wayland-sessions/*.desktop</c>. Does not touch

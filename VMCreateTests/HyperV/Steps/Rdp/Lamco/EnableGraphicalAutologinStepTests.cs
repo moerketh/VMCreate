@@ -82,7 +82,12 @@ namespace VMCreate.Tests.HyperV.Steps
                     content.Contains("wayland-sessions") &&
                     content.Contains("AutomaticLogin") &&
                     content.Contains("enable-linger") &&
-                    content.Contains("99-lamco-autologin")),
+                    content.Contains("99-lamco-autologin") &&
+                    // greetd (Omarchy 4.x on Arch): [initial_session]
+                    // autologin block + Hyprland monitor fragment.
+                    content.Contains("has_greetd") &&
+                    content.Contains("[initial_session]") &&
+                    content.Contains("vmcreate-monitors.conf")),
                 It.Is<string>(p => p.StartsWith("/tmp/enable_autologin_") && p.EndsWith(".sh")),
                 It.IsAny<CancellationToken>()), Times.Once);
 

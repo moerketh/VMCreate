@@ -18,13 +18,17 @@ USER="__AUTOLOGIN_USER__"
 # later [ -d ] checks meaningless (SDDM and LightDM autologin files were
 # written on every guest regardless of what is installed). Only create the
 # config dir for a display manager that is actually present.
-has_sddm=0; has_lightdm=0; has_gdm=0
+has_sddm=0; has_lightdm=0; has_gdm=0; has_greetd=0
 { [ -d /etc/sddm.conf.d ] || [ -f /etc/sddm.conf ] || command -v sddm >/dev/null 2>&1; } && has_sddm=1
 { [ -d /etc/lightdm/lightdm.conf.d ] || [ -f /etc/lightdm/lightdm.conf ] || command -v lightdm >/dev/null 2>&1; } && has_lightdm=1
 { [ -d /etc/gdm3 ] || [ -f /etc/gdm3/custom.conf ] || command -v gdm3 >/dev/null 2>&1; } && has_gdm=1
 { [ -f /etc/gdm/custom.conf ] || command -v gdm >/dev/null 2>&1; } && has_gdm=1
-if [ "$has_sddm$has_lightdm$has_gdm" = "000" ]; then
-    echo "WARNING: no display manager detected (sddm/lightdm/gdm) — autologin cannot be configured."
+# greetd (Omarchy 4.x: greetd + tuigreet + UWSM autologin target; plain Arch
+# greetd setups): a shipped /etc/greetd/config.toml is the authoritative
+# signal; fall back to the daemon binary.
+{ [ -f /etc/greetd/config.toml ] || command -v greetd >/dev/null 2>&1; } && has_greetd=1
+if [ "$has_sddm$has_lightdm$has_gdm$has_greetd" = "0000" ]; then
+    echo "WARNING: no display manager detected (sddm/lightdm/gdm/greetd) — autologin cannot be configured."
     DEGRADED=1
 fi
 
@@ -65,7 +69,7 @@ loginctl enable-linger "$USER" 2>/dev/null || true
 # (The old $dm detection ran a sed that never matched hyphen-free unit paths
 # like sddm.service and was used only in an echo; it is gone. Branching is
 # done with the has_* flags computed at the top of the script.)
-echo "Display managers detected: sddm=$has_sddm lightdm=$has_lightdm gdm=$has_gdm"
+echo "Display managers detected: sddm=$has_sddm lightdm=$has_lightdm gdm=$has_gdm greetd=$has_greetd"
 
 # -- GDM (GNOME: Ubuntu, Debian-GNOME) -------------------------------------
 # Enable AutomaticLogin in /etc/gdm3/custom.conf or /etc/gdm/custom.conf.
@@ -114,12 +118,80 @@ if [ "$has_lightdm" = "1" ]; then
     echo "Configured LightDM autologin in /etc/lightdm/lightdm.conf.d/99-lamco-autologin.conf"
 fi
 
+# -- greetd (Omarchy 4.x on Arch: greetd + tuigreet + UWSM) -----------------
+# greetd autologin = an [initial_session] block in /etc/greetd/config.toml
+# that starts the session once at boot (greeter-less) as $USER; the
+# [default_session] greeter below it only runs when that session exits.
+# The session command is parsed out of the existing config when it is a
+# tuigreet-style `--cmd` argument, so a future Omarchy layout change to the
+# greeter line still yields the compositor the distro wanted. Fallbacks
+# cover Arch/UWSM conventions, then bare Hyprland.
+if [ "$has_greetd" = "1" ]; then
+    greetd_conf="/etc/greetd/config.toml"
+    session_cmd=""
+    if [ -f "$greetd_conf" ]; then
+        # tuigreet greeter form: command = "tuigreet --time --remember --cmd <session>"
+        session_cmd="$(grep -oE -- '--cmd[[:space:]]+"?[^"]+"?' "$greetd_conf" | head -1 | sed -E 's/^--cmd[[:space:]]+"?//; s/"$//')"
+    fi
+    if [ -z "$session_cmd" ]; then
+        if command -v uwsm >/dev/null 2>&1 && [ -f /usr/share/wayland-sessions/hyprland.desktop ]; then
+            session_cmd="uwsm start -- hyprland.desktop"
+        elif command -v Hyprland >/dev/null 2>&1; then
+            session_cmd="Hyprland"
+        elif [ -n "$wayland_session" ]; then
+            session_cmd="$wayland_session"
+        fi
+    fi
+    if [ -z "$session_cmd" ]; then
+        echo "WARNING: greetd detected but no session command derivable (no tuigreet --cmd, no uwsm/Hyprland, no wayland-sessions) — greetd autologin NOT configured."
+        DEGRADED=1
+    else
+        mkdir -p /etc/greetd
+        # Replace a stale [initial_session] (idempotent re-provisioning), then
+        # append a fresh block. sed range-delete, then TOML append, keeps the
+        # [default_session] greeter untouched.
+        if [ -f "$greetd_conf" ]; then
+            sed -i '/^\[initial_session\]/,/^\[/ { /^\[initial_session\]/d; /^\[/!d }' "$greetd_conf"
+        fi
+        {
+            printf '\n[initial_session]\n'
+            printf 'command = "%s"\n' "$session_cmd"
+            printf 'user = "%s"\n' "$USER"
+        } >> "$greetd_conf"
+        systemctl enable greetd.service >/dev/null 2>&1 || true
+        echo "Configured greetd autologin ([initial_session] command='$session_cmd' user='$USER')."
+    fi
+fi
+
 # -- Create monitors.xml to force 1920x1080@60 resolution -----------------
 # The hyperv_drm driver reports 1024x768 as the preferred mode. mutter/GNOME
 # reads monitors.xml to override the DRM preferred mode. KWin uses KScreen
 # config instead but falls through to DRM default without a config file.
 USER_HOME=$(getent passwd "$USER" | cut -d: -f6)
 if [ -n "$USER_HOME" ] && [ -d "$USER_HOME" ]; then
+    if [ "$has_greetd" = "1" ]; then
+        # Hyprland under greetd: monitors.xml (mutter) and a KDE autostart
+        # entry do not apply. Write a Hyprland monitor fragment and source it
+        # from the END of hyprland.conf so it wins over distro-shipped rules.
+        mkdir -p "$USER_HOME/.config/hypr"
+        cat > "$USER_HOME/.config/hypr/vmcreate-monitors.conf" << 'HYPR_MONITORS_EOF'
+# Installed by VMCreate enable_autologin.sh — forced RDP resolution on Hyper-V.
+monitor = Virtual-1, 1920x1080@60, 0x0, 1
+monitor = , 1920x1080@60, auto, 1
+HYPR_MONITORS_EOF
+        chown "$USER" "$USER_HOME/.config/hypr/vmcreate-monitors.conf" 2>/dev/null || true
+        if [ -f "$USER_HOME/.config/hypr/hyprland.conf" ]; then
+            if ! grep -q 'vmcreate-monitors.conf' "$USER_HOME/.config/hypr/hyprland.conf"; then
+                printf '\nsource = %s\n' "$USER_HOME/.config/hypr/vmcreate-monitors.conf" >> "$USER_HOME/.config/hypr/hyprland.conf"
+                echo "Appended vmcreate-monitors.conf source line to hyprland.conf."
+            fi
+        else
+            printf 'source = %s\n' "$USER_HOME/.config/hypr/vmcreate-monitors.conf" > "$USER_HOME/.config/hypr/hyprland.conf"
+            chown "$USER" "$USER_HOME/.config/hypr/hyprland.conf" 2>/dev/null || true
+            echo "Created minimal hyprland.conf sourcing vmcreate-monitors.conf."
+        fi
+        echo "Created Hyprland monitor config for 1920x1080@60 resolution."
+    else
     mkdir -p "$USER_HOME/.config"
     cat > "$USER_HOME/.config/monitors.xml" << 'MONITORS_EOF'
 <monitors>
@@ -173,8 +245,9 @@ KSCREEN_AUTOSTART_EOF
     else
         echo "kscreen-doctor not found — KWin will use DRM default (1024x768)."
     fi
+    fi
 else
-    echo "WARNING: no home directory for $USER (getent) — monitors.xml and the kscreen autostart are NOT installed."
+    echo "WARNING: no home directory for $USER (getent) — monitors.xml/Hyprland monitor config and the kscreen autostart are NOT installed."
     DEGRADED=1
 fi
 

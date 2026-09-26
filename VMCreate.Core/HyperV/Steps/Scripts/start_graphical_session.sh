@@ -69,10 +69,11 @@ if [ "$SESSION_ACTIVE" = "active" ]; then
 else
     # -- Resolve the display manager ----------------------------------------
     # display-manager.service is the systemd alias the DM installs
-    # (sddm/lightdm/gdm3); /etc/X11/default-display-manager is the
-    # Debian-family file the package writes. Check both: the alias is what
-    # systemctl restart accepts, the file is the fallback when the alias is
-    # missing (e.g. a DM installed but not enabled).
+    # (sddm/lightdm/gdm3; Arch's greetd package installs the same alias);
+    # /etc/X11/default-display-manager is the Debian-family file the package
+    # writes. Check both: the alias is what systemctl restart accepts, the
+    # file/binary is the fallback when the alias is missing (e.g. a DM
+    # installed but not enabled).
     DM_UNIT=""
     if systemctl cat display-manager.service >/dev/null 2>&1; then
         DM_UNIT="display-manager.service"
@@ -82,8 +83,17 @@ else
             /usr/bin/sddm|/usr/sbin/sddm)   DM_UNIT="sddm.service" ;;
             /usr/sbin/lightdm|/usr/bin/lightdm) DM_UNIT="lightdm.service" ;;
             /usr/sbin/gdm3|/usr/bin/gdm3)  DM_UNIT="gdm3.service" ;;
+            /usr/bin/greetd|/usr/sbin/greetd) DM_UNIT="greetd.service" ;;
             *) DM_UNIT="" ;;
         esac
+        if [ -z "$DM_UNIT" ]; then
+            # greetd on the Arch/pacman lineage writes no X11 file; detect the
+            # daemon itself. Restarting greetd re-runs its [initial_session]
+            # block, which is exactly the in-deploy autologin trigger.
+            if command -v greetd >/dev/null 2>&1; then
+                DM_UNIT="greetd.service"
+            fi
+        fi
     fi
     if [ -z "$DM_UNIT" ]; then
         echo "DEGRADED: no display manager found (no display-manager.service alias, /etc/X11/default-display-manager is '$(cat /etc/X11/default-display-manager 2>/dev/null || echo unset)') — cannot activate the session." >&2

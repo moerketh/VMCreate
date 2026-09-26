@@ -281,7 +281,10 @@ namespace VMCreate.Tests.GalleryTests
                 Assert.AreEqual("false", item.SecureBoot);
                 Assert.AreEqual("26.03", item.Version);
                 Assert.IsFalse(item.IsRecommended, $"Athena items must not be recommended: '{item.Name}'");
-                Assert.IsFalse(item.SupportsLamco(), $"Athena is not Lamco-capable: '{item.Name}'");
+                // The Arch Athena installs Lamco via the fork's pacman
+                // package; the Nix Athena has no installable backend.
+                Assert.AreEqual(item.LinuxDistro == LinuxDistro.Arch, item.SupportsLamco(),
+                    $"Lamco capability mismatch on '{item.Name}' (distro {item.LinuxDistro})");
                 Assert.IsFalse(string.IsNullOrEmpty(item.SymbolUri),
                     $"SymbolUri (embedded athena-logo.svg) missing on '{item.Name}'");
                 Assert.IsFalse(string.IsNullOrEmpty(item.ThumbnailUri),
