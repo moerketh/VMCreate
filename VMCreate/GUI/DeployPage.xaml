@@ -21,8 +21,8 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- Image card: selected gallery item -->
-        <Border Grid.Row="0" CornerRadius="8" Padding="12"
+        <!-- Image card: selected gallery item (one line; the VM spec lives in the right-hand card) -->
+        <Border Grid.Row="0" CornerRadius="8" Padding="12,8"
                 BorderThickness="1"
                 BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
                 Background="{DynamicResource ControlFillColorDefaultBrush}"
@@ -34,7 +34,7 @@
                 </Grid.ColumnDefinitions>
                 <Image Grid.Column="0"
                        Source="{Binding SelectedItem.SymbolUri, Converter={StaticResource ImageConverter}}"
-                       Width="48" Height="48" Margin="0,0,14,0"
+                       Width="40" Height="40" Margin="0,0,12,0"
                        VerticalAlignment="Center" Stretch="Uniform"/>
                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
                     <TextBlock Text="{Binding VmName}" FontSize="16" FontWeight="SemiBold"
@@ -45,27 +45,20 @@
                         <Run Text="{Binding SelectedItem.Publisher, Mode=OneWay}"/>
                         <Run Text="{Binding SelectedItemVersionText, Mode=OneWay}"/>
                     </TextBlock>
-                    <!-- Pre-deploy / deployment summary -->
-                    <ItemsControl ItemsSource="{Binding SummaryRows}" Margin="0,6,0,0">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <StackPanel Orientation="Horizontal" Margin="0,1">
-                                    <TextBlock Text="{Binding Label, StringFormat='{}{0}:'}" FontSize="12" Width="150"
-                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
-                                    <TextBlock Text="{Binding Value}" FontSize="12"
-                                               Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
-                                </StackPanel>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
                 </StackPanel>
             </Grid>
         </Border>
 
-        <!-- Phase cards -->
-        <ScrollViewer x:Name="PhaseScrollViewer" Grid.Row="1"
-                      VerticalScrollBarVisibility="Auto"
-                      Padding="0,0,0,4">
+        <!-- Phase cards (left) + VM spec card (right) -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <ScrollViewer x:Name="PhaseScrollViewer" Grid.Column="0"
+                          VerticalScrollBarVisibility="Auto"
+                          Padding="0,0,0,4">
             <ScrollViewer.Resources>
                 <Style TargetType="{x:Type ScrollBar}" BasedOn="{StaticResource WizardScrollBarStyle}"/>
             </ScrollViewer.Resources>
@@ -171,7 +164,34 @@
             <!-- Bottom spacer: ensures any card can be scrolled to the viewport top -->
             <Rectangle x:Name="BottomSpacer" Height="{Binding ActualHeight, ElementName=PhaseScrollViewer}" />
             </StackPanel>
-        </ScrollViewer>
+            </ScrollViewer>
+
+            <!-- VM spec card: pre-deploy summary beside the phase list -->
+            <Border Grid.Column="1" CornerRadius="8" Padding="14,10"
+                    BorderThickness="1"
+                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                    Background="{DynamicResource ControlFillColorDefaultBrush}"
+                    Margin="10,0,0,0"
+                    VerticalAlignment="Top"
+                    MinWidth="230">
+                <StackPanel>
+                    <TextBlock Text="VM Specifications" FontSize="13" FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,0,6"/>
+                    <ItemsControl ItemsSource="{Binding SummaryRows}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal" Margin="0,1">
+                                    <TextBlock Text="{Binding Label, StringFormat='{}{0}:'}" FontSize="12" Width="105"
+                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+                                    <TextBlock Text="{Binding Value}" FontSize="12" TextTrimming="CharacterEllipsis"
+                                               Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+        </Grid>
 
         <!-- Bottom action bar -->
         <Grid Grid.Row="2" Margin="0,10,0,0">
