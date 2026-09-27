@@ -57,7 +57,7 @@ namespace VMCreate
             catch (Exception ex)
             {
                 // Corrupt/migrated file: start from defaults rather than crashing the wizard.
-                _logger.LogDebug(ex, "Failed to load user preferences; using defaults.");
+                _logger.LogWarning(ex, "Failed to load user preferences; using defaults.");
                 return new UserPreferences();
             }
         }
@@ -68,10 +68,11 @@ namespace VMCreate
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(_filePath)!);
                 File.WriteAllText(_filePath, JsonSerializer.Serialize(prefs, JsonOptions));
+                _logger.LogInformation("UserPreferences saved to {Path}", _filePath);
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Failed to save user preferences.");
+                _logger.LogWarning(ex, "Failed to save user preferences to {Path}", _filePath);
             }
         }
     }
