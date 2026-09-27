@@ -43,7 +43,8 @@
                          AutomationProperties.Name="Gallery images">
                     <ListBox.ItemTemplate>
                         <DataTemplate>
-                            <Grid Margin="1">
+                            <Grid Margin="1"
+                                  AutomationProperties.Name="{Binding Name}">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="Auto"/>
@@ -96,12 +97,9 @@
             <StackPanel>
                 <Image Source="{Binding SelectedItem.ThumbnailUri, Converter={StaticResource ImageConverter}}"
                        Stretch="Uniform" MaxHeight="300" Margin="0,0,0,10"/>
-                <!-- Recommended / Security badges in detail panel -->
+                <!-- Security badge in detail panel (recommended is already starred in the list) -->
                 <StackPanel Orientation="Horizontal" Margin="5,0,0,6"
                             Visibility="{Binding SelectedItem.IsSecurity, Converter={StaticResource BoolToVis}}">
-                    <TextBlock Text="★ Recommended" Style="{StaticResource PillLabelStyleAccent}" VerticalAlignment="Center"
-                               Visibility="{Binding SelectedItem.IsRecommended, Converter={StaticResource BoolToVis}}"
-                               Margin="0,0,8,0"/>
                     <TextBlock Text="Security Distribution" Style="{StaticResource SecurityPillStyle}" VerticalAlignment="Center"
                                Margin="0"/>
                 </StackPanel>

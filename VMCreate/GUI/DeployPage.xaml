@@ -197,7 +197,7 @@
                         AutomationProperties.Name="Back to customize">
                     <StackPanel Orientation="Horizontal">
                         <ui:SymbolIcon Symbol="ChevronLeft24" Margin="0,0,4,0"/>
-                        <TextBlock Text="&lt; Back" VerticalAlignment="Center"/>
+                        <TextBlock Text="Back" VerticalAlignment="Center"/>
                     </StackPanel>
                 </Button>
             </StackPanel>
