@@ -367,8 +367,8 @@ namespace VMCreate.Tests.HyperV.Steps
             // Arch/pacman lineage: the same fork tag ships an amd64 pacman
             // package; install_lamco.sh branches on is_arch_family and
             // installs the sha256-verified download via pacman -U.
-            StringAssert.Contains(captured, "LAMCO_FORK_PKG_VERSION=\"1.4.5-hyperv6-1\"",
-                "fork pacman pkgver pinned in the script");
+            StringAssert.Contains(captured, "LAMCO_FORK_PKG_VERSION=\"1.4.5.hyperv6-1\"",
+                "fork pacman pkgver pinned in the script (dot, not hyphen — Arch pkgver grammar)");
             Assert.IsTrue(captured.Contains("LAMCO_FORK_PKG_SHA256=\"") && !captured.Contains("LAMCO_FORK_PKG_SHA256=\"PENDING"),
                 "fork pacman package sha256 pinned");
             StringAssert.Contains(captured, "sha256sum \"$FORK_PKG_TMP\"",

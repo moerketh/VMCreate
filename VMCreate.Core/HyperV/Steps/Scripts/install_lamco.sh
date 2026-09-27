@@ -28,18 +28,22 @@ LAMCO_FORK_DEB_VERSION="1.4.5-hyperv6"
 # lineage suffix — i.e. the BINARY deliberately reports only the base
 # version (verified on the pinned assets: /usr/bin/lamco-rdp-server
 # --version prints "lamco-rdp-server 1.4.5"), while dpkg reports
-# 1.4.5-hyperv6 and pacman reports 1.4.5-hyperv6-1 (the .PKGINFO pkgver —
-# same upstream version plus the pkgrel '-1'; keep the pins and this
-# sentence in step).
+# 1.4.5-hyperv6 and pacman reports 1.4.5.hyperv6-1 (the .PKGINFO pkgver —
+# same upstream version plus the pkgrel '-1'; Arch pkgver cannot contain
+# hyphens, hence the dot; keep the pins and this sentence in step).
 LAMCO_FORK_CRATE_VERSION="1.4.5"
 LAMCO_FORK_DEB_SHA256="8439c0a35d1cc89ee5d4e7ba1b1f771cdb1e6185d2e8f9be7239bd3481daaea6"
 LAMCO_FORK_DEB_URL="https://github.com/${LAMCO_FORK_REPO}/releases/download/${LAMCO_FORK_TAG}/lamco-rdp-server_${LAMCO_FORK_DEB_VERSION}_amd64.deb"
 # Same release, pacman packaging. Built by the same workflow from the same
 # tag and carrying the same binary payload; the .PKGINFO pkgver is
-# 1.4.5-hyperv6-1 (upstream version + pkgrel), so pacman -Q reports the
-# full "1.4.5-hyperv6-1" string.
-LAMCO_FORK_PKG_VERSION="1.4.5-hyperv6-1"
-LAMCO_FORK_PKG_SHA256="d66b900e055bc94e76f465c5d3d1631b4ef9c3f44dc571f26d1f05bb2f0ac4a3"
+# 1.4.5.hyperv6-1 (upstream version + pkgrel), so pacman -Q reports the
+# full "1.4.5.hyperv6-1" string. NOTE the DOT: Arch pkgver grammar forbids
+# hyphens (the pkgver-pkgrel split), and the original v1.4.5-hyperv.6 asset
+# shipped pkgver "1.4.5-hyperv6-1", which pacman rejects as "invalid
+# metadata" — every pacman-lineage install failed on it. The corrected
+# asset (same payload, fixed .PKGINFO) sits alongside the broken one.
+LAMCO_FORK_PKG_VERSION="1.4.5.hyperv6-1"
+LAMCO_FORK_PKG_SHA256="4e80022b04f15f7b66cee1f8453dc41a460cb2a89c5463f63dc0de381d489e59"
 LAMCO_FORK_PKG_URL="https://github.com/${LAMCO_FORK_REPO}/releases/download/${LAMCO_FORK_TAG}/lamco-rdp-server-${LAMCO_FORK_PKG_VERSION}-x86_64.pkg.tar.zst"
 
 # Result contract: 0 = ok, 1 = degraded (install completed with warnings —
