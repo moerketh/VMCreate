@@ -118,7 +118,7 @@
                     <Hyperlink NavigateUri="{Binding SelectedItem.DiskUri}"
                                RequestNavigate="DownloadLink_RequestNavigate"
                                ToolTip="{Binding SelectedItem.DiskUri}">
-                        <Run Text="View source" FontSize="12"/>
+                        <Run Text="Manual download" FontSize="12"/>
                     </Hyperlink>
                 </TextBlock>
                 <TextBlock Text="{Binding SelectedItem.Description, StringFormat='Description: {0}'}"
