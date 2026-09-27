@@ -834,15 +834,14 @@ GRANT_EOF
     if is_arch_family; then
         # Hyprland (Omarchy / Arch): monitors.xml (mutter) and kscreen-doctor
         # (KScreen/KWin) do not apply. Omarchy's Hyprland runs the LUA config
-        # (hyprland.lua requires hypr.monitors / hypr.autostart from
+        # (hyprland.lua requires hypr.monitors from
         # ~/.config/hypr/) — a classic hyprland.conf fragment is silently
         # IGNORED (verified on Omarchy 4.0.4: monitor stayed 1024x768 with a
-        # sourced vmcreate-monitors.conf). Two Lua edits do both jobs:
-        #  - monitors.lua: PREPEND a wildcard 1920x1080@60 scale-1 rule —
-        #    Hyprland monitor rules are first-match-wins, so ours beats the
-        #    preferred-mode wildcard Omarchy ships below it. The empty output
-        #    matches whatever connector the kernel reports (Virtual-1 or
-        #    HyperV-1, depending on the hyperv_drm generation).
+        # sourced vmcreate-monitors.conf). And Hyprland Lua monitor rules are
+        # LAST-WINS: prepending a rule does nothing while Omarchy's own
+        # wildcard (mode "preferred") sits below it (verified live: 1024x768
+        # until Omarchy's rule was neutralized, then 1920x1080 applied).
+        # The fix therefore REPLACES Omarchy's wildcard rule in-place.
         #  - autostart.lua: launch the lamco units at hyprland.start.
         #    graphical-session.target NEVER activates on Omarchy — its
         #    compiled start-hyprland runs Hyprland outside the uwsm session
@@ -857,13 +856,22 @@ GRANT_EOF
 
         MON_LUA="$USER_HOME/.config/hypr/monitors.lua"
         if [ -f "$MON_LUA" ]; then
-            if ! grep -q 'VMCreate: forced RDP resolution' "$MON_LUA"; then
-                sed -i '1i -- VMCreate: forced RDP resolution on Hyper-V (first match wins over the preferred-wildcard below)\nhl.monitor({ output = "", mode = "1920x1080@60", position = "auto", scale = 1 })\n' "$MON_LUA"
-                echo "Prepended 1920x1080@60 monitor rule to monitors.lua."
+            if grep -q 'VMCreate: forced RDP resolution' "$MON_LUA"; then
+                echo "monitors.lua already carries the VMCreate rule."
+            elif grep -qE '^hl\.monitor\(\{ output = "", mode = "preferred"' "$MON_LUA"; then
+                # Replace Omarchy's preferred-wildcard with our fixed mode —
+                # same slot in the rule order, so precedence is preserved.
+                sed -i 's|^hl\.monitor({ output = "", mode = "preferred", position = "auto", scale = omarchy_monitor_scale })|-- VMCreate: forced RDP resolution on Hyper-V (replaces the preferred-wildcard: last rule wins)\nhl.monitor({ output = "", mode = "1920x1080@60", position = "auto", scale = 1 })|' "$MON_LUA"
+                echo "Replaced Omarchy's preferred-mode wildcard with 1920x1080@60 in monitors.lua."
+            else
+                # No Omarchy wildcard found (customized file): append our
+                # rule at the END — last-wins makes it take effect.
+                printf '\n-- VMCreate: forced RDP resolution on Hyper-V (last rule wins)\nhl.monitor({ output = "", mode = "1920x1080@60", position = "auto", scale = 1 })\n' >> "$MON_LUA"
+                echo "Appended 1920x1080@60 rule to monitors.lua."
             fi
         else
             cat > "$MON_LUA" << 'MON_LUA_EOF'
--- VMCreate: forced RDP resolution on Hyper-V (first match wins).
+-- VMCreate: forced RDP resolution on Hyper-V.
 hl.monitor({ output = "", mode = "1920x1080@60", position = "auto", scale = 1 })
 MON_LUA_EOF
             chown "$AUTOLOGIN_USER" "$MON_LUA"
@@ -1233,6 +1241,125 @@ fi
 # Remove a stale global override from older provisioning runs, so journald
 # defaults are restored (family-agnostic cleanup).
 rm -f /etc/systemd/journald.conf.d/99-lamco-ratelimit.conf
+
+# -- Early vsock hold: satisfy vmms's boot-time availability probe ----------
+# THE POPUP BUG (repro'd on Omarchy 4.0.4, 2026-09-27): Hyper-V's VM
+# Management (vmms) probes the guest's vsock port 3389 exactly ONCE, ~0.2s
+# after the first service binds it following VM start (probe-catcher
+# journal: bind 21:03:44.643 -> empty ACCEPT from CID 2 at .820), and
+# caches the answer for the whole VM run. Only when that probe finds a
+# listener does vmconnect offer the Enhanced Session pop-up (the real RDP
+# X.224 connection comes later, at the user's OK click). On a fresh
+# deployment lamco starts with the GRAPHICAL session (+60s after boot) —
+# the probe hits nothing, vmconnect silently falls back to the basic
+# console, and no pop-up EVER appears no matter how many times the user
+# reconnects. Gallery images with a baked-in RDP server (Kali/Parrot:
+# xrdp→lamco listening from early boot) never hit this.
+#
+# Fix: a root-run early listener that binds vsock:3389 at multi-user.target
+# (well before the boot probe window) and answers availability probes by
+# accepting-and-closing. It exits the moment lamco-rdp-server starts (unit
+# conflict) — or when lamco binds: the holder re-binds in a 1s loop while
+# the port is taken, so after lamco's user service takes the listener the
+# holder simply parks and never steals the port back. If lamco later stops
+# (logout), the holder re-acquires the port so the NEXT boot probe or
+# vmconnect attempt still finds a listener.
+python3 - << 'PYUNIT'
+import os
+unit = """[Unit]
+Description=Lamco early vsock hold (vmms Enhanced Session availability probe)
+# Bind BEFORE the display manager so the listener exists when vmms's
+# post-boot availability probe fires (observed ~0.2s after first bind).
+After=network.target
+Before=display-manager.service sddm.service lightdm.service gdm.service
+# Yield to the real server: as soon as lamco's user unit starts, this
+# holder must not compete for the port.
+Conflicts=user@1000.service lamco-hold-stop.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/lamco-vsock-hold.py
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+"""
+script = """#!/usr/bin/env python3
+# Holds AF_VSOCK :3389 so vmms's boot-time Enhanced Session availability
+# probe finds a listener before the graphical session starts lamco proper
+# (observed: vmms probes ~0.2s after the first early-boot bind and caches
+# the answer for the VM run — only then does vmconnect offer the pop-up).
+# Availability probes are satisfied by accept+close. Hand-off: as soon as
+# lamco's user unit is active(ating), release the port and exit; lamco's
+# Restart=on-failure re-binds within seconds. If lamco is ALREADY holding
+# the port (deploy-time install), just exit.
+import socket
+import subprocess
+import time
+import sys
+
+USER = "omarchy"  # resolved by the installer via sed below
+
+def lamco_unit_state():
+    try:
+        out = subprocess.run(
+            ["systemctl", "--user", "-M", f"{USER}@", "is-active",
+             "lamco-rdp-server.service"],
+            capture_output=True, text=True, timeout=5).stdout.strip()
+        return out
+    except Exception:
+        return "unknown"
+
+s = socket.socket(socket.AF_VSOCK, socket.SOCK_STREAM)
+try:
+    s.bind((socket.VMADDR_CID_ANY, 3389))
+    s.listen(4)
+    s.settimeout(1.0)
+except OSError:
+    # Port already held (lamco running) — nothing to do.
+    sys.exit(0)
+
+while True:
+    state = lamco_unit_state()
+    if state in ("active", "activating"):
+        break  # hand off: close and let lamco (re)bind
+    try:
+        c, _ = s.accept()
+        c.close()  # availability probe satisfied
+    except socket.timeout:
+        pass
+    except OSError:
+        break
+    time.sleep(0.5)
+
+try:
+    s.close()
+except OSError:
+    pass
+"""
+os.makedirs("/usr/local/bin", exist_ok=True)
+with open("/usr/local/bin/lamco-vsock-hold.py", "w") as f:
+    f.write(script)
+os.chmod("/usr/local/bin/lamco-vsock-hold.py", 0o755)
+with open("/etc/systemd/system/lamco-vsock-hold.service", "w") as f:
+    f.write(unit)
+print("early vsock hold installed")
+PYUNIT
+# The holder needs the DESKTOP user for its systemctl --user -M probe; the
+# Python block above cannot see shell vars, so substitute after the write
+# (empty AUTLOGIN_USER degrades to 'omarchy' — the holder then exits early
+# on a port-conflict no-op, harmless).
+sed -i "s/^USER = .*/USER = \"${AUTOLOGIN_USER:-omarchy}\"/" /usr/local/bin/lamco-vsock-hold.py
+systemctl daemon-reload 2>/dev/null || true
+systemctl enable lamco-vsock-hold.service >/dev/null 2>&1 || true
+systemctl start lamco-vsock-hold.service 2>/dev/null || true
+sleep 1
+if ss -l 2>/dev/null | grep -q 'v_str.*3389'; then
+    echo "Early vsock hold active: vmms boot probe will find the listener (Enhanced Session pop-up available from first connect)."
+else
+    echo "DEGRADED: early vsock hold did not bind vsock:3389 (port held by the running lamco? — fine for THIS boot; the unit re-acquires on the next)."
+fi
 
 echo "=== Lamco RDP Server install complete ==="
 # The one-time Portal consent is automated: lamco-grant.service runs

@@ -174,19 +174,25 @@ if [ -n "$USER_HOME" ] && [ -d "$USER_HOME" ]; then
         # entry do not apply. Omarchy's Hyprland runs the LUA config —
         # hyprland.lua requires hypr.monitors from ~/.config/hypr/ — so a
         # classic hyprland.conf fragment is silently ignored (see
-        # install_lamco.sh for the full findings). Prepend a wildcard
-        # 1920x1080@60 rule to monitors.lua; first match wins over the
-        # distro's preferred-mode wildcard. Idempotent via marker grep.
+        # install_lamco.sh for the full findings). Hyprland Lua monitor
+        # rules are LAST-WINS: replace Omarchy's preferred-wildcard
+        # in-place (or append when absent) so the fixed mode actually
+        # applies. Idempotent via marker grep.
         mkdir -p "$USER_HOME/.config/hypr"
         MON_LUA="$USER_HOME/.config/hypr/monitors.lua"
         if [ -f "$MON_LUA" ]; then
-            if ! grep -q 'VMCreate: forced RDP resolution' "$MON_LUA"; then
-                sed -i '1i -- VMCreate: forced RDP resolution on Hyper-V (first match wins over the preferred-wildcard below)\nhl.monitor({ output = "", mode = "1920x1080@60", position = "auto", scale = 1 })\n' "$MON_LUA"
-                echo "Prepended 1920x1080@60 monitor rule to monitors.lua."
+            if grep -q 'VMCreate: forced RDP resolution' "$MON_LUA"; then
+                echo "monitors.lua already carries the VMCreate rule."
+            elif grep -qE '^hl\.monitor\(\{ output = "", mode = "preferred"' "$MON_LUA"; then
+                sed -i 's|^hl\.monitor({ output = "", mode = "preferred", position = "auto", scale = omarchy_monitor_scale })|-- VMCreate: forced RDP resolution on Hyper-V (replaces the preferred-wildcard: last rule wins)\nhl.monitor({ output = "", mode = "1920x1080@60", position = "auto", scale = 1 })|' "$MON_LUA"
+                echo "Replaced Omarchy's preferred-mode wildcard with 1920x1080@60 in monitors.lua."
+            else
+                printf '\n-- VMCreate: forced RDP resolution on Hyper-V (last rule wins)\nhl.monitor({ output = "", mode = "1920x1080@60", position = "auto", scale = 1 })\n' >> "$MON_LUA"
+                echo "Appended 1920x1080@60 rule to monitors.lua."
             fi
         else
             cat > "$MON_LUA" << 'MON_LUA_EOF'
--- VMCreate: forced RDP resolution on Hyper-V (first match wins).
+-- VMCreate: forced RDP resolution on Hyper-V.
 hl.monitor({ output = "", mode = "1920x1080@60", position = "auto", scale = 1 })
 MON_LUA_EOF
             chown "$USER" "$MON_LUA" 2>/dev/null || true
