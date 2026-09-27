@@ -39,7 +39,14 @@ namespace VMCreate
         // the wait still polls IP + SSH every ~5s, so a fast guest connect
         // is detected immediately.
         private static readonly TimeSpan ReadyTimeout = TimeSpan.FromSeconds(600);
-        private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(120);
+        // 2026-09-27: 120s proved too tight for legitimate guest work —
+        // remove_vmware.sh runs `mkinitcpio -P`, which regenerates EVERY
+        // preset and measured >6 min on a 2-vCPU Omarchy guest; the timeout
+        // killed a healthy deploy mid-script. Dead sessions no longer need a
+        // short timeout to fail fast: ServerAlive keepalives (5s×3) kill
+        // black-holed connections in ~15s, so this budget only bounds
+        // slow-but-live commands. Matches ReadyTimeout/ISO shutdown budget.
+        private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(600);
         private const int MaxRetries = 3;
         private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(5);
 
