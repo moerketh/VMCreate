@@ -70,6 +70,14 @@ namespace VMCreate
             }
             args.Append("-o BatchMode=yes ");
             args.Append("-o ConnectTimeout=10 ");
+            // ServerAlive keepalives: a guest whose IP changed mid-pipeline (e.g.
+            // a NetworkManager restart re-DHCPing the interface) black-holes the
+            // TCP session — packets go into the void with no RST, and ssh.exe
+            // would otherwise sit until the host-side timeout. Three missed
+            // 5s probes terminate the client in ~15s so the transport-error
+            // retry path (nulls the IP, re-discovers, reconnects) can run.
+            args.Append("-o ServerAliveInterval=5 ");
+            args.Append("-o ServerAliveCountMax=3 ");
             args.Append($"{username}@{vmIpAddress} ");
             args.Append($"bash -c {EscapeForSsh(linuxCommand)}");
             return args.ToString();

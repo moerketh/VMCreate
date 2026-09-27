@@ -320,9 +320,23 @@ namespace VMCreate
                 {
                     _logger.LogWarning("SSH transport error during copy to {GuestPath} (attempt {Attempt}/{Max}); restarting the transfer from scratch: {Message}",
                         guestPath, attempt, maxCopyAttempts, ex.Message);
+
+                    // Same changed-IP gate as RunWithRetryAsync: a copy is
+                    // chunk-append idempotent only when it restarts on a NEW
+                    // address; retrying the same dead session against the
+                    // same IP just burns the attempts.
+                    string? previousIp = _vmIpAddress;
                     _vmIpAddress = null;
                     await Task.Delay(RetryDelay, ct);
                     _vmIpAddress = await DiscoverVmIpAsync(ct);
+                    if (_vmIpAddress is not null && previousIp is not null
+                        && _vmIpAddress == previousIp
+                        && ex is TimeoutException)
+                    {
+                        _logger.LogWarning("Copy to {GuestPath} timed out but VM {VMName} still at {Ip}; not retrying",
+                            guestPath, VmName, previousIp);
+                        throw;
+                    }
                 }
                 finally
                 {
@@ -370,28 +384,55 @@ namespace VMCreate
                     lastEx = ex;
                     _logger.LogWarning("SSH transport error on attempt {Attempt}/{Max}, retrying in {Delay}s: {Message}",
                         attempt, MaxRetries, RetryDelay.TotalSeconds, ex.Message);
+
+                    // On a host-side command timeout the guest may simply be
+                    // busy — only retry when re-discovery actually yields a
+                    // DIFFERENT address (the lease changed mid-pipeline, e.g.
+                    // NetworkManager restarting for a VPN plugin install).
+                    // Re-running a merely slow command against the same IP
+                    // could duplicate guest-side side effects.
+                    string? previousIp = _vmIpAddress;
                     _vmIpAddress = null;
                     await Task.Delay(RetryDelay, ct);
                     _vmIpAddress = await DiscoverVmIpAsync(ct);
+                    if (_vmIpAddress is not null && previousIp is not null
+                        && _vmIpAddress == previousIp
+                        && ex is TimeoutException)
+                    {
+                        _logger.LogWarning("Command timed out but VM {VMName} still at {Ip}; not retrying (likely a slow command, not a dead session)",
+                            VmName, previousIp);
+                        throw;
+                    }
                 }
             }
             throw lastEx!;
         }
 
-        private static bool IsSshTransportError(Exception ex)
+        internal static bool IsSshTransportError(Exception ex)
         {
             for (var e = ex; e != null; e = e.InnerException)
             {
+                // Host-side command timeout: the session may be black-holed by
+                // a mid-pipeline IP change (see ExecuteAsync) — the retry path
+                // re-discovers and decides there.
+                if (e is TimeoutException)
+                    return true;
                 string msg = e.Message;
                 if (msg.Contains("SSH transport process has abruptly terminated")
                     || msg.Contains("SSH client session has ended")
                     || msg.Contains("remote session to break")
                     || msg.Contains("broken pipe", StringComparison.OrdinalIgnoreCase)
                     || msg.Contains("closed by remote host", StringComparison.OrdinalIgnoreCase)
-                    || msg.Contains("Connection reset", StringComparison.OrdinalIgnoreCase))
+                    || msg.Contains("Connection reset", StringComparison.OrdinalIgnoreCase)
+                    // ServerAlive keepalive exhaustion: ssh exits 255 with
+                    // "Timeout, server not responding" — the signature of a
+                    // session black-holed by a mid-pipeline IP change.
+                    || msg.Contains("server not responding", StringComparison.OrdinalIgnoreCase)
+                    || msg.Contains("connection timed out", StringComparison.OrdinalIgnoreCase)
+                    || msg.Contains("connection refused", StringComparison.OrdinalIgnoreCase))
                     return true;
             }
-            return false;
+        return false;
         }
 
         private async Task<string> RunCommandInternalAsync(string linuxCommand, TimeSpan timeout, CancellationToken ct)

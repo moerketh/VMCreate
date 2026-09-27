@@ -53,6 +53,10 @@ namespace VMCreate.Tests.HyperV
             // BatchMode (never prompt), ConnectTimeout 10s, key file, target.
             StringAssert.Contains(args, "-o BatchMode=yes");
             StringAssert.Contains(args, "-o ConnectTimeout=10");
+            // ServerAlive keepalives: black-holed sessions (mid-pipeline IP
+            // change) must die in ~15s, not sit for the whole command timeout.
+            StringAssert.Contains(args, "-o ServerAliveInterval=5");
+            StringAssert.Contains(args, "-o ServerAliveCountMax=3");
             StringAssert.Contains(args, $"-i \"{KeyPath}\"");
             StringAssert.Contains(args, $" {User}@{VmIp} ");
         }
@@ -427,6 +431,29 @@ namespace VMCreate.Tests.HyperV
             Assert.AreEqual("00155DB7346A", SshTransport.NormalizeMacAddress("00155DB7346A"));
             Assert.AreEqual("", SshTransport.NormalizeMacAddress(null));
             Assert.AreEqual("", SshTransport.NormalizeMacAddress(""));
+        }
+
+        [TestMethod]
+        public void IsSshTransportError_ClassifiesTimeoutAndKeepaliveDeaths()
+        {
+            // Host-side command timeout: may be a black-holed session after a
+            // mid-pipeline IP change — must reach the retry+re-discovery path.
+            Assert.IsTrue(SshGuestShell.IsSshTransportError(
+                new TimeoutException("SSH command timed out after 120s on VM 'x'")));
+
+            // ssh exit 255 signatures of keepalive exhaustion / dead peer.
+            Assert.IsTrue(SshGuestShell.IsSshTransportError(
+                new Exception("SSH command failed (exit code 255) on VM 'x': Timeout, server not responding.")));
+            Assert.IsTrue(SshGuestShell.IsSshTransportError(
+                new Exception("ssh: connect to host 172.23.180.227 port 22: Connection refused")));
+            Assert.IsTrue(SshGuestShell.IsSshTransportError(
+                new Exception("ssh: connect to host 172.23.180.227 port 22: Connection timed out")));
+
+            // Guest-side failures are NOT transport errors — no retry.
+            Assert.IsFalse(SshGuestShell.IsSshTransportError(
+                new Exception("SSH command failed (exit code 1) on VM 'x': bash: oops: command not found")));
+            Assert.IsFalse(SshGuestShell.IsSshTransportError(
+                new InvalidOperationException("VM IP address not discovered yet.")));
         }
 
         [TestMethod]
