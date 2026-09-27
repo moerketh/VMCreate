@@ -26,6 +26,8 @@ namespace VMCreate
         private readonly IHtbApiClient _htbApiClient;
         private readonly IEnumerable<IConfigurableCustomizationStep> _configurableSteps;
         private readonly IEnumerable<IDesktopEnvironmentCatalog> _desktopCatalogs;
+        private readonly UserPreferencesStore _prefsStore;
+        private readonly UserPreferences _prefs;
         private WizardData? _wizardData;
 
         public MainWindow(
@@ -50,8 +52,20 @@ namespace VMCreate
             Title = $"New Virtual Machine Wizard — v{ProductInfo.Version}";
             VersionLabel.Text = $"v{ProductInfo.Version} \u2014 {ProductInfo.CodeName}";
 
-            // Follow the Windows system theme by default
-            SystemThemeWatcher.Watch(this);
+            // Apply persisted preferences: theme (explicit choice wins over following the
+            // Windows system theme) and window size.
+            _prefsStore = new UserPreferencesStore(_logger);
+            _prefs = _prefsStore.Load();
+
+            if (_prefs.Theme.Equals("Dark", StringComparison.OrdinalIgnoreCase))
+                ApplicationThemeManager.Apply(ApplicationTheme.Dark, WindowBackdropType.Mica, true);
+            else if (_prefs.Theme.Equals("Light", StringComparison.OrdinalIgnoreCase))
+                ApplicationThemeManager.Apply(ApplicationTheme.Light, WindowBackdropType.Mica, true);
+            else
+                SystemThemeWatcher.Watch(this); // follow the Windows system theme
+
+            Width = ClampSize(_prefs.WindowWidth, MinWidth, SystemParameters.PrimaryScreenWidth, 1050);
+            Height = ClampSize(_prefs.WindowHeight, MinHeight, SystemParameters.PrimaryScreenHeight, 720);
 
             Loaded += MyWindow_LoadedAsync;
             // First-frame milestone, then kick off the background PowerShell
@@ -68,6 +82,14 @@ namespace VMCreate
             SyncThemeIcon();
 
             _mainFrame.Navigated += (_, __) => UpdateStepIndicator();
+        }
+
+        /// <summary>Clamps a persisted window dimension to a sane on-screen range.</summary>
+        private static double ClampSize(double value, double min, double max, double fallback)
+        {
+            if (double.IsNaN(value) || double.IsInfinity(value) || value <= 0)
+                return fallback;
+            return Math.Clamp(value, min, Math.Max(min, max));
         }
 
         private void ShowBanner(string message, bool isError)
@@ -87,7 +109,20 @@ namespace VMCreate
                 ? ApplicationTheme.Light
                 : ApplicationTheme.Dark;
             ApplicationThemeManager.Apply(next, WindowBackdropType.Mica, true);
+            _prefs.Theme = next == ApplicationTheme.Dark ? "Dark" : "Light";
+            SavePreferences();
             SyncThemeIcon();
+        }
+
+        private void SavePreferences()
+        {
+            // RestoreBounds/ActualWidth are device-dependent; guard against minimized state.
+            if (WindowState == WindowState.Normal)
+            {
+                _prefs.WindowWidth = ActualWidth;
+                _prefs.WindowHeight = ActualHeight;
+            }
+            _prefsStore.Save(_prefs);
         }
 
         private void SyncThemeIcon()
@@ -110,6 +145,10 @@ namespace VMCreate
             Step3Panel.Visibility = skipCustomize ? Visibility.Collapsed : Visibility.Visible;
             Step3Separator.Visibility = skipCustomize ? Visibility.Collapsed : Visibility.Visible;
 
+            // A failed deployment marks the Deploy step in the indicator (stays failed while
+            // navigating back to fix settings; cleared when a fresh deployment starts).
+            bool deployFailed = page is DeployPage { ViewModel.HasFailed: true };
+
             // When Customize is skipped, renumber: Configure→2, Deploy→3.
             int activeStep = page switch
             {
@@ -120,29 +159,39 @@ namespace VMCreate
                 _ => 0
             };
 
-            SetStepStyle(Step1Icon, Step1Text, SymbolRegular.Image24, activeStep == 1, activeStep > 1);
-            SetStepStyle(Step2Icon, Step2Text, SymbolRegular.Settings24, activeStep == 2, activeStep > 2);
+            SetStepStyle(Step1Icon, Step1Text, Step1ActiveBar, SymbolRegular.Image24, activeStep == 1, activeStep > 1, false);
+            SetStepStyle(Step2Icon, Step2Text, Step2ActiveBar, SymbolRegular.Settings24, activeStep == 2, activeStep > 2, false);
 
             if (!skipCustomize)
             {
-                SetStepStyle(Step3Icon, Step3Text, SymbolRegular.Wrench24, activeStep == 3, activeStep > 3);
-                SetStepStyle(Step4Icon, Step4Text, SymbolRegular.Rocket24, activeStep == 4, false);
+                SetStepStyle(Step3Icon, Step3Text, Step3ActiveBar, SymbolRegular.Wrench24, activeStep == 3, activeStep > 3, false);
+                SetStepStyle(Step4Icon, Step4Text, Step4ActiveBar, SymbolRegular.Rocket24, activeStep == 4, false, deployFailed);
             }
             else
             {
                 // Deploy is the last step when Customize is hidden
-                SetStepStyle(Step4Icon, Step4Text, SymbolRegular.Rocket24, activeStep == 3, false);
+                SetStepStyle(Step4Icon, Step4Text, Step4ActiveBar, SymbolRegular.Rocket24, activeStep == 3, false, deployFailed);
             }
         }
 
         private static void SetStepStyle(
-            SymbolIcon icon, System.Windows.Controls.TextBlock text,
-            SymbolRegular defaultSymbol, bool active, bool completed)
+            SymbolIcon icon, System.Windows.Controls.TextBlock text, System.Windows.Controls.Border activeBar,
+            SymbolRegular defaultSymbol, bool active, bool completed, bool failed)
         {
-            string brushKey = (active || completed) ? "AccentTextBrush" : "TextFillColorPrimaryBrush";
+            string brushKey = failed
+                ? "SystemFillColorCriticalBrush"
+                : active ? "TextFillColorPrimaryBrush"
+                : completed ? "SystemFillColorSuccessBrush"
+                : "TextFillColorSecondaryBrush";
 
-            icon.Symbol = completed ? SymbolRegular.CheckmarkCircle24 : defaultSymbol;
+            icon.Symbol = failed ? SymbolRegular.DismissCircle24
+                : completed ? SymbolRegular.CheckmarkCircle24
+                : defaultSymbol;
             text.FontWeight = active ? FontWeights.SemiBold : FontWeights.Normal;
+
+            activeBar.Visibility = (active || failed) ? Visibility.Visible : Visibility.Collapsed;
+            activeBar.SetResourceReference(System.Windows.Controls.Border.BackgroundProperty,
+                failed ? "SystemFillColorCriticalBrush" : "AccentTextBrush");
 
             // SetResourceReference creates a live link that updates on theme change.
             icon.SetResourceReference(SymbolIcon.ForegroundProperty, brushKey);
@@ -230,6 +279,7 @@ namespace VMCreate
 
         protected override void OnClosed(EventArgs e)
         {
+            SavePreferences();
             _galleryCts?.Cancel();
             _galleryCts?.Dispose();
             base.OnClosed(e);
@@ -293,11 +343,13 @@ namespace VMCreate
 
                 var deployPage = _deployPageFactory(_wizardData!);
                 deployPage.WizardCompleted += WizardPage_Completed;
+                deployPage.DeploymentFailed += (_, __) => UpdateStepIndicator();
                 _mainFrame.Navigate(deployPage);
 
-                // Remove back-stack entries so the user can't navigate back during deployment.
-                while (_mainFrame.CanGoBack)
-                    _mainFrame.RemoveBackEntry();
+                // Keep the back stack so DeployPage.OnBackToCustomize (Retry / Back) can
+                // return to Customize with settings preserved. Unloading DeployPage cancels
+                // any in-flight deployment via Cleanup(), so a live deployment is never left
+                // running when the user navigates back.
             }
         }
     }

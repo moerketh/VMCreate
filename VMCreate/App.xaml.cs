@@ -26,6 +26,9 @@ namespace VMCreate
         /// <summary>When true, VMConnect is launched automatically after the VM starts.</summary>
         internal static bool DemoMode { get; private set; }
 
+        /// <summary>Path of the rolling plaintext log written by the main Serilog sink.</summary>
+        internal static readonly string LogFilePath = Path.Combine(Path.GetTempPath(), "VMCreate.log");
+
         // ── Startup timing (permanent, always-on) ─────────────────────────
         // Started before any DI construction; milestones are logged at
         // Information so a normal run's log answers "what took so long"
@@ -101,7 +104,7 @@ namespace VMCreate
             DemoMode = e.Args != null && e.Args.Any(a =>
                 a.Equals("/demo", StringComparison.OrdinalIgnoreCase)
                 || a.Equals("--demo", StringComparison.OrdinalIgnoreCase));
-            var logPath = Path.Combine(Path.GetTempPath(), "VMCreate.log");
+            var logPath = LogFilePath;
             // SECURITY: this is a PLAINTEXT rolling log in %TEMP%. The
             // previous MinimumLevel.Debug() floor captured every SSH command
             // line — including CopyContentAsync base64 chunks that embed VPN
