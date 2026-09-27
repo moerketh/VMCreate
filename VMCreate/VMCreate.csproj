@@ -28,16 +28,12 @@
     <Compile Include="Gallery\ImageSourceConverter.cs" />
     <Compile Include="Gallery\DateStringConverter.cs" />
     <Compile Include="GUI\MainWindow.xaml.cs" />
-    <Compile Include="GUI\ProgressWindow.xaml.cs">
-      <DependentUpon>ProgressWindow.xaml</DependentUpon>
-  	  <SubType>Code</SubType>
-    </Compile>
+    <Compile Include="GUI\HostCapabilities.cs" />
+    <Compile Include="GUI\UserPreferences.cs" />
     <Compile Include="GUI\SelectImagePage.xaml.cs">
     <DependentUpon>SelectImagePage.xaml</DependentUpon>
   	  <SubType>Code</SubType>
     </Compile>
-    <Compile Include="GUI\SuccessWindow.xaml.cs" />
-
     <Compile Include="GUI\VmSettingsPage.xaml.cs">
       <DependentUpon>VmSettingsPage.xaml</DependentUpon>
   	  <SubType>Code</SubType>
@@ -57,6 +53,7 @@
     <Compile Include="GUI\ViewModels\DeploymentPhase.cs" />
     <Compile Include="GUI\ViewModels\DeployPageViewModel.cs" />
     <Compile Include="GUI\ViewModels\DeployPageConverters.cs" />
+    <Compile Include="GUI\ViewModels\FileTypeConverters.cs" />
     <Compile Include="GUI\DeployPage.xaml.cs">
       <DependentUpon>DeployPage.xaml</DependentUpon>
       <SubType>Code</SubType>
@@ -97,13 +94,7 @@
     <Page Include="GUI\MainWindow.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
-    <Page Include="GUI\ProgressWindow.xaml">
-      <Generator>MSBuild:Compile</Generator>
-    </Page>
     <Page Include="GUI\SelectImagePage.xaml">
-      <Generator>MSBuild:Compile</Generator>
-    </Page>
-    <Page Include="GUI\SuccessWindow.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
     <Page Include="GUI\VmCustomizationPage.xaml">

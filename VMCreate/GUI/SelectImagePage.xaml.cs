@@ -45,6 +45,24 @@ namespace VMCreate
             nextPage.WizardCompleted += (s, args) => WizardCompleted?.Invoke(s, args);
             NavigationService.Navigate(nextPage);
         }
+
+        /// <summary>Opens the disk image source URL externally instead of navigating the frame.</summary>
+        private void DownloadLink_RequestNavigate(object sender, System.Windows.Navigation.RequestNavigateEventArgs e)
+        {
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(e.Uri.AbsoluteUri)
+                {
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex)
+            {
+                _loggerFactory.CreateLogger<SelectImagePage>()
+                    .LogDebug(ex, "Failed to open download URL {Uri}", e.Uri);
+            }
+            e.Handled = true;
+        }
     }
 
     public class WizardResultEventArgs : EventArgs

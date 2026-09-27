@@ -4,6 +4,7 @@
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         xmlns:local="clr-namespace:VMCreate"
         Title="New Virtual Machine Wizard" Height="720" Width="1050"
+        MinWidth="760" MinHeight="560"
         ExtendsContentIntoTitleBar="True"
         WindowBackdropType="Mica">
     <Grid>
@@ -31,27 +32,43 @@
         <!-- Wizard step indicator -->
         <Border Grid.Row="1" Padding="16,8" Background="{DynamicResource ControlFillColorDefaultBrush}">
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                <StackPanel x:Name="Step1Panel" Orientation="Horizontal" Margin="0,0,6,0">
-                    <ui:SymbolIcon x:Name="Step1Icon" Symbol="Image24" FontSize="16" Margin="0,0,4,0"/>
-                    <TextBlock x:Name="Step1Text" Text="Select Image" VerticalAlignment="Center" FontSize="13" FontWeight="SemiBold"/>
+                <StackPanel x:Name="Step1Panel" Margin="0,0,6,0">
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                        <ui:SymbolIcon x:Name="Step1Icon" Symbol="Image24" FontSize="16" Margin="0,0,4,0"/>
+                        <TextBlock x:Name="Step1Text" Text="Select Image" VerticalAlignment="Center" FontSize="13" FontWeight="SemiBold"/>
+                    </StackPanel>
+                    <Border x:Name="Step1ActiveBar" Height="2" CornerRadius="1" Margin="2,3,2,0"
+                            Background="{DynamicResource AccentTextBrush}" Visibility="Collapsed"/>
                 </StackPanel>
                 <TextBlock Text="―" VerticalAlignment="Center" Margin="6,0"
                            Foreground="{DynamicResource TextFillColorTertiaryBrush}" FontSize="13"/>
-                <StackPanel x:Name="Step2Panel" Orientation="Horizontal" Margin="6,0">
-                    <ui:SymbolIcon x:Name="Step2Icon" Symbol="Settings24" FontSize="16" Margin="0,0,4,0"/>
-                    <TextBlock x:Name="Step2Text" Text="Configure" VerticalAlignment="Center" FontSize="13"/>
+                <StackPanel x:Name="Step2Panel" Margin="6,0">
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                        <ui:SymbolIcon x:Name="Step2Icon" Symbol="Settings24" FontSize="16" Margin="0,0,4,0"/>
+                        <TextBlock x:Name="Step2Text" Text="Configure" VerticalAlignment="Center" FontSize="13"/>
+                    </StackPanel>
+                    <Border x:Name="Step2ActiveBar" Height="2" CornerRadius="1" Margin="2,3,2,0"
+                            Background="{DynamicResource AccentTextBrush}" Visibility="Collapsed"/>
                 </StackPanel>
                 <TextBlock x:Name="Step3Separator" Text="―" VerticalAlignment="Center" Margin="6,0"
                            Foreground="{DynamicResource TextFillColorTertiaryBrush}" FontSize="13"/>
-                <StackPanel x:Name="Step3Panel" Orientation="Horizontal" Margin="6,0">
-                    <ui:SymbolIcon x:Name="Step3Icon" Symbol="Wrench24" FontSize="16" Margin="0,0,4,0"/>
-                    <TextBlock x:Name="Step3Text" Text="Customize" VerticalAlignment="Center" FontSize="13"/>
+                <StackPanel x:Name="Step3Panel" Margin="6,0">
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                        <ui:SymbolIcon x:Name="Step3Icon" Symbol="Wrench24" FontSize="16" Margin="0,0,4,0"/>
+                        <TextBlock x:Name="Step3Text" Text="Customize" VerticalAlignment="Center" FontSize="13"/>
+                    </StackPanel>
+                    <Border x:Name="Step3ActiveBar" Height="2" CornerRadius="1" Margin="2,3,2,0"
+                            Background="{DynamicResource AccentTextBrush}" Visibility="Collapsed"/>
                 </StackPanel>
                 <TextBlock Text="―" VerticalAlignment="Center" Margin="6,0"
                            Foreground="{DynamicResource TextFillColorTertiaryBrush}" FontSize="13"/>
-                <StackPanel x:Name="Step4Panel" Orientation="Horizontal" Margin="6,0,0,0">
-                    <ui:SymbolIcon x:Name="Step4Icon" Symbol="Rocket24" FontSize="16" Margin="0,0,4,0"/>
-                    <TextBlock x:Name="Step4Text" Text="Deploy" VerticalAlignment="Center" FontSize="13"/>
+                <StackPanel x:Name="Step4Panel" Margin="6,0,0,0">
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                        <ui:SymbolIcon x:Name="Step4Icon" Symbol="Rocket24" FontSize="16" Margin="0,0,4,0"/>
+                        <TextBlock x:Name="Step4Text" Text="Deploy" VerticalAlignment="Center" FontSize="13"/>
+                    </StackPanel>
+                    <Border x:Name="Step4ActiveBar" Height="2" CornerRadius="1" Margin="2,3,2,0"
+                            Background="{DynamicResource AccentTextBrush}" Visibility="Collapsed"/>
                 </StackPanel>
             </StackPanel>
         </Border>

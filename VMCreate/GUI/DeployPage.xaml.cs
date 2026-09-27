@@ -45,6 +45,8 @@ namespace VMCreate
             DataContext = _viewModel;
 
             _viewModel.RequestCancel += OnCancelRequested;
+            _viewModel.RequestRetry += OnRetryRequested;
+            _viewModel.RequestNavigateBack += OnBackToCustomize;
             _viewModel.RequestWizardComplete += result =>
                 WizardCompleted?.Invoke(this, new WizardResultEventArgs(result));
 
@@ -74,6 +76,25 @@ namespace VMCreate
         private void OnCancelRequested()
         {
             _cts?.Cancel();
+        }
+
+        /// <summary>
+        /// Navigates back to the Customize page so the user can change options and re-deploy.
+        /// Settings are preserved in the shared <see cref="WizardData"/> instance; unloading this
+        /// page (in <see cref="Cleanup"/>) cancels any deployment still running.
+        /// </summary>
+        private void OnBackToCustomize()
+        {
+            NavigationService.GoBack();
+        }
+
+        /// <summary>
+        /// Retry after a failure: returns to Customize so re-deploying goes through the normal
+        /// Finish flow, which builds a fresh deployment engine (the engine is single-use).
+        /// </summary>
+        private void OnRetryRequested()
+        {
+            OnBackToCustomize();
         }
 
         private async Task StartDeploymentAsync()
@@ -146,9 +167,17 @@ namespace VMCreate
             }
         }
 
+        /// <summary>Exposed so MainWindow can mark the Deploy step as failed in the step indicator.</summary>
+        internal DeployPageViewModel ViewModel => _viewModel;
+
+        /// <summary>Raised when the deployment transitions to the failed state.</summary>
+        public event EventHandler? DeploymentFailed;
+
         private void SetError(string message)
         {
             _viewModel.ErrorMessage = message;
+            if (!_viewModel.HasFailed)
+                DeploymentFailed?.Invoke(this, EventArgs.Empty);
             _viewModel.HasFailed = true;
             _viewModel.IsDeploying = false;
             BottomSpacer.Height = 0;

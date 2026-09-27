@@ -150,6 +150,12 @@ namespace VMCreate
         public event Action<WizardResult>? RequestWizardComplete;
         public event Action? RequestCancel;
 
+        /// <summary>Raised when the user asks to retry the failed deployment.</summary>
+        public event Action? RequestRetry;
+
+        /// <summary>Raised when the user asks to go back and change settings.</summary>
+        public event Action? RequestNavigateBack;
+
         public DeployPageViewModel(WizardData wizardData, ILogger logger, IEnumerable<IConfigurableCustomizationStep>? configurableSteps = null)
         {
             if (wizardData == null) throw new ArgumentNullException(nameof(wizardData));
@@ -165,7 +171,11 @@ namespace VMCreate
             ConnectToVmCommand = new RelayCommand(OnConnectToVm);
             OpenHyperVManagerCommand = new RelayCommand(OnOpenHyperVManager);
             NewVmCommand = new RelayCommand(() => RequestWizardComplete?.Invoke(WizardResult.Finished));
+            RetryCommand = new RelayCommand(() => RequestRetry?.Invoke());
+            BackCommand = new RelayCommand(() => RequestNavigateBack?.Invoke());
+            OpenLogCommand = new RelayCommand(OpenLog);
 
+            BuildSummaryRows(wizardData);
             BuildPhaseList(wizardData);
         }
 
@@ -242,6 +252,66 @@ namespace VMCreate
         public ICommand ConnectToVmCommand { get; }
         public ICommand OpenHyperVManagerCommand { get; }
         public ICommand NewVmCommand { get; }
+        public ICommand RetryCommand { get; }
+        public ICommand BackCommand { get; }
+        public ICommand OpenLogCommand { get; }
+
+        /// <summary>Summary rows (label/value) describing the deployment, shown on the header card.</summary>
+        public ObservableCollection<DeploymentSummaryRow> SummaryRows { get; } = new ObservableCollection<DeploymentSummaryRow>();
+
+        // ── Summary rows ────────────────────────────────────────────────
+
+        private void BuildSummaryRows(WizardData wizardData)
+        {
+            var s = wizardData.Settings;
+            if (s == null) return;
+
+            SummaryRows.Add(new DeploymentSummaryRow("Memory",
+                s.MemoryInMB >= 1024 ? $"{s.MemoryInMB / 1024.0:0.#} GB" : $"{s.MemoryInMB} MB"));
+            SummaryRows.Add(new DeploymentSummaryRow("CPU",
+                s.CPUCount == 1 ? "1 core" : $"{s.CPUCount} cores"));
+
+            if (s.AutoDetectDiskSize)
+                SummaryRows.Add(new DeploymentSummaryRow("Disk", "Auto-detect"));
+            else
+                SummaryRows.Add(new DeploymentSummaryRow("Disk", $"{s.NewDriveSizeInGB} GB"));
+
+            if (s.VirtualizationEnabled)
+                SummaryRows.Add(new DeploymentSummaryRow("Nested virtualization", "Enabled"));
+
+            var c = wizardData.Customizations;
+            SummaryRows.Add(new DeploymentSummaryRow("Integration services",
+                c.EnableIntegrationServices ? "Enabled" : "Disabled"));
+
+            var fileType = wizardData.SelectedItem?.FileType;
+            var format = DiskImageFormatExtensions.FromExtension(fileType);
+            bool iso = format == DiskImageFormat.Iso;
+            bool nativeHyperV = wizardData.SelectedItem?.IsNativeHyperV == true;
+            if (!iso && !nativeHyperV && wizardData.SelectedItem?.IsWindows == false)
+            {
+                SummaryRows.Add(new DeploymentSummaryRow("Remote desktop", c.RdpBackend switch
+                {
+                    RdpBackend.Auto => "Auto",
+                    RdpBackend.Xrdp => "xrdp",
+                    RdpBackend.Lamco => "Lamco RDP",
+                    _ => "None"
+                }));
+                SummaryRows.Add(new DeploymentSummaryRow("DNS",
+                    c.DnsMode == DnsMode.Custom ? "Custom" : "Host"));
+            }
+        }
+
+        private void OpenLog()
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo(App.LogFilePath) { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to open log file {Path}", App.LogFilePath);
+            }
+        }
 
         // ── Phase list construction ──────────────────────────────────────
 
@@ -963,5 +1033,18 @@ namespace VMCreate
                 _logger.LogError(ex, "Failed to launch Hyper-V Manager");
             }
         }
+    }
+
+    /// <summary>A simple label/value pair shown on the Deploy page summary card.</summary>
+    public sealed class DeploymentSummaryRow
+    {
+        public DeploymentSummaryRow(string label, string value)
+        {
+            Label = label;
+            Value = value;
+        }
+
+        public string Label { get; }
+        public string Value { get; }
     }
 }

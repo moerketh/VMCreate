@@ -41,6 +41,12 @@ namespace VMCreate
             _newDriveSizeText = _wizardData.Settings.NewDriveSizeInGB.ToString();
             _autoDetectDiskSize = IsDiskImage;
 
+            // Restore settings already chosen this session (e.g. after Back navigation or retry).
+            _memoryMB = ClampMemory(_wizardData.Settings.MemoryInMB);
+            _cpuCount = Math.Clamp(_wizardData.Settings.CPUCount, 1, MaxCpuCount);
+            _virtualizationEnabled = _wizardData.Settings.VirtualizationEnabled;
+            _replacePreviousVm = _wizardData.Settings.ReplacePreviousVm;
+
             NextCommand = new RelayCommand(OnNext);
             BackCommand = new RelayCommand(() => RequestNavigateBack?.Invoke());
             CancelCommand = new RelayCommand(() => RequestWizardComplete?.Invoke(WizardResult.Canceled));
@@ -87,6 +93,46 @@ namespace VMCreate
 
         /// <summary>Human-readable CPU label shown next to the slider.</summary>
         public string CpuDisplay => _cpuCount == 1 ? "1 core" : $"{_cpuCount} cores";
+
+        // ── Host-aware slider limits ────────────────────────────────────────
+
+        /// <summary>Upper bound of the memory slider: ~75% of host RAM (hard-capped at 64 GB),
+        /// or the previous fixed maximum when host memory cannot be detected.</summary>
+        public int MaxMemoryMB
+        {
+            get
+            {
+                const int fallback = 32768;
+                ulong hostMB = HostCapabilities.TotalMemoryMB;
+                if (hostMB == 0)
+                    return fallback;
+                ulong cap = hostMB * 3 / 4;
+                return (int)Math.Max(4096, Math.Min(cap, 65536));
+            }
+        }
+
+        /// <summary>Upper bound of the CPU slider: the host's logical processor count.</summary>
+        public int MaxCpuCount => Math.Max(4, HostCapabilities.LogicalProcessors);
+
+        /// <summary>Hint shown under the sliders describing host capability, e.g. "Host: 32 GB RAM / 16 cores".</summary>
+        public string HostCapabilityHint
+        {
+            get
+            {
+                int cores = HostCapabilities.LogicalProcessors;
+                ulong hostMB = HostCapabilities.TotalMemoryMB;
+                if (hostMB == 0)
+                    return $"Host: {cores} cores";
+                return $"Host: {hostMB / 1024.0:0.#} GB RAM / {cores} cores";
+            }
+        }
+
+        /// <summary>Formatted upper memory bound for the slider's right label.</summary>
+        public string MaxMemoryDisplay => MaxMemoryMB >= 1024
+            ? $"{MaxMemoryMB / 1024.0:0.#} GB"
+            : $"{MaxMemoryMB} MB";
+
+        private int ClampMemory(int mb) => Math.Clamp(mb, 512, MaxMemoryMB);
 
         public bool VirtualizationEnabled
         {
@@ -170,16 +216,28 @@ namespace VMCreate
                 return;
             }
 
-            // Sliders enforce range, but guard just in case
+            // Sliders enforce range, but guard against out-of-host-range values
             if (_memoryMB < 512)
             {
                 ValidationError = "Memory must be at least 512 MB!";
                 return;
             }
 
+            if (_memoryMB > MaxMemoryMB)
+            {
+                ValidationError = $"Memory exceeds what this host can provide (max {MaxMemoryDisplay}).";
+                return;
+            }
+
             if (_cpuCount < 1)
             {
                 ValidationError = "CPU count must be at least 1!";
+                return;
+            }
+
+            if (_cpuCount > MaxCpuCount)
+            {
+                ValidationError = $"CPU count exceeds this host's {HostCapabilities.LogicalProcessors} logical processors.";
                 return;
             }
 
