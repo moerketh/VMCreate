@@ -303,6 +303,65 @@ namespace VMCreate.Tests.HyperV
         }
 
         [TestMethod]
+        public void PickNeighborMacMatch_CimInstanceWithEmptyProperties_NoMatch()
+        {
+            // PRODUCTION BUG REPRO: Under CreateDefault2 runspace,
+            // Get-NetNeighbor returns CimInstance objects whose Properties
+            // dictionary is EMPTY. The extraction code then produces tuples
+            // with all-empty strings. With an empty state string, no rank
+            // matches, so the function must return null (and the caller keeps
+            // polling until the runspace returns proper PSObjects).
+            //
+            // This test guards against a regression where empty states
+            // accidentally match.
+            var vmMacs = new[] { "00155D100185" };
+            var neighbors = new[]
+            {
+                // Simulating the CimInstance extraction result: all empty
+                ("", "", ""),
+                // The correct row with a valid state
+                ("172.23.185.39", "00-15-5D-10-01-85", "Permanent"),
+            };
+
+            Assert.AreEqual("172.23.185.39", SshTransport.PickNeighborMacMatch(vmMacs, neighbors),
+                "rows with empty properties must be skipped, not matched");
+        }
+
+        [TestMethod]
+        public void PickNeighborMacMatch_AllRowsEmptyProperties_ReturnsNull()
+        {
+            // If EVERY row has empty properties (the full CimInstance case),
+            // discovery must fail gracefully and return null so the caller
+            // retries — never match a garbage address.
+            var vmMacs = new[] { "00155D100185" };
+            var neighbors = new[]
+            {
+                ("", "", ""),
+                ("", "", ""),
+            };
+
+            Assert.IsNull(SshTransport.PickNeighborMacMatch(vmMacs, neighbors),
+                "all-empty rows must not match anything");
+        }
+
+        [TestMethod]
+        public void PickNeighborMacMatch_SkipsApipaAndNonMatchingMacs_MustIgnoreEmptyIpRows()
+        {
+            var vmMacs = new[] { "00155DB7346A" };
+            var neighbors = new[]
+            {
+                // Link-local can never carry SSH for us.
+                ("169.254.10.20", "00-15-5d-b7-34-6a", "Reachable"),
+                // A different host's VM — never match.
+                ("192.168.42.8", "00-15-5d-aa-bb-cc", "Reachable"),
+                // Empty-IP row from CimInstance property extraction failure
+                ("", "", ""),
+            };
+
+            Assert.IsNull(SshTransport.PickNeighborMacMatch(vmMacs, neighbors));
+        }
+
+        [TestMethod]
         public void PickNeighborMacMatch_EmptyInputs_ReturnsNull()
         {
             Assert.IsNull(SshTransport.PickNeighborMacMatch(
@@ -383,6 +442,130 @@ namespace VMCreate.Tests.HyperV
 
             Assert.IsTrue(SshTransport.IsUsableMacAddress("00-15-5d-b7-34-6a"));
             Assert.IsTrue(SshTransport.IsUsableMacAddress("00155DB7346A"));
+        }
+
+        #endregion
+
+        #region NormalizeNeighborState (CreateDefault2 raw-byte State)
+
+        [TestMethod]
+        public void ReadNeighborRow_ByteState_ProducesEnumName()
+        {
+            // END-TO-END SEAM: build a PSObject whose State property is the raw
+            // System.Byte the CreateDefault2 runspace returns for MSFT_NetNeighbor,
+            // and confirm ReadNeighborRow surfaces the enum name PickNeighborMacMatch
+            // ranks on. This is the exact shape the probe captured in the app's
+            // hosted runspace (State=[6], stateType=System.Byte).
+            var psObj = new System.Management.Automation.PSObject();
+            psObj.Properties.Add(new System.Management.Automation.PSNoteProperty("IPAddress", "172.23.185.39"));
+            psObj.Properties.Add(new System.Management.Automation.PSNoteProperty("LinkLayerAddress", "00-15-5D-10-01-85"));
+            psObj.Properties.Add(new System.Management.Automation.PSNoteProperty("State", (byte)6));
+
+            var row = SshTransport.ReadNeighborRow(psObj);
+
+            Assert.AreEqual("172.23.185.39", row.Ip);
+            Assert.AreEqual("00-15-5D-10-01-85", row.Mac);
+            Assert.AreEqual("Permanent", row.State,
+                "the raw CIM byte must normalize to the enum name the rank filter matches");
+        }
+
+        [TestMethod]
+        public void ReadNeighborRow_MissingStateProperty_ProducesEmptyState()
+        {
+            // Defensive: a row without a State property must not throw and must
+            // yield an unusable (empty) state.
+            var psObj = new System.Management.Automation.PSObject();
+            psObj.Properties.Add(new System.Management.Automation.PSNoteProperty("IPAddress", "172.23.185.39"));
+
+            var row = SshTransport.ReadNeighborRow(psObj);
+            Assert.AreEqual("", row.State);
+        }
+
+        [TestMethod]
+        [DataRow((byte)0, "Unreachable")]
+        [DataRow((byte)1, "Incomplete")]
+        [DataRow((byte)2, "Probe")]
+        [DataRow((byte)3, "Delay")]
+        [DataRow((byte)4, "Stale")]
+        [DataRow((byte)5, "Reachable")]
+        [DataRow((byte)6, "Permanent")]
+        [DataRow((byte)7, "Failed")]
+        public void NormalizeNeighborState_ByteValues_MapToEnumNames(byte raw, string expected)
+        {
+            // The hosted CreateDefault2 runspace surfaces MSFT_NetNeighbor.State
+            // as a raw System.Byte (probe-verified: Default Switch rows read 6,
+            // stale rows read 4). PickNeighborMacMatch ranks by enum NAME, so
+            // without this mapping the KVP-blind fallback never matches.
+            Assert.AreEqual(expected, SshTransport.NormalizeNeighborState(raw));
+        }
+
+        [TestMethod]
+        public void NormalizeNeighborState_ByteString_ParsesViaNumeric()
+        {
+            // If anything upstream already stringified the byte ("6"), recover it.
+            Assert.AreEqual("Permanent", SshTransport.NormalizeNeighborState("6"));
+            Assert.AreEqual("Stale", SshTransport.NormalizeNeighborState("4"));
+        }
+
+        [TestMethod]
+        public void NormalizeNeighborState_EnumNameString_PassesThrough()
+        {
+            // A fully-adapted session hands us the enum name string.
+            Assert.AreEqual("Reachable", SshTransport.NormalizeNeighborState("Reachable"));
+        }
+
+        [TestMethod]
+        public void NormalizeNeighborState_EnumValue_MapsViaUnderlyingByte()
+        {
+            // DayOfWeek.Saturday has underlying value 6 → must map to Permanent,
+            // proving the enum path routes through the numeric mapping.
+            Assert.AreEqual("Permanent", SshTransport.NormalizeNeighborState(DayOfWeek.Saturday));
+            Assert.AreEqual("Unreachable", SshTransport.NormalizeNeighborState(DayOfWeek.Sunday));
+        }
+
+        [TestMethod]
+        public void NormalizeNeighborState_NullAndUnknown_ReturnEmpty()
+        {
+            Assert.AreEqual("", SshTransport.NormalizeNeighborState(null));
+            Assert.AreEqual("", SshTransport.NormalizeNeighborState((byte)99));
+            Assert.AreEqual("", SshTransport.NormalizeNeighborState(new object()), "unrecognized shape must never rank as usable");
+        }
+
+        #endregion
+
+        #region PickGuestIp (stale-KVP vs neighbor tie-break)
+
+        [TestMethod]
+        public void PickGuestIp_NeighborRowWins_OverDisagreeingStaleKvp()
+        {
+            // PRODUCTION SCENARIO: installer live ISO reported KVP lease
+            // 172.23.191.16; guest rebooted into the KVP-blind installed system
+            // and got 172.23.182.209. The neighbor table (ARP) tracks the live
+            // binding; KVP is frozen at the old lease. The neighbor row must win.
+            Assert.AreEqual("172.23.182.209",
+                SshTransport.PickGuestIp("172.23.191.16", "172.23.182.209"));
+        }
+
+        [TestMethod]
+        public void PickGuestIp_KvpWins_WhenNoNeighborMatch()
+        {
+            // KVP is live and ARP has nothing usable yet → trust KVP.
+            Assert.AreEqual("172.23.191.16", SshTransport.PickGuestIp("172.23.191.16", null));
+            Assert.AreEqual("172.23.191.16", SshTransport.PickGuestIp("172.23.191.16", ""));
+        }
+
+        [TestMethod]
+        public void PickGuestIp_NeighborWins_WhenKvpBlind()
+        {
+            // The pure KVP-blind installed system: no KVP IP at all.
+            Assert.AreEqual("172.23.182.209", SshTransport.PickGuestIp(null, "172.23.182.209"));
+        }
+
+        [TestMethod]
+        public void PickGuestIp_NeitherKnows_ReturnsNull()
+        {
+            Assert.IsNull(SshTransport.PickGuestIp(null, null));
+            Assert.IsNull(SshTransport.PickGuestIp("", ""));
         }
 
         #endregion

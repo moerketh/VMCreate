@@ -252,11 +252,13 @@ namespace VMCreate
         /// trimmed hosting package.
         /// </summary>
         /// <remarks>
-        /// When KVP reports no IPv4 for any adapter, falls back to matching
-        /// the VM's MAC addresses against the host neighbor table
-        /// (Get-NetNeighbor, also pre-imported — see HostPowerShell). This is
-        /// what makes first-boot SSH discovery work on guests without
-        /// hv_kvp_daemon yet running (Omarchy's installed system).
+        /// Combines two signals, tie-broken by <see cref="PickGuestIp"/>:
+        /// KVP (<c>Get-VMNetworkAdapter.IPAddresses</c>, only live while the
+        /// guest runs hv_kvp_daemon — Omarchy's installer ISO does, the
+        /// installed system does not, and its DHCP lease can change across
+        /// the reboot) and the host neighbor table's MAC → IPv4 binding
+        /// learned via ARP. A MAC-matched neighbor row wins over a
+        /// disagreeing KVP address: it reflects where the guest is <em>now</em>.
         /// </remarks>
         public static async Task<string?> DiscoverVmIpAsync(string vmName, CancellationToken ct, bool preferVmCreateTempAdapter)
         {
@@ -282,20 +284,27 @@ namespace VMCreate
                     .Concat(result.Where(a => !string.Equals(GetNetworkAdapterName(a), "VMCreate Temp", StringComparison.OrdinalIgnoreCase)))
                 : result).ToList();
 
+            string? kvpIp = null;
             foreach (var adapter in adapters)
             {
                 foreach (string? ip in GetAdapterIpAddresses(adapter))
                 {
                     if (!string.IsNullOrEmpty(ip) && IPv4Regex.IsMatch(ip))
-                        return ip;
+                    {
+                        kvpIp = ip;
+                        break;
+                    }
                 }
+                if (kvpIp is not null)
+                    break;
             }
 
             // KVP blind fallback: the guest is up and talking (DHCP/ARP), but
-            // hv_kvp_daemon is not running, so Hyper-V reports no IPAddresses.
-            // That is exactly the freshly-installed Omarchy system — its
-            // installer never adds the 'hyperv' package — so without this
-            // fallback WaitForReadyAsync would poll forever. The host's own
+            // hv_kvp_daemon is not running, so Hyper-V reports no IPAddresses
+            // (or a stale one — the installer ISO's lease). That is exactly
+            // the freshly-installed Omarchy system — its installer never adds
+            // the 'hyperv' package — so without this path WaitForReadyAsync
+            // would poll forever on a dead lease. The host's own
             // neighbor table still learns the guest's MAC via the vmSwitch
             // (Dynamic on external switches, Permanent on the Default Switch),
             // so match the VM's adapter MACs against Get-NetNeighbor rows and
@@ -303,38 +312,121 @@ namespace VMCreate
             // allocates 00-15-5D MACs per host, and a fabricated entry would
             // at worst send our SSH connect to a wrong address that TOFU
             // (per-VM known_hosts, fresh per deployment) then rejects.
-            // Drop placeholder/zero and broadcast adapter MACs: a NIC that has
-            // no burned-in MAC yet (a Hyper-V adapter before the guest driver
-            // initializes it) can report 00-00-00-00-00-00, and the host's
-            // neighbor table keeps that same zero MAC on its own Unreachable
-            // rows. Matching a zero MAC against those rows pins discovery to a
-            // dead, shared address — that is the Omarchy "Discovered VM IP
-            // 172.23.186.21 while the guest really is 172.23.180.201" bug.
+            // MAC → IP rows, tie-broken against whatever KVP claimed.
+            // Placeholder adapters: a NIC whose guest driver never
+            // initialized reports 00-00-00-00-00-00 and the host keeps that
+            // same zero MAC on its own Unreachable rows — matching it pins
+            // discovery to a dead shared address, hence the exclusion here
+            // and again on the row side inside PickNeighborMacMatch.
             var vmMacs = adapters
                 .Select(GetAdapterMacAddress)
                 .Where(IsUsableMacAddress)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
             if (vmMacs.Count == 0)
-                return null;
+                return kvpIp;
 
             using var ps2 = PowerShell.Create();
             ps2.Runspace = runspace;
-            // IPv4 rows only; the state filtering runs in C# below (no
-            // Utility cmdlets under the trimmed runspace — the script is the
-            // bare cmdlet call only, same contract as the adapter query).
+            // IPv4 rows only; filtering and State normalization run in C#
+            // below (the trimmed runspace ships the bare cmdlet call only,
+            // same contract as the adapter query). MSFT_NetNeighbor exposes
+            // State as a byte on the raw CIM instance, and this hosted
+            // CreateDefault2 runspace returns the CimInstance unadapted —
+            // Properties["State"].Value is a System.Byte ("6"), not the enum
+            // name ("Permanent") an interactive console prints. Mapping the
+            // byte here is what makes the fallback match at all.
             ps2.AddScript("Get-NetNeighbor -AddressFamily IPv4 -ErrorAction SilentlyContinue");
 
             var neighbors = await Task.Run(() => ps2.Invoke(), ct);
             var rows = neighbors
                 .Where(n => n is not null)
-                .Select(n => (
-                    Ip: n.Properties["IPAddress"]?.Value?.ToString() ?? string.Empty,
-                    Mac: n.Properties["LinkLayerAddress"]?.Value?.ToString() ?? string.Empty,
-                    State: n.Properties["State"]?.Value?.ToString() ?? string.Empty))
+                .Select(n => ReadNeighborRow(n))
                 .ToList();
 
-            return PickNeighborMacMatch(vmMacs, rows);
+            return PickGuestIp(kvpIp, PickNeighborMacMatch(vmMacs, rows));
+        }
+
+        /// <summary>
+        /// Reads one Get-NetNeighbor row into the (Ip, Mac, State) tuple
+        /// <see cref="PickNeighborMacMatch"/> consumes. Extracted and internal
+        /// so tests can pin the cross-runtime contract: a full console session
+        /// adapts the CIM object (State reads "Permanent"), the app's hosted
+        /// <c>InitialSessionState.CreateDefault2()</c> runspace does not
+        /// (State is a raw <see cref="byte"/>). Either shape must produce the
+        /// same enum-name string.
+        /// </summary>
+        internal static (string Ip, string Mac, string State) ReadNeighborRow(PSObject row)
+        {
+            return (
+                Ip: row.Properties["IPAddress"]?.Value?.ToString() ?? string.Empty,
+                Mac: row.Properties["LinkLayerAddress"]?.Value?.ToString() ?? string.Empty,
+                State: NormalizeNeighborState(row.Properties["State"]?.Value));
+        }
+
+        /// <summary>
+        /// Resolves the guest's IPv4 from the two signals Hyper-V gives us.
+        /// The KVP lease (hv_kvp_daemon) wins while it still answers SSH —
+        /// that is the installer live ISO. Once the guest has rebooted into
+        /// the KVP-blind installed system, the lease IP is stale and the MAC
+        /// → IP binding the host's vmSwitch learned via ARP is the truth, so
+        /// a matching neighbor row overrides a disagreeing KVP address. When
+        /// only one source knows an address, that source wins.
+        /// </summary>
+        internal static string? PickGuestIp(string? kvpIp, string? neighborIp)
+        {
+            if (string.IsNullOrEmpty(neighborIp))
+                return string.IsNullOrEmpty(kvpIp) ? null : kvpIp;
+            return neighborIp;
+        }
+
+        /// <summary>
+        /// Normalizes MSFT_NetNeighbor State to its enum name no matter how
+        /// the runspace surfaced it. The hosted CreateDefault2 runspace yields
+        /// the raw CIM byte (RFC 4861 / NetTCPIP mapping: 0=Unreachable,
+        /// 1=Incomplete, 2=Probe, 3=Delay, 4=Stale, 5=Reachable, 6=Permanent,
+        /// 7=Failed); an interactive session yields the enum name string.
+        /// Anything unrecognized maps to empty so the rank filter ignores it
+        /// — a state we cannot classify must never pretend to be usable.
+        /// </summary>
+        internal static string NormalizeNeighborState(object? rawState)
+        {
+            if (rawState is null)
+                return string.Empty;
+
+            // Enum-typed (adapted console output): cast to its integer value
+            // and fall through to the byte map below.
+            if (rawState is Enum)
+                rawState = Convert.ToByte(rawState);
+
+            if (rawState is byte b)
+                return b switch
+                {
+                    0 => "Unreachable",
+                    1 => "Incomplete",
+                    2 => "Probe",
+                    3 => "Delay",
+                    4 => "Stale",
+                    5 => "Reachable",
+                    6 => "Permanent",
+                    7 => "Failed",
+                    _ => string.Empty,
+                };
+
+            // String-typed (either an enum name such as "Permanent" or a
+            // decimal digit such as "6", depending on who stringified it).
+            string s = rawState.ToString() ?? string.Empty;
+            if (byte.TryParse(s, out byte parsed))
+                return NormalizeNeighborState(parsed);
+            // Only the eight known names pass through; anything else (e.g. an
+            // arbitrary object's type name) is not a neighbor state and must
+            // not rank as usable.
+            foreach (string known in new[] { "Unreachable", "Incomplete", "Probe", "Delay", "Stale", "Reachable", "Permanent", "Failed" })
+            {
+                if (s.Equals(known, StringComparison.OrdinalIgnoreCase))
+                    return known;
+            }
+            return string.Empty;
         }
 
         /// <summary>
