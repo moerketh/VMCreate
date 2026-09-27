@@ -1,5 +1,11 @@
 #!/bin/bash
 set -o pipefail
+# Non-interactive guard: headless SSH gives scripts a no-TTY, pipe stdin that
+# never yields EOF on its own — an interactive `read` blocks until the host
+# kills the session. Omarchy's /usr/local/bin/mkinitcpio wrapper asks
+# "run limine-mkinitcpio now? [Y/n]" after -P; with /dev/null stdin its read
+# returns instantly (empty answer → default branch). See remove_vmware.sh.
+exec 0</dev/null
 
 # -- Install hyperv-daemons (best-effort) ----------------------------------
 # Provides VSS backup integration, KVP data exchange, and fcopy daemon.

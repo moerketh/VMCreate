@@ -1,5 +1,13 @@
 #!/bin/bash
 set -o pipefail
+# Non-interactive guard: over headless SSH (no TTY, stdin at EOF-forever on a
+# pipe), any interactive prompt would block until the host-side timeout kills
+# the session. Omarchy ships /usr/local/bin/mkinitcpio as a wrapper that ASKS
+# "run limine-mkinitcpio now? [Y/n]" after -P — its `read` sat on
+# anon_pipe_read for the full command timeout and killed the deploy. Redirect
+# our own stdin to /dev/null so every child inherits instant-EOF stdin: the
+# wrapper's `read` returns immediately (answer empty → default branch).
+exec 0</dev/null
 removed=0
 
 # -- Step 1: Uninstall open-vm-tools packages ------------------------------
