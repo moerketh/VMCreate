@@ -833,29 +833,60 @@ GRANT_EOF
     # every compositor picks by default. The override is per-compositor.
     if is_arch_family; then
         # Hyprland (Omarchy / Arch): monitors.xml (mutter) and kscreen-doctor
-        # (KScreen/KWin) do not apply. Write a Hyprland monitor fragment and
-        # source it from the END of hyprland.conf so it wins over any
-        # distro-shipped rules. The empty-name rule is Hyprland's wildcard
-        # fallback for whatever connector name the kernel reports (Virtual-1
-        # or HyperV-1, depending on the hyperv_drm generation).
+        # (KScreen/KWin) do not apply. Omarchy's Hyprland runs the LUA config
+        # (hyprland.lua requires hypr.monitors / hypr.autostart from
+        # ~/.config/hypr/) — a classic hyprland.conf fragment is silently
+        # IGNORED (verified on Omarchy 4.0.4: monitor stayed 1024x768 with a
+        # sourced vmcreate-monitors.conf). Two Lua edits do both jobs:
+        #  - monitors.lua: PREPEND a wildcard 1920x1080@60 scale-1 rule —
+        #    Hyprland monitor rules are first-match-wins, so ours beats the
+        #    preferred-mode wildcard Omarchy ships below it. The empty output
+        #    matches whatever connector the kernel reports (Virtual-1 or
+        #    HyperV-1, depending on the hyperv_drm generation).
+        #  - autostart.lua: launch the lamco units at hyprland.start.
+        #    graphical-session.target NEVER activates on Omarchy — its
+        #    compiled start-hyprland runs Hyprland outside the uwsm session
+        #    chain, so nothing pulls the target and the units bound to it
+        #    (lamco-rdp-server, lamco-grant, lamco-idle-inhibit) never fire.
+        #    o.exec_on_start runs at hyprland.start with the session env:
+        #    import WAYLAND_DISPLAY into the systemd user manager first (the
+        #    units' ConditionEnvironment), then start the services directly
+        #    (allowed, unlike the target itself which refuses manual start).
+        # Idempotent: guarded by markers, safe on re-run.
         mkdir -p "$USER_HOME/.config/hypr"
-        cat > "$USER_HOME/.config/hypr/vmcreate-monitors.conf" << 'HYPR_MONITORS_EOF'
-# Installed by VMCreate install_lamco.sh — forced RDP resolution on Hyper-V.
-monitor = Virtual-1, 1920x1080@60, 0x0, 1
-monitor = , 1920x1080@60, auto, 1
-HYPR_MONITORS_EOF
-        chown "$AUTOLOGIN_USER" "$USER_HOME/.config/hypr/vmcreate-monitors.conf"
-        if [ -f "$USER_HOME/.config/hypr/hyprland.conf" ]; then
-            if ! grep -q 'vmcreate-monitors.conf' "$USER_HOME/.config/hypr/hyprland.conf"; then
-                printf '\nsource = %s\n' "$USER_HOME/.config/hypr/vmcreate-monitors.conf" >> "$USER_HOME/.config/hypr/hyprland.conf"
-                echo "Appended vmcreate-monitors.conf source line to hyprland.conf."
+
+        MON_LUA="$USER_HOME/.config/hypr/monitors.lua"
+        if [ -f "$MON_LUA" ]; then
+            if ! grep -q 'VMCreate: forced RDP resolution' "$MON_LUA"; then
+                sed -i '1i -- VMCreate: forced RDP resolution on Hyper-V (first match wins over the preferred-wildcard below)\nhl.monitor({ output = "", mode = "1920x1080@60", position = "auto", scale = 1 })\n' "$MON_LUA"
+                echo "Prepended 1920x1080@60 monitor rule to monitors.lua."
             fi
         else
-            printf 'source = %s\n' "$USER_HOME/.config/hypr/vmcreate-monitors.conf" > "$USER_HOME/.config/hypr/hyprland.conf"
-            chown "$AUTOLOGIN_USER" "$USER_HOME/.config/hypr/hyprland.conf"
-            echo "Created minimal hyprland.conf sourcing vmcreate-monitors.conf."
+            cat > "$MON_LUA" << 'MON_LUA_EOF'
+-- VMCreate: forced RDP resolution on Hyper-V (first match wins).
+hl.monitor({ output = "", mode = "1920x1080@60", position = "auto", scale = 1 })
+MON_LUA_EOF
+            chown "$AUTOLOGIN_USER" "$MON_LUA"
+            echo "Created monitors.lua with the 1920x1080@60 rule."
         fi
-        echo "Created Hyprland monitor config for 1920x1080@60 resolution."
+
+        AUTO_LUA="$USER_HOME/.config/hypr/autostart.lua"
+        if ! grep -q 'vmcreate lamco autostart' "$AUTO_LUA" 2>/dev/null; then
+            cat > "$AUTO_LUA" << 'AUTO_LUA_EOF'
+-- Extra autostart processes.
+-- o.launch_on_start("my-service")
+
+-- vmcreate lamco autostart (see install_lamco.sh): graphical-session.target
+-- never activates on Omarchy (start-hyprland runs outside the uwsm chain),
+-- so import the Wayland env into the systemd user manager and start the
+-- lamco units directly at hyprland.start.
+o.exec_on_start("dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP HYPRLAND_INSTANCE_SIGNATURE")
+o.exec_on_start("systemctl --user start lamco-grant.service lamco-rdp-server.service lamco-idle-inhibit.service")
+AUTO_LUA_EOF
+            echo "Wrote lamco autostart hooks to autostart.lua."
+        fi
+        chown -R "$AUTOLOGIN_USER" "$USER_HOME/.config/hypr" 2>/dev/null || true
+        echo "Configured Hyprland (Lua config) for 1920x1080@60 + lamco autostart."
     else
     # -- Create monitors.xml to force 1920x1080@60 resolution ------------
     # The hyperv_drm driver reports 1024x768 as the preferred mode, which
@@ -951,9 +982,14 @@ MONITORS_EOF
     #     real fabricated-success hazard this gate exists to catch.
     RDY_UID=$(id -u "$AUTOLOGIN_USER")
     RDY_OUTCOME="timeout"
+    # Session proof: the target (uwsm-integrated compositors) OR the lamco
+    # server unit itself (Omarchy: autostart.lua starts it directly because
+    # graphical-session.target never activates there).
     SESSION_ACTIVE=$(sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
         systemctl --user is-active graphical-session.target 2>/dev/null || true)
-    if [ "$SESSION_ACTIVE" = "active" ]; then
+    LAMCO_ACTIVE=$(sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
+        systemctl --user is-active lamco-rdp-server.service 2>/dev/null || true)
+    if [ "$SESSION_ACTIVE" = "active" ] || [ "$LAMCO_ACTIVE" = "active" ]; then
         for r in $(seq 1 12); do
             if journalctl _UID=$RDY_UID --since "-5 min" --no-pager 2>/dev/null \
                 | grep -aq "Accept dispatcher started"; then

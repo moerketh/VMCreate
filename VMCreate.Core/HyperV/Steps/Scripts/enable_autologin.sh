@@ -171,26 +171,28 @@ USER_HOME=$(getent passwd "$USER" | cut -d: -f6)
 if [ -n "$USER_HOME" ] && [ -d "$USER_HOME" ]; then
     if [ "$has_greetd" = "1" ]; then
         # Hyprland under greetd: monitors.xml (mutter) and a KDE autostart
-        # entry do not apply. Write a Hyprland monitor fragment and source it
-        # from the END of hyprland.conf so it wins over distro-shipped rules.
+        # entry do not apply. Omarchy's Hyprland runs the LUA config —
+        # hyprland.lua requires hypr.monitors from ~/.config/hypr/ — so a
+        # classic hyprland.conf fragment is silently ignored (see
+        # install_lamco.sh for the full findings). Prepend a wildcard
+        # 1920x1080@60 rule to monitors.lua; first match wins over the
+        # distro's preferred-mode wildcard. Idempotent via marker grep.
         mkdir -p "$USER_HOME/.config/hypr"
-        cat > "$USER_HOME/.config/hypr/vmcreate-monitors.conf" << 'HYPR_MONITORS_EOF'
-# Installed by VMCreate enable_autologin.sh — forced RDP resolution on Hyper-V.
-monitor = Virtual-1, 1920x1080@60, 0x0, 1
-monitor = , 1920x1080@60, auto, 1
-HYPR_MONITORS_EOF
-        chown "$USER" "$USER_HOME/.config/hypr/vmcreate-monitors.conf" 2>/dev/null || true
-        if [ -f "$USER_HOME/.config/hypr/hyprland.conf" ]; then
-            if ! grep -q 'vmcreate-monitors.conf' "$USER_HOME/.config/hypr/hyprland.conf"; then
-                printf '\nsource = %s\n' "$USER_HOME/.config/hypr/vmcreate-monitors.conf" >> "$USER_HOME/.config/hypr/hyprland.conf"
-                echo "Appended vmcreate-monitors.conf source line to hyprland.conf."
+        MON_LUA="$USER_HOME/.config/hypr/monitors.lua"
+        if [ -f "$MON_LUA" ]; then
+            if ! grep -q 'VMCreate: forced RDP resolution' "$MON_LUA"; then
+                sed -i '1i -- VMCreate: forced RDP resolution on Hyper-V (first match wins over the preferred-wildcard below)\nhl.monitor({ output = "", mode = "1920x1080@60", position = "auto", scale = 1 })\n' "$MON_LUA"
+                echo "Prepended 1920x1080@60 monitor rule to monitors.lua."
             fi
         else
-            printf 'source = %s\n' "$USER_HOME/.config/hypr/vmcreate-monitors.conf" > "$USER_HOME/.config/hypr/hyprland.conf"
-            chown "$USER" "$USER_HOME/.config/hypr/hyprland.conf" 2>/dev/null || true
-            echo "Created minimal hyprland.conf sourcing vmcreate-monitors.conf."
+            cat > "$MON_LUA" << 'MON_LUA_EOF'
+-- VMCreate: forced RDP resolution on Hyper-V (first match wins).
+hl.monitor({ output = "", mode = "1920x1080@60", position = "auto", scale = 1 })
+MON_LUA_EOF
+            chown "$USER" "$MON_LUA" 2>/dev/null || true
+            echo "Created monitors.lua with the 1920x1080@60 rule."
         fi
-        echo "Created Hyprland monitor config for 1920x1080@60 resolution."
+        echo "Configured Hyprland (Lua config) for 1920x1080@60 resolution."
     else
     mkdir -p "$USER_HOME/.config"
     cat > "$USER_HOME/.config/monitors.xml" << 'MONITORS_EOF'

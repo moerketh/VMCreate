@@ -61,10 +61,14 @@ echo "Desktop user resolved as '$USER' (uid $USER_UID)."
 # -- Already in a session? Nothing to do ------------------------------------
 # A live Wayland session means autologin already ran (or the operator is
 # logged in): the lamco units are bound to graphical-session.target and are
-# starting with it. Report ok — the poll below confirms the listeners.
+# starting with it — or, on Omarchy, autostart.lua started them directly
+# (the target never activates there). Report ok — the poll below confirms
+# the listeners.
 SESSION_ACTIVE=$(sudo -u "$USER" XDG_RUNTIME_DIR=/run/user/$USER_UID \
     systemctl --user is-active graphical-session.target 2>/dev/null || true)
-if [ "$SESSION_ACTIVE" = "active" ]; then
+LAMCO_ACTIVE=$(sudo -u "$USER" XDG_RUNTIME_DIR=/run/user/$USER_UID \
+    systemctl --user is-active lamco-rdp-server.service 2>/dev/null || true)
+if [ "$SESSION_ACTIVE" = "active" ] || [ "$LAMCO_ACTIVE" = "active" ]; then
     echo "Graphical session already active for '$USER' — no DM restart needed."
 else
     # -- Resolve the display manager ----------------------------------------
@@ -120,13 +124,25 @@ fi
 # attempt can take ~60-90s on a 2-vCPU guest; 12 x 10s covers it with room.
 RDY_OUTCOME="timeout"
 for r in $(seq 1 12); do
-    # Session up?
+    # Session up? Two acceptable proofs:
+    #  a) graphical-session.target active (uwsm-integrated compositors), or
+    #  b) the lamco server unit itself active — on Omarchy the target NEVER
+    #     activates (start-hyprland runs Hyprland outside the uwsm session
+    #     chain) and autostart.lua starts the units directly instead.
     SESS=$(sudo -u "$USER" XDG_RUNTIME_DIR=/run/user/$USER_UID \
         systemctl --user is-active graphical-session.target 2>/dev/null || true)
-    if [ "$SESS" = "active" ]; then
+    LAMCO=$(sudo -u "$USER" XDG_RUNTIME_DIR=/run/user/$USER_UID \
+        systemctl --user is-active lamco-rdp-server.service 2>/dev/null || true)
+    if [ "$SESS" = "active" ] || [ "$LAMCO" = "active" ]; then
         # Server dispatcher line = listeners bound.
         if journalctl _UID=$USER_UID --since "-5 min" --no-pager 2>/dev/null \
             | grep -aq "Accept dispatcher started"; then
+            RDY_OUTCOME="ready"
+            break
+        fi
+        # Server active with a bound listener (vsock/TCP 3389) also proves
+        # readiness even when the dispatcher line predates the journal window.
+        if [ "$LAMCO" = "active" ] && sudo -n ss -l 2>/dev/null | grep -q ':3389 '; then
             RDY_OUTCOME="ready"
             break
         fi
@@ -152,7 +168,7 @@ case "$RDY_OUTCOME" in
         echo "NOTICE: graphical session active; one-time portal consent dialog is on the VM console — click Allow once, then the listeners bind."
         ;;
     timeout)
-        echo "DEGRADED: session/listener readiness gate timed out (120s) — graphical-session.target reports '$SESS'."
+        echo "DEGRADED: session/listener readiness gate timed out (120s) — graphical-session.target='$SESS' lamco-rdp-server='$LAMCO'."
         echo "Diagnose with: journalctl _UID=$USER_UID -b --no-pager | tail -n 50"
         DEGRADED=1
         ;;
