@@ -21,7 +21,8 @@ namespace VMCreate.Gallery
         /// Loads gallery items from all sources, streaming batches via the callback as each source completes.
         /// Deduplicates against items already known via <paramref name="existingKeys"/>.
         /// </summary>
-        Task LoadFromSourcesStreamingAsync(
+        /// <returns>Load metadata (loader count, failed loaders) for status surfacing.</returns>
+        Task<GalleryLoadSummary> LoadFromSourcesStreamingAsync(
             HashSet<(string Name, string DiskUri)> existingKeys,
             Action<List<GalleryItem>> onBatch,
             CancellationToken cancellationToken);

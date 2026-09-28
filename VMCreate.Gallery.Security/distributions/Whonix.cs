@@ -13,8 +13,12 @@ namespace VMCreate.Gallery
     /// </summary>
     public class Whonix : IGalleryLoader
     {
-        private const string PinnedVersion = "18.1.4.2";
-        private const string OvaUrl        = "https://www.whonix.org/download/ova/18.1.4.2/Whonix-LXQt-18.1.4.2.Intel_AMD64.ova";
+        private const string PinnedVersion = "18.2.1.9";
+        private const string OvaUrl        = "https://www.whonix.org/download/ova/18.2.1.9/Whonix-LXQt-18.2.1.9.Intel_AMD64.ova";
+        // Upstream publishes SHA-512 only — no SHA-256 is available for the OVA.
+        // The .sha512sums sidecar is GNU coreutils format (hash  filename) and
+        // PGP-signed (.sig); ChecksumVerifier parses the cleartext natively.
+        private const string Sha512SumsUrl = OvaUrl + ".sha512sums";
         public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
             var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(Whonix).Assembly, "whonix-logo.svg");
@@ -26,6 +30,8 @@ namespace VMCreate.Gallery
                 ThumbnailUri = logoUri,
                 SymbolUri    = logoUri,
                 DiskUri      = OvaUrl,
+                ChecksumUri  = Sha512SumsUrl,
+                ChecksumAlgorithm = "SHA512",
                 EnhancedSessionTransportType = "HvSocket",
                 Version      = PinnedVersion,
                 LastUpdated  = DateTime.UtcNow.ToString("o"),

@@ -284,6 +284,28 @@ namespace VMCreate.HyperV.VmCreation
                 {
                     _logger.LogWarning(ex, "Failed to delete VM config folder {Folder}: {Message}", vmConfigFolder, ex.Message);
                 }
+
+                // The per-VM disk directory is where extraction and conversion
+                // wrote the deployment's media. Files attached to the VM were
+                // deleted above, but a FAILED earlier deploy can leave
+                // unattached intermediates behind (partial extraction,
+                // half-converted disks, the downloaded archive). A stale
+                // directory at the same path breaks the next deploy of this
+                // VM name — remove the whole per-VM directory so re-deploys
+                // start from a clean slate (the extractor recreates it).
+                string oldDiskDir = _pathService.GetVirtualHardDiskPath(existingVmName);
+                try
+                {
+                    if (Directory.Exists(oldDiskDir))
+                    {
+                        Directory.Delete(oldDiskDir, true);
+                        _logger.LogInformation("Deleted old VM disk directory: {Folder}", oldDiskDir);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to delete VM disk directory {Folder}: {Message}", oldDiskDir, ex.Message);
+                }
             }
         }
     }

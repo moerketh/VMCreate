@@ -33,7 +33,7 @@ namespace VMCreate.Gallery
             return new List<GalleryItem>();
         }
 
-        public async Task LoadFromSourcesStreamingAsync(
+        public async Task<GalleryLoadSummary> LoadFromSourcesStreamingAsync(
             HashSet<(string Name, string DiskUri)> existingKeys,
             Action<List<GalleryItem>> onBatch,
             CancellationToken cancellationToken)
@@ -47,6 +47,12 @@ namespace VMCreate.Gallery
                         .ToList();
                     onBatch(newItems);
                 }, cancellationToken);
+
+                return new GalleryLoadSummary
+                {
+                    LoaderCount = aggregate.LoaderCount,
+                    FailedLoaders = aggregate.FailedLoaderNames
+                };
             }
             else
             {
@@ -57,6 +63,11 @@ namespace VMCreate.Gallery
                     .Select(g => g.First())
                     .ToList();
                 onBatch(newItems);
+                return new GalleryLoadSummary
+                {
+                    LoaderCount = 1,
+                    FailedLoaders = new List<string>()
+                };
             }
         }
 

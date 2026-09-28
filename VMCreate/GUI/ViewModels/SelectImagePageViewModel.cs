@@ -4,6 +4,7 @@ using System.Collections;
 using System.ComponentModel;
 using System.Windows.Data;
 using System.Windows.Input;
+using VMCreate.Gallery;
 
 namespace VMCreate
 {
@@ -22,6 +23,8 @@ namespace VMCreate
         private bool _isLoading = true;
         private string? _errorMessage;
         private bool _showIsoInstallers;
+        private string? _galleryStatusText;
+        private string? _galleryStatusToolTip;
 
         /// <summary>Raised when the wizard should complete (e.g. Cancel).</summary>
         public event Action<WizardResult>? RequestWizardComplete;
@@ -106,6 +109,36 @@ namespace VMCreate
         }
 
         public bool HasError => !string.IsNullOrEmpty(_errorMessage);
+
+        /// <summary>
+        /// Live gallery status line: "N images · live from distribution sites",
+        /// extended with "· M loaders failed" when loaders failed, with the
+        /// failed loader names in the tooltip.
+        /// </summary>
+        public string? GalleryStatusText
+        {
+            get => _galleryStatusText;
+            private set => SetProperty(ref _galleryStatusText, value);
+        }
+
+        /// <summary>Tooltip for the status line: names of loaders that failed.</summary>
+        public string? GalleryStatusToolTip
+        {
+            get => _galleryStatusToolTip;
+            private set => SetProperty(ref _galleryStatusToolTip, value);
+        }
+
+        /// <summary>
+        /// Sets the status line from the load summary once streaming completes.
+        /// Callers must be on the UI thread.
+        /// </summary>
+        public void SetGalleryStatus(int itemCount, GalleryLoadSummary summary)
+        {
+            if (summary == null) throw new ArgumentNullException(nameof(summary));
+
+            (GalleryStatusText, GalleryStatusToolTip) =
+                GalleryLoadSummary.ComposeStatusLine(itemCount, summary);
+        }
 
         public ICommand NextCommand { get; }
         public ICommand CancelCommand { get; }

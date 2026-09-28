@@ -103,6 +103,11 @@ namespace VMCreate.Gallery
                 Description = $"Kali Linux Hyper-V Image ({fileName}) - Released: {date}",
                 Publisher = Publisher,
                 DiskUri = baseUrl + fileName,
+                // cdimage.kali.org publishes a GNU-format SHA256SUMS in the
+                // same directory as the image; ChecksumVerifier looks the
+                // image filename up in it.
+                ChecksumUri = baseUrl + "SHA256SUMS",
+                ChecksumAlgorithm = "SHA256",
                 SymbolUri = SymbolUrl,
                 LastUpdated = ParseDate(date),
                 Version = version,
@@ -178,6 +183,8 @@ namespace VMCreate.Gallery
                     Description = $"Kali Linux weekly Hyper-V Image — untested build with the latest updates ({bestFileName}) - Released: {bestDate}",
                     Publisher = Publisher,
                     DiskUri = baseUrl + bestFileName,
+                    ChecksumUri = baseUrl + "SHA256SUMS",
+                    ChecksumAlgorithm = "SHA256",
                     SymbolUri = SymbolUrl,
                     LastUpdated = ParseDate(bestDate),
                     Version = bestVersion,
@@ -223,6 +230,9 @@ namespace VMCreate.Gallery
                 Description = $"Kali Linux with the KDE Plasma desktop, switched from XFCE after deployment. Same disk image as {source.Name}.",
                 Publisher = source.Publisher,
                 DiskUri = source.DiskUri,
+                // Shares the base disk, so it shares the base checksum too.
+                ChecksumUri = source.ChecksumUri,
+                ChecksumAlgorithm = source.ChecksumAlgorithm,
                 SymbolUri = source.SymbolUri,
                 LastUpdated = source.LastUpdated,
                 Version = source.Version,

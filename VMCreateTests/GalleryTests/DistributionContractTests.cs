@@ -184,6 +184,15 @@ namespace VMCreate.Tests.GalleryTests
             // (units written to /.config) — both base and twin must carry it.
             Assert.AreEqual("kali", items[0].InitialUsername, "Base item must carry the image's desktop user");
             Assert.AreEqual("kali", items[1].InitialUsername, "Twin must carry the image's desktop user");
+
+            // cdimage.kali.org publishes SHA256SUMS next to the image — both
+            // base and twin must point at it so the download verifies.
+            foreach (var item in items)
+            {
+                StringAssert.EndsWith(item.ChecksumUri ?? "", "SHA256SUMS",
+                    $"'{item.Name}' must wire the mirror's SHA256SUMS");
+                Assert.AreEqual("SHA256", item.ChecksumAlgorithm);
+            }
         }
 
         [TestMethod]
@@ -341,6 +350,11 @@ namespace VMCreate.Tests.GalleryTests
             AssertContractInvariants(items, nameof(Tails));
             Assert.AreEqual(1, items.Count);
             StringAssert.EndsWith(items[0].DiskUri, ".img", StringComparison.OrdinalIgnoreCase);
+
+            // The API is the publisher's own metadata: its inline sha256
+            // must flow into the item so downloads verify.
+            Assert.AreEqual("abc123", items[0].Checksum);
+            Assert.AreEqual("SHA256", items[0].ChecksumAlgorithm);
         }
 
         [TestMethod]

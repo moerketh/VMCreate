@@ -116,6 +116,57 @@ namespace VMCreate.Tests.HyperV.VmCreation
             Assert.IsFalse(result.Success);
             Assert.IsTrue(result.ErrorMessage!.Contains("No creation strategy found"));
         }
+
+        [TestMethod]
+        public async Task DeployAsync_ReplacePreviousVm_DeletesStalePerVmDiskDirectory()
+        {
+            // The re-deploy failure mode this pins: a previous deploy (or a
+            // failed one) leaves a per-VM disk directory with unattached
+            // intermediates. ReplacePreviousVm must remove the whole directory
+            // so the next deploy of the same base name starts clean.
+            string baseDir = Path.Combine(Path.GetTempPath(), $"vmcreate-orch-{Guid.NewGuid():N}");
+            string oldVmName = "TestVM_20240101000000";
+            string oldDiskDir = Path.Combine(baseDir, oldVmName);
+            Directory.CreateDirectory(oldDiskDir);
+            // Stale intermediates: a half-converted disk and a leftover archive.
+            File.WriteAllText(Path.Combine(oldDiskDir, "disk.vhdx.tmp"), "partial");
+            File.WriteAllText(Path.Combine(oldDiskDir, "image.ova"), "archive");
+
+            try
+            {
+                _pathService.Setup(s => s.DefaultVhdxPath).Returns(baseDir);
+                _pathService.Setup(s => s.GetVirtualHardDiskPath(It.IsAny<string>()))
+                    .Returns((string vmName) => Path.Combine(baseDir, vmName));
+
+                var plan = VmDeploymentPlan.FromSettings(new VmSettings
+                {
+                    VMName = "TestVM_20250601120000",
+                    ReplacePreviousVm = true
+                });
+                var galleryItem = new GalleryItem { Name = "Test", DiskUri = "http://example.com/disk.vhdx", IsNativeHyperV = false };
+                _mediaHandlerFactory.Setup(f => f.CreateHandler(It.IsAny<DiskImageFormat>()))
+                    .Returns(new FakeMediaHandler(DiskImageFormat.Vhdx));
+                _strategy.Setup(s => s.CanHandle(It.IsAny<GalleryItem>(), It.IsAny<DiskImageFormat>())).Returns(true);
+                _hyperVManager.Setup(h => h.FindExistingVmsByBaseNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(new[] { oldVmName });
+                _hyperVManager.Setup(h => h.GetVmHardDiskPathsAsync(oldVmName, It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(Array.Empty<string>());
+
+                VmDeploymentResult result = await _orchestrator.DeployAsync(
+                    plan, new VmCustomizations(), galleryItem, CancellationToken.None, null, "disk.vhdx");
+
+                Assert.IsTrue(result.Success);
+                Assert.IsFalse(Directory.Exists(oldDiskDir),
+                    "stale per-VM disk directory must be deleted on replace so re-deploys start clean");
+                _hyperVManager.Verify(h => h.RemoveVMAsync(oldVmName, It.IsAny<CancellationToken>()), Times.Once);
+            }
+            finally
+            {
+                if (Directory.Exists(baseDir))
+                    Directory.Delete(baseDir, true);
+            }
+        }
+
         private sealed class FakeMediaHandler : IMediaHandler
         {
             private readonly DiskImageFormat _fileType;

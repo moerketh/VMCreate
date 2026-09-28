@@ -25,6 +25,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
         private Mock<ISshKeyManager> _sshKeyManager = null!;
         private Mock<IKvpSender> _kvpSender = null!;
         private Mock<IKvpPoller> _kvpPoller = null!;
+        private Mock<IKvpHeartbeatGate> _kvpHeartbeatGate = null!;
         private Mock<IVmShutdownWatcher> _shutdownWatcher = null!;
         private Mock<IGuestDiagnosticsCollector> _diagnosticsCollector = null!;
         private Mock<IPostBootCustomizationService> _postBootService = null!;
@@ -50,6 +51,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
             _sshKeyManager = new Mock<ISshKeyManager>();
             _kvpSender = new Mock<IKvpSender>();
             _kvpPoller = new Mock<IKvpPoller>();
+            _kvpHeartbeatGate = new Mock<IKvpHeartbeatGate>();
             _shutdownWatcher = new Mock<IVmShutdownWatcher>();
             _diagnosticsCollector = new Mock<IGuestDiagnosticsCollector>();
             _postBootService = new Mock<IPostBootCustomizationService>();
@@ -84,6 +86,11 @@ namespace VMCreate.Tests.HyperV.VmCreation
             _guestShellFactory.Setup(f => f.Create(It.IsAny<string>(), It.IsAny<string>())).Returns(shell.Object);
             _sshKeyManager.Setup(s => s.GetPrivateKeyPath(It.IsAny<string>())).Returns("C:\\Users\\Test\\.ssh\\id_rsa");
 
+            // KVP heartbeat gate: pass-through default (guest daemon alive).
+            _kvpHeartbeatGate.Setup(g => g.WaitForGuestKvpAsync(
+                It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<int>(), It.IsAny<int>()))
+                .ReturnsAsync(true);
+
             _strategy = new DiskImageVmCreationStrategy(
                 _lifecycleManager.Object,
                 _diskManager.Object,
@@ -94,6 +101,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
                 _sshKeyManager.Object,
                 _kvpSender.Object,
                 _kvpPoller.Object,
+                _kvpHeartbeatGate.Object,
                 _shutdownWatcher.Object,
                 _diagnosticsCollector.Object,
                 _postBootService.Object,
@@ -218,6 +226,50 @@ namespace VMCreate.Tests.HyperV.VmCreation
             }
 
             Assert.IsTrue(threw);
+        }
+
+        [TestMethod]
+        public async Task CreateVMAsync_KvpHeartbeatNotConfirmed_ThrowsAndSkipsPostBoot()
+        {
+            // The quickspawn bug class: SSH answers but the guest's KVP
+            // daemon was never started. The gate must fail the deployment
+            // with diagnostics instead of running post-boot steps into a
+            // dead integration stack.
+            _kvpHeartbeatGate.Setup(g => g.WaitForGuestKvpAsync(
+                It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<int>(), It.IsAny<int>()))
+                .ReturnsAsync(false);
+            _diagnosticsCollector.Setup(d => d.CollectAsync(
+                It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()))
+                .ReturnsAsync(new GuestDiagnostics { RawOutput = "hv_kvp_daemon: inactive (dead)" });
+
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => ExecuteAsync(generation: 2));
+
+            StringAssert.Contains(ex.Message, "hv_kvp_daemon", StringComparison.Ordinal);
+            _postBootService.Verify(p => p.RunLinuxPostBootAsync(
+                It.IsAny<IGuestShell>(), It.IsAny<VmDeploymentPlan>(), It.IsAny<GalleryItem>(),
+                It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(),
+                It.IsAny<CancellationToken>()), Times.Never,
+                "post-boot steps must not run when the integration daemon is dead");
+            _diagnosticsCollector.Verify(d => d.CollectAsync(
+                It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()), Times.Once,
+                "failure path must collect guest diagnostics for the log");
+        }
+
+        [TestMethod]
+        public async Task CreateVMAsync_IntegrationServicesDisabled_SkipsHeartbeatGate()
+        {
+            // Opting out of integration services also opts out of the gate —
+            // the user explicitly accepted a degraded integration stack.
+            _customizations.EnableIntegrationServices = false;
+            _kvpHeartbeatGate.Setup(g => g.WaitForGuestKvpAsync(
+                It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<int>(), It.IsAny<int>()))
+                .ThrowsAsync(new InvalidOperationException("gate must not be called"));
+
+            await ExecuteAsync(generation: 2);
+
+            _kvpHeartbeatGate.Verify(g => g.WaitForGuestKvpAsync(
+                It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<int>(), It.IsAny<int>()), Times.Never);
         }
 
         private async Task ExecuteAsync(int generation)
