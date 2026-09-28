@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Windows.Controls;
+using VMCreate.Gallery;
 
 namespace VMCreate
 {
@@ -37,6 +38,15 @@ namespace VMCreate
 
         /// <summary>Called by MainWindow when all gallery loaders have finished.</summary>
         public void SetLoadingComplete() => _viewModel.IsLoading = false;
+
+        /// <summary>
+        /// Called by MainWindow with the load summary so the page can show a
+        /// live status line ("N images · live from distribution sites · M
+        /// loaders failed") instead of silently rendering fewer cards than
+        /// the catalog contains.
+        /// </summary>
+        public void SetGalleryStatus(int itemCount, GalleryLoadSummary summary)
+            => _viewModel.SetGalleryStatus(itemCount, summary);
 
         /// <summary>Displays a dismissible error banner on this page.</summary>
         public void ShowError(string message) => _viewModel.ErrorMessage = message;

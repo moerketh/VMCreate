@@ -42,14 +42,18 @@ namespace VMCreate.Gallery
             var version = first.GetProperty("version").GetString()
                 ?? throw new Exception("Tails API: version field is missing.");
 
-            // Find the .img installation path
+            // Find the .img installation path (its target-file entry carries
+            // an inline sha256 — the API is the publisher's own metadata).
             string? imgUrl = null;
+            string? imgSha256 = null;
             foreach (var path in first.GetProperty("installation-paths").EnumerateArray())
             {
                 if (path.GetProperty("type").GetString() == "img")
                 {
-                    imgUrl = path.GetProperty("target-files")[0]
-                                 .GetProperty("url").GetString();
+                    var targetFile = path.GetProperty("target-files")[0];
+                    imgUrl = targetFile.GetProperty("url").GetString();
+                    if (targetFile.TryGetProperty("sha256", out var sha))
+                        imgSha256 = sha.GetString();
                     break;
                 }
             }
@@ -66,6 +70,8 @@ namespace VMCreate.Gallery
                 ThumbnailUri = logoUri,
                 SymbolUri = logoUri,
                 DiskUri = imgUrl,
+                ChecksumAlgorithm = "SHA256",
+                Checksum = imgSha256,
                 EnhancedSessionTransportType = "HvSocket",
                 Version = version,
                 LastUpdated = DateTime.UtcNow.ToString("o"),

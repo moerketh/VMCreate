@@ -229,7 +229,7 @@ namespace VMCreate
                     _logger.LogDebug("Populated {Count} items from cache.", _galleryItems.Count);
 
                 // ── 2. Background refresh via streaming ──────────────────────
-                await _galleryService.LoadFromSourcesStreamingAsync(_seenItems, batch =>
+                var summary = await _galleryService.LoadFromSourcesStreamingAsync(_seenItems, batch =>
                 {
                     Application.Current.Dispatcher.BeginInvoke(() =>
                     {
@@ -263,6 +263,8 @@ namespace VMCreate
 
                 _logger.LogDebug("Successfully loaded gallery items");
                 firstPage.SetLoadingComplete();
+                Application.Current.Dispatcher.Invoke(() =>
+                    firstPage.SetGalleryStatus(_galleryItems.Count, summary));
             }
             catch (OperationCanceledException)
             {

@@ -27,6 +27,7 @@
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*"/>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
                 <!-- Search filter -->
                 <ui:TextBox Grid.Row="0" Margin="0,0,0,6"
@@ -66,8 +67,19 @@
                                 </DockPanel>
                                 <!-- Right-side badges stacked vertically -->
                                 <StackPanel Grid.Column="1" Orientation="Vertical" VerticalAlignment="Center" HorizontalAlignment="Right">
-                                    <TextBlock Text="{Binding FileType}" Style="{StaticResource PillLabelStyle}"
-                                               Visibility="{Binding Converter={StaticResource FileTypePillVis}}"/>
+                                    <!-- Deploy transparency: what the file is · what Deploy will do with it -->
+                                    <TextBlock Style="{StaticResource PillLabelStyle}"
+                                               Visibility="{Binding Converter={StaticResource FileTypePillVis}}"
+                                               ToolTip="What Deploy will do with this image format">
+                                        <Run Text="{Binding FileType}"/><Run Text=" · "/><Run Text="{Binding DeploySemantics}"/>
+                                    </TextBlock>
+                                    <!-- Integrity state: visible before clicking Deploy, not just in the log -->
+                                    <TextBlock Text="✓ verified" Style="{StaticResource VerifiedPillStyle}"
+                                               Visibility="{Binding HasChecksum, Converter={StaticResource BoolToVis}}"
+                                               ToolTip="The download will be verified against the publisher's checksum"/>
+                                    <TextBlock Text="⚠ unverified" Style="{StaticResource UnverifiedPillStyle}"
+                                               Visibility="{Binding HasNoChecksum, Converter={StaticResource BoolToVis}}"
+                                               ToolTip="No publisher checksum is available — the downloaded image cannot be verified"/>
                                     <TextBlock Text="Security" Style="{StaticResource SecurityPillStyle}"
                                                Visibility="{Binding IsSecurity, Converter={StaticResource BoolToVis}}"
                                                ToolTip="Security / penetration-testing distribution"/>
@@ -91,6 +103,13 @@
                                    VerticalAlignment="Center" Margin="8,0,0,0"/>
                     </StackPanel>
                 </Border>
+                <!-- Live gallery status line — item count and loader health,
+                     so missing sources are visible instead of silent -->
+                <TextBlock Grid.Row="3" Text="{Binding GalleryStatusText}"
+                           ToolTip="{Binding GalleryStatusToolTip}"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="12"
+                           HorizontalAlignment="Center" Margin="0,6,0,0"
+                           TextWrapping="Wrap" TextAlignment="Center"/>
             </Grid>
             <!-- Detail panel — bound directly to SelectedItem properties -->
             <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="10,0,10,0">

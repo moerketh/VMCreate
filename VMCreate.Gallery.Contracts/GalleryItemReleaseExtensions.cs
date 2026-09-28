@@ -84,7 +84,9 @@ namespace VMCreate
                 InitialUsername = item.InitialUsername,
                 InitialPassword = item.InitialPassword,
                 LinuxDistro = item.LinuxDistro,
-                ChecksumUri = item.ChecksumUri,
+                // The chosen release may live in a different directory with
+                // its own checksum file — prefer the variant's checksum.
+                ChecksumUri = variant.ChecksumUri ?? item.ChecksumUri,
                 Checksum = item.Checksum,
                 ChecksumAlgorithm = item.ChecksumAlgorithm,
                 Category = item.Category,

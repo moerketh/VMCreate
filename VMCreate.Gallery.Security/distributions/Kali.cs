@@ -59,6 +59,7 @@ namespace VMCreate.Gallery
                     DisplayName = $"Stable ({stable.Version})",
                     Description = "Fully-tested point release (quarterly).",
                     DiskUri = stable.DiskUri,
+                    ChecksumUri = stable.ChecksumUri,
                     Version = stable.Version,
                     LastUpdated = ParseDate(stable.DateText),
                     DownloadSizeText = stable.SizeText,
@@ -76,6 +77,7 @@ namespace VMCreate.Gallery
                     DisplayName = $"Weekly ({weekly.Version})",
                     Description = "Untested build with the latest updates.",
                     DiskUri = weekly.DiskUri,
+                    ChecksumUri = weekly.ChecksumUri,
                     Version = weekly.Version,
                     LastUpdated = ParseDate(weekly.DateText),
                     DownloadSizeText = weekly.SizeText,
@@ -91,6 +93,10 @@ namespace VMCreate.Gallery
                     Description = "Kali Linux Hyper-V image — stable point release plus untested weekly builds with the latest updates.",
                     Publisher = Publisher,
                     DiskUri = stable.DiskUri,
+                    // The item's own fields describe the stable release;
+                    // ResolveRelease swaps in the chosen variant's checksum.
+                    ChecksumUri = stable.ChecksumUri,
+                    ChecksumAlgorithm = "SHA256",
                     SymbolUri = SymbolUrl,
                     LastUpdated = ParseDate(stable.DateText),
                     Version = stable.Version,
@@ -112,7 +118,7 @@ namespace VMCreate.Gallery
         /// <summary>
         /// One scraped row of a cdimage directory listing.
         /// </summary>
-        private sealed record ScrapedRelease(string DiskUri, string Version, string DateText, string SizeText);
+        private sealed record ScrapedRelease(string DiskUri, string ChecksumUri, string Version, string DateText, string SizeText);
 
         /// <summary>
         /// Fetches the stable point release from <c>/current/</c>.
@@ -191,6 +197,11 @@ namespace VMCreate.Gallery
 
             return new ScrapedRelease(
                 DiskUri: baseUrl + fileName,
+                // cdimage.kali.org publishes a GNU-format SHA256SUMS in the
+                // same directory as the image; ChecksumVerifier looks the
+                // image filename up in it. Stable and weekly live in
+                // different directories, so each release carries its own.
+                ChecksumUri: baseUrl + "SHA256SUMS",
                 Version: versionMatch.Success ? formatVersion(versionMatch) : "Unknown",
                 DateText: match.Groups[4].Value,
                 SizeText: match.Groups[3].Value.Trim());

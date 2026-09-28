@@ -36,7 +36,8 @@
         EnableNestedVirt,
         CleanupIsoBoot,
         AddTempNic,
-        WaitForSsh
+        WaitForSsh,
+        WaitForKvpHeartbeat
     }
 
     /// <summary>

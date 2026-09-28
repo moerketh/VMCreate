@@ -91,6 +91,23 @@ namespace VMCreate.Gallery
         /// <summary>Maximum time any single loader is allowed before it is abandoned.</summary>
         private static readonly TimeSpan LoaderTimeout = TimeSpan.FromSeconds(10);
 
+        private readonly object _failureLock = new();
+        private readonly List<string> _failedLoaders = new();
+
+        /// <summary>Number of loaders the aggregate ran for the last load.</summary>
+        public int LoaderCount => _loaders.Count;
+
+        /// <summary>
+        /// Names of loaders that failed, timed out, or returned nothing during
+        /// the last <see cref="LoadGalleryItems"/> / streaming run. Surfaced so
+        /// the UI can say "N loaders failed" instead of silently showing fewer
+        /// cards than the catalog contains.
+        /// </summary>
+        public IReadOnlyList<string> FailedLoaderNames
+        {
+            get { lock (_failureLock) return _failedLoaders.ToList(); }
+        }
+
         private async Task<List<GalleryItem>> LoadFromSingleLoader(IGalleryLoader loader, CancellationToken cancellationToken)
         {
             try
@@ -102,7 +119,13 @@ namespace VMCreate.Gallery
                 if (items == null)
                 {
                     _logger.LogWarning("Loader {LoaderType} returned null items.", loader.GetType().Name);
+                    RegisterFailure(loader);
                     return new List<GalleryItem>();
+                }
+                if (items.Count == 0)
+                {
+                    _logger.LogWarning("Loader {LoaderType} returned no items.", loader.GetType().Name);
+                    RegisterFailure(loader);
                 }
                 return items;
             }
@@ -111,6 +134,7 @@ namespace VMCreate.Gallery
                 // The per-loader timeout fired, not the caller's token — treat as a soft failure.
                 _logger.LogWarning("Loader {LoaderType} timed out after {Timeout}s and was skipped.",
                     loader.GetType().Name, LoaderTimeout.TotalSeconds);
+                RegisterFailure(loader);
                 return new List<GalleryItem>();
             }
             catch (OperationCanceledException)
@@ -120,8 +144,15 @@ namespace VMCreate.Gallery
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error loading items from {LoaderType}: {ErrorMessage}", loader.GetType().Name, ex.Message);
+                RegisterFailure(loader);
                 return new List<GalleryItem>();
             }
+        }
+
+        private void RegisterFailure(IGalleryLoader loader)
+        {
+            lock (_failureLock)
+                _failedLoaders.Add(loader.GetType().Name);
         }
     }
 }

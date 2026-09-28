@@ -181,6 +181,18 @@ namespace VMCreate.Tests.GalleryTests
             // A blank field collapsed every user-unit path on TEST_20260910165003
             // (units written to /.config) — the single item must carry it.
             Assert.AreEqual("kali", items[0].InitialUsername, "Item must carry the image's desktop user");
+
+            // cdimage.kali.org publishes SHA256SUMS next to the image — the
+            // item and its variants must point at their directory's sums so
+            // the download verifies, whichever release is chosen.
+            StringAssert.EndsWith(items[0].ChecksumUri ?? "", "SHA256SUMS",
+                "Item must wire the stable mirror's SHA256SUMS");
+            Assert.AreEqual("SHA256", items[0].ChecksumAlgorithm);
+            foreach (var variant in items[0].ReleaseVariants!)
+            {
+                StringAssert.EndsWith(variant.ChecksumUri ?? "", "SHA256SUMS",
+                    $"Variant '{variant.Id}' must wire its directory's SHA256SUMS");
+            }
         }
 
         [TestMethod]
@@ -259,6 +271,14 @@ namespace VMCreate.Tests.GalleryTests
             Assert.AreEqual(LinuxDistro.Kali, effective.LinuxDistro, "Variant resolution keeps distro identity");
             Assert.IsNull(effective.ReleaseVariants, "Effective item is a concrete image, not a picker");
             Assert.IsNull(kali.ResolveRelease("nightly"), "Unknown release id resolves to null — callers fail loudly");
+
+            // Checksums live per directory: the resolved weekly item must
+            // point at the weekly SHA256SUMS, not the stable one — otherwise
+            // verification would look up the weekly filename in the wrong
+            // sums file and fail (or verify the wrong bytes).
+            StringAssert.Contains(effective.ChecksumUri ?? "", "kali-weekly/",
+                StringComparison.OrdinalIgnoreCase);
+            StringAssert.EndsWith(effective.ChecksumUri ?? "", "SHA256SUMS");
         }
 
         [TestMethod]
@@ -355,6 +375,11 @@ namespace VMCreate.Tests.GalleryTests
             AssertContractInvariants(items, nameof(Tails));
             Assert.AreEqual(1, items.Count);
             StringAssert.EndsWith(items[0].DiskUri, ".img", StringComparison.OrdinalIgnoreCase);
+
+            // The API is the publisher's own metadata: its inline sha256
+            // must flow into the item so downloads verify.
+            Assert.AreEqual("abc123", items[0].Checksum);
+            Assert.AreEqual("SHA256", items[0].ChecksumAlgorithm);
         }
 
         [TestMethod]

@@ -162,6 +162,16 @@
                 <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}"/>
                 <Setter Property="Background" Value="{DynamicResource ControlFillColorTertiaryBrush}"/>
             </Style>
+            <!-- Checksum-verified badge pill (muted green accent) -->
+            <Style x:Key="VerifiedPillStyle" TargetType="{x:Type TextBlock}" BasedOn="{StaticResource PreInstalledPillStyle}">
+                <Setter Property="Foreground" Value="{DynamicResource SystemFillColorSuccessBrush}"/>
+                <Setter Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}"/>
+            </Style>
+            <!-- Checksum-unverified warning badge pill (muted amber accent) -->
+            <Style x:Key="UnverifiedPillStyle" TargetType="{x:Type TextBlock}" BasedOn="{StaticResource PreInstalledPillStyle}">
+                <Setter Property="Foreground" Value="{DynamicResource SystemFillColorCautionBrush}"/>
+                <Setter Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}"/>
+            </Style>
             <Style x:Key="PillLabelStyleAccent" TargetType="{x:Type TextBlock}" BasedOn="{StaticResource PreInstalledPillStyle}">
                 <Setter Property="Foreground" Value="{DynamicResource TextOnAccentFillColorPrimaryBrush}"/>
                 <Setter Property="Background" Value="{DynamicResource AccentBrush}"/>

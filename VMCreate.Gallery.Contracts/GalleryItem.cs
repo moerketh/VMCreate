@@ -223,5 +223,30 @@ namespace VMCreate
             }
         }
 
+        /// <summary>
+        /// True when the publisher's checksum is known (inline hash or checksum
+        /// file URI), so the download will be verified. Drives the
+        /// verified/unverified badge on gallery cards — the integrity state
+        /// must be visible before the user clicks Deploy, not just in the log.
+        /// </summary>
+        public bool HasChecksum =>
+            !string.IsNullOrEmpty(Checksum) || !string.IsNullOrEmpty(ChecksumUri);
+
+        /// <summary>Inverse of <see cref="HasChecksum"/> for XAML visibility bindings.</summary>
+        public bool HasNoChecksum => !HasChecksum;
+
+        /// <summary>
+        /// What Deploy will actually do with this image, in the user-facing
+        /// transparency vocabulary: boots as-is / converts / manual install.
+        /// Sets expectations before the user clicks Deploy.
+        /// </summary>
+        public string DeploySemantics => FileType switch
+        {
+            "VHDX" or "VHD" => "boots as-is",
+            "VMDK" or "QCOW2" or "OVA" => "converts",
+            "ISO" => "manual install",
+            _ => "unknown format"
+        };
+
     }
 }

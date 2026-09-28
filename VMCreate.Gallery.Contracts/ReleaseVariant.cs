@@ -41,6 +41,13 @@ namespace VMCreate
         public string? DownloadSizeText { get; init; }
 
         /// <summary>
+        /// Publisher checksum file for this release's download (GNU SHA256SUMS
+        /// style). Each release channel may live in a different directory with
+        /// its own checksum file — when null, the item's own checksum applies.
+        /// </summary>
+        public string? ChecksumUri { get; init; }
+
+        /// <summary>
         /// True when this is the release the gallery item itself describes.
         /// Exactly one variant per item must be the default; choosing the
         /// default (or nothing at all) deploys the item's own fields

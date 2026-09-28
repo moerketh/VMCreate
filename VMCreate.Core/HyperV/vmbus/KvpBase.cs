@@ -84,11 +84,13 @@ namespace CreateVM.HyperV.vmbus
         }
 
         /// <summary>
-        /// Get VM GUID from WMI (returns null if not running)
+        /// Get VM GUID from WMI (returns null if not running).
+        /// Virtual so host-less unit tests can substitute a fake GUID and
+        /// exercise polling loops (e.g. <see cref="KvpHeartbeatGate"/>).
         /// </summary>
         /// <param name="vmName"></param>
         /// <returns></returns>
-        protected string? GetVMGuid(string vmName)
+        protected virtual string? GetVMGuid(string vmName)
         {
             ValidateVmName(vmName);
 

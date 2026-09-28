@@ -26,6 +26,7 @@ namespace VMCreate.HyperV.VmCreation
         private readonly ISshKeyManager _sshKeyManager;
         private readonly IKvpSender _kvpSender;
         private readonly IKvpPoller _kvpPoller;
+        private readonly IKvpHeartbeatGate _kvpHeartbeatGate;
         private readonly IVmShutdownWatcher _shutdownWatcher;
         private readonly IGuestDiagnosticsCollector _diagnosticsCollector;
         private readonly IPostBootCustomizationService _postBootService;
@@ -45,6 +46,7 @@ namespace VMCreate.HyperV.VmCreation
             ISshKeyManager sshKeyManager,
             IKvpSender kvpSender,
             IKvpPoller kvpPoller,
+            IKvpHeartbeatGate kvpHeartbeatGate,
             IVmShutdownWatcher shutdownWatcher,
             IGuestDiagnosticsCollector diagnosticsCollector,
             IPostBootCustomizationService postBootService,
@@ -62,6 +64,7 @@ namespace VMCreate.HyperV.VmCreation
             _sshKeyManager = sshKeyManager ?? throw new ArgumentNullException(nameof(sshKeyManager));
             _kvpSender = kvpSender ?? throw new ArgumentNullException(nameof(kvpSender));
             _kvpPoller = kvpPoller ?? throw new ArgumentNullException(nameof(kvpPoller));
+            _kvpHeartbeatGate = kvpHeartbeatGate ?? throw new ArgumentNullException(nameof(kvpHeartbeatGate));
             _shutdownWatcher = shutdownWatcher ?? throw new ArgumentNullException(nameof(shutdownWatcher));
             _diagnosticsCollector = diagnosticsCollector ?? throw new ArgumentNullException(nameof(diagnosticsCollector));
             _postBootService = postBootService ?? throw new ArgumentNullException(nameof(postBootService));
@@ -217,6 +220,39 @@ namespace VMCreate.HyperV.VmCreation
 
                     progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.PostBoot, VmDeploymentSubStep.WaitForSsh));
                     await shell.WaitForReadyAsync(cancellationToken);
+
+                    // KVP heartbeat gate: SSH being up proves the network
+                    // stack, not the integration stack. An image can ship
+                    // hv_kvp_daemon installed-but-unstarted, which would
+                    // leave later integration (host↔guest KVP exchange,
+                    // Enhanced Session) silently dead. Confirm the guest
+                    // daemon is actually answering before customizing —
+                    // fail loudly with diagnostics instead of proceeding
+                    // into a dead pipeline (the quickspawn lesson).
+                    if (vmCustomizations.EnableIntegrationServices)
+                    {
+                        progress.Report(CreateVMProgressInfo.ForPhase(
+                            VmDeploymentPhase.PostBoot, VmDeploymentSubStep.WaitForKvpHeartbeat));
+                        bool kvpAlive = await _kvpHeartbeatGate.WaitForGuestKvpAsync(
+                            plan.VmName, cancellationToken);
+                        if (!kvpAlive)
+                        {
+                            var diagnostics = await _diagnosticsCollector.CollectAsync(
+                                plan.VmName, cancellationToken,
+                                _sshKeyManager.GetPrivateKeyPath(vmCustomizations.CustomSshPublicKeyPath));
+                            _logger.LogError(
+                                "KVP heartbeat not confirmed for {VMName} within the timeout — the guest's " +
+                                "Hyper-V integration daemon (hv_kvp_daemon) appears to be installed but not " +
+                                "answering. Guest diagnostics:\n{Diagnostics}",
+                                plan.VmName, diagnostics.RawOutput);
+                            throw new InvalidOperationException(
+                                $"The Hyper-V integration daemon (hv_kvp_daemon) in VM '{plan.VmName}' did not " +
+                                $"answer within the heartbeat timeout. The image may ship it unstarted. " +
+                                $"Start it in the guest (systemctl enable --now hv_kvp_daemon) and retry, " +
+                                $"or disable integration services for this deployment.");
+                        }
+                        _logger.LogInformation("KVP heartbeat confirmed for {VMName} — guest integration daemon is answering.", plan.VmName);
+                    }
 
                     try
                     {
