@@ -1,94 +1,51 @@
 using System;
 using System.Collections.Generic;
-using System.Net.Http;
-using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace VMCreate.Gallery
 {
+    /// <summary>
+    /// Gallery loader for BlackArch Linux, delivered as an Arch Linux base
+    /// with the BlackArch repositories added and a curated subset of tools
+    /// installed post-boot by <c>BlackArchInstallStep</c> (tag: <c>blackarch</c>).
+    /// <para>
+    /// BlackArch upstream publishes only two stale disk images (a 2023.05 Slim
+    /// ISO and a 2023.04 OVA) and supports the "Arch + BlackArch repos" model
+    /// as a first-class install path. Riding the rolling Arch cloud image plus
+    /// the live BlackArch repos yields a current pentesting install, sidesteps
+    /// the outdated-ISO problem entirely, and reuses VMCreate's existing Arch
+    /// qcow2 deployment pipeline (no ISO boot cycle).
+    /// </para>
+    /// <para>
+    /// Static loader: <c>DiskUri</c> is the hardcoded Arch basic cloud image
+    /// template, so no HTTP scrape is required to enumerate the item.
+    /// </para>
+    /// </summary>
     public class BlackArch : IGalleryLoader
     {
-        private const string DownloadsUrl = "https://www.blackarch.org/downloads.html";
-        private readonly IHttpClientFactory _clientFactory;
-        private const string PinnedVersion = "2023.04.01";
+        private const string ArchTemplateUrl = "https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-basic.qcow2";
+        private const string SymbolUri = "https://archlinux.org/static/archlinux_common_style/favicon.png";
 
-        public BlackArch(IHttpClientFactory clientFactory)
+        public Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
-            _clientFactory = clientFactory ?? throw new ArgumentNullException(nameof(clientFactory));
-        }
-
-        public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
-        {
-            var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(BlackArch).Assembly, "blackarch-logo.png");
-            var galleryItems = new List<GalleryItem>();
-            var client = _clientFactory.CreateClient();
-            client.DefaultRequestHeaders.Add("User-Agent", ProductInfo.UserAgent);
-
-            // Fetch the downloads page
-            var response = await client.GetAsync(DownloadsUrl, cancellationToken);
-                response.EnsureSuccessStatusCode();
-                var htmlContent = await response.Content.ReadAsStringAsync();
-
-                // Simplified regex for Slim ISO URL
-                string slimPattern = @"<a href=""(https:\/\/[^""]+blackarch-linux-slim-2023\.05\.01-x86_64\.iso)""";
-                string ovaPattern = @"<a href=""(https:\/\/[^""]+blackarch-linux-2023\.04\.01\.ova)""";
-
-                // Find Slim ISO
-                var slimMatch = Regex.Match(htmlContent, slimPattern);
-                if (slimMatch.Success)
-                {
-                    var slimUrl = slimMatch.Groups[1].Value;
-
-                    var slimItem = new GalleryItem
-                    {
-                        Name = "BlackArch",
-                        Publisher = "BlackArch Project",
-                        Description = $"BlackArch Linux is an Arch Linux-based penetration testing distribution for penetration testers and security researchers. This is the Slim ISO (version {PinnedVersion}), which contains a functional BlackArch Linux system with a selected set of common/well-known tools and system utilities for pentesting.",
-                        ThumbnailUri = "https://blackarch.org/images/screenshots/menu_slim.png",
-                        SymbolUri = logoUri,
-                        DiskUri = slimUrl,
-                        SecureBoot = "false",
-                        Version = PinnedVersion,
-                        LastUpdated = DateTime.ParseExact(PinnedVersion, "yyyy.MM.dd", System.Globalization.CultureInfo.InvariantCulture).ToString("o"),
-                        Category = "Security"
-                    };
-                    galleryItems.Add(slimItem);
-                }
-                else
-                {
-                    throw new Exception("Could not find BlackArch Slim ISO URL in the downloads page.");
-                }
-
-                // Find OVA Image
-                var ovaMatch = Regex.Match(htmlContent, ovaPattern);
-                if (ovaMatch.Success)
-                {
-                    var ovaUrl = ovaMatch.Groups[1].Value;
-
-                    var ovaItem = new GalleryItem
-                    {
-                        Name = "BlackArch",
-                        Publisher = "BlackArch Project",
-                        Description = $"BlackArch Linux is an Arch Linux-based penetration testing distribution for penetration testers and security researchers. This is the OVA Image (version {PinnedVersion}), suitable for running in VirtualBox, VMware, and QEMU.",
-                        ThumbnailUri = "https://blackarch.org/images/screenshots/menu_slim.png",
-                        SymbolUri = logoUri,
-                        DiskUri = ovaUrl,
-                        SecureBoot = "false",
-                        EnhancedSessionTransportType = "HvSocket",
-                        Version = PinnedVersion,
-                        LastUpdated = DateTime.ParseExact(PinnedVersion, "yyyy.MM.dd", System.Globalization.CultureInfo.InvariantCulture).ToString("o"),
-                        InitialUsername = "root",
-                        InitialPassword = "blackarch",
-                        Category = "Security"
-                    };
-                    galleryItems.Add(ovaItem);
-                }
-                else
-                {
-                    throw new Exception("Could not find BlackArch OVA Image URL in the downloads page.");
-                }
-            return galleryItems;
+            var galleryItem = new GalleryItem
+            {
+                Name = "BlackArch",
+                Publisher = "BlackArch Project",
+                Description = "BlackArch Linux as an Arch Linux base with the BlackArch repositories added post-boot, installing a curated subset of pentesting tools. Uses the current rolling Arch image, so this stays up to date where the BlackArch 2023 ISO is not.",
+                ThumbnailUri = "",
+                SymbolUri = SymbolUri,
+                DiskUri = ArchTemplateUrl,
+                SecureBoot = "false",
+                EnhancedSessionTransportType = "HvSocket",
+                LastUpdated = DateTime.UtcNow.ToString("o"),
+                InitialUsername = "arch",
+                InitialPassword = "arch",
+                Category = "Security",
+                Tags = new List<string> { "blackarch" }
+            };
+            return Task.FromResult(new List<GalleryItem> { galleryItem });
         }
     }
 }

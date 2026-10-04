@@ -146,14 +146,15 @@ namespace VMCreate.Tests.GalleryTests
         [TestMethod]
         public async Task BlackArch_MeetsContract()
         {
-            const string html =
-                @"<a href=""https://ftp.example.com/blackarch-linux-slim-2023.05.01-x86_64.iso"">Slim</a>
-                   <a href=""https://ftp.example.com/blackarch-linux-2023.04.01.ova"">OVA</a>";
-
-            var items = await new BlackArch(FactoryFor(html)).LoadGalleryItems();
+            // Static loader: no HTTP — returns the Arch base + blackarch tag.
+            var items = await new BlackArch().LoadGalleryItems();
 
             AssertContractInvariants(items, nameof(BlackArch));
-            Assert.AreEqual(2, items.Count);
+            Assert.AreEqual(1, items.Count);
+            Assert.IsTrue(items[0].HasTag("blackarch"), "BlackArch item must carry the blackarch tag");
+            Assert.AreEqual("Security", items[0].Category, "BlackArch must be categorized as Security");
+            // Rides the Arch cloud image, not a stale BlackArch ISO.
+            StringAssert.Contains(items[0].DiskUri, "Arch-Linux-x86_64-basic.qcow2");
         }
 
         [TestMethod]
@@ -419,7 +420,6 @@ namespace VMCreate.Tests.GalleryTests
 
         public static IEnumerable<object[]> HttpLoaderFactories =>
         [
-            ["BlackArch",          new Func<IHttpClientFactory, IGalleryLoader>(f => new BlackArch(f))],
             ["LoadKaliCurrent",    new Func<IHttpClientFactory, IGalleryLoader>(f => new Kali(f))],
             ["LoadParrot",         new Func<IHttpClientFactory, IGalleryLoader>(f => new Parrot(f))],
             ["LoadPentooCurrent",  new Func<IHttpClientFactory, IGalleryLoader>(f => new PentooCurrent(f))],

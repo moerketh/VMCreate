@@ -129,11 +129,9 @@ namespace VMCreate.Tests.GalleryTests
         // HTTP loaders — live scrape then URI verification
         // ════════════════════════════════════════════════════════════════════════
 
-        [TestMethod, Timeout(120_000)]
+        [TestMethod, Timeout(60_000)]
         public async Task BlackArch_AllUrisResolve()
-            => await VerifyAllUrisAsync(
-                await new BlackArch(_factory).LoadGalleryItems(),
-                nameof(BlackArch));
+            => await VerifyAllUrisAsync(await new BlackArch().LoadGalleryItems(), nameof(BlackArch));
 
         [TestMethod, Timeout(120_000)]
         public async Task LoadKali_AllUrisResolve()

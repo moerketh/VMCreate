@@ -20,9 +20,9 @@ These distributions ship disk images and can be deployed without manual installa
 
 | Security | General |
 |----------|---------|
-| BlackArch | Arch Linux |
-| Kali Linux | Ubuntu |
-| Parrot OS | |
+| Kali Linux | Arch Linux |
+| Parrot OS | Ubuntu |
+| BlackArch | |
 | PwnCloud OS | |
 | REMnux | |
 | Whonix | |
