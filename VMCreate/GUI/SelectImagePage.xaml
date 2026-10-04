@@ -71,7 +71,7 @@
                                     <TextBlock Style="{StaticResource PillLabelStyle}"
                                                Visibility="{Binding Converter={StaticResource FileTypePillVis}}"
                                                ToolTip="What Deploy will do with this image format">
-                                        <Run Text="{Binding FileType}"/><Run Text=" · "/><Run Text="{Binding DeploySemantics}"/>
+                                        <Run Text="{Binding FileType, Mode=OneWay}"/><Run Text=" · "/><Run Text="{Binding DeploySemantics, Mode=OneWay}"/>
                                     </TextBlock>
                                     <!-- Integrity state: visible before clicking Deploy, not just in the log -->
                                     <TextBlock Text="✓ verified" Style="{StaticResource VerifiedPillStyle}"

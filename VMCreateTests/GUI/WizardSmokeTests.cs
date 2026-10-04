@@ -1,4 +1,5 @@
 using FlaUI.Core.AutomationElements;
+using FlaUI.Core.Conditions;
 using FlaUI.UIA3;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
@@ -29,6 +30,7 @@ namespace VMCreate.Tests.GUI
 
         private Process? _process;
         private FlaUI.Core.Application? _app;
+        private UIA3Automation? _automation;
 
         [TestInitialize]
         public void LaunchApp()
@@ -36,6 +38,7 @@ namespace VMCreate.Tests.GUI
             if (!File.Exists(ExePath))
                 Assert.Inconclusive($"Built exe not found at {ExePath}. Build VMCreate first.");
 
+            _automation = new UIA3Automation();
             _process = Process.Start(new ProcessStartInfo(ExePath) { Arguments = "--demo" });
             _app = FlaUI.Core.Application.Attach(_process);
         }
@@ -61,6 +64,10 @@ namespace VMCreate.Tests.GUI
             {
                 // best effort
             }
+            // One UIA3Automation per test: created in LaunchApp, disposed here.
+            // Creating a new one per lookup leaks COM and makes later tests flaky.
+            _automation?.Dispose();
+            _automation = null;
         }
 
         private Window WaitForMainWindow(TimeSpan timeout)
@@ -70,7 +77,7 @@ namespace VMCreate.Tests.GUI
             {
                 try
                 {
-                    var window = _app!.GetMainWindow(new UIA3Automation(), TimeSpan.FromSeconds(2));
+                    var window = _app!.GetMainWindow(_automation!, TimeSpan.FromSeconds(2));
                     if (window != null)
                         return window;
                 }
@@ -84,27 +91,117 @@ namespace VMCreate.Tests.GUI
             throw new InvalidOperationException("unreachable");
         }
 
+        /// <summary>
+        /// UIA occasionally answers a fresh window subtree query with nothing
+        /// for several seconds even though the app has rendered (its own log
+        /// shows first-frame in ~1.5 s). When a window-scoped lookup comes back
+        /// empty, retry the same condition from the desktop root scoped to our
+        /// process; that path takes a different UIA route and usually succeeds.
+        /// </summary>
+        private AutomationElement? FindInProcess(Window window, Func<ConditionFactory, ConditionBase> byCondition)
+        {
+            var found = window.FindFirstDescendant(byCondition);
+            if (found != null)
+                return found;
+            try
+            {
+                var desktop = _automation!.GetDesktop();
+                return desktop.FindFirstDescendant(cf => cf.ByProcessId(_app!.ProcessId).And(byCondition(cf)));
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// the main window's first frame; an immediate FindFirstDescendant can
+        /// still miss it. Poll until the list exists in the UIA tree.
+        /// </summary>
+        private ListBox WaitForGalleryList(Window window)
+        {
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(15);
+            Exception? lastError = null;
+            while (DateTime.UtcNow < deadline)
+            {
+                ListBox? list = null;
+                try
+                {
+                    var found = FindInProcess(window, cf => cf.ByControlType(FlaUI.Core.Definitions.ControlType.List));
+                    if (found != null)
+                    {
+                        list = found.AsListBox();
+                        if (list.Items.Length > 0)
+                            return list;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    lastError = ex;
+                }
+                Thread.Sleep(500);
+            }
+            var detail = lastError != null ? $" Last error: {lastError.GetType().Name}: {lastError.Message}" : "";
+            Assert.Fail("Gallery list did not appear within 15 s" + detail);
+            throw new InvalidOperationException("unreachable");
+        }
+
+        /// <summary>
+        /// The search box sits on the same page as the gallery list and can be
+        /// absent for a beat after the window's first frame; poll for it.
+        /// </summary>
+        private AutomationElement WaitForSearchBox(Window window)
+        {
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(15);
+            while (DateTime.UtcNow < deadline)
+            {
+                var search = FindInProcess(window, cf => cf.ByAutomationId("Search gallery images"))
+                          ?? FindInProcess(window, cf => cf.ByName("Search gallery images"));
+                if (search != null)
+                    return search;
+                Thread.Sleep(500);
+            }
+            Assert.Fail("Search box did not appear within 15 s");
+            throw new InvalidOperationException("unreachable");
+        }
+
+        /// <summary>
+        /// Page transitions re-create the UIA subtree; look up a named element
+        /// with polling instead of assuming it's already there.
+        /// </summary>
+        private AutomationElement WaitForElement(Window window, string name, int timeoutSeconds = 15)
+        {
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(timeoutSeconds);
+            while (DateTime.UtcNow < deadline)
+            {
+                var element = FindInProcess(window, cf => cf.ByName(name));
+                if (element != null)
+                    return element;
+                Thread.Sleep(250);
+            }
+            Assert.Fail($"Element '{name}' did not appear within {timeoutSeconds} s");
+            throw new InvalidOperationException("unreachable");
+        }
+
         /// <summary>Gallery search box filters the item list.</summary>
         [TestMethod]
         public void SearchBox_FiltersGalleryList()
         {
-            using var automation = new UIA3Automation();
             var window = WaitForMainWindow(TimeSpan.FromSeconds(30));
-            var search = window.FindFirstDescendant(cf => cf.ByAutomationId("Search gallery images"))
-                       ?? window.FindFirstDescendant(cf => cf.ByName("Search gallery images"));
-            Assert.IsNotNull(search, "search box not found");
+            var search = WaitForSearchBox(window);
 
             // Wait for the gallery stream to settle: cached items appear instantly,
             // then loaders stream more in. Poll until the count is stable for 2 s.
-            ListBox gallery;
+            ListBox gallery = WaitForGalleryList(window);
             var stableDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
             int lastCount = -1;
             var lastChange = DateTime.UtcNow;
             do
             {
-                gallery = window.FindFirstDescendant(cf => cf.ByControlType(FlaUI.Core.Definitions.ControlType.List))
-                          .AsListBox();
-                var count = gallery?.Items.Length ?? 0;
+                var foundStable = FindInProcess(window, cf => cf.ByControlType(FlaUI.Core.Definitions.ControlType.List));
+                if (foundStable != null)
+                    gallery = foundStable.AsListBox();
+                var count = gallery.Items.Length;
                 if (count != lastCount)
                 {
                     lastCount = count;
@@ -125,11 +222,13 @@ namespace VMCreate.Tests.GUI
             searchBox.Enter("kali");
 
             // 250 ms debounce + filter; poll until the list settles on Kali-only
-            var filtered = window.FindFirstDescendant(cf => cf.ByControlType(FlaUI.Core.Definitions.ControlType.List)).AsListBox();
+            var filtered = WaitForGalleryList(window);
             var filterDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(15);
             while (DateTime.UtcNow < filterDeadline)
             {
-                filtered = window.FindFirstDescendant(cf => cf.ByControlType(FlaUI.Core.Definitions.ControlType.List)).AsListBox();
+                var foundFiltered = FindInProcess(window, cf => cf.ByControlType(FlaUI.Core.Definitions.ControlType.List));
+                if (foundFiltered != null)
+                    filtered = foundFiltered.AsListBox();
                 if (filtered.Items.Length > 0 && filtered.Items.Length < beforeCount)
                     break;
                 Thread.Sleep(500);
@@ -144,27 +243,27 @@ namespace VMCreate.Tests.GUI
         [TestMethod]
         public void SettingsPage_SlidersAreHostBounded()
         {
-            using var automation = new UIA3Automation();
             var window = WaitForMainWindow(TimeSpan.FromSeconds(30));
 
             // select the first item, then Next
-            var gallery = window.FindFirstDescendant(cf => cf.ByControlType(FlaUI.Core.Definitions.ControlType.List)).AsListBox();
+            // The ListBox renders a beat after the window's first frame; wait for it.
+            var gallery = WaitForGalleryList(window);
             var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
             while (gallery.Items.Length == 0 && DateTime.UtcNow < deadline)
             {
                 Thread.Sleep(500);
-                gallery = window.FindFirstDescendant(cf => cf.ByControlType(FlaUI.Core.Definitions.ControlType.List)).AsListBox();
+                var found = FindInProcess(window, cf => cf.ByControlType(FlaUI.Core.Definitions.ControlType.List));
+                if (found != null)
+                    gallery = found.AsListBox();
             }
             Assert.IsTrue(gallery.Items.Length > 0, "gallery did not load");
             gallery.Items[0].Select();
 
-            window.FindFirstDescendant(cf => cf.ByName("Next step")).AsButton().Invoke();
-            Thread.Sleep(1000);
+            WaitForElement(window, "Next step").AsButton().Invoke();
 
-            var memory = window.FindFirstDescendant(cf => cf.ByName("Memory in megabytes"))?.AsSlider();
-            var cpu = window.FindFirstDescendant(cf => cf.ByName("CPU count"))?.AsSlider();
-            Assert.IsNotNull(memory, "memory slider not found");
-            Assert.IsNotNull(cpu, "cpu slider not found");
+            // 1 s page transition, then poll: the settings sliders come with the page
+            var memory = WaitForElement(window, "Memory in megabytes").AsSlider();
+            var cpu = WaitForElement(window, "CPU count").AsSlider();
 
             // UIA Slider exposes Minimum/Maximum directly
             Assert.IsTrue(memory.Maximum <= 65536, $"memory cap should be clamped, got {memory.Maximum}");
@@ -182,23 +281,24 @@ namespace VMCreate.Tests.GUI
         [TestMethod]
         public void WizardNavigation_SelectAndAdvance()
         {
-            using var automation = new UIA3Automation();
             var window = WaitForMainWindow(TimeSpan.FromSeconds(30));
 
             // select a Kali image (recommended tier sorts first; typing narrows to Kali)
             // → Next → (Next | Deploy depending on customize step) → Deploy
-            var gallery = window.FindFirstDescendant(cf => cf.ByControlType(FlaUI.Core.Definitions.ControlType.List)).AsListBox();
+            var gallery = WaitForGalleryList(window);
             var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
             while (gallery.Items.Length == 0 && DateTime.UtcNow < deadline)
             {
                 Thread.Sleep(500);
-                gallery = window.FindFirstDescendant(cf => cf.ByControlType(FlaUI.Core.Definitions.ControlType.List)).AsListBox();
+                var foundWait = FindInProcess(window, cf => cf.ByControlType(FlaUI.Core.Definitions.ControlType.List));
+                if (foundWait != null)
+                    gallery = foundWait.AsListBox();
             }
             Assert.IsTrue(gallery.Items.Length > 0, "gallery did not load");
 
             // Filter to Kali: its disk image needs QEMU conversion, which demo mode
             // lacks, so the deployment fails fast with the recovery UI.
-            var searchBox = window.FindFirstDescendant(cf => cf.ByName("Search gallery images")).AsTextBox();
+            var searchBox = WaitForSearchBox(window).AsTextBox();
             searchBox.Click();
             searchBox.Enter("kali");
 
@@ -208,41 +308,39 @@ namespace VMCreate.Tests.GUI
             int preFilterCount = gallery.Items.Length;
             while (DateTime.UtcNow < filterDeadline)
             {
-                gallery = window.FindFirstDescendant(cf => cf.ByControlType(FlaUI.Core.Definitions.ControlType.List)).AsListBox();
+                var foundFilter = FindInProcess(window, cf => cf.ByControlType(FlaUI.Core.Definitions.ControlType.List));
+                if (foundFilter != null)
+                    gallery = foundFilter.AsListBox();
                 if (gallery.Items.Length >= 1 && gallery.Items.Length < preFilterCount) break;
                 Thread.Sleep(500);
             }
             Assert.IsTrue(gallery.Items.Length >= 1, "Kali not found in gallery");
             // Re-find the list after the filter settles, then select via keyboard
             // (SelectionItemPattern on a re-queried wrapper is reliable).
-            gallery = window.FindFirstDescendant(cf => cf.ByControlType(FlaUI.Core.Definitions.ControlType.List)).AsListBox();
+            gallery = WaitForGalleryList(window);
             var item = gallery.Items[0];
             item.Click();
             Thread.Sleep(500);
 
             // Next is disabled until a selection exists; wait for it to enable
-            var nextBtn = window.FindFirstDescendant(cf => cf.ByName("Next step")).AsButton();
+            var nextBtn = WaitForElement(window, "Next step").AsButton();
             var enableDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
             while (!nextBtn.IsEnabled && DateTime.UtcNow < enableDeadline)
             {
                 Thread.Sleep(250);
-                nextBtn = window.FindFirstDescendant(cf => cf.ByName("Next step")).AsButton();
+                nextBtn = WaitForElement(window, "Next step", timeoutSeconds: 5).AsButton();
             }
             Assert.IsTrue(nextBtn.IsEnabled, "Next button never enabled after selection");
             nextBtn.Invoke();
-            Thread.Sleep(1500);
 
             // We should now be on the settings page: the VM name box and the
             // host-bounded sliders are present, and Back returns to the gallery.
-            Assert.IsNotNull(window.FindFirstDescendant(cf => cf.ByName("VM Name")),
-                "settings page did not appear after Next");
-            Assert.IsNotNull(window.FindFirstDescendant(cf => cf.ByName("Go back")),
-                "Back button missing on settings page");
+            WaitForElement(window, "VM Name");
+            WaitForElement(window, "Go back");
 
-            window.FindFirstDescendant(cf => cf.ByName("Go back")).AsButton().Invoke();
-            Thread.Sleep(1000);
-            Assert.IsNotNull(window.FindFirstDescendant(cf => cf.ByName("Search gallery images")),
-                "Back did not return to the gallery page");
+            WaitForElement(window, "Go back").AsButton().Invoke();
+            // Back re-creates the gallery page; the search box reappears with it.
+            WaitForSearchBox(window);
         }
     }
 }
