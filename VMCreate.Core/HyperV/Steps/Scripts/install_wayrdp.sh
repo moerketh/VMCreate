@@ -184,6 +184,27 @@ if ldd /usr/local/bin/wayrdp 2>/dev/null | grep -q "not found"; then
 fi
 echo "Binary linkage OK."
 
+# -- Firewall: open RDP port 3389 -------------------------------------------
+# Omarchy ships ufw with `INPUT policy DROP`, allowing only ssh(22) +
+# localsend(53317) + docker-dns. The wayrdp listener (0.0.0.0:3389) is healthy
+# but silently unreachable from the host until 3389 is allowed — this was the
+# precise cause of the scripted-T5 "TCP connect to 3389 failed" while ssh
+# worked. Open it via ufw when present (best-effort; non-fatal if absent).
+if command -v ufw >/dev/null 2>&1; then
+    if ufw allow 3389/tcp >/dev/null 2>&1; then
+        echo "ufw: allowed 3389/tcp."
+    else
+        echo "WARN: ufw present but 'ufw allow 3389/tcp' failed (non-fatal)." >&2
+    fi
+elif command -v firewall-cmd >/dev/null 2>&1; then
+    firewall-cmd --permanent --add-port=3389/tcp >/dev/null 2>&1 \
+        && firewall-cmd --reload >/dev/null 2>&1 \
+        && echo "firewalld: allowed 3389/tcp." \
+        || echo "WARN: firewall-cmd present but rule-add failed (non-fatal)." >&2
+else
+    echo "No ufw/firewalld firewall manager found; leaving 3389 to the distro default."
+fi
+
 # -- Resolve the autologin (desktop) user -----------------------------------
 # The C# side substitutes __AUTOLOGIN_USER__ with the gallery item's
 # initial username; when blank/absent, fall back to the /etc/passwd scan
