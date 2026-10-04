@@ -38,19 +38,34 @@ namespace VMCreate
         /// <summary>
         /// wayrdp — the project's own MIT-licensed Wayland-native RDP server
         /// built on FreeRDP 3 (<c>libfreerdp-server</c>), intended to replace
-        /// the Lamco fork. Captures via compositor-specific backends
-        /// (KDE first: KWin virtual outputs + PipeWire via the shared
-        /// <c>hyperv-rdp-extras</c> crate; generic portal fallback later).
+        /// the Lamco fork. Captures via compositor-specific backends, selected
+        /// at runtime via <c>WAYRDP_BACKEND</c> (wlroots: a headless output at
+        /// the exact client size captured via ext-image-copy-capture — the
+        /// path that lands Hyprland parity; kde: KWin virtual outputs +
+        /// PipeWire via the shared <c>hyperv-rdp-extras</c> crate; synthetic
+        /// for headless smoke tests).
         /// <para>
-        /// Status: Phase 0 protocol spike — there is no installable artifact
-        /// yet, so the deployment step currently FAILS LOUDLY with a TODO
-        /// marker (same fail-fast contract as the Lamco install; a silently
-        /// absent RDP server is the worse failure). Selecting this option is
-        /// how the eventual E2E deployment path is exercised end-to-end before
-        /// the server itself is finished.
+        /// Because the wayrdp repo is private (no anonymous release-asset
+        /// fetch like the Lamco fork's curl flow), the package is delivered
+        /// host-side: the deployment step scp's a locally-built tarball
+        /// (<c>VmCustomizations.WayrdpPackagePath</c>, produced by wayrdp's
+        /// <c>scripts/build-package.sh</c>) to the guest, injects its
+        /// host-computed sha256 into the install script so the guest verifies
+        /// the exact bits it received, then runs the bundle's install.sh
+        /// (prefix /usr/local). A missing/unset package path fails the
+        /// deployment loudly on the host before touching the guest — same
+        /// fail-fast contract as the Lamco install (a silently absent RDP
+        /// server is the worse failure). The script prints a machine-readable
+        /// <c>WAYRDP_RESULT=ok|degraded</c> terminal line; install-time
+        /// readiness is the systemd user unit being active, with a
+        /// session-absent state reported as DEGRADED rather than a hard error
+        /// (mirrors the Lamco gate).
         /// </para>
-        /// Debian-family distros only (Ubuntu, Debian, Parrot, Kali) — the
-        /// packaging line ships amd64 debs, same as the Lamco lineage.
+        /// Requires a graphical Wayland session to share, so graphical
+        /// autologin is enabled. Supported distro families: Debian trixie+
+        /// (Ubuntu, Debian, Parrot, Kali — via libfreerdp3 runtime libs) and
+        /// Arch-family (incl. Omarchy — via the <c>freerdp</c> package); the
+        /// wlroots backend additionally requires <c>hyprctl</c> on the PATH.
         /// </summary>
         Wayrdp,
 

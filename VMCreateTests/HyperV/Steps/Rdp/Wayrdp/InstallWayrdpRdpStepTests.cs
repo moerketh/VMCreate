@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Moq;
 using System;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using VMCreate;
@@ -10,10 +11,12 @@ namespace VMCreate.Tests.HyperV.Steps
 {
     /// <summary>
     /// Mirrors <see cref="InstallLamcoRdpStepTests"/> for the wayrdp backend.
-    /// The wayrdp placeholder install script always fails loudly in the guest
-    /// (Phase 0: no artifact); these tests lock the surrounding contracts that
-    /// the E2E pipeline relies on: gating, ordering, script deployment with
-    /// /tmp hardening, runtime distro re-verification, and username hygiene.
+    /// wayrdp is delivered as a locally-built package tarball that the step
+    /// scp's over SSH (the wayrdp repo is private, so no curl-from-GitHub like
+    /// the Lamco fork). These tests lock the surrounding contracts the E2E
+    /// pipeline relies on: gating, ordering, package+sha256+script delivery,
+    /// /tmp hardening, the WAYRDP_RESULT result-line contract, runtime distro
+    /// re-verification, and username hygiene.
     /// </summary>
     [TestClass]
     public sealed class InstallWayrdpRdpStepTests
@@ -76,14 +79,22 @@ namespace VMCreate.Tests.HyperV.Steps
         [TestMethod]
         public void IsApplicable_TrueForAllDebianFamilyDistros()
         {
-            // wayrdp's packaging line follows the same amd64 Debian-deb
-            // lineage as the Lamco fork.
+            // wayrdp's supported set tracks the Lamco set (Debian-family +
+            // Arch-family): freerdp3 runtime libs are packaged on both.
             foreach (var distro in new[] { LinuxDistro.Ubuntu, LinuxDistro.Debian, LinuxDistro.Parrot, LinuxDistro.Kali })
             {
                 var item = new GalleryItem { LinuxDistro = distro };
                 Assert.IsTrue(_step.IsApplicable(item, _wayrdpCustomizations),
                     $"{distro} should be wayrdp-targetable");
             }
+        }
+
+        [TestMethod]
+        public void IsApplicable_TrueForArchFamily()
+        {
+            var item = new GalleryItem { LinuxDistro = LinuxDistro.Arch };
+            Assert.IsTrue(_step.IsApplicable(item, _wayrdpCustomizations),
+                "Arch (Omarchy/Hyprland) is the wlroots backend's primary target");
         }
 
         [TestMethod]
@@ -108,31 +119,129 @@ namespace VMCreate.Tests.HyperV.Steps
             _shell.Verify(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
         }
 
-        [TestMethod]
-        public async Task ExecuteAsync_DeploysAndRunsScript_WithTmpHardening()
+        /// <summary>
+        /// Creates a temporary host tarball acting as the wayrdp package
+        /// (content irrelevant — the step only scp's it + sha256's it).
+        /// Pointed at by _wayrdpCustomizations.WayrdpPackagePath so the
+        /// package-resolution guard passes. Returns the temp path.
+        /// </summary>
+        private string CreateHostTarball()
         {
-            // The placeholder script exits non-zero in the guest; the mock
-            // simulates the throw that RunCommandAsync would raise on
-            // non-zero SSH exit, proving the failure propagates (is not
-            // masked by a later command using ";").
-            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
-                  .ThrowsAsync(new InvalidOperationException("SSH command failed: exit 1"));
+            string path = Path.Combine(Path.GetTempPath(), $"wayrdp-test-{Guid.NewGuid():N}.tar.gz");
+            File.WriteAllBytes(path, new byte[] { 0x1F, 0x8B, 1, 2, 3 }); // arbitrary gzip-ish bytes
+            _wayrdpCustomizations.WayrdpPackagePath = path;
+            return path;
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_MissingPackagePath_ThrowsBeforeCopy()
+        {
+            // WayrdpPackagePath unset → the step must fail on the host with a
+            // clear directive, never touching the guest.
+            _wayrdpCustomizations.WayrdpPackagePath = null;
 
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 _step.ExecuteAsync(_shell.Object, _supportedItem, _wayrdpCustomizations, _logger.Object, CancellationToken.None));
 
+            _shell.Verify(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+            _shell.Verify(s => s.CopyFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_PackageFileNotFound_ThrowsBeforeCopy()
+        {
+            _wayrdpCustomizations.WayrdpPackagePath = Path.Combine(Path.GetTempPath(), "does-not-exist-wayrdp.tar.gz");
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                _step.ExecuteAsync(_shell.Object, _supportedItem, _wayrdpCustomizations, _logger.Object, CancellationToken.None));
+
+            _shell.Verify(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_UploadsPackageAndScript_ThenRunsWithTmpHardening()
+        {
+            CreateHostTarball();
+            // Success path: the script prints the terminal result line and
+            // exits zero.
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+                  .ReturnsAsync("...install output...\nWAYRDP_RESULT=ok\n");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _wayrdpCustomizations, _logger.Object, CancellationToken.None);
+
+            // Script uploaded to an unpredictable /tmp path...
             _shell.Verify(s => s.CopyContentAsync(
                 It.Is<string>(content => content.Contains("wayrdp") && content.Contains("WAYRDP")),
                 It.Is<string>(p => p.StartsWith("/tmp/install_wayrdp_") && p.EndsWith(".sh")),
                 It.IsAny<CancellationToken>()), Times.Once);
 
+            // ...the tarball is scp'd from the host path to the guest...
+            _shell.Verify(s => s.CopyFileAsync(
+                It.Is<string>(h => h == _wayrdpCustomizations.WayrdpPackagePath),
+                It.Is<string>(g => g == "/tmp/wayrdp-pkg.tar.gz"),
+                It.IsAny<CancellationToken>()), Times.Once);
+
+            // ...and the sha256 sidecar is uploaded alongside.
+            _shell.Verify(s => s.CopyContentAsync(
+                It.Is<string>(content => content.TrimEnd().EndsWith("  wayrdp-pkg.tar.gz")),
+                It.Is<string>(g => g == "/tmp/wayrdp-pkg.sha256"),
+                It.IsAny<CancellationToken>()), Times.Once);
+
+            // The run command hardens perms, captures the exit code so cleanup
+            // ALWAYS runs (rm not gated behind the script's success), and the
+            // script's sha256 placeholder is injected host-side.
             _shell.Verify(s => s.RunCommandAsync(
                 It.Is<string>(cmd => cmd.Contains("sudo chown root:root /tmp/install_wayrdp_")
                                      && cmd.Contains("sudo chmod 0700 /tmp/install_wayrdp_")
-                                     && cmd.Contains("&& sudo bash /tmp/install_wayrdp_")
-                                     && cmd.Contains("&& sudo rm -f /tmp/install_wayrdp_")),
+                                     && cmd.Contains("sudo bash /tmp/install_wayrdp_")
+                                     && cmd.Contains("rc=$?")
+                                     && cmd.Contains("sudo rm -f")
+                                     && cmd.Contains("exit $rc")),
                 It.IsAny<TimeSpan>(),
                 It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_MissingResultLineOnZeroExit_Throws()
+        {
+            CreateHostTarball();
+            // A completely swallowed install (zero exit, no terminal line) must
+            // NOT report success.
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+                  .ReturnsAsync("some output with no result line\n");
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                _step.ExecuteAsync(_shell.Object, _supportedItem, _wayrdpCustomizations, _logger.Object, CancellationToken.None));
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_GuestFailure_PropagatesThrow()
+        {
+            CreateHostTarball();
+            // Non-zero SSH exit → RunCommandAsync throws; the step must not
+            // mask it (proves the failure isn't hidden by a later command).
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+                  .ThrowsAsync(new InvalidOperationException("SSH command failed: exit 1"));
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                _step.ExecuteAsync(_shell.Object, _supportedItem, _wayrdpCustomizations, _logger.Object, CancellationToken.None));
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_DegradedResult_LogsWarningNoThrow()
+        {
+            CreateHostTarball();
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+                  .ReturnsAsync("...\nWAYRDP_RESULT=degraded\n");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _wayrdpCustomizations, _logger.Object, CancellationToken.None);
+
+            _logger.Verify(l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("DEGRADED")),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
         }
 
         [TestMethod]

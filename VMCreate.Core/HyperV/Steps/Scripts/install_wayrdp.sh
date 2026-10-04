@@ -4,41 +4,263 @@ set -o pipefail
 # =========================================================================
 # wayrdp — install + configure (Wayland-native, MIT, FreeRDP 3)
 # =========================================================================
-# PLACEHOLDER — wayrdp is at Phase 0 (protocol spike on a synthetic desktop);
-# there is no installable artifact yet (no releases, no packaging line).
-#
-# This script exists so the VMCreate deployment pipeline can be exercised
-# end-to-end TODAY: the step plumbing, guest-shell transport, /tmp hardening,
-# and result-line contract are all identical to install_lamco.sh — only the
-# payload differs. When the first wayrdp deb lands (moerketh/wayrdp
-# releases), this script gets the same pinned-tag + sha256-verified contract
-# as LAMCO_FORK_* above (see install_lamco.sh).
+# wayrdp is the replacement for the Lamco fork: same high-level shape
+# (post-boot SSH install, systemd USER unit, kept-Wayland headless capture)
+# but on the project's own protocol stack (libfreerdp-server) with
+# compositor-specific backends — the wlroots backend drives Hyprland via
+# `hyprctl output create headless` + ext-image-copy-capture, no portal
+# consent required.
 #
 # SECURITY/RELIABILITY CONTRACT (same as install_lamco.sh):
 #   - FAIL LOUDLY: no fallback path, no partial install silently accepted.
-#   - STREAM RULE: STDOUT ONLY is returned on zero-exit SSH runs. Every
-#     DEGRADED/WARNING/NOTICE line prints to stdout; only hard-failure ERROR
-#     lines use stderr (there stderr IS captured into the SSH exception).
+#   - STREAM RULE: the SSH transport returns STDOUT ONLY on zero-exit runs
+#     (stderr is dropped to a debug log), so every DEGRADED/WARNING/NOTICE
+#     reason line prints to stdout; only hard-failure ERROR lines use stderr
+#     (there stderr IS captured into the thrown SSH exception).
 #   - Result contract: prints exactly one terminal line
 #     WAYRDP_RESULT=ok|degraded — hard failures exit non-zero BEFORE that
-#     line is reached. (Currently it always fails hard below; the contract
-#     line is implemented now so the host step's parser can be validated.)
+#     line is reached.
+#
+# PACKAGE DELIVERY (current): wayrdp lives in a PRIVATE repo with no public
+# release asset, so the guest cannot fetch a package over the network. The
+# host step (InstallWayrdpRdpStep) scp's the portable tarball
+# (wayrdp-<ver>-linux-x86_64.tar.gz, built by scripts/build-package.sh) to
+# /tmp/wayrdp-pkg.tar.gz alongside this script, and its sha256 into
+# /tmp/wayrdp-pkg.sha256. This script verifies the digest, extracts the
+# bundle, and runs its install.sh. When wayrdp ships a public release this
+# becomes a pinned curl of $WAYRDP_PKG_URL — mirror install_lamco.sh.
+#
+# The tarball layout (scripts/build-package.sh):
+#   wayrdp-<ver>-linux-x86_64/
+#     bin/wayrdp
+#     lib/systemd/user/wayrdp.service
+#     share/doc/wayrdp/LICENSE
+#     install.sh            — installs to /usr/local (default prefix)
 
-echo "WAYRDP NOTICE: wayrdp selected — the replacement for the Lamco fork." >&1
-echo "WAYRDP NOTICE: MIT-licensed, FreeRDP 3 (libfreerdp-server) core." >&1
-echo "WAYRDP ERROR: wayrdp is not yet installable (Phase 0: no releases, no" >&2
-echo "WAYRDP ERROR: packaging pipeline). This deployment path is wired for" >&2
-echo "WAYRDP ERROR: E2E testing of the VMCreate plumbing only. Select the" >&2
-echo "WAYRDP ERROR: 'lamco' or 'xrdp' backend for a working VM today, or" >&2
-echo "WAYRDP ERROR: track progress in the wayrdp repo (docs/plan.md)." >&2
+DEGRADED=0
 
-# TODO(wayrdp Phase 2): replace this block with the real install:
-#   1. download pinned deb from github.com/moerketh/wayrdp releases
-#      (WAYRDP_TAG / WAYRDP_DEB_VERSION / WAYRDP_DEB_SHA256 constants),
-#   2. sha256-verify, dpkg -i,
-#   3. runtime deps: freerdp3 server libs, pipewire, libei (KDE backend),
-#   4. TLS cert generation + /etc/wayrdp/config.toml,
-#   5. systemd user unit + linger (same pattern as lamco; no portal consent
-#      needed on the KDE/zkde path — that's the design win over the portal),
-#   6. terminal line: echo "WAYRDP_RESULT=ok".
-exit 1
+# Pinned digest of the tarball the host uploads. Injected by
+# InstallWayrdpRdpStep via the __WAYRDP_PKG_SHA256__ placeholder; when the
+# placeholder is left un-replaced the digest is read from the sidecar file
+# /tmp/wayrdp-pkg.sha256 (manual/local deploys).
+WAYRDP_PKG_TARBALL="/tmp/wayrdp-pkg.tar.gz"
+WAYRDP_PKG_SHA256_FILE="/tmp/wayrdp-pkg.sha256"
+WAYRDP_PKG_SHA256="__WAYRDP_PKG_SHA256__"
+
+echo "=== wayrdp install (Wayland-native, FreeRDP 3) ==="
+echo "NOTICE: wayrdp is MIT-licensed (c) moerketh — the project's own"
+echo "        Wayland-native RDP server replacing the BSL-licensed Lamco fork."
+
+# -- Validate distro: Debian family or pacman family (freerdp3 available) ---
+if [ ! -f /etc/os-release ]; then
+    echo "ERROR: /etc/os-release not found — cannot determine distro." >&2
+    exit 1
+fi
+. /etc/os-release
+DISTRO_ID="${ID}"
+DISTRO_LIKE="${ID_LIKE:-}"
+is_debian_family() {
+    case "$DISTRO_ID" in
+        ubuntu|debian|parrot|kali) return 0 ;;
+    esac
+    case " $DISTRO_LIKE " in
+        *" debian"*|*" ubuntu"*) return 0 ;;
+    esac
+    return 1
+}
+is_arch_family() {
+    case "$DISTRO_ID" in
+        arch|omarchy|athenaos) return 0 ;;
+    esac
+    case " $DISTRO_LIKE " in
+        *" arch"*) return 0 ;;
+    esac
+    return 1
+}
+if ! is_debian_family && ! is_arch_family; then
+    echo "ERROR: distro '${DISTRO_ID}' (ID_LIKE='${DISTRO_LIKE}') is neither Debian-family nor pacman-family." >&2
+    echo "       wayrdp needs FreeRDP 3 from the distro packages; rpm distros await" >&2
+    echo "       a packaging line." >&2
+    exit 1
+fi
+
+# -- Runtime dependency: FreeRDP 3 server libs ------------------------------
+# wayrdp links libfreerdp-server3 / libfreerdp3 / libwinpr3 at runtime.
+# Debian: trixie (13, stable) has freerdp3; bookworm (12) needs backports.
+# Arch ships it as the 'freerdp' package.
+install_freerdp_deps() {
+    if is_arch_family; then
+        echo "Installing runtime deps via pacman: freerdp openssl libxkbcommon wayland"
+        pacman -Sy --noconfirm --needed freerdp openssl libxkbcommon wayland 2>&1 || {
+            echo "ERROR: pacman failed to install freerdp runtime deps." >&2
+            exit 1
+        }
+    elif is_debian_family; then
+        echo "Installing runtime deps via apt: libfreerdp-server3-3 libfreerdp3-3 libwinpr3-3 openssl"
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update -qq 2>&1 || true
+        if ! apt-get install -y -qq libfreerdp-server3-3 libfreerdp3-3 libwinpr3-3 openssl 2>&1; then
+            echo "ERROR: apt failed to install freerdp3 runtime libs." >&2
+            echo "       wayrdp needs FreeRDP 3; on Debian bookworm enable backports first." >&2
+            exit 1
+        fi
+    fi
+}
+install_freerdp_deps
+
+# -- Locate + verify the uploaded tarball -----------------------------------
+if [ ! -f "$WAYRDP_PKG_TARBALL" ]; then
+    echo "ERROR: wayrdp package tarball not found at $WAYRDP_PKG_TARBALL." >&2
+    echo "       The host step scp's dist/release/wayrdp-<ver>-linux-x86_64.tar.gz" >&2
+    echo "       there before running this script; it is missing." >&2
+    exit 1
+fi
+
+# Resolve the expected digest: injected constant, else sidecar file.
+if [ "$WAYRDP_PKG_SHA256" = "__WAYRDP_PKG_SHA256__" ]; then
+    if [ -f "$WAYRDP_PKG_SHA256_FILE" ]; then
+        WAYRDP_PKG_SHA256="$(awk '{print $1}' "$WAYRDP_PKG_SHA256_FILE" | head -1)"
+    else
+        echo "ERROR: no pinned sha256 for the wayrdp tarball (placeholder not" >&2
+        echo "       substituted and $WAYRDP_PKG_SHA256_FILE missing)." >&2
+        exit 1
+    fi
+fi
+
+echo "Verifying sha256 of $(basename "$WAYRDP_PKG_TARBALL") ..."
+ACTUAL_SHA256="$(sha256sum "$WAYRDP_PKG_TARBALL" | awk '{print $1}')"
+if [ "$ACTUAL_SHA256" != "$WAYRDP_PKG_SHA256" ]; then
+    echo "ERROR: sha256 mismatch for the wayrdp tarball." >&2
+    echo "       expected: $WAYRDP_PKG_SHA256" >&2
+    echo "       actual:   $ACTUAL_SHA256" >&2
+    echo "       Refusing to install an unverified/re-pointed package." >&2
+    exit 1
+fi
+echo "sha256 OK."
+
+# -- Extract + run the bundle's install.sh ----------------------------------
+EXTRACT_DIR="$(mktemp -d /tmp/wayrdp-pkg.XXXXXX)"
+trap 'rm -rf "$EXTRACT_DIR"' EXIT
+if ! tar -xzf "$WAYRDP_PKG_TARBALL" -C "$EXTRACT_DIR" 2>&1; then
+    echo "ERROR: failed to extract the wayrdp tarball." >&2
+    exit 1
+fi
+BUNDLE_DIR="$(find "$EXTRACT_DIR" -maxdepth 1 -type d -name 'wayrdp-*' | head -1)"
+if [ -z "$BUNDLE_DIR" ] || [ ! -x "$BUNDLE_DIR/install.sh" ]; then
+    echo "ERROR: extracted bundle has no executable install.sh ($BUNDLE_DIR)." >&2
+    exit 1
+fi
+if ! bash "$BUNDLE_DIR/install.sh" --prefix /usr/local 2>&1; then
+    echo "ERROR: wayrdp install.sh failed." >&2
+    exit 1
+fi
+echo "wayrdp installed to /usr/local."
+
+# Post-install sanity: the binary must at least launch far enough to print
+# its banner/listener line. wayrdp has no --version flag (Phase 0 spike), so
+# the check is "exists + is executable + links resolve".
+if [ ! -x /usr/local/bin/wayrdp ]; then
+    echo "ERROR: /usr/local/bin/wayrdp missing after install." >&2
+    exit 1
+fi
+if ldd /usr/local/bin/wayrdp 2>/dev/null | grep -q "not found"; then
+    echo "ERROR: /usr/local/bin/wayrdp has unresolved shared libraries:" >&2
+    ldd /usr/local/bin/wayrdp | grep "not found" >&2
+    exit 1
+fi
+echo "Binary linkage OK."
+
+# -- Resolve the autologin (desktop) user -----------------------------------
+# The C# side substitutes __AUTOLOGIN_USER__ with the gallery item's
+# initial username; when blank/absent, fall back to the /etc/passwd scan
+# (first UID>=1000 with a home dir), mirroring install_lamco.sh.
+AUTOLOGIN_USER="__AUTOLOGIN_USER__"
+if [ "$AUTOLOGIN_USER" = "__AUTOLOGIN_USER__" ] || [ -z "$AUTOLOGIN_USER" ]; then
+    AUTOLOGIN_USER=""
+    AUTOLOGIN_USER="$(awk -F: '$3 >= 1000 && $3 < 65534 && $6 != "" {print $1; exit}' /etc/passwd 2>/dev/null || echo "")"
+fi
+if [ -z "$AUTOLOGIN_USER" ] || ! id "$AUTOLOGIN_USER" >/dev/null 2>&1; then
+    echo "ERROR: could not resolve a desktop user for the wayrdp user unit" >&2
+    echo "       (AUTOLOGIN_USER='$AUTOLOGIN_USER')." >&2
+    exit 1
+fi
+echo "Desktop user: $AUTOLOGIN_USER"
+
+# -- systemd USER unit + linger ---------------------------------------------
+# wayrdp runs as a USER unit because it must attach to the live Wayland
+# session (Wayland socket + hyprctl). Enable linger so the user manager (and
+# the unit) starts at boot before any login; bind to graphical-session.target
+# so the unit only runs when a Wayland display exists.
+UNIT_SRC="/usr/local/lib/systemd/user/wayrdp.service"
+if [ ! -f "$UNIT_SRC" ]; then
+    echo "ERROR: wayrdp.service not at $UNIT_SRC after install." >&2
+    exit 1
+fi
+
+loginctl enable-linger "$AUTOLOGIN_USER" 2>/dev/null || true
+USER_UID="$(id -u "$AUTOLOGIN_USER")"
+run_as_user() {
+    sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR="/run/user/$USER_UID" "$@"
+}
+run_as_user systemctl --user daemon-reload 2>/dev/null || true
+run_as_user systemctl --user enable wayrdp.service 2>/dev/null || true
+
+# graphical-session.target is not guaranteed under Hyprland (Omarchy starts
+# wayrdp-class units from an autostart hook because the target may never
+# activate). Mirror install_lamco.sh: add an exec_on_start hook to Hyprland's
+# autostart.lua so the unit starts with the session.
+HYPRLAND_CONF_HOME="$(getent passwd "$AUTOLOGIN_USER" | cut -d: -f6)/.config/hypr"
+if [ -d "$HYPRLAND_CONF_HOME" ] || command -v hyprctl >/dev/null 2>&1; then
+    AUTO_LUA="$HYPRLAND_CONF_HOME/autostart.lua"
+    mkdir -p "$HYPRLAND_CONF_HOME" 2>/dev/null || true
+    if ! grep -q "wayrdp.service" "$AUTO_LUA" 2>/dev/null; then
+        cat >> "$AUTO_LUA" <<'AUTO_LUA_EOF'
+-- wayrdp autostart (added by VMCreate install_wayrdp.sh): Hyprland may not
+-- raise graphical-session.target, so start the wayrdp user unit directly.
+o.exec_on_start("dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP HYPRLAND_INSTANCE_SIGNATURE")
+o.exec_on_start("systemctl --user start wayrdp.service")
+AUTO_LUA_EOF
+        chown "$AUTOLOGIN_USER":"$AUTOLOGIN_USER" "$AUTO_LUA" 2>/dev/null || true
+        echo "Wrote wayrdp autostart hook to $AUTO_LUA."
+    fi
+fi
+
+# Start it now if a Wayland session is already up; otherwise the autostart
+# hook / graphical-session.target brings it up on next login.
+WAYLAND_UP="$(run_as_user systemctl --user is-active graphical-session.target 2>/dev/null || true)"
+if [ "$WAYLAND_UP" = "active" ] || [ -S "/run/user/$USER_UID/wayland-1" ] || [ -S "/run/user/$USER_UID/wayland-0" ]; then
+    run_as_user systemctl --user start wayrdp.service 2>/dev/null || true
+    echo "Started wayrdp.service (Wayland session present)."
+else
+    echo "NOTICE: no active Wayland session yet; wayrdp.service starts on login."
+fi
+
+# -- Readiness gate: installed is NOT the same as listening ------------------
+# Give the unit a moment, then check it is active. A unit that immediately
+# fails is a real failure, not a degraded install.
+WAYRDP_ACTIVE="$(run_as_user systemctl --user is-active wayrdp.service 2>/dev/null || true)"
+if [ "$WAYRDP_ACTIVE" = "active" ]; then
+    echo "wayrdp.service is active."
+elif [ "$WAYRDP_ACTIVE" = "inactive" ] || [ -z "$WAYRDP_ACTIVE" ]; then
+    # No session yet — unit is enabled + lingered + autostart-hooked, so it
+    # comes up on login. That is a usable (degraded) state, not a failure.
+    DEGRADED=1
+    echo "WAYRDP DEGRADED: wayrdp.service not active yet (no live Wayland"
+    echo "session); enabled + lingered + autostart-hooked, starts on login."
+else
+    echo "ERROR: wayrdp.service state '$WAYRDP_ACTIVE' after start attempt." >&2
+    run_as_user systemctl --user status wayrdp.service --no-pager -l 2>&1 | tail -20 >&2 || true
+    exit 1
+fi
+
+# -- Result contract (terminal line) -----------------------------------------
+# Cleanup: leave no root-owned guest script/tarball behind. The tarball +
+# sha256 sidecar are consumed; remove them.
+rm -f "$WAYRDP_PKG_TARBALL" "$WAYRDP_PKG_SHA256_FILE" 2>/dev/null || true
+
+if [ "${DEGRADED:-0}" = "1" ]; then
+    echo "WAYRDP_RESULT=degraded"
+    exit 0
+fi
+echo "WAYRDP_RESULT=ok"
+exit 0
