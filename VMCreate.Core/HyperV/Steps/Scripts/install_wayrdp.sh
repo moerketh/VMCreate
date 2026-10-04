@@ -139,13 +139,27 @@ fi
 echo "sha256 OK."
 
 # -- Extract + run the bundle's install.sh ----------------------------------
-EXTRACT_DIR="$(mktemp -d /tmp/wayrdp-pkg.XXXXXX)"
+# NOTE on the mktemp name: do NOT use the /tmp/wayrdp-pkg.XXXXXX template
+# here — its basename starts with 'wayrdp-', so
+# `find "$EXTRACT_DIR" -maxdepth 1 -type d -name 'wayrdp-*'` would match the
+# extract dir ITSELF (basename wayrdp-pkg.*) and `head -1` could pick it over
+# the real nested bundle dir (that exact false-match caused "extracted bundle
+# has no executable install.sh"). Use a non-matching template instead.
+EXTRACT_DIR="$(mktemp -d /tmp/wrdp-extract.XXXXXX)"
 trap 'rm -rf "$EXTRACT_DIR"' EXIT
 if ! tar -xzf "$WAYRDP_PKG_TARBALL" -C "$EXTRACT_DIR" 2>&1; then
     echo "ERROR: failed to extract the wayrdp tarball." >&2
     exit 1
 fi
-BUNDLE_DIR="$(find "$EXTRACT_DIR" -maxdepth 1 -type d -name 'wayrdp-*' | head -1)"
+# The bundle root is the single top-level directory the tarball creates
+# (wayrdp-<ver>-linux-x86_64). Match it explicitly and require install.sh.
+BUNDLE_DIR=""
+for d in "$EXTRACT_DIR"/wayrdp-*/; do
+    if [ -d "$d" ] && [ -e "${d}install.sh" ]; then
+        BUNDLE_DIR="${d%/}"
+        break
+    fi
+done
 if [ -z "$BUNDLE_DIR" ] || [ ! -x "$BUNDLE_DIR/install.sh" ]; then
     echo "ERROR: extracted bundle has no executable install.sh ($BUNDLE_DIR)." >&2
     exit 1
