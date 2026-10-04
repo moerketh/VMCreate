@@ -211,8 +211,105 @@ namespace VMCreate.Tests.HyperV.Steps
                 Packages = new List<string> { "pkg'; rm -rf /" }
             };
 
-            var ex = Assert.Throws<InvalidOperationException>(() => DesktopSwitchStep.BuildScript(hostile));
+            var ex = Assert.Throws<InvalidOperationException>(() => DesktopSwitchStep.BuildScript(hostile, DesktopPackageManager.Apt));
             StringAssert.Contains(ex.Message, "cannot be safely passed");
+        }
+
+        // ── Package-manager dispatch (apt vs pacman) ─────────────────────
+
+        [TestMethod]
+        public void BuildScript_DispatchesScriptByPackageManager()
+        {
+            // The catalog's PackageManager picks the embedded script family:
+            // apt distros (Kali) get the dpkg/debconf script; the Arch
+            // lineage (BlackArch) gets the pacman script.
+            var option = new DesktopEnvironmentOption
+            {
+                Id = "kde",
+                DisplayName = "KDE Plasma",
+                Packages = new List<string> { "plasma", "sddm" }
+            };
+
+            string apt = DesktopSwitchStep.BuildScript(option, DesktopPackageManager.Apt);
+            string pacman = DesktopSwitchStep.BuildScript(option, DesktopPackageManager.Pacman);
+
+            StringAssert.Contains(apt, "apt-get", "the apt script drives apt/dpkg");
+            StringAssert.Contains(pacman, "pacman", "the pacman script drives pacman");
+            // Arch has no dpkg/debconf / update-alternatives machinery.
+            Assert.IsFalse(pacman.Contains("debconf-set-selections"),
+                "the pacman script must not reference debconf (not present on Arch)");
+            // Both share the same parameter-injection + result contract.
+            foreach (var script in new[] { apt, pacman })
+            {
+                StringAssert.Contains(script, "DESKTOP_PACKAGES='plasma sddm'", "packages are injected");
+                StringAssert.Contains(script, "DESKTOP_SWITCH_RESULT=", "carries the result-line contract");
+            }
+        }
+
+        [TestMethod]
+        public void BuildScript_UnsupportedPackageManager_Throws()
+        {
+            // A catalog must never advertise a package manager that has no
+            // shipped switch script — fail loudly rather than guessing.
+            var option = new DesktopEnvironmentOption
+            {
+                Id = "kde",
+                DisplayName = "KDE Plasma",
+                Packages = new List<string> { "plasma" }
+            };
+
+            var ex = Assert.Throws<System.NotSupportedException>(() =>
+                DesktopSwitchStep.BuildScript(option, DesktopPackageManager.Dnf));
+            StringAssert.Contains(ex.Message, "No desktop-switch script");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_PacmanItem_RunsPacmanScriptWithInjectedPackages()
+        {
+            // End-to-end for the Arch/BlackArch lineage: the BlackArch catalog
+            // advertises Pacman, so the step must ship the pacman script with
+            // the chosen desktop's packages injected.
+            var step = new DesktopSwitchStep(new IDesktopEnvironmentCatalog[] { new BlackArchDesktopCatalog() });
+            var blackArchItem = new GalleryItem
+            {
+                Name = "BlackArch",
+                LinuxDistro = LinuxDistro.Arch,
+                Tags = new List<string> { "blackarch" }
+            };
+            var customizations = new VmCustomizations { DesktopEnvironmentId = "gnome" };
+
+            string? copiedContent = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, path, _) => copiedContent = content)
+                  .Returns(Task.CompletedTask);
+            SetupScriptResult("DESKTOP_SWITCH_RESULT=ok");
+
+            await step.ExecuteAsync(_shell.Object, blackArchItem, customizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(copiedContent);
+            StringAssert.Contains(copiedContent, "pacman", "the BlackArch catalog runs the pacman script");
+            StringAssert.Contains(copiedContent, "gnome", "the GNOME packages are injected");
+            Assert.IsFalse(copiedContent.Contains("apt-get"),
+                "the pacman lineage must not run the apt script");
+        }
+
+        [TestMethod]
+        public void IsApplicable_BlackArchItem_CatalogResolvesArchDesktops()
+        {
+            var step = new DesktopSwitchStep(new IDesktopEnvironmentCatalog[] { new BlackArchDesktopCatalog() });
+            var blackArchItem = new GalleryItem
+            {
+                Name = "BlackArch",
+                LinuxDistro = LinuxDistro.Arch,
+                Tags = new List<string> { "blackarch" }
+            };
+
+            Assert.IsTrue(step.IsVisibleFor(blackArchItem), "the desktop card applies to the BlackArch item");
+            Assert.IsTrue(step.IsApplicable(blackArchItem, new VmCustomizations { DesktopEnvironmentId = "xfce" }));
+            Assert.IsTrue(step.IsApplicable(blackArchItem, new VmCustomizations { DesktopEnvironmentId = "no-desktop" }));
+            Assert.IsFalse(step.IsApplicable(blackArchItem, null), "no desktop picked → no switch");
+            Assert.IsFalse(step.IsApplicable(blackArchItem, new VmCustomizations { DesktopEnvironmentId = "enlightenment" }),
+                "unknown id → refuse");
         }
     }
 }

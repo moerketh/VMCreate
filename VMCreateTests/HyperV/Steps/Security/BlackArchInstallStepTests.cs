@@ -47,7 +47,7 @@ namespace VMCreate.Tests.HyperV.Steps
             Assert.AreEqual("Add BlackArch Repositories and Tools", _step.Name);
             Assert.AreEqual(CustomizationPhase.PostBoot, _step.Phase);
             Assert.AreEqual(StepPlatform.Linux, _step.Platform);
-            Assert.AreEqual(233, _step.Order);
+            Assert.AreEqual(230, _step.Order);
 
             // ProgressPhaseId === DeployPhaseId (IDistributionOptionMetadata
             // pattern shared with KaliKdeSwitchStep).
@@ -62,7 +62,7 @@ namespace VMCreate.Tests.HyperV.Steps
             Assert.AreEqual("Install BlackArch tools (required)", _step.Label);
             Assert.AreEqual("Install BlackArch Tools", _step.DeployTitle);
             Assert.AreEqual("Shield24", _step.DeployIconName);
-            Assert.AreEqual(233, _step.DeployOrder);
+            Assert.AreEqual(230, _step.DeployOrder);
             Assert.IsFalse(_step.IsOptional, "the BlackArch conversion is required for the BlackArch item — shipping plain Arch would be fabricated");
             Assert.IsTrue(_step.DefaultEnabled);
             Assert.IsNull(_step.DeployCompletionInfo);

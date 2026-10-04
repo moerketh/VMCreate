@@ -20,18 +20,23 @@ namespace VMCreate
     /// guest's default session matches the chosen desktop (e.g. Plasma
     /// Wayland), so Auto RDP-backend detection sees the session the user
     /// will actually get and picks Lamco/xrdp accordingly. Explicit backend
-    /// choices are unaffected.
+    /// choices are unaffected. On the Arch lineage the BlackArch repo strap
+    /// (Order 230) has already landed, so pacman resolves the desktop against
+    /// the combined Arch+BlackArch package set.
     /// </para>
     /// <para>
-    /// The script (<c>desktop_switch_apt.sh</c>) is parameterized by this
-    /// step: a variable block naming the target desktop's packages, session
-    /// starter and display manager is injected below the shebang. Output
+    /// The script is parameterized by this step: a variable block naming the
+    /// target desktop's packages, session starter and display manager is
+    /// injected below the shebang. The script family is selected by the
+    /// catalog's <see cref="IDesktopEnvironmentCatalog.PackageManager"/> —
+    /// <c>desktop_switch_apt.sh</c> for apt distros (Kali),
+    /// <c>desktop_switch_pacman.sh</c> for Arch (BlackArch). Output
     /// contract: the terminal line <c>DESKTOP_SWITCH_RESULT=ok|degraded</c>.
-    /// Hard failures (missing metapackage in the distro's live index, apt
-    /// install failing) exit non-zero and fail the deployment — a
+    /// Hard failures (missing metapackage in the distro's live index, the
+    /// package install failing) exit non-zero and fail the deployment — a
     /// half-installed desktop must never ship silently. "degraded" means the
-    /// switch succeeded but a side task (session-manager alternative, old
-    /// desktop purge) failed.
+    /// switch succeeded but a side task (session-manager alternative,
+    /// display-manager handover, old desktop purge) failed.
     /// </para>
     /// </summary>
     public class DesktopSwitchStep : IConfigurableCustomizationStep, IDistributionOptionMetadata
@@ -65,17 +70,22 @@ namespace VMCreate
         {
             ct.ThrowIfCancellationRequested();
 
-            var option = _catalogs.ForItem(item)?.Resolve(customizations.DesktopEnvironmentId)
+            var catalog = _catalogs.ForItem(item)
+                ?? throw new InvalidOperationException(
+                    $"Desktop switch requested on VM {shell.VmName} but no desktop catalog " +
+                    $"applies to {item.Name}. The image and the desktop selection have diverged.");
+
+            var option = catalog.Resolve(customizations.DesktopEnvironmentId)
                 ?? throw new InvalidOperationException(
                     $"Desktop switch requested on VM {shell.VmName} but desktop " +
                     $"'{customizations.DesktopEnvironmentId}' is not offered for {item.Name}. " +
                     "The desktop selection and the image have diverged — refusing to guess.");
 
             logger.LogInformation(
-                "Switching VM {VMName} to the {Desktop} desktop ({DesktopId})...",
-                shell.VmName, option.DisplayName, option.Id);
+                "Switching VM {VMName} to the {Desktop} desktop ({DesktopId}) via {PackageManager}...",
+                shell.VmName, option.DisplayName, option.Id, catalog.PackageManager);
 
-            string script = BuildScript(option);
+            string script = BuildScript(option, catalog.PackageManager);
 
             // /tmp hardening: unpredictable GUID path (no pre-creation /
             // TOCTOU), then ownership+perms tightened before root execution
@@ -133,14 +143,32 @@ namespace VMCreate
             => _catalogs.ForItem(item) != null;
 
         /// <summary>
-        /// Builds the guest script: the embedded <c>desktop_switch_apt.sh</c>
-        /// with a parameter block naming the target desktop injected directly
-        /// below the shebang (injected values come from the catalog, never
-        /// free-form user input — and are still shell-quoted and validated).
+        /// Maps a catalog <see cref="DesktopPackageManager"/> to its embedded
+        /// switch script. Only families with a shipped script are supported —
+        /// a catalog advertising an unsupported manager fails the deployment
+        /// loudly rather than guessing.
         /// </summary>
-        internal static string BuildScript(DesktopEnvironmentOption option)
+        private static string ScriptResourceFor(DesktopPackageManager packageManager)
+            => packageManager switch
+            {
+                DesktopPackageManager.Apt => "desktop_switch_apt.sh",
+                DesktopPackageManager.Pacman => "desktop_switch_pacman.sh",
+                _ => throw new NotSupportedException(
+                    $"No desktop-switch script ships for package manager '{packageManager}'. " +
+                    "A catalog must not advertise a package manager without a matching script."),
+            };
+
+        /// <summary>
+        /// Builds the guest script: the embedded switch script for the
+        /// catalog's package manager with a parameter block naming the target
+        /// desktop injected directly below the shebang (injected values come
+        /// from the catalog, never free-form user input — and are still
+        /// shell-quoted and validated).
+        /// </summary>
+        internal static string BuildScript(DesktopEnvironmentOption option, DesktopPackageManager packageManager)
         {
-            string script = ScriptResourceLoader.Load("desktop_switch_apt.sh");
+            string resourceName = ScriptResourceFor(packageManager);
+            string script = ScriptResourceLoader.Load(resourceName);
 
             var packages = ShellQuoteList(option.Packages);
             var packagesToRemove = ShellQuoteList(option.PackagesToRemove);
@@ -152,7 +180,7 @@ namespace VMCreate
 
             int firstNewline = script.IndexOf('\n');
             if (firstNewline < 0)
-                throw new InvalidOperationException("desktop_switch_apt.sh has no shebang line to inject parameters below.");
+                throw new InvalidOperationException($"{resourceName} has no shebang line to inject parameters below.");
 
             return script[..(firstNewline + 1)] + parameters + script[(firstNewline + 1)..];
         }

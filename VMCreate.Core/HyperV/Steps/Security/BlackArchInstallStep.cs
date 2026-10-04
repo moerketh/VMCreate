@@ -29,11 +29,12 @@ namespace VMCreate
     /// the core groups installed but a best-effort extra package failed.
     /// </para>
     /// <para>
-    /// Runs at Order 233, immediately after <see cref="KaliKdeSwitchStep"/>
-    /// (231) and <see cref="AutoRdpBackendResolveStep"/> (232): the repo
-    /// conversion must land before the RDP/desktop steps (270+) install a
-    /// display stack, so a desktop later chosen comes from the combined
-    /// Arch+BlackArch repos.
+    /// Runs at Order 230, immediately BEFORE <see cref="DesktopSwitchStep"/>
+    /// (231): the BlackArch repos must be in place before the desktop switch
+    /// drives pacman, so a desktop chosen in the wizard resolves against the
+    /// combined Arch+BlackArch package set. Both steps run before
+    /// <see cref="AutoRdpBackendResolveStep"/> (232), so the Auto RDP
+    /// detection then sees the post-switch default session.
     /// </para>
     /// </summary>
     public class BlackArchInstallStep : IConfigurableCustomizationStep, IDistributionOptionMetadata
@@ -42,7 +43,7 @@ namespace VMCreate
         public string Name => "Add BlackArch Repositories and Tools";
         public CustomizationPhase Phase => CustomizationPhase.PostBoot;
         public StepPlatform Platform => StepPlatform.Linux;
-        public int Order => 233;
+        public int Order => 230;
 
         public string? ProgressPhaseId => (this as IDistributionOptionMetadata)?.DeployPhaseId;
 
@@ -103,7 +104,7 @@ namespace VMCreate
         public string DeployDescription => "Adding the BlackArch repositories and installing a curated subset of pentesting tools";
         public string DeployPhaseId => "Sub_BlackArchInstall";
         public string DeployIconName => "Shield24";
-        public int DeployOrder => 233;
+        public int DeployOrder => 230;
         public string? DeployCompletionInfo => null;
 
         public bool IsVisibleFor(GalleryItem? item)

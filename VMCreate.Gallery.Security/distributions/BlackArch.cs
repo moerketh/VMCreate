@@ -33,7 +33,7 @@ namespace VMCreate.Gallery
             {
                 Name = "BlackArch",
                 Publisher = "BlackArch Project",
-                Description = "BlackArch Linux as an Arch Linux base with the BlackArch repositories added post-boot, installing a curated subset of pentesting tools. Uses the current rolling Arch image, so this stays up to date where the BlackArch 2023 ISO is not.",
+                Description = "BlackArch Linux as an Arch Linux base with the BlackArch repositories added post-boot, installing a curated subset of pentesting tools. Uses the current rolling Arch image, so this stays up to date where the BlackArch 2023 ISO is not. Ships headless; a desktop environment (Xfce, KDE Plasma, GNOME) can be installed from the customization page.",
                 ThumbnailUri = "",
                 SymbolUri = SymbolUri,
                 DiskUri = ArchTemplateUrl,
@@ -43,6 +43,7 @@ namespace VMCreate.Gallery
                 InitialUsername = "arch",
                 InitialPassword = "arch",
                 Category = "Security",
+                LinuxDistro = LinuxDistro.Arch,
                 Tags = new List<string> { "blackarch" }
             };
             return Task.FromResult(new List<GalleryItem> { galleryItem });
