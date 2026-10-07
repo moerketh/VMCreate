@@ -205,6 +205,23 @@ else
     echo "No ufw/firewalld firewall manager found; leaving 3389 to the distro default."
 fi
 
+# -- Hyper-V vsock transport (vmconnect Enhanced Session) --------------------
+# wayrdp listens on AF_VSOCK (hv_sock) alongside TCP so vmconnect Enhanced
+# Session works with no network dependency. vsock bypasses netfilter entirely,
+# so nothing here touches ufw. hv_sock is a module on most guest kernels
+# (CONFIG_VSOCKETS=m); load it for the current boot and persist it.
+# On non-Hyper-V guests the module is absent — wayrdp then logs once and
+# serves TCP only, so failures here are non-fatal; we also skip the
+# modules-load entry to keep the boot log clean there.
+if [ -d /sys/module/hv_sock ] || modprobe hv_sock 2>/dev/null; then
+    echo "hv_sock: loaded."
+    printf '# wayrdp: Hyper-V sockets for the vmconnect Enhanced Session transport\nhv_sock\n' \
+        > /etc/modules-load.d/wayrdp-vsock.conf
+    echo "hv_sock: persisted via /etc/modules-load.d/wayrdp-vsock.conf."
+else
+    echo "NOTE: hv_sock not available (not a Hyper-V guest?) — Enhanced Session disabled, TCP-only." >&2
+fi
+
 # -- Resolve the autologin (desktop) user -----------------------------------
 # The C# side substitutes __AUTOLOGIN_USER__ with the gallery item's
 # initial username; when blank/absent, fall back to the /etc/passwd scan
