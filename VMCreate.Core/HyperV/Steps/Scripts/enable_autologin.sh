@@ -13,6 +13,14 @@ DEGRADED=0
 
 USER="__AUTOLOGIN_USER__"
 
+# RDP backend driving this deployment ("lamco" or "wayrdp"). The forced
+# 1920x1080 display section below applies to lamco only: its portal capture
+# targets the PHYSICAL output, so the physical monitor must run at the RDP
+# resolution. wayrdp creates its own headless output at the exact client
+# size and captures that (verified at unlisted resolutions incl. 1366x768),
+# so forcing the physical mode only degrades console use — skipped for it.
+RDP_BACKEND="__RDP_BACKEND__"
+
 # -- Detect the installed display managers (REAL detection, no mkdir) -----
 # The old unconditional `mkdir -p` of all four DM config dirs made the
 # later [ -d ] checks meaningless (SDDM and LightDM autologin files were
@@ -167,8 +175,11 @@ fi
 # The hyperv_drm driver reports 1024x768 as the preferred mode. mutter/GNOME
 # reads monitors.xml to override the DRM preferred mode. KWin uses KScreen
 # config instead but falls through to DRM default without a config file.
+# (lamco only — see RDP_BACKEND note above.)
 USER_HOME=$(getent passwd "$USER" | cut -d: -f6)
-if [ -n "$USER_HOME" ] && [ -d "$USER_HOME" ]; then
+if [ "$RDP_BACKEND" = "wayrdp" ]; then
+    echo "Skipping forced 1920x1080 (wayrdp sizes its own headless output to the client)."
+elif [ -n "$USER_HOME" ] && [ -d "$USER_HOME" ]; then
     if [ "$has_greetd" = "1" ]; then
         # Hyprland under greetd: monitors.xml (mutter) and a KDE autostart
         # entry do not apply. Omarchy's Hyprland runs the LUA config —
