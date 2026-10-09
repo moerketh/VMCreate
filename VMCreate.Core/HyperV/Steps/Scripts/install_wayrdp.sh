@@ -184,6 +184,94 @@ if ldd /usr/local/bin/wayrdp 2>/dev/null | grep -q "not found"; then
 fi
 echo "Binary linkage OK."
 
+# -- Hyprland shm-capture plugin (optional, best-effort) ---------------------
+# Hyprland guests get the zero-repaint capture path: the compositor plugin
+# ships SOURCE-ONLY (Hyprland has no stable C++ ABI) and must be built on the
+# guest against its own headers. When the build works we also enable the
+# shm-plugin capture drop-in and the autostart plugin-load hook; on any
+# failure wayrdp falls back to ext-image-copy-capture, which still works but
+# costs a full re-render + readPixels per frame (~40ms at 1080p on llvmpipe).
+PLUGIN_SRC_DIR="/usr/local/share/wayrdp/plugins/hyprland-capture"
+if [ -d "$PLUGIN_SRC_DIR" ] && command -v hyprctl >/dev/null 2>&1; then
+    # Resolve the desktop user early for plugin paths (AUTOLOGIN_USER is
+    # re-resolved below for the unit; same logic).
+    PLUGIN_USER="__AUTOLOGIN_USER__"
+    if [ "$PLUGIN_USER" = "__AUTOLOGIN_USER__" ] || [ -z "$PLUGIN_USER" ]; then
+        PLUGIN_USER="$(awk -F: '$3 >= 1000 && $3 < 65534 && $6 != "" {print $1; exit}' /etc/passwd 2>/dev/null || echo "")"
+    fi
+    if [ -n "$PLUGIN_USER" ] && id "$PLUGIN_USER" >/dev/null 2>&1; then
+        PLUGIN_HOME="$(getent passwd "$PLUGIN_USER" | cut -d: -f6)"
+        PLUGIN_DIR="$PLUGIN_HOME/.local/share/wayrdp"
+        PLUGIN_SO="$PLUGIN_DIR/hyprland-capture.so"
+        mkdir -p "$PLUGIN_DIR" 2>/dev/null || true
+        chown "$PLUGIN_USER":"$PLUGIN_USER" "$PLUGIN_DIR" 2>/dev/null || true
+        BUILD_OK=0
+        if command -v g++ >/dev/null 2>&1 && pkg-config --exists hyprland 2>/dev/null; then
+            # Build in a staging dir as the desktop user so no root-owned
+            # artifacts land in the user's home.
+            PLUGIN_BUILD="$(mktemp -d /tmp/wayrdp-plugin.XXXXXX)"
+            cp "$PLUGIN_SRC_DIR/main.cpp" "$PLUGIN_SRC_DIR/Makefile" "$PLUGIN_BUILD/"
+            chown -R "$PLUGIN_USER":"$PLUGIN_USER" "$PLUGIN_BUILD" 2>/dev/null || true
+            if sudo -u "$PLUGIN_USER" make -C "$PLUGIN_BUILD" >/dev/null 2>&1 \
+               && [ -f "$PLUGIN_BUILD/wayrdp-capture.so" ]; then
+                install -m 644 "$PLUGIN_BUILD/wayrdp-capture.so" "$PLUGIN_SO"
+                chown "$PLUGIN_USER":"$PLUGIN_USER" "$PLUGIN_SO" 2>/dev/null || true
+                BUILD_OK=1
+                echo "Hyprland shm-capture plugin built: $PLUGIN_SO"
+            fi
+            rm -rf "$PLUGIN_BUILD" 2>/dev/null || true
+        else
+            echo "NOTE: skipping Hyprland plugin build (need g++ + hyprland pkg-config);"
+            echo "      capture falls back to ext-image-copy (slower, still functional)."
+        fi
+
+        if [ "$BUILD_OK" = "1" ]; then
+            # Enable the shm capture path via a user drop-in.
+            DROPIN_DIR="/home/$PLUGIN_USER/.config/systemd/user/wayrdp.service.d"
+            if [ -d "$PLUGIN_HOME" ]; then
+                DROPIN_DIR="$PLUGIN_HOME/.config/systemd/user/wayrdp.service.d"
+            fi
+            mkdir -p "$DROPIN_DIR" 2>/dev/null || true
+            cat > "$DROPIN_DIR/shm.conf" <<'SHM_EOF'
+# Enable the Hyprland plugin shm capture path (wayrdp backend-wlroots).
+# The plugin is loaded separately via the Hyprland autostart hook; if it is
+# missing the pump simply waits for /dev/shm/wayrdp-capture, so only install
+# this drop-in together with a successfully built plugin.
+[Service]
+Environment=WAYRDP_CAPTURE=shm-plugin
+SHM_EOF
+            chown -R "$PLUGIN_USER":"$PLUGIN_USER" "$DROPIN_DIR" 2>/dev/null || true
+            echo "shm-plugin drop-in written ($DROPIN_DIR/shm.conf)."
+
+            # Plugin autoload: Hyprland Lua hook, same file as the unit hook
+            # below. hyprctl plugin load is keyed by absolute path, so the
+            # filename must match across boots.
+            AUTO_LUA="$PLUGIN_HOME/.config/hypr/autostart.lua"
+            if [ -d "$PLUGIN_HOME/.config/hypr" ] || command -v hyprctl >/dev/null 2>&1; then
+                mkdir -p "$PLUGIN_HOME/.config/hypr" 2>/dev/null || true
+                if ! grep -q "hyprland-capture.so" "$AUTO_LUA" 2>/dev/null; then
+                    cat >> "$AUTO_LUA" <<'PLUG_EOF'
+-- wayrdp shm-capture plugin (added by VMCreate install_wayrdp.sh): loads the
+-- compositor plugin that feeds /dev/shm/wayrdp-capture. Runs at hyprland
+-- start; if it fails, wayrdp falls back to waiting on shm and the session
+-- shows the ext-image-copy path only after removing the drop-in.
+os.execute("hyprctl plugin load " .. os.getenv("HOME") .. "/.local/share/wayrdp/hyprland-capture.so")
+PLUG_EOF
+                    chown "$PLUGIN_USER":"$PLUGIN_USER" "$AUTO_LUA" 2>/dev/null || true
+                    echo "Wrote plugin autoload hook to $AUTO_LUA."
+                fi
+            fi
+
+            # If a session is live, load the plugin right now (ignore the
+            # "twice" error — load is idempotent-keyed by path).
+            if [ -d "/run/user/$(id -u "$PLUGIN_USER")/hypr" ]; then
+                sudo -u "$PLUGIN_USER" XDG_RUNTIME_DIR="/run/user/$(id -u "$PLUGIN_USER")" \
+                    hyprctl plugin load "$PLUGIN_SO" >/dev/null 2>&1 || true
+            fi
+        fi
+    fi
+fi
+
 # -- Firewall: open RDP port 3389 -------------------------------------------
 # Omarchy ships ufw with `INPUT policy DROP`, allowing only ssh(22) +
 # localsend(53317) + docker-dns. The wayrdp listener (0.0.0.0:3389) is healthy
@@ -269,8 +357,12 @@ if [ -d "$HYPRLAND_CONF_HOME" ] || command -v hyprctl >/dev/null 2>&1; then
         cat >> "$AUTO_LUA" <<'AUTO_LUA_EOF'
 -- wayrdp autostart (added by VMCreate install_wayrdp.sh): Hyprland may not
 -- raise graphical-session.target, so start the wayrdp user unit directly.
+-- Race guard: exec_on_start fires before Hyprland owns the Wayland socket,
+-- and wayrdp's backend has no retry — a pump started too early fails with
+-- "Could not find wayland compositor" and the peer gets a black screen until
+-- the unit is restarted. Poll for the socket first.
 o.exec_on_start("dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP HYPRLAND_INSTANCE_SIGNATURE")
-o.exec_on_start("systemctl --user start wayrdp.service")
+o.exec_on_start("sh -c 'for i in $(seq 1 40); do [ -S \"$XDG_RUNTIME_DIR/wayland-1\" ] || [ -S \"$XDG_RUNTIME_DIR/wayland-0\" ] && break; sleep 0.25; done; systemctl --user start wayrdp.service'")
 AUTO_LUA_EOF
         chown "$AUTOLOGIN_USER":"$AUTOLOGIN_USER" "$AUTO_LUA" 2>/dev/null || true
         echo "Wrote wayrdp autostart hook to $AUTO_LUA."
