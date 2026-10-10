@@ -388,7 +388,10 @@ echo "TCP bind drop-in written ($AUTO_DROPIN_DIR/tcp.conf)."
 # a partial write can never pass as "usable" SAM content on a later run.
 WAYRDP_NLA_PASSWORD_B64="__WAYRDP_NLA_PASSWORD_B64__"
 SAM_FILE="$USER_HOME/.local/share/wayrdp/SAM"
-if [ "$WAYRDP_NLA_PASSWORD_B64" != "__WAYRDP_NLA_PASSWORD_B64__" ] && ! run_as_user test -s "$SAM_FILE" 2>/dev/null; then
+# Note: the comparison placeholder is split ("..."_B64__") so the C# string
+# substitution cannot replace it — otherwise it always compares equal to the
+# seeded value and seeding is silently skipped.
+if [ "$WAYRDP_NLA_PASSWORD_B64" != "__WAYRDP_NLA_PASSWORD""_B64__" ] && ! run_as_user test -s "$SAM_FILE" 2>/dev/null; then
     NLA_PW="$(printf '%s' "$WAYRDP_NLA_PASSWORD_B64" | base64 -d 2>/dev/null || echo "")"
     if [ -n "$NLA_PW" ] && command -v winpr-hash3 >/dev/null 2>&1; then
         mkdir -p "$(dirname "$SAM_FILE")" && chown "$AUTOLOGIN_USER":"$AUTOLOGIN_USER" "$(dirname "$SAM_FILE")" 2>/dev/null || true
