@@ -145,14 +145,17 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
-        public void IsApplicable_TrueExceptForLamcoBackend()
+        public void IsApplicable_TrueOnlyForXrdpBackend()
         {
-            // Wayland sessions are disabled for the xrdp/X11 path; Lamco (Wayland-native) keeps them.
+            // Wayland sessions are disabled only for the xrdp/X11 default path;
+            // wayrdp and Lamco are Wayland-native and must keep them — hiding
+            // "hyprland.desktop" breaks uwsm autologin cold boot.
             Assert.IsTrue(_step.IsApplicable(null, null));
             Assert.IsTrue(_step.IsApplicable(new GalleryItem(), new VmCustomizations()));
             Assert.IsTrue(_step.IsApplicable(new GalleryItem(), new VmCustomizations { RdpBackend = RdpBackend.Xrdp }));
             Assert.IsTrue(_step.IsApplicable(new GalleryItem(), new VmCustomizations { RdpBackend = RdpBackend.None }));
             Assert.IsFalse(_step.IsApplicable(new GalleryItem(), new VmCustomizations { RdpBackend = RdpBackend.Lamco }));
+            Assert.IsFalse(_step.IsApplicable(new GalleryItem(), new VmCustomizations { RdpBackend = RdpBackend.Wayrdp }));
         }
     }
 }
