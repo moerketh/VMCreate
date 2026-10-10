@@ -537,6 +537,14 @@ namespace VMCreate.CLI.Commands
                     jsonReporter, jsonMode, ct);
             }
 
+            // Redirected stdout (pipe/file/CI): Spectre's Live display needs a
+            // real console handle and crashes with IOException otherwise.
+            if (Console.IsOutputRedirected)
+            {
+                return await CreateVmAsync(services, vmSettings, vmCustomizations, galleryItem,
+                    new PlainTextProgressReporter(), jsonMode, ct);
+            }
+
             // Rich console output
             AnsiConsole.MarkupLine($"[bold]Creating VM:[/] {Markup.Escape(vmSettings.VMName)}");
             AnsiConsole.MarkupLine($"  Image    : {Markup.Escape(galleryItem.Name ?? string.Empty)}" +
