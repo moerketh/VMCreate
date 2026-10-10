@@ -31,7 +31,10 @@ namespace VMCreate
         public string? ProgressPhaseId => "Sub_FixXrdp";
 
         public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
-            => customizations?.RdpBackend != RdpBackend.Lamco;
+            // xrdp/X11 path only — gating on "not Lamco" leaks xrdp fixups
+            // onto Wayland-native wayrdp guests (see DisableWaylandSessionsStep).
+            => customizations?.RdpBackend is not RdpBackend.Lamco
+                                      and not RdpBackend.Wayrdp;
 
         public async Task ExecuteAsync(IGuestShell shell, GalleryItem item, VmCustomizations customizations, ILogger logger, CancellationToken ct)
         {

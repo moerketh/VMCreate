@@ -55,7 +55,10 @@ namespace VMCreate
         // Hyper-V consoles stay usable. If a future backend needs Wayland
         // without Lamco, this gate must become an explicit allowlist.
         public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
-            => customizations?.RdpBackend != RdpBackend.Lamco;
+            // xrdp/X11 path only — gating on "not Lamco" leaks xrdp fixups
+            // onto Wayland-native wayrdp guests (see DisableWaylandSessionsStep).
+            => customizations?.RdpBackend is not RdpBackend.Lamco
+                                      and not RdpBackend.Wayrdp;
 
         public async Task ExecuteAsync(IGuestShell shell, GalleryItem item, VmCustomizations customizations, ILogger logger, CancellationToken ct)
         {
