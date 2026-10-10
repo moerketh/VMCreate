@@ -109,6 +109,23 @@ namespace VMCreate
                 logger.LogWarning("Gallery item has no InitialUsername for VM {VMName}; the install script will resolve the autologin user from /etc/passwd.", shell.VmName);
             }
 
+            // NLA credential seed: wayrdp refuses to start without a usable
+            // SAM (observed on a cold deploy: unit restart-loops with "no
+            // usable NLA credentials"). Seed it from the gallery item's
+            // initial password so first connect accepts the same creds as the
+            // console. Base64 so arbitrary password bytes survive script
+            // substitution; left as the placeholder when no password exists
+            // (script then prints a loud NOTE and the readiness gate fails).
+            if (!string.IsNullOrEmpty(item?.InitialPassword))
+            {
+                string pwB64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(item.InitialPassword));
+                script = script.Replace("__WAYRDP_NLA_PASSWORD_B64__", pwB64);
+            }
+            else
+            {
+                logger.LogWarning("Gallery item has no InitialPassword for VM {VMName}; the wayrdp NLA SAM will NOT be seeded — the unit will refuse to start until a SAM is provisioned manually.", shell.VmName);
+            }
+
             // Runtime distro re-verification, identical to the Lamco path:
             // distinguish a verdict (Unknown = guest answered, not supported)
             // from no-verdict (null = SSH read failed; retry once).

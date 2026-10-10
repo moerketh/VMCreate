@@ -192,6 +192,10 @@ echo "Binary linkage OK."
 # failure wayrdp falls back to ext-image-copy-capture, which still works but
 # costs a full re-render + readPixels per frame (~40ms at 1080p on llvmpipe).
 PLUGIN_SRC_DIR="/usr/local/share/wayrdp/plugins/hyprland-capture"
+if [ ! -d "$PLUGIN_SRC_DIR" ] && command -v hyprctl >/dev/null 2>&1; then
+    echo "NOTE: Hyprland shm-capture plugin source not at $PLUGIN_SRC_DIR;"
+    echo "      capture uses ext-image-copy (slower, still functional)."
+fi
 if [ -d "$PLUGIN_SRC_DIR" ] && command -v hyprctl >/dev/null 2>&1; then
     # Resolve the desktop user early for plugin paths (AUTOLOGIN_USER is
     # re-resolved below for the unit; same logic).
@@ -373,6 +377,35 @@ Environment=WAYRDP_BIND=0.0.0.0
 TCP_EOF
 chown -R "$AUTOLOGIN_USER":"$AUTOLOGIN_USER" "$AUTO_DROPIN_DIR" 2>/dev/null || true
 echo "TCP bind drop-in written ($AUTO_DROPIN_DIR/tcp.conf)."
+
+# -- NLA SAM seed ------------------------------------------------------------
+# wayrdp refuses to start when the SAM is missing/empty: "no usable NLA
+# credentials", unit restart-loops, 3389 never listens (observed on a cold
+# deploy). Seed it once from the gallery item's initial password so the first
+# RDP connect accepts the console creds. The password arrives base64-encoded
+# from the C# side; if the placeholder survives there is nothing to seed and
+# the readiness gate below fails loudly. Write via a temp file + chmod 600 so
+# a partial write can never pass as "usable" SAM content on a later run.
+WAYRDP_NLA_PASSWORD_B64="__WAYRDP_NLA_PASSWORD_B64__"
+SAM_FILE="$USER_HOME/.local/share/wayrdp/SAM"
+if [ "$WAYRDP_NLA_PASSWORD_B64" != "__WAYRDP_NLA_PASSWORD_B64__" ] && ! run_as_user test -s "$SAM_FILE" 2>/dev/null; then
+    NLA_PW="$(printf '%s' "$WAYRDP_NLA_PASSWORD_B64" | base64 -d 2>/dev/null || echo "")"
+    if [ -n "$NLA_PW" ] && command -v winpr-hash3 >/dev/null 2>&1; then
+        mkdir -p "$(dirname "$SAM_FILE")" && chown "$AUTOLOGIN_USER":"$AUTOLOGIN_USER" "$(dirname "$SAM_FILE")" 2>/dev/null || true
+        SAM_TMP="$(dirname "$SAM_FILE")/.SAM.seed.$$"
+        if run_as_user winpr-hash3 -u "$AUTOLOGIN_USER" -p "$NLA_PW" -f sam > "$SAM_TMP" 2>/dev/null && [ -s "$SAM_TMP" ]; then
+            cp "$SAM_TMP" "$SAM_FILE" && chmod 600 "$SAM_FILE" 2>/dev/null || true
+            chown "$AUTOLOGIN_USER":"$AUTOLOGIN_USER" "$SAM_FILE" 2>/dev/null || true
+            echo "NLA SAM seeded for '$AUTOLOGIN_USER'."
+        else
+            echo "NOTE: winpr-hash3 SAM generation failed — wayrdp will refuse to start until a SAM is provisioned." >&2
+        fi
+        rm -f "$SAM_TMP" 2>/dev/null || true
+    elif [ -n "$NLA_PW" ]; then
+        echo "NOTE: winpr-hash3 not installed — cannot seed wayrdp NLA SAM; first RDP connect will fail." >&2
+    fi
+    unset NLA_PW
+fi
 
 run_as_user systemctl --user daemon-reload 2>/dev/null || true
 run_as_user systemctl --user enable wayrdp.service 2>/dev/null || true
