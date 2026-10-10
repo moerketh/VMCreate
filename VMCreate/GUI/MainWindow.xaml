@@ -25,6 +25,13 @@
                                ToolTip="Toggle dark / light theme"
                                AutomationProperties.Name="Toggle theme"
                                Margin="0,0,8,0" Padding="4"/>
+                    <ui:Button x:Name="SettingsButton"
+                               Icon="{ui:SymbolIcon Settings24}"
+                               Click="Settings_Click"
+                               Appearance="Transparent"
+                               ToolTip="Settings (credentials, AI, defaults)"
+                               AutomationProperties.Name="Settings"
+                               Padding="4"/>
                 </StackPanel>
             </ui:TitleBar.Header>
         </ui:TitleBar>

@@ -120,11 +120,19 @@ namespace VMCreate.CLI.Commands
             // ── HTB VPN ────────────────────────────────────────────────────────
             var htbTokenOpt = new Option<string>(
                 "--htb-token",
-                description: "Hack The Box API token for downloading VPN configuration.");
+                description: "Hack The Box API token for downloading VPN configuration. Falls back to the token stored in settings.json (GUI Settings) when omitted.");
 
             var htbVpnOpt = new Option<string>(
                 "--htb-vpn",
                 description: "Comma-separated HTB VPN endpoint types: labs, sp, academy.");
+
+            // ── Elastic SIEM AI ─────────────────────────────────────────────────
+            var elasticAiOpt = new Option<bool>(
+                "--elastic-ai",
+                description: "Enable AI features on an Elastic SIEM deployment using the LLM endpoint stored in settings.json (GUI: Settings → AI / LLM).");
+            var elasticAiNoTrialOpt = new Option<bool>(
+                "--elastic-ai-no-trial",
+                description: "With --elastic-ai: skip starting the 30-day Enterprise trial license (AI features need Enterprise on self-hosted stacks).");
 
             var ovpnOpt = new Option<string>(
                 "--ovpn",
@@ -185,6 +193,8 @@ namespace VMCreate.CLI.Commands
             cmd.AddOption(noTimezoneOpt);
             cmd.AddOption(htbTokenOpt);
             cmd.AddOption(htbVpnOpt);
+            cmd.AddOption(elasticAiOpt);
+            cmd.AddOption(elasticAiNoTrialOpt);
             cmd.AddOption(ovpnOpt);
             cmd.AddOption(noOpenVpnOpt);
             cmd.AddOption(optionOpt);
@@ -221,6 +231,8 @@ namespace VMCreate.CLI.Commands
                     NoTimezoneSync = r.GetValueForOption(noTimezoneOpt),
                     HtbToken = r.GetValueForOption(htbTokenOpt),
                     HtbVpn = r.GetValueForOption(htbVpnOpt),
+                    ElasticAi = r.GetValueForOption(elasticAiOpt),
+                    ElasticAiNoTrial = r.GetValueForOption(elasticAiNoTrialOpt),
                     OvpnPath = r.GetValueForOption(ovpnOpt),
                     NoOpenVpn = r.GetValueForOption(noOpenVpnOpt),
                     Options = r.GetValueForOption(optionOpt) ?? Array.Empty<string>(),
@@ -407,7 +419,23 @@ namespace VMCreate.CLI.Commands
             }
 
             // ── Build VmCustomizations ───────────────────────────────────────
-            bool hasHtbVpn = !string.IsNullOrEmpty(args.HtbToken) || !string.IsNullOrEmpty(args.OvpnPath);
+            // --htb-token falls back to the stored HTB App Token (settings.json,
+            // DPAPI-encrypted) so credentials are provided once per machine.
+            var effectiveHtbToken = args.HtbToken;
+            if (string.IsNullOrEmpty(effectiveHtbToken))
+            {
+                try
+                {
+                    effectiveHtbToken = services.GetRequiredService<IUserPreferencesStore>()
+                        .Load().HtbApiToken;
+                }
+                catch (Exception ex)
+                {
+                    PrintError(jsonMode, "HtbApi", $"Failed to read stored preferences: {ex.Message}");
+                }
+            }
+
+            bool hasHtbVpn = !string.IsNullOrEmpty(effectiveHtbToken) || !string.IsNullOrEmpty(args.OvpnPath);
 
             RdpBackend rdpBackend = ResolveRdpBackend(args.RdpBackend, args.NoXrdp, jsonMode, out bool rdpBackendValid);
             if (!rdpBackendValid)
@@ -469,6 +497,26 @@ namespace VMCreate.CLI.Commands
                 DistributionOptions = distributionOptions,
             };
 
+            // ── Elastic SIEM AI: hydrate from the machine-level store ─────
+            if (args.ElasticAi)
+            {
+                var aiPrefs = services.GetRequiredService<IUserPreferencesStore>().Load();
+                if (!aiPrefs.HasLlmConfiguration)
+                {
+                    PrintError(jsonMode, "validation",
+                        "--elastic-ai requires a stored LLM configuration. Set it via the GUI (Settings → AI / LLM) or settings.json first.");
+                    return ExitCodes.InvalidArguments;
+                }
+                vmCustomizations.ElasticAi = new ElasticAiSettings
+                {
+                    Enabled = true,
+                    StartTrialLicense = !args.ElasticAiNoTrial,
+                    ChatCompletionsUrl = aiPrefs.LlmChatCompletionsUrl,
+                    ApiKey = aiPrefs.LlmApiKey,
+                    Model = aiPrefs.LlmModel,
+                };
+            }
+
             // Auto-populate FLARE VM optional distribution options if none were explicitly provided
             if (distributionOptions.Count == 0 &&
                 string.Equals(galleryItem.Name, "FLARE VM", StringComparison.OrdinalIgnoreCase))
@@ -484,9 +532,9 @@ namespace VMCreate.CLI.Commands
             }
 
             // ── Download HTB VPN keys if token is provided ───────────────────
-            if (!string.IsNullOrEmpty(args.HtbToken) && !string.IsNullOrEmpty(args.HtbVpn))
+            if (!string.IsNullOrEmpty(effectiveHtbToken) && !string.IsNullOrEmpty(args.HtbVpn))
             {
-                var htbResult = await DownloadHtbKeysAsync(services, args.HtbToken, args.HtbVpn, jsonMode, ct);
+                var htbResult = await DownloadHtbKeysAsync(services, effectiveHtbToken, args.HtbVpn, jsonMode, ct);
                 if (htbResult == null)
                     return ExitCodes.VmCreationFailed;
                 vmCustomizations.HtbVpnKeys = htbResult;
@@ -705,6 +753,8 @@ namespace VMCreate.CLI.Commands
         public bool NoTimezoneSync { get; set; }
         public string? HtbToken { get; set; }
         public string? HtbVpn { get; set; }
+        public bool ElasticAi { get; set; }
+        public bool ElasticAiNoTrial { get; set; }
         public string? OvpnPath { get; set; }
         public bool NoOpenVpn { get; set; }
         public string[] Options { get; set; } = Array.Empty<string>();

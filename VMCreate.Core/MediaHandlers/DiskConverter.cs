@@ -34,11 +34,13 @@ namespace VMCreate
                 throw new FileNotFoundException($"Source disk file not found: {sourcePath}");
             }
 
-            string sourceExtension = Path.GetExtension(sourcePath).ToLower();
-            if (sourceExtension != ".vmdk" && sourceExtension != ".qcow2")
+            // Format is resolved by content first (Ubuntu cloud images ship
+            // qcow2 data in ".img" files), falling back to the extension.
+            string sourceFormat = ResolveSourceFormat(sourcePath);
+            if (sourceFormat is not ("vmdk" or "qcow2"))
             {
-                _logger.LogError("Unsupported source format: {SourceExtension}. Supported formats: .vmdk, .qcow2", sourceExtension);
-                throw new NotSupportedException($"Unsupported disk format: {sourceExtension}");
+                _logger.LogError("Unsupported source format: {SourceFormat}. Supported formats: vmdk, qcow2", sourceFormat);
+                throw new NotSupportedException($"Unsupported disk format: {sourceFormat}");
             }
 
             if (Path.GetExtension(destinationPath).ToLower() != ".vhdx")
@@ -129,7 +131,7 @@ namespace VMCreate
                 {
                     FileName = _qemuImgPath,
                     // -p for progress output on stdout
-                    Arguments = $"convert -p -f {GetQemuSourceFormat(sourceExtension)} -O vhdx \"{sourcePath}\" \"{destinationPath}\"",
+                    Arguments = $"convert -p -f {sourceFormat} -O vhdx \"{sourcePath}\" \"{destinationPath}\"",
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     UseShellExecute = false,
@@ -316,6 +318,41 @@ namespace VMCreate
                     _logger.LogError("Unknown disk format: {Extension}", extension);
                     throw new NotSupportedException($"Unknown disk format: {extension}");
             }
+        }
+
+        /// <summary>
+        /// Resolves the qemu source format for a local file by sniffing magic
+        /// bytes (qcow2: "QFI\xFB" at offset 0; VMDK: "KDMV" at offset 512),
+        /// falling back to the extension for raw/unknown content. Needed
+        /// because cloud images (Ubuntu) ship qcow2 data in ".img" files.
+        /// </summary>
+        private string ResolveSourceFormat(string sourcePath)
+        {
+            try
+            {
+                using var stream = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read,
+                    bufferSize: 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
+
+                Span<byte> header = stackalloc byte[1024];
+                int read = 0;
+                while (read < header.Length)
+                {
+                    int n = stream.Read(header[read..]);
+                    if (n == 0) break;
+                    read += n;
+                }
+
+                if (read >= 4 && header[0] == (byte)'Q' && header[1] == (byte)'F' && header[2] == (byte)'I' && header[3] == 0xFB)
+                    return "qcow2";
+                if (read >= 516 && header[512] == (byte)'K' && header[513] == (byte)'D' && header[514] == (byte)'M' && header[515] == (byte)'V')
+                    return "vmdk";
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Magic-byte format sniffing failed for {Path}; falling back to extension", sourcePath);
+            }
+
+            return GetQemuSourceFormat(Path.GetExtension(sourcePath));
         }
     }
 }

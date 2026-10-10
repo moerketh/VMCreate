@@ -154,6 +154,10 @@ namespace VMCreate
             foreach (var catalogType in desktopCatalogTypes)
                 services.AddTransient(typeof(IDesktopEnvironmentCatalog), catalogType);
 
+            // ── User preferences (settings.json; DPAPI-encrypted secrets) ──
+            services.AddSingleton<ISecretProtector, DpapiSecretProtector>();
+            services.AddSingleton<IUserPreferencesStore, UserPreferencesStore>();
+
             // ── HTB API client (uses IHttpClientFactory) ────────────────────
             services.AddHttpClient<IHtbApiClient, HtbApiClient>();
 

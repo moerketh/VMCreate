@@ -163,7 +163,8 @@ namespace VMCreate
                     sp.GetRequiredService<CreateVM>(),
                     sp.GetRequiredService<ILoggerFactory>(),
                     steps,
-                    allSteps);
+                    allSteps,
+                    sp.GetRequiredService<IUserPreferencesStore>());
             }));
             services.AddSingleton<MainWindow>();
 

@@ -21,6 +21,8 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
     <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.12" />
+    <!-- DPAPI (user-scope) protection for secrets in settings.json. -->
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.5" />
     <!-- Startup-milestone logging (Serilog.Log.Information in the PowerShell
          executor) — frontends configure the static sink; Core only writes. -->
     <PackageReference Include="Serilog" Version="4.2.0" />

@@ -30,6 +30,11 @@ namespace VMCreate
         {
             get
             {
+                // A loader's explicit declaration (e.g. qcow2 data in an
+                // ".img" file) always wins over extension inference.
+                if (!string.IsNullOrEmpty(FileTypeOverride))
+                    return FileTypeOverride!;
+
                 if (string.IsNullOrEmpty(DiskUri))
                     return "Unknown";
 
@@ -78,6 +83,16 @@ namespace VMCreate
 
         public string? InitialUsername { get; set; }
         public string? InitialPassword { get; set; }
+
+        /// <summary>
+        /// Explicit media type that overrides the <see cref="FileType"/>
+        /// inference from <see cref="DiskUri"/> when the filename extension is
+        /// ambiguous — e.g. Ubuntu cloud images ship qcow2 data in
+        /// <c>.img</c> files. Loaders that scrape such sources set this;
+        /// consumers that need a <see cref="DiskImageFormat"/> should map
+        /// through it. Null (default) keeps pure extension-based inference.
+        /// </summary>
+        public string? FileTypeOverride { get; set; }
 
         /// <summary>
         /// Hint identifying the Linux distribution family of this gallery item.

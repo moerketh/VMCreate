@@ -62,7 +62,8 @@ namespace VMCreate
         public string? ProgressPhaseId => "Sub_InstallLamcoRdp";
 
         public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
-            => customizations?.RdpBackend == RdpBackend.Lamco && item.SupportsLamco();
+            => !item.HasTag("headless")
+               && customizations?.RdpBackend == RdpBackend.Lamco && item.SupportsLamco();
 
         public async Task ExecuteAsync(IGuestShell shell, GalleryItem item, VmCustomizations customizations, ILogger logger, CancellationToken ct)
         {

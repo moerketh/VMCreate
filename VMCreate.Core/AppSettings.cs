@@ -33,5 +33,13 @@ namespace VMCreate
         public string GalleryCachePath { get; set; } = System.IO.Path.Combine(
             System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData),
             "VMCreate", "gallery-cache.json");
+
+        /// <summary>
+        /// Path of the persisted <see cref="UserPreferences"/> file.
+        /// Default: %LocalAppData%\VMCreate\settings.json
+        /// </summary>
+        public string UserPreferencesPath { get; set; } = System.IO.Path.Combine(
+            System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData),
+            "VMCreate", "settings.json");
     }
 }

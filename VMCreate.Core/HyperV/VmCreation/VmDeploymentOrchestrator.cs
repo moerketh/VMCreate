@@ -75,7 +75,8 @@ namespace VMCreate.HyperV.VmCreation
                 cancellationToken.ThrowIfCancellationRequested();
 
                 IProgress<CreateVMProgressInfo> effectiveProgress = progress ?? new Progress<CreateVMProgressInfo>(_ => { });
-                IMediaHandler mediaHandler = _mediaHandlerFactory.CreateHandler(DiskFileDetector.DetectFileType(sourceFileOrUri));
+                IMediaHandler mediaHandler = _mediaHandlerFactory.CreateHandler(
+                    DiskFileDetector.ResolveDiskImageFormat(galleryItem, sourceFileOrUri));
                 DiskImageFormat actualFileType = mediaHandler.FileType;
 
                 Task isoProvisioningTask = EnsureCloningIsoAsync(plan, cancellationToken, effectiveProgress);

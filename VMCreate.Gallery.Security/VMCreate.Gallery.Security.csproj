@@ -21,6 +21,7 @@
     <EmbeddedResource Include="Icons\caine-logo.svg" />
     <EmbeddedResource Include="Icons\whonix-logo.svg" />
     <EmbeddedResource Include="Icons\securityonion-logo.svg" />
+    <EmbeddedResource Include="Icons\elastic-siem-logo.svg" />
     <EmbeddedResource Include="Icons\tsurugi-logo.svg" />
     <EmbeddedResource Include="Icons\flarevm-logo.png" />
     <EmbeddedResource Include="Icons\parrot-security-screenshot.jpg" />

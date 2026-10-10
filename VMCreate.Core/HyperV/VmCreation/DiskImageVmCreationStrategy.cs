@@ -93,6 +93,11 @@ namespace VMCreate.HyperV.VmCreation
             var cancellationToken = ctx.CancellationToken;
             var progress = ctx.Progress;
 
+            // Cloud-init gallery items (tag "cloud-init", e.g. Elastic SIEM)
+            // are customized by a NoCloud seed ISO instead of the cloning ISO.
+            bool isCloudInit = item.HasTag("cloud-init");
+            string? seedIsoPath = null;
+
             int detectedGeneration = ctx.MediaResult.VmGeneration;
             const int targetGen = 2;
 
@@ -120,21 +125,39 @@ namespace VMCreate.HyperV.VmCreation
                 progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.AttachDisk));
                 await _diskManager.AddExistingHardDrive(plan, mediaPath, cancellationToken);
 
-                bool needsIsoBoot = vmCustomizations.ConfigureXrdp
-                    || vmCustomizations.SyncTimezone
-                    || _postBootService.HasLinuxPostBootSteps(item, vmCustomizations);
-
-                if (needsIsoBoot)
+                // Cloud-init items (e.g. the Elastic SIEM Ubuntu cloud image)
+                // skip the cloning-ISO cycle entirely: a NoCloud seed ISO with
+                // the deployment SSH key is attached instead, and the VM boots
+                // straight from its disk. Post-boot work then flows through
+                // the normal SSH path below.
+                if (isCloudInit)
                 {
                     progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.AttachBootDvd));
-                    await _bootManager.AddBootDvd(plan, cloningIsoPath, cancellationToken);
+                    string publicKey = await _sshKeyManager.EnsureKeyPairAsync(cancellationToken);
+                    seedIsoPath = Path.Combine(_pathService.DefaultVhdxPath, $"{plan.VmName}_cidata.iso");
+                    CloudInitSeedBuilder.BuildSeedIso(seedIsoPath, plan.VmName, publicKey, _logger);
+                    await _bootManager.AddBootDvd(plan, seedIsoPath, cancellationToken);
                     progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.SetBootOrder));
-                    await _bootManager.SetFirstBootToDvd(plan, cancellationToken);
+                    await _bootManager.SetFirstBootToHardDrive(plan, cancellationToken);
                 }
                 else
                 {
-                    progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.SetBootOrder));
-                    await _bootManager.SetFirstBootToHardDrive(plan, cancellationToken);
+                    bool needsIsoBoot = vmCustomizations.ConfigureXrdp
+                        || vmCustomizations.SyncTimezone
+                        || _postBootService.HasLinuxPostBootSteps(item, vmCustomizations);
+
+                    if (needsIsoBoot)
+                    {
+                        progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.AttachBootDvd));
+                        await _bootManager.AddBootDvd(plan, cloningIsoPath, cancellationToken);
+                        progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.SetBootOrder));
+                        await _bootManager.SetFirstBootToDvd(plan, cancellationToken);
+                    }
+                    else
+                    {
+                        progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.SetBootOrder));
+                        await _bootManager.SetFirstBootToHardDrive(plan, cancellationToken);
+                    }
                 }
             }
             else if (detectedGeneration == 1)
@@ -171,8 +194,12 @@ namespace VMCreate.HyperV.VmCreation
             await _lifecycleManager.StartVM(plan, cancellationToken);
 
             bool needsPostBoot = GetPostBootSteps(item, vmCustomizations).Any();
-            bool needsIsoBootCycle = detectedGeneration == 1
-                || (detectedGeneration == 2 && (vmCustomizations.ConfigureXrdp || needsPostBoot));
+            // Cloud-init items never run the cloning-ISO cycle — their
+            // customization happens via the NoCloud seed at first boot.
+            bool needsIsoBootCycle = !isCloudInit
+                && (detectedGeneration == 1
+                    || (detectedGeneration == 2 && (vmCustomizations.ConfigureXrdp || needsPostBoot)));
+            bool needsCloudInitPostBoot = isCloudInit && needsPostBoot;
 
             if (needsIsoBootCycle)
             {
@@ -202,19 +229,22 @@ namespace VMCreate.HyperV.VmCreation
 
             var postBootSteps = GetPostBootSteps(item, vmCustomizations).ToList();
 
-            if (needsIsoBootCycle)
+            if (needsIsoBootCycle || needsCloudInitPostBoot)
             {
                 if (postBootSteps.Count > 0)
                     progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.PostBoot));
 
-                progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.PostBoot, VmDeploymentSubStep.AddTempNic));
-                await _networkManager.RemoveTemporaryNetworkAdapter(plan, cancellationToken);
-                await _networkManager.AddTemporaryNetworkAdapter(plan, cancellationToken);
+                if (needsIsoBootCycle)
+                {
+                    progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.PostBoot, VmDeploymentSubStep.AddTempNic));
+                    await _networkManager.RemoveTemporaryNetworkAdapter(plan, cancellationToken);
+                    await _networkManager.AddTemporaryNetworkAdapter(plan, cancellationToken);
+
+                    await _lifecycleManager.StartVM(plan, cancellationToken);
+                }
 
                 try
                 {
-                    await _lifecycleManager.StartVM(plan, cancellationToken);
-
                     string privateKeyPath = _sshKeyManager.GetPrivateKeyPath(vmCustomizations.CustomSshPublicKeyPath);
                     var shell = _guestShellFactory.Create(plan.VmName, privateKeyPath);
 
@@ -254,16 +284,35 @@ namespace VMCreate.HyperV.VmCreation
                         _logger.LogInformation("KVP heartbeat confirmed for {VMName} — guest integration daemon is answering.", plan.VmName);
                     }
 
-                    try
+                    if (needsIsoBootCycle)
                     {
-                        string autorunLog = await shell.RunCommandAsync(
-                            "sudo cat /var/log/vmcreate-autorun.log 2>/dev/null || echo '[no autorun log found]'",
-                            cancellationToken);
-                        _logger.LogInformation("Autorun log for {VMName}:\n{Log}", plan.VmName, autorunLog);
+                        try
+                        {
+                            string autorunLog = await shell.RunCommandAsync(
+                                "sudo cat /var/log/vmcreate-autorun.log 2>/dev/null || echo '[no autorun log found]'",
+                                cancellationToken);
+                            _logger.LogInformation("Autorun log for {VMName}:\n{Log}", plan.VmName, autorunLog);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to collect autorun log (non-fatal)");
+                        }
                     }
-                    catch (Exception ex)
+                    else
                     {
-                        _logger.LogWarning(ex, "Failed to collect autorun log (non-fatal)");
+                        // Cloud-init boot: confirm the seed ran so failures
+                        // surface in the deployment log, not just in the guest.
+                        try
+                        {
+                            string cloudInitStatus = await shell.RunCommandAsync(
+                                "sudo cloud-init status --wait --format json 2>/dev/null || sudo cloud-init status 2>/dev/null || echo '[cloud-init status unavailable]'",
+                                cancellationToken);
+                            _logger.LogInformation("cloud-init status for {VMName}: {Status}", plan.VmName, cloudInitStatus.Trim());
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to collect cloud-init status (non-fatal)");
+                        }
                     }
 
                     if (postBootSteps.Count > 0)
@@ -274,15 +323,41 @@ namespace VMCreate.HyperV.VmCreation
                 }
                 finally
                 {
-                    try
+                    if (needsIsoBootCycle)
                     {
-                        await _networkManager.RemoveTemporaryNetworkAdapter(plan, cancellationToken);
+                        try
+                        {
+                            await _networkManager.RemoveTemporaryNetworkAdapter(plan, cancellationToken);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to remove temporary network adapter (non-fatal)");
+                        }
                     }
-                    catch (Exception ex)
+
+                    if (seedIsoPath != null)
                     {
-                        _logger.LogWarning(ex, "Failed to remove temporary network adapter (non-fatal)");
+                        try
+                        {
+                            await _bootManager.RemoveBootDvd(plan, seedIsoPath, cancellationToken);
+                            if (File.Exists(seedIsoPath))
+                                File.Delete(seedIsoPath);
+                            _logger.LogInformation("Cleaned up cloud-init seed ISO for VM {VMName}", plan.VmName);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to clean up cloud-init seed ISO for VM {VMName}", plan.VmName);
+                        }
                     }
                 }
+            }
+            else if (isCloudInit && seedIsoPath != null)
+            {
+                // No post-boot steps ran, so we never waited for the guest:
+                // leave the seed attached rather than risk ejecting it
+                // mid-first-boot. It is a tiny read-only DVD and cloud-init
+                // ignores it on subsequent boots.
+                _logger.LogInformation("Cloud-init seed ISO left attached to VM {VMName} (no post-boot steps)", plan.VmName);
             }
         }
 

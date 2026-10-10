@@ -41,6 +41,8 @@ namespace VMCreate
         private bool _enableIntegrationServices = true;
         private bool _isCustomDns;
         private string _customNameservers = "";
+        private bool _elasticAiEnabled;
+        private bool _elasticAiStartTrial = true;
 
         /// <summary>Raised when the wizard should complete (Finished or Canceled).</summary>
         public event Action<WizardResult>? RequestWizardComplete;
@@ -73,6 +75,17 @@ namespace VMCreate
                 foreach (var step in configurableSteps.Where(s => s.IsVisibleFor(selectedItem) && s.IsOptional))
                     DistributionOptions.Add(new DistributionOptionItem(step));
             }
+
+            // Seed from Customizations (pre-filled from the user's stored
+            // preferences) and the stored HTB token so credentials are never
+            // re-typed. Editing the token here overrides the stored one for
+            // this run only.
+            _selectedRdpBackend = wizardData.Customizations.RdpBackend;
+            _isCustomDns = wizardData.Customizations.DnsMode == DnsMode.Custom;
+            _customNameservers = wizardData.Customizations.CustomNameservers ?? "";
+            _syncTimezone = wizardData.Customizations.SyncTimezone;
+            _enableIntegrationServices = wizardData.Customizations.EnableIntegrationServices;
+            _htbApiToken = wizardData.Preferences.HtbApiToken ?? "";
 
             FinishCommand = new RelayCommand(OnFinish);
             BackCommand = new RelayCommand(() => RequestNavigateBack?.Invoke());
@@ -364,6 +377,35 @@ namespace VMCreate
         /// security distributions are excluded — HTB VPN provisioning is SSH/Linux-based.</summary>
         public bool ShowHtbVpn => SelectedItem?.IsSecurity == true && SelectedItem?.IsWindows != true;
 
+        /// <summary>
+        /// True when an Elastic SIEM step targets this image (the appliance
+        /// item's required step, or the optional add-on card) AND a complete
+        /// LLM configuration is stored — the AI features read their endpoint
+        /// and key from the machine-level settings, never per-VM input.
+        /// </summary>
+        public bool ShowElasticAi =>
+            SelectedItem != null
+            && (SelectedItem.HasTag("elastic-siem")
+                || DistributionOptions.Any(o => o.Name.Equals("Install Elastic SIEM (add-on)", StringComparison.OrdinalIgnoreCase)))
+            && _wizardData.Preferences.HasLlmConfiguration;
+
+        /// <summary>Enable AI features on the deployed Elastic Stack.</summary>
+        public bool ElasticAiEnabled
+        {
+            get => _elasticAiEnabled;
+            set => SetProperty(ref _elasticAiEnabled, value);
+        }
+
+        /// <summary>
+        /// Start a 30-day Enterprise trial license (required for the AI
+        /// features on a self-hosted stack). Default on when AI is enabled.
+        /// </summary>
+        public bool ElasticAiStartTrial
+        {
+            get => _elasticAiStartTrial;
+            set => SetProperty(ref _elasticAiStartTrial, value);
+        }
+
         /// <summary>Distribution-specific options discovered from plugin assemblies.</summary>
         public ObservableCollection<DistributionOptionItem> DistributionOptions { get; } = new();
 
@@ -422,6 +464,9 @@ namespace VMCreate
             _wizardData.Customizations.EnableIntegrationServices = _enableIntegrationServices;
             _wizardData.Customizations.DnsMode = _isCustomDns ? DnsMode.Custom : DnsMode.Host;
             _wizardData.Customizations.CustomNameservers = _isCustomDns ? _customNameservers : null;
+            // The token used this run — DeployPage persists it into the
+            // preferences store on success so the user types it exactly once.
+            _wizardData.LastUsedHtbApiToken = string.IsNullOrWhiteSpace(_htbApiToken) ? null : _htbApiToken;
 
             _wizardData.Customizations.DistributionOptions.Clear();
             foreach (var opt in DistributionOptions.Where(o => o.IsEnabled))
@@ -433,6 +478,17 @@ namespace VMCreate
                     Order = 0
                 });
             }
+
+            // AI enablement: values come from the machine-level credential
+            // store (never typed per-VM); this only records the choice.
+            _wizardData.Customizations.ElasticAi = new ElasticAiSettings
+            {
+                Enabled = ElasticAiEnabled,
+                StartTrialLicense = ElasticAiStartTrial,
+                ChatCompletionsUrl = _wizardData.Preferences.LlmChatCompletionsUrl,
+                ApiKey = _wizardData.Preferences.LlmApiKey,
+                Model = _wizardData.Preferences.LlmModel,
+            };
 
             _logger.LogDebug(
                 "Finished customization: RdpBackend={RdpBackend}, Desktop={Desktop}, HtbVpnKeys={KeyCount}, ManualOvpn={ManualPath}, SyncTimezone={Tz}, CustomKey={Key}, IntegrationServices={IntSvc}, DnsMode={DnsMode}, DistOptions={DistOpts}",

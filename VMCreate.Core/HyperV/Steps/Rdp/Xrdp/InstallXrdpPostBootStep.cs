@@ -56,8 +56,9 @@ namespace VMCreate
         public string? ProgressPhaseId => "Sub_InstallXrdpPostBoot";
 
         public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
-            => customizations?.RdpBackend == RdpBackend.Xrdp
-            && item?.LinuxDistro != LinuxDistro.NixOs;
+            => !item.HasTag("headless")
+               && customizations?.RdpBackend == RdpBackend.Xrdp
+               && item?.LinuxDistro != LinuxDistro.NixOs;
 
         public async Task ExecuteAsync(IGuestShell shell, GalleryItem item, VmCustomizations customizations, ILogger logger, CancellationToken ct)
         {
