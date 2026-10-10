@@ -48,8 +48,8 @@ namespace VMCreate.CLI.Commands
 
             var cpuOpt = new Option<int>(
                 "--cpu",
-                getDefaultValue: () => 2,
-                description: "Number of virtual CPUs (default: 2).");
+                getDefaultValue: () => 4,
+                description: "Number of virtual CPUs (default: 4).");
 
             var diskSizeOpt = new Option<int>(
                 "--disk-size",
