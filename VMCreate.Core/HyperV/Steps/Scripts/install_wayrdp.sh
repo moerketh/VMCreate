@@ -214,12 +214,21 @@ if [ -d "$PLUGIN_SRC_DIR" ] && command -v hyprctl >/dev/null 2>&1; then
             chown -R "$PLUGIN_USER":"$PLUGIN_USER" "$PLUGIN_BUILD" 2>/dev/null || true
             if sudo -u "$PLUGIN_USER" make -C "$PLUGIN_BUILD" >/dev/null 2>&1 \
                && [ -f "$PLUGIN_BUILD/wayrdp-capture.so" ]; then
+                # Canonical name: hyprland-capture.so. An earlier rev shipped
+                # main-v2/v2 names; a boot hook that loads a stale -v2 path
+                # leaves two plugin instances fighting over the shm.
                 install -m 644 "$PLUGIN_BUILD/wayrdp-capture.so" "$PLUGIN_SO"
                 chown "$PLUGIN_USER":"$PLUGIN_USER" "$PLUGIN_SO" 2>/dev/null || true
                 BUILD_OK=1
                 echo "Hyprland shm-capture plugin built: $PLUGIN_SO"
             fi
             rm -rf "$PLUGIN_BUILD" 2>/dev/null || true
+            # Remove stale plugin .so files from earlier revs so no boot hook
+            # (or manual load) can pick an old build — hyprctl dedupes plugin
+            # unloads by exact load-path string, so mixed paths cause
+            # double-instances that race the capture shm.
+            find "$PLUGIN_DIR" -maxdepth 1 -name '*.so' ! -name 'hyprland-capture.so' \
+                -delete 2>/dev/null || true
         else
             echo "NOTE: skipping Hyprland plugin build (need g++ + hyprland pkg-config);"
             echo "      capture falls back to ext-image-copy (slower, still functional)."
@@ -234,9 +243,10 @@ if [ -d "$PLUGIN_SRC_DIR" ] && command -v hyprctl >/dev/null 2>&1; then
             mkdir -p "$DROPIN_DIR" 2>/dev/null || true
             cat > "$DROPIN_DIR/shm.conf" <<'SHM_EOF'
 # Enable the Hyprland plugin shm capture path (wayrdp backend-wlroots).
-# The plugin is loaded separately via the Hyprland autostart hook; if it is
-# missing the pump simply waits for /dev/shm/wayrdp-capture, so only install
-# this drop-in together with a successfully built plugin.
+# The plugin is loaded separately via the Hyprland autostart hook. The shm
+# is per-monitor (/dev/shm/wayrdp-capture-<output>) so concurrent sessions
+# cannot race one buffer; if the plugin is missing the pump waits for its
+# output's shm. Only install this drop-in with a successfully built plugin.
 [Service]
 Environment=WAYRDP_CAPTURE=shm-plugin
 SHM_EOF
@@ -252,10 +262,13 @@ SHM_EOF
                 if ! grep -q "hyprland-capture.so" "$AUTO_LUA" 2>/dev/null; then
                     cat >> "$AUTO_LUA" <<'PLUG_EOF'
 -- wayrdp shm-capture plugin (added by VMCreate install_wayrdp.sh): loads the
--- compositor plugin that feeds /dev/shm/wayrdp-capture. Runs at hyprland
--- start; if it fails, wayrdp falls back to waiting on shm and the session
--- shows the ext-image-copy path only after removing the drop-in.
-os.execute("hyprctl plugin load " .. os.getenv("HOME") .. "/.local/share/wayrdp/hyprland-capture.so")
+-- compositor plugin that feeds /dev/shm/wayrdp-capture-<output>. Runs during
+-- config parse, before the Hyprland IPC socket necessarily exists, so a
+-- bare load races the socket (observed live: "no plugins loaded" after
+-- login). Retry in a backgrounded shell for up to ~10s. If it ultimately
+-- fails, wayrdp falls back to waiting on shm; the ext-image-copy path only
+-- returns after removing the shm.conf drop-in.
+os.execute("sh -c '(for i in $(seq 1 40); do hyprctl plugin load $HOME/.local/share/wayrdp/hyprland-capture.so >/dev/null 2>&1 && exit 0; sleep 0.25; done) &'")
 PLUG_EOF
                     chown "$PLUGIN_USER":"$PLUGIN_USER" "$AUTO_LUA" 2>/dev/null || true
                     echo "Wrote plugin autoload hook to $AUTO_LUA."
@@ -342,6 +355,25 @@ USER_UID="$(id -u "$AUTOLOGIN_USER")"
 run_as_user() {
     sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR="/run/user/$USER_UID" "$@"
 }
+
+# -- TCP listener bind -------------------------------------------------------
+# Default TCP bind is loopback-only, which vmconnect (vsock) does not need
+# but mstsc from the host absolutely does — a loopback-only 3389 presents as
+# the generic mstsc 0x204 "can't connect" error. Listen on all interfaces;
+# the firewall section above owns 3389 reachability.
+USER_HOME="$(getent passwd "$AUTOLOGIN_USER" | cut -d: -f6)"
+AUTO_DROPIN_DIR="$USER_HOME/.config/systemd/user/wayrdp.service.d"
+mkdir -p "$AUTO_DROPIN_DIR" 2>/dev/null || true
+cat > "$AUTO_DROPIN_DIR/tcp.conf" <<'TCP_EOF'
+# Bind the RDP TCP listener on all interfaces (loopback-only by default) so
+# mstsc from the Hyper-V host can reach the guest. vsock is unaffected.
+[Service]
+Environment=WAYRDP_TCP=1
+Environment=WAYRDP_BIND=0.0.0.0
+TCP_EOF
+chown -R "$AUTOLOGIN_USER":"$AUTOLOGIN_USER" "$AUTO_DROPIN_DIR" 2>/dev/null || true
+echo "TCP bind drop-in written ($AUTO_DROPIN_DIR/tcp.conf)."
+
 run_as_user systemctl --user daemon-reload 2>/dev/null || true
 run_as_user systemctl --user enable wayrdp.service 2>/dev/null || true
 
