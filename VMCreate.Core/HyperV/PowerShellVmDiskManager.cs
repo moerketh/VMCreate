@@ -54,17 +54,26 @@ namespace VMCreate
         }
 
         public async Task AddExistingHardDrive(VmDeploymentPlan plan, string mediaPath, CancellationToken cancellationToken)
+            => await AddExistingHardDriveAsync(plan, mediaPath, ide: false, cancellationToken);
+
+        /// <summary>
+        /// Attaches an existing VHDX. IDE matters for Gen 1 VMs: a BIOS-booting
+        /// disk (e.g. Ubuntu cloud images: GRUB-in-MBR + GPT) can only boot from
+        /// the IDE controller on Gen 1 — Hyper-V firmware exposes no BIOS boot
+        /// entry for SCSI disks.
+        /// </summary>
+        public async Task AddExistingHardDriveAsync(VmDeploymentPlan plan, string mediaPath, bool ide, CancellationToken cancellationToken)
         {
             var result = await _executor.RunCommandAsync("Add-VMHardDiskDrive",
                 new System.Collections.Generic.Dictionary<string, object?>
                 {
                     ["VMName"] = plan.VmName,
                     ["Path"] = mediaPath,
-                    ["ControllerType"] = "SCSI",
+                    ["ControllerType"] = ide ? "IDE" : "SCSI",
                 }, cancellationToken);
             if (result.HadErrors)
                 throw new Exception($"Failed to attach VHDX {mediaPath}: {result.ErrorSummary}");
-            _logger.LogInformation("Attached VHDX: {Path}", mediaPath);
+            _logger.LogInformation("Attached VHDX ({Controller}): {Path}", ide ? "IDE" : "SCSI", mediaPath);
         }
 
         public async Task RemoveHardDrive(VmDeploymentPlan plan, int location, CancellationToken cancellationToken)

@@ -34,8 +34,10 @@ namespace VMCreate.Gallery
             => ElasticStackInstaller.ExecuteAsync(shell, item, customizations, logger, ct);
 
         // ── IStepVisibility ─────────────────────────────────────────────
-        // Debian-family only: the install path is apt-based. The appliance
-        // item itself is excluded (its required step already installs).
+        // apt-family only for now: the add-on install path is apt-based (the
+        // rpm appliance path is handled by ElasticStackInstallStep). Grows to
+        // include Rocky when the installer gains its dnf branch. The
+        // appliance item itself is excluded (its required step installs).
         public bool IsVisibleFor(GalleryItem? item)
             => !item.HasTag("elastic-siem")
                && (item?.LinuxDistro is LinuxDistro.Ubuntu

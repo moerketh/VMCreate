@@ -44,7 +44,7 @@ namespace VMCreate.Tests.GalleryTests
         [TestMethod]
         public async Task LoadGalleryItems_ReturnsApplianceItemWithCloudInitTag()
         {
-            var html = "<a href=\"20260801/\">x</a><a href=\"20260926/\">x</a><a href=\"current/\">x</a>";
+            var html = "<a href=\"Rocky-10-GenericCloud-Base-10.2-20260525.0.x86_64.qcow2\">x</a>";
             var items = await new ElasticSiem(FactoryReturning(html)).LoadGalleryItems();
 
             Assert.AreEqual(1, items.Count);
@@ -53,17 +53,20 @@ namespace VMCreate.Tests.GalleryTests
             Assert.IsTrue(item.HasTag("cloud-init"), "cloud-init tag drives the NoCloud seed path");
             Assert.IsTrue(item.HasTag("headless"), "headless tag gates RDP/SSH-removal steps");
             Assert.IsTrue(item.HasTag("elastic-siem"));
-            Assert.AreEqual(LinuxDistro.Ubuntu, item.LinuxDistro);
+            Assert.AreEqual(LinuxDistro.Rocky, item.LinuxDistro);
             Assert.AreEqual("Security", item.Category);
         }
 
         [TestMethod]
-        public async Task LoadGalleryItems_PicksNewestBuildSerial()
+        public async Task LoadGalleryItems_PicksNewestVersionFromFileNames()
         {
-            var html = "<a href=\"20260101/\">x</a><a href=\"20261002/\">x</a><a href=\"20260405/\">x</a>";
+            var html = "<a href=\"Rocky-10-GenericCloud-Base-10.2-20260401.0.x86_64.qcow2\">x</a>" +
+                       "<a href=\"Rocky-10-GenericCloud-Base-10.2-20260525.0.x86_64.qcow2\">x</a>" +
+                       "<a href=\"Rocky-10-GenericCloud-LVM-10.2-20260525.0.x86_64.qcow2\">x</a>";
             var item = (await new ElasticSiem(FactoryReturning(html)).LoadGalleryItems())[0];
 
-            StringAssert.Contains(item.Version, "20261002");
+            StringAssert.Contains(item.Version, "10.2-20260525.0");
+            // The LVM variant must not leak into the Base version scrape.
         }
 
         [TestMethod]
@@ -73,8 +76,8 @@ namespace VMCreate.Tests.GalleryTests
             var item = (await new ElasticSiem(FactoryReturning("")).LoadGalleryItems())[0];
 
             StringAssert.Contains(item.Version, "unknown");
-            Assert.IsTrue(item.DiskUri.EndsWith("noble-server-cloudimg-amd64.img", StringComparison.Ordinal));
-            Assert.IsNotNull(item.ChecksumUri);
+            Assert.IsTrue(item.DiskUri.EndsWith("Rocky-10-GenericCloud-Base.latest.x86_64.qcow2", StringComparison.Ordinal));
+            Assert.IsTrue(item.ChecksumUri.EndsWith(".CHECKSUM", StringComparison.Ordinal));
         }
 
         // ── Step gating ─────────────────────────────────────────────────────────
@@ -84,12 +87,12 @@ namespace VMCreate.Tests.GalleryTests
             Name = "Elastic SIEM",
             Publisher = "test",
             Description = "test",
-            DiskUri = "https://x/noble-server-cloudimg-amd64.img",
+            DiskUri = "https://x/Rocky-10-GenericCloud-Base.latest.x86_64.qcow2",
             SecureBoot = "false",
             EnhancedSessionTransportType = "HvSocket",
-            Version = "24.04",
+            Version = "Rocky 10",
             Tags = new List<string> { "cloud-init", "elastic-siem", "headless" },
-            LinuxDistro = LinuxDistro.Ubuntu,
+            LinuxDistro = LinuxDistro.Rocky,
         };
 
         private static GalleryItem UbuntuDesktopItem() => new()
@@ -149,7 +152,18 @@ namespace VMCreate.Tests.GalleryTests
             var fedora = UbuntuDesktopItem();
             fedora.LinuxDistro = LinuxDistro.Fedora;
 
-            Assert.IsFalse(step.IsVisibleFor(fedora));
+            Assert.IsFalse(step.IsVisibleFor(fedora), "rpm distros are not add-on targets until the dnf branch exists");
+        }
+
+        [TestMethod]
+        public void DistroDetector_ClassifiesRockyFamily()
+        {
+            // Runtime re-verification path (guest os-release): exact IDs and
+            // the RHEL family fallback.
+            Assert.AreEqual(LinuxDistro.Rocky, DistroDetector.ClassifyForTest("rocky", "rhel centos fedora"));
+            Assert.AreEqual(LinuxDistro.Rocky, DistroDetector.ClassifyForTest("almalinux", "rhel"));
+            Assert.AreEqual(LinuxDistro.Rocky, DistroDetector.ClassifyForTest("some-rhel-derivative", "rhel like"));
+            Assert.AreEqual(LinuxDistro.Unknown, DistroDetector.ClassifyForTest("gentoo", ""));
         }
 
         [TestMethod]

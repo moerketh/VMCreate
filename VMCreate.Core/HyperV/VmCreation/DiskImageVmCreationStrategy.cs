@@ -99,9 +99,14 @@ namespace VMCreate.HyperV.VmCreation
             string? seedIsoPath = null;
 
             int detectedGeneration = ctx.MediaResult.VmGeneration;
+            // Like every VMCreate deployment, the VM is Generation 2. A source
+            // disk classified "BIOS" (no ESP) is handled by the stock cloning
+            // cycle, which converts the layout to UEFI-bootable before first
+            // boot; cloud-init items only ADD the NoCloud seed ISO so the
+            // post-clone first boot provisions the automation user (the seed
+            // replaces the cloning ISO's SSH-key injection).
             const int targetGen = 2;
-
-            ctx.Logger.Log($"Detected generation {detectedGeneration}, targeting Gen {targetGen}");
+            ctx.Logger.Log($"Detected generation {detectedGeneration}, targeting Gen {targetGen} (cloud-init: {isCloudInit})");
 
             progress.Report(new CreateVMProgressInfo { Phase = VmDeploymentPhase.CreateVM, DetectedGeneration = detectedGeneration });
 
@@ -125,43 +130,32 @@ namespace VMCreate.HyperV.VmCreation
                 progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.AttachDisk));
                 await _diskManager.AddExistingHardDrive(plan, mediaPath, cancellationToken);
 
-                // Cloud-init items (e.g. the Elastic SIEM Ubuntu cloud image)
-                // skip the cloning-ISO cycle entirely: a NoCloud seed ISO with
-                // the deployment SSH key is attached instead, and the VM boots
-                // straight from its disk. Post-boot work then flows through
-                // the normal SSH path below.
-                if (isCloudInit)
+                bool needsIsoBoot = vmCustomizations.ConfigureXrdp
+                    || vmCustomizations.SyncTimezone
+                    || _postBootService.HasLinuxPostBootSteps(item, vmCustomizations);
+
+                if (needsIsoBoot)
                 {
                     progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.AttachBootDvd));
-                    string publicKey = await _sshKeyManager.EnsureKeyPairAsync(cancellationToken);
-                    seedIsoPath = Path.Combine(_pathService.DefaultVhdxPath, $"{plan.VmName}_cidata.iso");
-                    CloudInitSeedBuilder.BuildSeedIso(seedIsoPath, plan.VmName, publicKey, _logger);
-                    await _bootManager.AddBootDvd(plan, seedIsoPath, cancellationToken);
+                    await _bootManager.AddBootDvd(plan, cloningIsoPath, cancellationToken);
                     progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.SetBootOrder));
-                    await _bootManager.SetFirstBootToHardDrive(plan, cancellationToken);
+                    await _bootManager.SetFirstBootToDvd(plan, cancellationToken);
                 }
                 else
                 {
-                    bool needsIsoBoot = vmCustomizations.ConfigureXrdp
-                        || vmCustomizations.SyncTimezone
-                        || _postBootService.HasLinuxPostBootSteps(item, vmCustomizations);
-
-                    if (needsIsoBoot)
-                    {
-                        progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.AttachBootDvd));
-                        await _bootManager.AddBootDvd(plan, cloningIsoPath, cancellationToken);
-                        progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.SetBootOrder));
-                        await _bootManager.SetFirstBootToDvd(plan, cancellationToken);
-                    }
-                    else
-                    {
-                        progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.SetBootOrder));
-                        await _bootManager.SetFirstBootToHardDrive(plan, cancellationToken);
-                    }
+                    progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.SetBootOrder));
+                    await _bootManager.SetFirstBootToHardDrive(plan, cancellationToken);
                 }
             }
-            else if (detectedGeneration == 1)
+            else
             {
+                // "GPT_BIOS"/MBR source: the cloning ISO converts the layout to
+                // UEFI-bootable on this Gen 2 VM. Cloud-init items get the
+                // NoCloud seed ISO attached as a SECOND DVD: the clone cycle
+                // boots first (DVD 1), then the cloned disk's first boot finds
+                // the seed and provisions the automation user (replacing the
+                // cloning ISO's SSH-key injection, which the cloud image's
+                // cloud-init re-runs would overwrite anyway).
                 progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.AttachDisk));
                 await _diskManager.AddNewHardDrive(plan, _pathService.DefaultVhdxPath, cancellationToken);
 
@@ -172,12 +166,16 @@ namespace VMCreate.HyperV.VmCreation
                 progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.AttachBootDvd));
                 await _bootManager.AddBootDvd(plan, cloningIsoPath, cancellationToken);
 
+                if (isCloudInit)
+                {
+                    string publicKey = await _sshKeyManager.EnsureKeyPairAsync(cancellationToken);
+                    seedIsoPath = Path.Combine(_pathService.DefaultVhdxPath, $"{plan.VmName}_cidata.iso");
+                    CloudInitSeedBuilder.BuildSeedIso(seedIsoPath, plan.VmName, publicKey, _logger);
+                    await _bootManager.AddBootDvd(plan, seedIsoPath, cancellationToken);
+                }
+
                 progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.SetBootOrder));
                 await _bootManager.SetFirstBootToDvd(plan, cancellationToken);
-            }
-            else
-            {
-                throw new Exception($"Unsupported generation detected: {detectedGeneration}");
             }
 
             if (plan.VirtualizationEnabled)
@@ -194,11 +192,13 @@ namespace VMCreate.HyperV.VmCreation
             await _lifecycleManager.StartVM(plan, cancellationToken);
 
             bool needsPostBoot = GetPostBootSteps(item, vmCustomizations).Any();
-            // Cloud-init items never run the cloning-ISO cycle — their
-            // customization happens via the NoCloud seed at first boot.
-            bool needsIsoBootCycle = !isCloudInit
-                && (detectedGeneration == 1
-                    || (detectedGeneration == 2 && (vmCustomizations.ConfigureXrdp || needsPostBoot)));
+            // The cloning-ISO cycle runs whenever the source layout needs
+            // conversion (detectedGeneration == 1 means "BIOS/MBR-classified,
+            // clone to UEFI") or Gen 2 pre-boot customization is requested.
+            // Cloud-init items ride the SAME cycle (their seed is already
+            // attached); cloud-init itself handles their first-boot setup.
+            bool needsIsoBootCycle = detectedGeneration == 1
+                || (detectedGeneration == 2 && (vmCustomizations.ConfigureXrdp || needsPostBoot));
             bool needsCloudInitPostBoot = isCloudInit && needsPostBoot;
 
             if (needsIsoBootCycle)
@@ -297,21 +297,23 @@ namespace VMCreate.HyperV.VmCreation
                         {
                             _logger.LogWarning(ex, "Failed to collect autorun log (non-fatal)");
                         }
-                    }
-                    else
-                    {
-                        // Cloud-init boot: confirm the seed ran so failures
-                        // surface in the deployment log, not just in the guest.
-                        try
+
+                        if (isCloudInit)
                         {
-                            string cloudInitStatus = await shell.RunCommandAsync(
-                                "sudo cloud-init status --wait --format json 2>/dev/null || sudo cloud-init status 2>/dev/null || echo '[cloud-init status unavailable]'",
-                                cancellationToken);
-                            _logger.LogInformation("cloud-init status for {VMName}: {Status}", plan.VmName, cloudInitStatus.Trim());
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex, "Failed to collect cloud-init status (non-fatal)");
+                            // The clone converted the layout; cloud-init then
+                            // booted from the seed. Confirm so seed failures
+                            // surface in the deployment log.
+                            try
+                            {
+                                string cloudInitStatus = await shell.RunCommandAsync(
+                                    "cloud-init status --format json 2>/dev/null || sudo cloud-init status 2>/dev/null || echo '[cloud-init status unavailable]'",
+                                    cancellationToken);
+                                _logger.LogInformation("cloud-init status for {VMName}: {Status}", plan.VmName, cloudInitStatus.Trim());
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "Failed to collect cloud-init status (non-fatal)");
+                            }
                         }
                     }
 

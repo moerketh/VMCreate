@@ -7,12 +7,13 @@ namespace VMCreate
 {
     /// <summary>
     /// Builds a cloud-init NoCloud seed ISO (volume label <c>cidata</c>) for
-    /// first-boot customization of cloud images such as the Ubuntu Server image
+    /// first-boot customization of cloud images such as the Rocky 10 image
     /// behind the Elastic SIEM gallery item. Replaces the cloning-ISO SSH-key
     /// injection cycle: cloud-init creates the <c>vmcreate</c> automation user
     /// with the deployment's public key, enables passwordless sudo, and grows
     /// the root filesystem to the full disk — so the standard post-boot SSH
-    /// machinery works unchanged.
+    /// machinery works unchanged. Distro-agnostic: no package installs, no
+    /// distro-specific groups (see BuildUserData).
     /// </summary>
     public static class CloudInitSeedBuilder
     {
@@ -63,15 +64,20 @@ namespace VMCreate
 
         private static string BuildUserData(string publicKey)
         {
-            // The Ubuntu cloud image ships openssh-server preinstalled+enabled,
+            // Distro-agnostic seed (Rocky 10 today): EL cloud images ship
+            // openssh-server preinstalled+enabled and cloud-init configured,
             // so no package installs are needed on first boot — the seed only
             // provisions the automation user and grows the filesystem.
+            // NB: the group is "wheel" on EL, "sudo" on Debian-family; putting
+            // the user in BOTH would fail group creation on distros missing
+            // one of them — cloud-init tolerates a nonexistent group only in
+            // its lenient mode, so we rely on the sudo: directive alone
+            // (passwordless sudo does not require group membership).
             var sb = new StringBuilder();
             sb.AppendLine("#cloud-config");
             sb.AppendLine("users:");
             sb.AppendLine("  - name: vmcreate");
             sb.AppendLine("    sudo: ALL=(ALL) NOPASSWD:ALL");
-            sb.AppendLine("    groups: [sudo]");
             sb.AppendLine("    shell: /bin/bash");
             sb.AppendLine("    lock_passwd: true");
             sb.AppendLine("    ssh_authorized_keys:");

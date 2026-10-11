@@ -53,6 +53,9 @@ namespace VMCreate
         public Task AddExistingHardDrive(VmDeploymentPlan plan, string mediaPath, CancellationToken cancellationToken)
             => _disk.AddExistingHardDrive(plan, mediaPath, cancellationToken);
 
+        public Task AddExistingHardDriveAsync(VmDeploymentPlan plan, string mediaPath, bool ide, CancellationToken cancellationToken)
+            => _disk.AddExistingHardDriveAsync(plan, mediaPath, ide, cancellationToken);
+
         public Task AddNewHardDrive(VmDeploymentPlan plan, string vmPath, CancellationToken cancellationToken)
             => _disk.AddNewHardDrive(plan, vmPath, cancellationToken);
 
