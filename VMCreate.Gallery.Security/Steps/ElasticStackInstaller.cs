@@ -10,21 +10,31 @@ namespace VMCreate
     /// Shared engine for the Elastic SIEM steps: writes an idempotent setup
     /// script into the guest (base64 over SSH to avoid quoting issues) and
     /// runs it. Used by both the appliance step (Elastic SIEM gallery item,
-    /// always executed) and the add-on step (optional card on apt-family
+    /// always executed) and the add-on step (optional card on Debian-family
     /// distributions).
     /// <para>
-    /// Stands up a single-node lab stack from the official Elastic 9.x apt
-    /// repository: Elasticsearch (auto-configured TLS, heap sized to the VM),
-    /// Kibana (bound to 0.0.0.0), and an Elastic Agent Fleet server. Secrets
-    /// (elastic/kibana_system passwords, service token, enrollment token) are
-    /// generated inside the guest and written to
+    /// Stands up a single-node lab stack from the official Elastic 9.x
+    /// repositories — dnf (EL family: Rocky/Alma) or apt (Debian family),
+    /// selected at runtime in the guest: Elasticsearch (auto-configured TLS,
+    /// heap sized to the VM), Kibana (bound to 0.0.0.0), and an Elastic Agent
+    /// Fleet server. Secrets (elastic/kibana_system passwords, service token,
+    /// enrollment token) are generated inside the guest and written to
     /// <c>/opt/vmcreate-elastic/credentials.txt</c> (mode 600) — they never
-    /// cross back to the host logs. AI enablement, when requested, creates the
-    /// <c>_inference/chat_completion</c> endpoint from the stored LLM config.
+    /// cross back to the host logs. AI enablement, when requested, creates
+    /// the <c>_inference/chat_completion</c> endpoint from the stored LLM
+    /// config.
+    /// </para>
+    /// <para>
+    /// <see cref="BuildScript"/> is internal for testability: the tests
+    /// assert on the generated bash (package-manager branches, secret-free
+    /// stdout, AI endpoint wiring).
     /// </para>
     /// </summary>
     internal static class ElasticStackInstaller
     {
+        /// <summary>Visible to tests: generates the guest setup script.</summary>
+        internal static string BuildScriptForTest(bool aiEnabled, bool startTrial, string aiUrl, string aiKey, string aiModel)
+            => BuildScript(aiEnabled, startTrial, aiUrl, aiKey, aiModel);
         public const string StepName = "Install Elastic SIEM";
 
         public static async Task ExecuteAsync(
@@ -84,15 +94,42 @@ if systemctl is-active --quiet elasticsearch.service && [ -f /opt/vmcreate-elast
 fi
 
 [ ""$(id -u)"" -eq 0 ] || fail ""must run as root""
-command -v apt-get >/dev/null || fail ""apt-get not found (Debian-family required)""
 
-log ""installing prerequisites and Elastic apt repository""
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -y || fail ""apt-get update""
-apt-get install -y curl gnupg apt-transport-https ca-certificates || fail ""prerequisites""
-curl -fsSL https://artifacts.elastic.co/GPG-KEY-elasticsearch | gpg --dearmor --yes -o /usr/share/keyrings/elasticsearch-keyring.gpg || fail ""GPG key""
-echo ""deb [signed-by=/usr/share/keyrings/elasticsearch-keyring.gpg] https://artifacts.elastic.co/packages/9.x/apt stable main"" > /etc/apt/sources.list.d/elastic-9.x.list
-apt-get update -y || fail ""apt-get update (elastic repo)""
+# ── Package-manager branch: dnf (EL family: Rocky/Alma) or apt (Debian family) ──
+PKGMGR=unknown
+if command -v dnf >/dev/null 2>&1; then
+  PKGMGR=dnf
+elif command -v apt-get >/dev/null 2>&1; then
+  PKGMGR=apt
+else
+  fail ""neither dnf nor apt-get found (EL or Debian family required)""
+fi
+log ""package manager: ${PKGMGR}""
+
+if [ ""$PKGMGR"" = ""dnf"" ]; then
+  log ""installing prerequisites and Elastic rpm repository""
+  dnf install -y curl dnf-utils || fail ""prerequisites""
+  rpm --import https://artifacts.elastic.co/GPG-KEY-elasticsearch || fail ""GPG key""
+  cat > /etc/yum.repos.d/elastic-9.x.repo <<'ELREPO'
+[elastic-9.x]
+name=Elastic repository for 9.x packages
+baseurl=https://artifacts.elastic.co/packages/9.x/yum
+gpgcheck=1
+gpgkey=https://artifacts.elastic.co/GPG-KEY-elasticsearch
+enabled=1
+autorefresh=1
+type=rpm-md
+ELREPO
+  dnf makecache --disablerepo='*' --enablerepo='elastic-9.x' || fail ""dnf makecache (elastic repo)""
+else
+  log ""installing prerequisites and Elastic apt repository""
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -y || fail ""apt-get update""
+  apt-get install -y curl gnupg apt-transport-https ca-certificates || fail ""prerequisites""
+  curl -fsSL https://artifacts.elastic.co/GPG-KEY-elasticsearch | gpg --dearmor --yes -o /usr/share/keyrings/elasticsearch-keyring.gpg || fail ""GPG key""
+  echo ""deb [signed-by=/usr/share/keyrings/elasticsearch-keyring.gpg] https://artifacts.elastic.co/packages/9.x/apt stable main"" > /etc/apt/sources.list.d/elastic-9.x.list
+  apt-get update -y || fail ""apt-get update (elastic repo)""
+fi
 
 log ""sizing JVM heap for a single-node lab (Elasticsearch + Kibana on one host)""
 TOTAL_MB=$(( $(grep MemTotal /proc/meminfo | awk '{print $2}') / 1024 ))
@@ -102,7 +139,11 @@ HEAP_MB=$(( TOTAL_MB / 2 - 2048 ))
 log ""total RAM ${TOTAL_MB} MB -> heap ${HEAP_MB} MB""
 
 log ""installing elasticsearch, kibana, elastic-agent""
-apt-get install -y elasticsearch kibana elastic-agent || fail ""package install""
+if [ ""$PKGMGR"" = ""dnf"" ]; then
+  dnf install -y elasticsearch kibana elastic-agent || fail ""package install""
+else
+  apt-get install -y elasticsearch kibana elastic-agent || fail ""package install""
+fi
 mkdir -p /etc/elasticsearch/jvm.options.d
 printf ""-Xms%sm\n-Xmx%sm\n"" ""$HEAP_MB"" ""$HEAP_MB"" > /etc/elasticsearch/jvm.options.d/vmcreate.options
 

@@ -167,6 +167,51 @@ namespace VMCreate.Tests.HyperV.VmCreation
             }
         }
 
+        [TestMethod]
+        public async Task DeployAsync_CreatesPerVmDiskDirectory_ForBareDiskImages()
+        {
+            // The bare-qcow2 E2E failure: archive extraction creates the
+            // per-VM disk directory as a side effect, but a bare disk image
+            // (ISO/QCOW2/VHDX — no extraction step) handed qemu-img / the
+            // disk attach a path whose parent did not exist. The orchestrator
+            // must create it before PrepareMediaAsync runs.
+            string baseDir = Path.Combine(Path.GetTempPath(), $"vmcreate-orch-{Guid.NewGuid():N}");
+            _pathService.Setup(s => s.DefaultVhdxPath).Returns(baseDir);
+            _pathService.Setup(s => s.GetVirtualHardDiskPath(It.IsAny<string>()))
+                .Returns((string vmName) => Path.Combine(baseDir, vmName));
+
+            var plan = VmDeploymentPlan.FromSettings(new VmSettings { VMName = "TestVM_20250601120000" });
+            var galleryItem = new GalleryItem { Name = "Test", DiskUri = "https://x/image.qcow2", IsNativeHyperV = false };
+            _mediaHandlerFactory.Setup(f => f.CreateHandler(It.IsAny<DiskImageFormat>()))
+                .Returns(new FakeMediaHandler(DiskImageFormat.Qcow2));
+            _strategy.Setup(s => s.CanHandle(It.IsAny<GalleryItem>(), It.IsAny<DiskImageFormat>())).Returns(true);
+
+            // Fail inside PrepareMediaAsync to observe whether the directory
+            // existed by then.
+            string? observedDir = null;
+            _strategy.Setup(s => s.CreateVMAsync(It.IsAny<VmCreationContext>())).Returns(() =>
+            {
+                observedDir = Path.Combine(baseDir, plan.VmName);
+                return Task.CompletedTask;
+            });
+
+            try
+            {
+                VmDeploymentResult result = await _orchestrator.DeployAsync(
+                    plan, new VmCustomizations(), galleryItem, CancellationToken.None, null, "image.qcow2");
+
+                Assert.IsTrue(result.Success);
+                Assert.IsNotNull(observedDir);
+                Assert.IsTrue(Directory.Exists(observedDir),
+                    "the per-VM disk directory must exist before media preparation (bare disk images skip extraction)");
+            }
+            finally
+            {
+                if (Directory.Exists(baseDir))
+                    Directory.Delete(baseDir, true);
+            }
+        }
+
         private sealed class FakeMediaHandler : IMediaHandler
         {
             private readonly DiskImageFormat _fileType;

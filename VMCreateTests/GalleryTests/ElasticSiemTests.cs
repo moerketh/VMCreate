@@ -201,5 +201,105 @@ namespace VMCreate.Tests.GalleryTests
             var disabled = new ElasticAiSettings { Enabled = false };
             Assert.IsFalse(disabled.IsComplete, "disabled AI is never complete regardless of fields");
         }
+
+        // ── Guest setup script (content contract) ───────────────────────────────
+
+        [TestMethod]
+        public void BuildScript_ContainsBothPackageManagerBranches()
+        {
+            var script = ElasticStackInstaller.BuildScriptForTest(false, false, "", "", "");
+
+            StringAssert.Contains(script, "PKGMGR=dnf", StringComparison.Ordinal);
+            StringAssert.Contains(script, "PKGMGR=apt", StringComparison.Ordinal);
+            StringAssert.Contains(script, "/etc/yum.repos.d/elastic-9.x.repo", StringComparison.Ordinal);
+            StringAssert.Contains(script, "packages/9.x/yum", StringComparison.Ordinal);
+            StringAssert.Contains(script, "packages/9.x/apt stable main", StringComparison.Ordinal);
+            // The EL family (Rocky) is the appliance base — dnf must be accepted.
+            StringAssert.Contains(script, "command -v dnf", StringComparison.Ordinal);
+        }
+
+        [TestMethod]
+        public void BuildScript_NeverLeaksLlmKeyIntoPlainScriptSections()
+        {
+            // The AI key rides in the script (base64 transport), but must only
+            // appear inside the inference.json heredoc — never in an echo/log
+            // line that would land in stdout or the guest log.
+            var script = ElasticStackInstaller.BuildScriptForTest(true, true, "https://llm/v1/chat/completions", "SUPER-SECRET-KEY", "test-model");
+
+            var count = script.Split("SUPER-SECRET-KEY").Length - 1;
+            Assert.AreEqual(1, count, "exactly one key occurrence expected (the inference payload)");
+        }
+
+        [TestMethod]
+        public void BuildScript_AiDisabled_NoInferenceSection()
+        {
+            var script = ElasticStackInstaller.BuildScriptForTest(false, false, "", "", "");
+
+            Assert.IsFalse(script.Contains("_inference/chat_completion", StringComparison.Ordinal));
+        }
+
+        [TestMethod]
+        public void BuildScript_TrialOnlyWhenRequested()
+        {
+            var withTrial = ElasticStackInstaller.BuildScriptForTest(true, true, "u", "k", "m");
+            var withoutTrial = ElasticStackInstaller.BuildScriptForTest(true, false, "u", "k", "m");
+
+            StringAssert.Contains(withTrial, "start_trial", StringComparison.Ordinal);
+            Assert.IsFalse(withoutTrial.Contains("start_trial?acknowledge", StringComparison.Ordinal));
+        }
+
+        [TestMethod]
+        public void BuildScript_CredentialsFileAndIdempotencyMarkers()
+        {
+            var script = ElasticStackInstaller.BuildScriptForTest(false, false, "", "", "");
+
+            StringAssert.Contains(script, "/opt/vmcreate-elastic/credentials.txt", StringComparison.Ordinal);
+            StringAssert.Contains(script, "ELASTIC_SETUP_OK", StringComparison.Ordinal);
+            StringAssert.Contains(script, ".installed", StringComparison.Ordinal);
+            // Credentials must never be echoed: the file is written via redirection.
+            Assert.IsFalse(script.Contains("echo \"${ES_PW}", StringComparison.Ordinal), "elastic password must not be echoed");
+        }
+
+        [TestMethod]
+        public void BuildScript_BashSyntax_ValidWhenWslAvailable()
+        {
+            // WSL gives us a real bash for a syntax check (bash -n) on dev
+            // machines; silently skipped where WSL is absent (CI containers).
+            var wslPath = System.IO.Path.Combine(
+                System.Environment.GetFolderPath(System.Environment.SpecialFolder.System), "wsl.exe");
+            if (!System.IO.File.Exists(wslPath))
+            {
+                Assert.Inconclusive("wsl.exe not present — bash syntax check skipped");
+            }
+
+            var script = ElasticStackInstaller.BuildScriptForTest(true, true, "https://llm/v1/chat/completions", "key", "model");
+            var temp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"elastic-setup-{Guid.NewGuid():N}.sh");
+            System.IO.File.WriteAllText(temp, script.Replace("\r\n", "\n"));
+
+            try
+            {
+                var psi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = wslPath,
+                    Arguments = $"-e bash -n \"{ToWslPath(temp)}\"",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                };
+                using var process = System.Diagnostics.Process.Start(psi)!;
+                var stderr = process.StandardError.ReadToEnd();
+                process.WaitForExit(15000);
+
+                Assert.AreEqual(0, process.ExitCode, $"bash -n rejected the generated script: {stderr}");
+            }
+            finally
+            {
+                try { System.IO.File.Delete(temp); } catch { }
+            }
+        }
+
+        private static string ToWslPath(string windowsPath)
+            => "/mnt/" + char.ToLowerInvariant(windowsPath[0]) + windowsPath[2..].Replace('\\', '/');
     }
 }

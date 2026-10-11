@@ -81,6 +81,10 @@ namespace VMCreate.Tests.HyperV.VmCreation
                 It.IsAny<CancellationToken>()))
                 .ReturnsAsync(IsoBootCycleResult.Succeeded());
 
+            // Cloud-init seed builds need a real public key line.
+            _sshKeyManager.Setup(s => s.EnsureKeyPairAsync(It.IsAny<CancellationToken>()))
+                .ReturnsAsync("ssh-ed25519 AAAAC3Nzatest vmcreate@test");
+
             var shell = new Mock<IGuestShell>();
             shell.Setup(s => s.WaitForReadyAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
             _guestShellFactory.Setup(f => f.Create(It.IsAny<string>(), It.IsAny<string>())).Returns(shell.Object);
@@ -197,6 +201,105 @@ namespace VMCreate.Tests.HyperV.VmCreation
 
             _diskManager.Verify(h => h.AddNewHardDrive(_plan, @"C:\Hyper-V\Virtual hard disks", It.IsAny<CancellationToken>()), Times.Once);
             _diskManager.Verify(h => h.AddExistingHardDrive(_plan, _mediaPath, It.IsAny<CancellationToken>()), Times.Once);
+            _bootManager.Verify(h => h.SetFirstBootToDvd(_plan, It.IsAny<CancellationToken>()), Times.Once);
+            _isoBootRunner.Verify(r => r.RunAsync(
+                It.IsAny<VmCreationContext>(), 1, _mediaPath, _customizations,
+                It.IsAny<IProgress<CreateVMProgressInfo>>(), It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        // ── Cloud-init (Elastic SIEM) path + stock-flow regression pins ────────
+
+        private static GalleryItem CloudInitItem() => new()
+        {
+            Name = "Elastic SIEM",
+            Publisher = "t",
+            Description = "t",
+            DiskUri = "https://x/Rocky-10-GenericCloud-Base.latest.x86_64.qcow2",
+            SecureBoot = "false",
+            EnhancedSessionTransportType = "HvSocket",
+            Version = "Rocky 10",
+            Tags = new List<string> { "cloud-init", "elastic-siem", "headless" },
+            LinuxDistro = LinuxDistro.Rocky,
+        };
+
+        [TestMethod]
+        public async Task CreateVMAsync_CloudInitGen2_BootsDiskWithSeed_NoCloningIso()
+        {
+            // The appliance path: UEFI-bootable cloud image attaches the
+            // converted disk + cidata seed and boots the DISK — the cloning
+            // ISO is never attached and the clone cycle never runs.
+            _item = CloudInitItem();
+            _customizations = new VmCustomizations();
+
+            await ExecuteAsync(generation: 2);
+
+            _diskManager.Verify(h => h.AddExistingHardDrive(_plan, _mediaPath, It.IsAny<CancellationToken>()), Times.Once);
+            _diskManager.Verify(h => h.AddNewHardDrive(_plan, It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+            _bootManager.Verify(h => h.AddBootDvd(_plan, It.Is<string>(p => p.EndsWith("hyperv-convert.iso", StringComparison.OrdinalIgnoreCase) || p == _cloningIsoPath), It.IsAny<CancellationToken>()), Times.Never,
+                "cloud-init Gen 2 must never attach the cloning ISO");
+            _bootManager.Verify(h => h.AddBootDvd(_plan, It.Is<string>(p => p.EndsWith("_cidata.iso", StringComparison.OrdinalIgnoreCase)), It.IsAny<CancellationToken>()), Times.Once,
+                "the NoCloud seed must be attached");
+            _bootManager.Verify(h => h.SetFirstBootToHardDrive(_plan, It.IsAny<CancellationToken>()), Times.Once);
+            _bootManager.Verify(h => h.SetFirstBootToDvd(_plan, It.IsAny<CancellationToken>()), Times.Never);
+            _isoBootRunner.Verify(r => r.RunAsync(
+                It.IsAny<VmCreationContext>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<VmCustomizations>(),
+                It.IsAny<IProgress<CreateVMProgressInfo>>(), It.IsAny<CancellationToken>()), Times.Never,
+                "cloud-init Gen 2 must never run the clone cycle");
+        }
+
+        [TestMethod]
+        public async Task CreateVMAsync_CloudInitGen2_RunsPostBootOverSsh_AndDetachesSeed()
+        {
+            _item = CloudInitItem();
+            _customizations = new VmCustomizations();
+            _postBootService.Setup(s => s.HasLinuxPostBootSteps(_item, _customizations)).Returns(true);
+
+            await ExecuteAsync(generation: 2);
+
+            // Post-boot ran (seed path), no temp-NIC dance (that belongs to the
+            // clone cycle), and the seed was detached afterwards.
+            _postBootService.Verify(p => p.RunLinuxPostBootAsync(
+                It.IsAny<IGuestShell>(), _plan, _item, _customizations,
+                It.IsAny<IProgress<CreateVMProgressInfo>>(), It.IsAny<CancellationToken>()), Times.Once);
+            _networkManager.Verify(n => n.AddTemporaryNetworkAdapter(_plan, It.IsAny<CancellationToken>()), Times.Never);
+            _bootManager.Verify(h => h.RemoveBootDvd(_plan, It.Is<string>(p => p.EndsWith("_cidata.iso", StringComparison.OrdinalIgnoreCase)), It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [TestMethod]
+        public async Task CreateVMAsync_StockGen2WithPostBoot_StillUsesCloningIso()
+        {
+            // Regression pin: a NON-cloud-init image with post-boot steps must
+            // keep the stock cloning-ISO flow exactly as before the SIEM work.
+            _customizations.ConfigureXrdp = false;
+            _customizations.InstallOpenVpn = true;
+            _postBootService.Setup(s => s.HasLinuxPostBootSteps(_item, _customizations)).Returns(true);
+
+            await ExecuteAsync(generation: 2);
+
+            _bootManager.Verify(h => h.AddBootDvd(_plan, _cloningIsoPath, It.IsAny<CancellationToken>()), Times.Once);
+            _bootManager.Verify(h => h.SetFirstBootToDvd(_plan, It.IsAny<CancellationToken>()), Times.Once);
+            _isoBootRunner.Verify(r => r.RunAsync(
+                It.IsAny<VmCreationContext>(), 2, _mediaPath, _customizations,
+                It.IsAny<IProgress<CreateVMProgressInfo>>(), It.IsAny<CancellationToken>()), Times.Once);
+            _bootManager.Verify(h => h.AddBootDvd(_plan, It.Is<string>(p => p.EndsWith("_cidata.iso", StringComparison.OrdinalIgnoreCase)), It.IsAny<CancellationToken>()), Times.Never,
+                "non-cloud-init images never get a seed");
+        }
+
+        [TestMethod]
+        public async Task CreateVMAsync_CloudInitGen1_StillClonesLayoutWithSeed()
+        {
+            // A hypothetical cloud-init image WITHOUT an ESP (Ubuntu-class):
+            // the clone cycle must still convert the layout, with the seed
+            // attached alongside for the post-clone first boot.
+            _item = CloudInitItem();
+            _customizations = new VmCustomizations();
+
+            await ExecuteAsync(generation: 1);
+
+            _diskManager.Verify(h => h.AddNewHardDrive(_plan, @"C:\Hyper-V\Virtual hard disks", It.IsAny<CancellationToken>()), Times.Once);
+            _diskManager.Verify(h => h.AddExistingHardDrive(_plan, _mediaPath, It.IsAny<CancellationToken>()), Times.Once);
+            _bootManager.Verify(h => h.AddBootDvd(_plan, _cloningIsoPath, It.IsAny<CancellationToken>()), Times.Once);
+            _bootManager.Verify(h => h.AddBootDvd(_plan, It.Is<string>(p => p.EndsWith("_cidata.iso", StringComparison.OrdinalIgnoreCase)), It.IsAny<CancellationToken>()), Times.Once);
             _bootManager.Verify(h => h.SetFirstBootToDvd(_plan, It.IsAny<CancellationToken>()), Times.Once);
             _isoBootRunner.Verify(r => r.RunAsync(
                 It.IsAny<VmCreationContext>(), 1, _mediaPath, _customizations,
