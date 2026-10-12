@@ -50,7 +50,12 @@ namespace VMCreate
                     new UTF8Encoding(false));
 
                 // NoCloud requires the filesystem label to be exactly "cidata".
-                Imapi2Interop.CreateIsoFromDirectory(stagingDir, outputPath, volumeName: "cidata");
+                // ISO9660 + Joliet ONLY — a UDF descriptor makes blkid report
+                // TYPE=udf and ds-identify skips the seed (see Imapi2Interop).
+                Imapi2Interop.CreateIsoFromDirectory(
+                    stagingDir, outputPath,
+                    volumeName: "cidata",
+                    FsiFileSystems.ISO9660 | FsiFileSystems.Joliet);
 
                 logger.LogInformation("Created cloud-init NoCloud seed ISO at {Path} for VM {VMName}", outputPath, vmName);
                 return outputPath;
