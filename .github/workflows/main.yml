@@ -84,13 +84,17 @@ jobs:
       - name: Generate checksums
         shell: pwsh
         run: |
+          $ver = "${{ steps.version.outputs.clean_version }}"
           $msi = Get-ChildItem -Path VMCreate.Installer/bin -Filter "*.msi" -Recurse | Select-Object -First 1
           if (-not $msi) { throw "MSI not found under VMCreate.Installer/bin" }
           $exe = "publish/VMCreate.exe"
+          $cliZip = "vmcreate-cli-$ver.zip"
           $msiHash = (Get-FileHash $msi.FullName -Algorithm SHA256).Hash
           $exeHash = (Get-FileHash $exe -Algorithm SHA256).Hash
-          "$msiHash  vmcreate-${{ steps.version.outputs.clean_version }}.msi" | Out-File -Encoding utf8 checksums.sha256
-          "$exeHash  vmcreate-${{ steps.version.outputs.clean_version }}.exe" | Add-Content -Encoding utf8 checksums.sha256
+          $cliHash = (Get-FileHash $cliZip -Algorithm SHA256).Hash
+          "$msiHash  vmcreate-$ver.msi"    | Out-File  -Encoding utf8 checksums.sha256
+          "$exeHash  vmcreate-$ver.exe"    | Add-Content -Encoding utf8 checksums.sha256
+          "$cliHash  $cliZip"              | Add-Content -Encoding utf8 checksums.sha256
           Get-Content checksums.sha256
 
       - name: Rename artifacts for release
