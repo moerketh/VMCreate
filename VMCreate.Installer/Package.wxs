@@ -24,6 +24,11 @@
       <Directory Id="INSTALLFOLDER" Name="VMCreate">
         <Component Id="VMCreateExe" Guid="A1B2C3D4-E5F6-7890-ABCD-EF1234567890" Bitness="always64">
           <File Id="VMCreateExe" Source="VMCreate.exe" KeyPath="yes" />
+          <Shortcut Id="VMCreateStartMenu"
+                    Directory="ProgramMenuFolder"
+                    Name="VMCreate"
+                    Description="Linux VM Quick Create for Hyper-V"
+                    Advertise="yes" />
         </Component>
         <Component Id="License" Guid="B2C3D4E5-F6A7-8901-BCDE-F12345678901" Bitness="always64">
           <File Id="License" Source="$(var.SolutionDir)LICENSE.txt" Name="LICENSE.txt" KeyPath="yes" />
@@ -33,6 +38,12 @@
         </Component>
       </Directory>
     </StandardDirectory>
+
+    <!-- ── Start Menu shortcut (registers app for Start search) ─────── -->
+    <!-- ProgramMenuFolder resolves to the all-users Start Menu in a per-machine
+         install (ALLUSERS=1), which Windows Search indexes automatically.
+         The advertised shortcut lives in the same component as its target file. -->
+    <StandardDirectory Id="ProgramMenuFolder" />
 
     <!-- ── Hyper-V Quick Create replacement ─────────────────────────── -->
     <SetProperty Id="HYPERVDIR" After="CostFinalize" Sequence="execute" Value="[ProgramFiles64Folder]Hyper-V\" />
