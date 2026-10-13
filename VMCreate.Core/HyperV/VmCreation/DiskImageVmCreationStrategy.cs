@@ -221,37 +221,39 @@ namespace VMCreate.HyperV.VmCreation
                     progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.PostBoot, VmDeploymentSubStep.WaitForSsh));
                     await shell.WaitForReadyAsync(cancellationToken);
 
-                    // KVP heartbeat gate: SSH being up proves the network
-                    // stack, not the integration stack. An image can ship
-                    // hv_kvp_daemon installed-but-unstarted, which would
-                    // leave later integration (host↔guest KVP exchange,
-                    // Enhanced Session) silently dead. Confirm the guest
-                    // daemon is actually answering before customizing —
-                    // fail loudly with diagnostics instead of proceeding
-                    // into a dead pipeline (the quickspawn lesson).
+                    // KVP heartbeat (integration-stack check): SSH being up
+                    // proves the network stack, not the integration stack —
+                    // an image can ship hv_kvp_daemon installed-but-unstarted,
+                    // which would leave later integration (host↔guest KVP
+                    // exchange, Enhanced Session) silently dead.
+                    //
+                    // Probe cheaply for an early signal, but do NOT gate
+                    // here: InstallHypervDaemonsStep (post-boot, Order 280)
+                    // is what installs and enables the daemon on images that
+                    // ship it disabled — the Arch family ships all three
+                    // Hyper-V daemons disabled — so a guest can legitimately
+                    // show no heartbeat yet and be fully integrated a few
+                    // minutes later. The hard gate after post-boot fails
+                    // the deployment if the daemon is still silent then.
                     if (vmCustomizations.EnableIntegrationServices)
                     {
-                        progress.Report(CreateVMProgressInfo.ForPhase(
-                            VmDeploymentPhase.PostBoot, VmDeploymentSubStep.WaitForKvpHeartbeat));
-                        bool kvpAlive = await _kvpHeartbeatGate.WaitForGuestKvpAsync(
-                            plan.VmName, cancellationToken);
-                        if (!kvpAlive)
+                        bool probeAlive = await _kvpHeartbeatGate.WaitForGuestKvpAsync(
+                            plan.VmName, cancellationToken, timeoutSeconds: 1, pollIntervalMs: 1000);
+                        if (probeAlive)
                         {
-                            var diagnostics = await _diagnosticsCollector.CollectAsync(
-                                plan.VmName, cancellationToken,
-                                _sshKeyManager.GetPrivateKeyPath(vmCustomizations.CustomSshPublicKeyPath));
-                            _logger.LogError(
-                                "KVP heartbeat not confirmed for {VMName} within the timeout — the guest's " +
-                                "Hyper-V integration daemon (hv_kvp_daemon) appears to be installed but not " +
-                                "answering. Guest diagnostics:\n{Diagnostics}",
-                                plan.VmName, diagnostics.RawOutput);
-                            throw new InvalidOperationException(
-                                $"The Hyper-V integration daemon (hv_kvp_daemon) in VM '{plan.VmName}' did not " +
-                                $"answer within the heartbeat timeout. The image may ship it unstarted. " +
-                                $"Start it in the guest (systemctl enable --now hv_kvp_daemon) and retry, " +
-                                $"or disable integration services for this deployment.");
+                            _logger.LogInformation(
+                                "KVP heartbeat already visible for {VMName} after SSH — guest integration daemon is answering.",
+                                plan.VmName);
                         }
-                        _logger.LogInformation("KVP heartbeat confirmed for {VMName} — guest integration daemon is answering.", plan.VmName);
+                        else
+                        {
+                            _logger.LogWarning(
+                                "KVP heartbeat not yet visible for {VMName} after SSH — proceeding to post-boot, " +
+                                "which installs and enables the Hyper-V daemons on images that ship them disabled " +
+                                "(Arch family). The gate at the end of post-boot fails the deployment if the " +
+                                "daemon is still not answering by then.",
+                                plan.VmName);
+                        }
                     }
 
                     try
@@ -270,6 +272,44 @@ namespace VMCreate.HyperV.VmCreation
                     {
                         await _postBootService.RunLinuxPostBootAsync(
                             shell, plan, item, vmCustomizations, progress, cancellationToken);
+                    }
+
+                    // Hard KVP gate — AFTER post-boot. RunLinuxPostBootAsync
+                    // runs InstallHypervDaemonsStep (Order 280), which
+                    // installs and enables hv_kvp_daemon on guests that
+                    // ship it disabled (the Arch family ships all three
+                    // Hyper-V daemons disabled), so waiting for post-boot to
+                    // settle first is what lets such images pass instead of
+                    // failing after the heartbeat timeout. If the daemon is
+                    // still not answering even then, fail loudly with
+                    // diagnostics instead of proceeding into a dead
+                    // integration stack (the quickspawn lesson). Still
+                    // inside the try: diagnostics collection needs the SSH
+                    // shell and the temp NIC the finally removes.
+                    if (vmCustomizations.EnableIntegrationServices)
+                    {
+                        progress.Report(CreateVMProgressInfo.ForPhase(
+                            VmDeploymentPhase.PostBoot, VmDeploymentSubStep.WaitForKvpHeartbeat));
+                        bool kvpAlive = await _kvpHeartbeatGate.WaitForGuestKvpAsync(
+                            plan.VmName, cancellationToken);
+                        if (!kvpAlive)
+                        {
+                            var diagnostics = await _diagnosticsCollector.CollectAsync(
+                                plan.VmName, cancellationToken,
+                                _sshKeyManager.GetPrivateKeyPath(vmCustomizations.CustomSshPublicKeyPath));
+                            _logger.LogError(
+                                "KVP heartbeat not confirmed for {VMName} within the timeout — the guest's " +
+                                "Hyper-V integration daemon (hv_kvp_daemon) appears to be installed but not " +
+                                "answering. Guest diagnostics:\n{Diagnostics}",
+                                plan.VmName, diagnostics.RawOutput);
+                            throw new InvalidOperationException(
+                                $"The Hyper-V integration daemon (hv_kvp_daemon) in VM '{plan.VmName}' did not " +
+                                $"answer within the heartbeat timeout, even after post-boot customization " +
+                                $"installed and enabled the Hyper-V daemons. The image may ship it unstarted " +
+                                $"or broken. Start it in the guest (systemctl enable --now hv_kvp_daemon) and " +
+                                $"retry, or disable integration services for this deployment.");
+                        }
+                        _logger.LogInformation("KVP heartbeat confirmed for {VMName} — guest integration daemon is answering.", plan.VmName);
                     }
                 }
                 finally

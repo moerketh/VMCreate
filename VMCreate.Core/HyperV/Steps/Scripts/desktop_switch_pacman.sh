@@ -22,7 +22,7 @@ set -o pipefail
 # prompts), so the DM handover below is the only session/DM wiring.
 #
 # Sequence (mirrors the apt variant, adapted to pacman's model):
-#   1. pacman -Sy (refresh databases)
+#   1. pacman -Syu (full sync + upgrade — a bare -Sy is a partial upgrade)
 #   2. resolve the removal set FIRST (pacman's transaction resolver refuses
 #      to remove a package an explicitly-installed package depends on, so
 #      dependents of a to-remove package must be co-marked for removal —
@@ -45,9 +45,9 @@ set -o pipefail
 
 DEGRADED=0
 
-echo "Refreshing pacman databases..."
-if ! pacman -Sy --noconfirm 2>&1; then
-    echo "ERROR: pacman -Sy failed."
+echo "Syncing + upgrading pacman databases and packages..."
+if ! pacman -Syu --noconfirm 2>&1; then
+    echo "ERROR: pacman -Syu failed."
     exit 1
 fi
 

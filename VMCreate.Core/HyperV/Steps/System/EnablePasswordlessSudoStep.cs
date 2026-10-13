@@ -85,11 +85,27 @@ namespace VMCreate
             // stdin line that sudo -S consumes at its prompt. sudo -k forces
             // the credential prompt even if a timestamp is cached, guaranteeing
             // the prompt — not the inner bash — reads the password line.
+            //
+            // Atomicity: stage the drop-in inside /etc/sudoers.d under a
+            // dot-suffixed name (sudo skips sudoers.d files whose name
+            // contains a dot, so the staged file is never parsed), run
+            // visudo on the staged copy, and only a passing check renames
+            // it into place — a rename within one directory is atomic, so
+            // /etc/sudoers.d/99-vmcreate-nopasswd is either absent or a
+            // visudo-valid file, never a half-written one. A failed check
+            // must not leave a broken file in place: sudoers.d content is
+            // parsed live for every sudo, and a malformed drop-in breaks
+            // sudo on the guest. The trap still removes the staged file on
+            // any failure (the rename only happens on success).
+            string stagedPath = DropInPath + ".vmcreate-tmp";
             string script =
                 "set -e; " +
-                $"printf '%s\\n' '{SshTransport.EscapeSingleQuotes(username + " ALL=(ALL:ALL) NOPASSWD: ALL")}' > {DropInPath}; " +
-                $"chmod 440 {DropInPath}; " +
-                $"visudo -c -f {DropInPath} | grep -q 'parsed OK'";
+                $"tmp='{SshTransport.EscapeSingleQuotes(stagedPath)}'; " +
+                "trap 'rm -f \"$tmp\"' EXIT; " +
+                $"printf '%s\\n' '{SshTransport.EscapeSingleQuotes(username + " ALL=(ALL:ALL) NOPASSWD: ALL")}' > \"$tmp\"; " +
+                "chmod 440 \"$tmp\"; " +
+                "visudo -c -f \"$tmp\" | grep -q 'parsed OK'; " +
+                $"mv \"$tmp\" {DropInPath}; trap - EXIT;";
             string bash = "sudo -S -k bash -c '" + SshTransport.EscapeSingleQuotes(script) + "'";
 
             await shell.RunCommandWithStdinAsync(bash, password + "\n", ct);

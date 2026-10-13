@@ -439,7 +439,7 @@ namespace VMCreate
                     || msg.Contains("connection refused", StringComparison.OrdinalIgnoreCase))
                     return true;
             }
-        return false;
+            return false;
         }
 
         private async Task<string> RunCommandInternalAsync(string linuxCommand, TimeSpan timeout, CancellationToken ct)

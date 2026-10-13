@@ -188,7 +188,34 @@ namespace VMCreate.Tests.HyperV.VmCreation
             LinuxDistro = LinuxDistro.Arch,
             InitialUsername = "omarchy",
             InitialPassword = "test-password",
+            Tags = new System.Collections.Generic.List<string> { "omarchy" },
         };
+
+        [TestMethod]
+        public async Task CreateVMAsync_ArchDistro_WithoutOmarchyTag_DoesNotGetCidataSeed()
+        {
+            // Regression pin for the Athena OS misroute: the cidata branch is
+            // gated on the omarchy tag, not the Arch distro hint. Athena OS
+            // (Arch) and any --image-uri Arch ISO share LinuxDistro.Arch but
+            // install manually — an Omarchy seed there would impose a 20 GB
+            // disk floor and wait 40 minutes for an sshd that never comes up.
+            _item = new GalleryItem
+            {
+                Name = "Athena OS (Arch)",
+                IsWindows = false,
+                LinuxDistro = LinuxDistro.Arch,
+                InitialUsername = "athena",
+                InitialPassword = "athena",
+                Tags = new System.Collections.Generic.List<string> { "athena-arch" },
+            };
+
+            await ExecuteAsync();
+
+            _bootManager.Verify(b => b.AttachIsoToNewDvdDrive(It.IsAny<VmDeploymentPlan>(), It.Is<string>(p => p.EndsWith("_cidata.iso")), It.IsAny<CancellationToken>()), Times.Never);
+            _bootManager.Verify(b => b.SetFirstBootToDvd(_plan, It.IsAny<CancellationToken>()), Times.Once);
+            _bootManager.Verify(b => b.SetFirstBootToHardDrive(_plan, It.IsAny<CancellationToken>()), Times.Never);
+            _guestShellFactory.Verify(f => f.Create(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        }
 
         [TestMethod]
         public async Task CreateVMAsync_Omarchy_BuildsAndAttachesCidataSeed()

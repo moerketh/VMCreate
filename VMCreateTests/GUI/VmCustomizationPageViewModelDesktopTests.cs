@@ -13,13 +13,15 @@ namespace VMCreate.Tests.GUI
     /// desktop selection must drive Lamco availability (an X11-only desktop
     /// like Xfce can never be served by the Wayland-native Lamco RDP Server),
     /// reset now-impossible explicit Lamco choices to Auto, and normalize the
-    /// finished wizard data so the stock desktop means "no switch".
+    /// finished wizard data so the stock desktop means "no switch". Also
+    /// pins the wayrdp radio's dev gate: the GUI cannot supply the host-built
+    /// wayrdp package, so the radio must stay hidden in release GUIs.
     /// </summary>
     [TestClass]
     public sealed class VmCustomizationPageViewModelDesktopTests
     {
         private static VmCustomizationPageViewModel Create(
-            GalleryItem? item, out WizardData wizardData)
+            GalleryItem? item, out WizardData wizardData, bool wayrdpDevOptionEnabled = false)
         {
             wizardData = new WizardData { SelectedItem = item };
             var htbApi = new Mock<IHtbApiClient>();
@@ -27,7 +29,10 @@ namespace VMCreate.Tests.GUI
             return new VmCustomizationPageViewModel(
                 wizardData, htbApi.Object, NullLogger.Instance,
                 configurableSteps: Enumerable.Empty<IConfigurableCustomizationStep>(),
-                desktopCatalogs: new[] { new KaliDesktopCatalog() });
+                desktopCatalogs: new[] { new KaliDesktopCatalog() })
+            {
+                WayrdpDevOptionEnabled = wayrdpDevOptionEnabled
+            };
         }
 
         private static GalleryItem KaliItem() =>
@@ -152,6 +157,37 @@ namespace VMCreate.Tests.GUI
             vm.SelectDesktop(null);
             Assert.IsTrue(vm.IsKeepDefaultDesktop);
             Assert.IsFalse(vm.DesktopOptions.Single(o => o.Id == "gnome").IsSelected);
+        }
+
+        // ── wayrdp dev gate ─────────────────────────────────────────────
+        // The GUI has no way to collect WayrdpPackagePath (the package is a
+        // host-built tarball; only the CLI's --wayrdp-package feeds it), so a
+        // GUI wayrdp selection can never deploy: it fails at the install
+        // step after the full install + first boot. The radio is therefore
+        // hidden behind VMCREATE_DEV_WAYRDP=1 for release.
+
+        [TestMethod]
+        public void WayrdpRadio_HiddenByDefault_EvenOnSupportedDistro()
+        {
+            var vm = Create(KaliItem(), out _);
+
+            Assert.IsFalse(vm.WayrdpOptionVisible,
+                "release GUI must not offer a backend it cannot supply the package for");
+        }
+
+        [TestMethod]
+        public void WayrdpRadio_DevFlag_AndSupportedDistro_ShowIt()
+        {
+            // Kali (Debian family) is wayrdp-targetable; the dev gate is the
+            // only thing hiding the radio.
+            var vm = Create(KaliItem(), out _, wayrdpDevOptionEnabled: true);
+
+            Assert.IsTrue(vm.WayrdpOptionVisible);
+
+            // On an unsupported distro the gate alone is not enough.
+            var vmFedora = Create(new GalleryItem { Name = "Fedora", LinuxDistro = LinuxDistro.Unknown },
+                out _, wayrdpDevOptionEnabled: true);
+            Assert.IsFalse(vmFedora.WayrdpOptionVisible);
         }
     }
 }

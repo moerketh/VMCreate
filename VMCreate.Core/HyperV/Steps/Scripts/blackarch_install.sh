@@ -12,8 +12,13 @@
 
 set -o pipefail
 
+# strap.sh changes upstream now and then, breaking every deploy at the
+# checksum below. When it does, re-download from STRAP_URL and compare with
+# the SHA1 published at https://www.blackarch.org/downloads.html (the script
+# content is identical to the site's copy), then update STRAP_SHA1.
+# (Not vendored: the strap.sh source repo ships no redistribution license.)
 STRAP_URL="https://www.blackarch.org/strap.sh"
-STRAP_SHA1="d062038042c5f141755ea39dbd615e6ff9e23121"
+STRAP_SHA1="d338a4bb95d9e09f97508da68ac9e17d963b85f6"
 
 if ! command -v pacman >/dev/null 2>&1; then
     echo "ERROR: pacman not found — BlackArch install requires an Arch base." >&2
@@ -35,9 +40,11 @@ bash "$workdir/strap.sh" || {
     exit 1
 }
 
-# Refresh databases so the new [blackarch] repo is usable.
-pacman -Sy --noconfirm || {
-    echo "ERROR: pacman -Sy failed after adding the BlackArch repository." >&2
+# Full sync + upgrade (not a bare -Sy): a refresh without -u is a partial
+# upgrade, which Arch warns can break packages once the -S installs below
+# pull against mixed-version databases on a stale image.
+pacman -Syu --noconfirm || {
+    echo "ERROR: pacman -Syu failed after adding the BlackArch repository." >&2
     exit 1
 }
 

@@ -141,12 +141,26 @@ namespace VMCreate
         public bool LamcoOptionVisible => SelectedItem?.SupportsLamco() ?? false;
 
         /// <summary>
-        /// True when the selected gallery item is wayrdp-targetable (same
-        /// Debian-family set as Lamco). Hides the wayrdp radio on unsupported
-        /// distros. The backend is pre-release: when selected, the install
-        /// step fails loudly with a TODO marker — see <c>install_wayrdp.sh</c>.
+        /// Dev gate for the wayrdp radio: set <c>VMCREATE_DEV_WAYRDP=1</c> to
+        /// expose the option while developing against a locally built package.
+        /// wayrdp itself installs fine, but the package it needs is host-built
+        /// (the wayrdp repo is private with no public release asset), and only
+        /// the CLI can supply it: <c>--wayrdp-package</c> sets
+        /// <see cref="VmCustomizations.WayrdpPackagePath"/>. The GUI has no
+        /// picker for that file, so a wayrdp deploy started here would always
+        /// fail at the install step — after the whole install and first boot.
+        /// Hidden by default so the release GUI offers only options that work
+        /// end-to-end from the GUI itself.
         /// </summary>
-        public bool WayrdpOptionVisible => SelectedItem?.SupportsWayrdp() ?? false;
+        internal bool WayrdpDevOptionEnabled { get; init; } =
+            Environment.GetEnvironmentVariable("VMCREATE_DEV_WAYRDP") == "1";
+
+        /// <summary>
+        /// True when the wayrdp radio should render: a dev-gated option
+        /// (see <see cref="WayrdpDevOptionEnabled"/>) on a wayrdp-targetable
+        /// gallery item (same Debian/arch-family set as Lamco).
+        /// </summary>
+        public bool WayrdpOptionVisible => WayrdpDevOptionEnabled && (SelectedItem?.SupportsWayrdp() ?? false);
 
         // ── Desktop Environment card ────────────────────────────────────
 

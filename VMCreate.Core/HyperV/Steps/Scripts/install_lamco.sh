@@ -213,13 +213,14 @@ if [ "$actual_sha" != "$LAMCO_FORK_PKG_SHA256" ]; then
     exit 1
 fi
 echo "sha256 OK ($LAMCO_FORK_PKG_SHA256)"
-# Refresh the sync database (best-effort, matching the apt-get update on
-# the Debian path): a freshly installed guest has current DBs from its own
-# install, but a stale-DB guest gets "target not found" for the hard deps
-# otherwise. pacman -U then installs the verified file and resolves its
-# hard deps (glibc, pipewire, xdg-desktop-portal, ...) from the sync
+# Refresh + upgrade (best-effort, matching the apt-get update on the Debian
+# path): a freshly installed guest has current DBs from its own install, but
+# a stale-DB guest gets "target not found" for the hard deps otherwise. -Syu,
+# not a bare -Sy: a refresh without -u is a partial upgrade, which Arch warns
+# can break packages. pacman -U then installs the verified file and resolves
+# its hard deps (glibc, pipewire, xdg-desktop-portal, ...) from the sync
 # repositories in one transaction.
-pacman -Sy --noconfirm >/dev/null 2>&1 || true
+pacman -Syu --noconfirm >/dev/null 2>&1 || true
 if ! pacman -U --noconfirm "$FORK_PKG_TMP" 2>&1; then
     echo "ERROR: pacman -U failed installing the fork pacman package." >&2
     rm -f "$FORK_PKG_TMP"

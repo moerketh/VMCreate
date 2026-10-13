@@ -39,8 +39,14 @@ namespace VMCreate.Tests.GUI
                 Assert.Inconclusive($"Built exe not found at {ExePath}. Build VMCreate first.");
 
             _automation = new UIA3Automation();
-            _process = Process.Start(new ProcessStartInfo(ExePath) { Arguments = "--demo" });
-            _app = FlaUI.Core.Application.Attach(_process);
+            // Process.Start is annotated nullable; a null here means the exe
+            // could not be launched at all (registry/binary issue), not a
+            // missing build — that keeps this a hard error rather than an
+            // Inconclusive skip.
+            var started = Process.Start(new ProcessStartInfo(ExePath) { Arguments = "--demo" })
+                ?? throw new InvalidOperationException($"Failed to launch {ExePath}.");
+            _process = started;
+            _app = FlaUI.Core.Application.Attach(started);
         }
 
         [TestCleanup]

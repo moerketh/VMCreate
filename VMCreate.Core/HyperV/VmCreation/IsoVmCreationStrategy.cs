@@ -12,9 +12,10 @@ namespace VMCreate.HyperV.VmCreation
     /// Creates a VM from an ISO installer image. Attaches an empty VHDX, mounts the ISO,
     /// and boots the VM so the installer can run. For Windows ISOs an unattend.xml ISO is
     /// also attached so setup runs unattended, followed by optional post-boot customization
-    /// steps over PowerShell Direct. For Omarchy (Arch) ISOs a cidata seed ISO is attached
-    /// so the installer runs fully unattended; deployment then waits for the installed
-    /// system's SSH to come up.
+    /// steps over PowerShell Direct. For ISOs tagged <c>omarchy</c> a cidata seed ISO is
+    /// attached so the Omarchy installer runs fully unattended; deployment then waits for
+    /// the installed system's SSH to come up. Other Arch-based ISOs (Athena OS, BlackArch,
+    /// plain Arch live ISOs) are manual installs and must NOT take this path.
     /// </summary>
     public class IsoVmCreationStrategy : IVmCreationStrategy
     {
@@ -113,8 +114,13 @@ namespace VMCreate.HyperV.VmCreation
                     unattendIsoPath = null;
                 }
             }
-            else if (item.LinuxDistro == LinuxDistro.Arch)
+            else if (item.HasTag(EnablePasswordlessSudoStep.OmarchyTag))
             {
+                // Tag-gated, not distro-gated: LinuxDistro.Arch covers Athena OS
+                // and plain Arch ISOs too, and only Omarchy ships an unattended
+                // installer. An un-tagged Arch ISO on this path would get an
+                // Omarchy seed ISO, a 20 GB disk floor, and a 40-minute wait for
+                // an "omarchy" user that manual installs never create.
                 _logger.LogInformation("Creating cidata seed ISO for unattended Omarchy installation on VM {VMName}", plan.VmName);
                 cidataIsoPath = Path.Combine(_pathService.DefaultVhdxPath, $"{plan.VmName}_cidata.iso");
                 // Validate the plan's drive size up front: a misconfigured plan

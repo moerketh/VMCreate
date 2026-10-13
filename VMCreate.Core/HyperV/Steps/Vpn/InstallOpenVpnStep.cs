@@ -32,7 +32,7 @@ namespace VMCreate
                 elif command -v yum >/dev/null 2>&1; then
                     sudo yum install -y -q openvpn NetworkManager-openvpn NetworkManager-openvpn-gnome 2>&1
                 elif command -v pacman >/dev/null 2>&1; then
-                    sudo pacman -Sy --noconfirm openvpn networkmanager-openvpn 2>&1
+                    sudo pacman -Syu --noconfirm openvpn networkmanager-openvpn 2>&1
                 elif command -v zypper >/dev/null 2>&1; then
                     sudo zypper install -y openvpn NetworkManager-openvpn NetworkManager-openvpn-gnome 2>&1
                 else

@@ -24,11 +24,15 @@ set -o pipefail
 # PACKAGE DELIVERY (current): wayrdp lives in a PRIVATE repo with no public
 # release asset, so the guest cannot fetch a package over the network. The
 # host step (InstallWayrdpRdpStep) scp's the portable tarball
-# (wayrdp-<ver>-linux-x86_64.tar.gz, built by scripts/build-package.sh) to
-# /tmp/wayrdp-pkg.tar.gz alongside this script, and its sha256 into
-# /tmp/wayrdp-pkg.sha256. This script verifies the digest, extracts the
-# bundle, and runs its install.sh. When wayrdp ships a public release this
-# becomes a pinned curl of $WAYRDP_PKG_URL — mirror install_lamco.sh.
+# (wayrdp-<ver>-linux-x86_64.tar.gz, built by scripts/build-package.sh) to a
+# per-deploy /tmp path alongside this script, and its sha256 into a sidecar
+# next to it; both paths are injected into the WAYRDP_PKG_TARBALL /
+# WAYRDP_PKG_SHA256_FILE placeholders below. Per-deploy paths (same /tmp
+# hardening rationale as the script name): concurrent deploys must never
+# read or clobber each other's files in a shared /tmp. This script verifies
+# the digest, extracts the bundle, and runs its install.sh. When wayrdp
+# ships a public release this becomes a pinned curl of $WAYRDP_PKG_URL —
+# mirror install_lamco.sh.
 #
 # The tarball layout (scripts/build-package.sh):
 #   wayrdp-<ver>-linux-x86_64/
@@ -39,12 +43,15 @@ set -o pipefail
 
 DEGRADED=0
 
-# Pinned digest of the tarball the host uploads. Injected by
-# InstallWayrdpRdpStep via the __WAYRDP_PKG_SHA256__ placeholder; when the
-# placeholder is left un-replaced the digest is read from the sidecar file
-# /tmp/wayrdp-pkg.sha256 (manual/local deploys).
-WAYRDP_PKG_TARBALL="/tmp/wayrdp-pkg.tar.gz"
-WAYRDP_PKG_SHA256_FILE="/tmp/wayrdp-pkg.sha256"
+# Where the host scp'd the package tarball and its sha256 sidecar, plus the
+# pinned digest of the tarball. All three are injected by
+# InstallWayrdpRdpStep by substituting the placeholders on the next three
+# lines (per-deploy /tmp paths + host-computed sha256). When the digest
+# placeholder is left un-replaced — manual/local deploys: copy the script,
+# the tarball and its sidecar into /tmp yourself and fill in all three
+# values — the digest is read from the sidecar file instead.
+WAYRDP_PKG_TARBALL="__WAYRDP_PKG_TARBALL__"
+WAYRDP_PKG_SHA256_FILE="__WAYRDP_PKG_SHA256_FILE__"
 WAYRDP_PKG_SHA256="__WAYRDP_PKG_SHA256__"
 
 echo "=== wayrdp install (Wayland-native, FreeRDP 3) ==="
@@ -91,7 +98,10 @@ fi
 install_freerdp_deps() {
     if is_arch_family; then
         echo "Installing runtime deps via pacman: freerdp openssl libxkbcommon wayland"
-        pacman -Sy --noconfirm --needed freerdp openssl libxkbcommon wayland 2>&1 || {
+        # -Syu, not a bare -Sy: refreshing databases without upgrading is a
+        # partial upgrade, which Arch warns can break packages against the
+        # mixed-version databases on a stale image.
+        pacman -Syu --noconfirm --needed freerdp openssl libxkbcommon wayland 2>&1 || {
             echo "ERROR: pacman failed to install freerdp runtime deps." >&2
             exit 1
         }

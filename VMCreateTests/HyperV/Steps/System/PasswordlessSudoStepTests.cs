@@ -103,6 +103,40 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
+        public async Task EnableStep_Execute_StagesVisudoChecks_ThenMovesIntoPlace()
+        {
+            var step = new EnablePasswordlessSudoStep();
+            string? command = null;
+            _shell.Setup(s => s.RunCommandWithStdinAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((cmd, _, _) => command = cmd)
+                  .ReturnsAsync("");
+
+            await step.ExecuteAsync(_shell.Object, TaggedItem(), new VmCustomizations(), _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(command);
+            // The drop-in is staged next to its final destination under a
+            // dot-suffixed name — sudo never parses sudoers.d files whose
+            // name contains a dot — validated there, and only a passing
+            // visudo check renames it into place. A failed check must not
+            // leave a broken file in /etc/sudoers.d: sudoers.d content is
+            // live for every sudo, and a malformed drop-in breaks sudo on
+            // the guest.
+            StringAssert.Contains(command, EnablePasswordlessSudoStep.DropInPath + ".vmcreate-tmp",
+                "the file must be staged, not written straight to the sudoers.d target");
+            StringAssert.Contains(command, "visudo -c -f \"$tmp\"",
+                "visudo must validate the staged copy");
+            StringAssert.Contains(command, "mv \"$tmp\" " + EnablePasswordlessSudoStep.DropInPath,
+                "only a passing visudo check moves the drop-in into place (atomic within /etc/sudoers.d)");
+            // The script embeds in sudo bash -c '...' with single quotes
+            // escaped as '\'' (SshTransport.EscapeSingleQuotes), so the trap
+            // assertion uses the escaped form of: trap 'rm -f "$tmp"' EXIT.
+            StringAssert.Contains(command, "trap '\\''rm -f \"$tmp\"'\\'' EXIT",
+                "a failing check must clean the staged file up");
+            StringAssert.Contains(command, "> \"$tmp\"",
+                "printf writes the staged file, not the live drop-in path");
+        }
+
+        [TestMethod]
         public async Task EnableStep_Execute_WhenDropInAlreadyPresent_IsIdempotent()
         {
             var step = new EnablePasswordlessSudoStep();

@@ -229,12 +229,17 @@ namespace VMCreate.Tests.HyperV.VmCreation
         }
 
         [TestMethod]
-        public async Task CreateVMAsync_KvpHeartbeatNotConfirmed_ThrowsAndSkipsPostBoot()
+        public async Task CreateVMAsync_KvpHeartbeatNotConfirmed_ThrowsAfterPostBootRan()
         {
             // The quickspawn bug class: SSH answers but the guest's KVP
             // daemon was never started. The gate must fail the deployment
-            // with diagnostics instead of running post-boot steps into a
-            // dead integration stack.
+            // with diagnostics, but only AFTER post-boot: the post-boot
+            // pipeline runs InstallHypervDaemonsStep (Order 280), which
+            // installs and enables hv_kvp_daemon on images that ship it
+            // disabled (the Arch family ships all three Hyper-V daemons
+            // disabled), so gating before post-boot would break those
+            // deploys the step exists to fix.
+            _postBootService.Setup(s => s.HasLinuxPostBootSteps(_item, _customizations)).Returns(true);
             _kvpHeartbeatGate.Setup(g => g.WaitForGuestKvpAsync(
                 It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<int>(), It.IsAny<int>()))
                 .ReturnsAsync(false);
@@ -246,14 +251,43 @@ namespace VMCreate.Tests.HyperV.VmCreation
                 () => ExecuteAsync(generation: 2));
 
             StringAssert.Contains(ex.Message, "hv_kvp_daemon", StringComparison.Ordinal);
+            _kvpHeartbeatGate.Verify(g => g.WaitForGuestKvpAsync(
+                It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<int>(), It.IsAny<int>()), Times.Exactly(2),
+                "the gate probes cheaply once after SSH, then waits the full timeout after post-boot");
             _postBootService.Verify(p => p.RunLinuxPostBootAsync(
                 It.IsAny<IGuestShell>(), It.IsAny<VmDeploymentPlan>(), It.IsAny<GalleryItem>(),
                 It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(),
-                It.IsAny<CancellationToken>()), Times.Never,
-                "post-boot steps must not run when the integration daemon is dead");
+                It.IsAny<CancellationToken>()), Times.Once,
+                "post-boot must run before the gate fails — it is what enables the daemon the gate checks for");
             _diagnosticsCollector.Verify(d => d.CollectAsync(
                 It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()), Times.Once,
                 "failure path must collect guest diagnostics for the log");
+        }
+
+        [TestMethod]
+        public async Task CreateVMAsync_KvpHeartbeatEnabledByPostBoot_PassesTheGate()
+        {
+            // The Arch-family flow: no heartbeat immediately after SSH
+            // (the daemons ship disabled), heartbeat present after
+            // post-boot enabled them. This deploy must succeed end to end.
+            _postBootService.Setup(s => s.HasLinuxPostBootSteps(_item, _customizations)).Returns(true);
+            _kvpHeartbeatGate.Setup(g => g.WaitForGuestKvpAsync(
+                It.IsAny<string>(), It.IsAny<CancellationToken>(), 1, 1000))
+                .ReturnsAsync(false);
+            _kvpHeartbeatGate.Setup(g => g.WaitForGuestKvpAsync(
+                It.IsAny<string>(), It.IsAny<CancellationToken>(), 120, 2000))
+                .ReturnsAsync(true);
+
+            await ExecuteAsync(generation: 2);
+
+            _postBootService.Verify(p => p.RunLinuxPostBootAsync(
+                It.IsAny<IGuestShell>(), It.IsAny<VmDeploymentPlan>(), It.IsAny<GalleryItem>(),
+                It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(),
+                It.IsAny<CancellationToken>()), Times.Once,
+                "post-boot must run — InstallHypervDaemonsStep is what turns the heartbeat on for such images");
+            _diagnosticsCollector.Verify(d => d.CollectAsync(
+                It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()), Times.Never,
+                "a heartbeat that arrives after post-boot must not be treated as a failure");
         }
 
         [TestMethod]

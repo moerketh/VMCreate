@@ -149,14 +149,14 @@
                                 Message="Lamco RDP Server is third-party software under the Business Source License 1.1 (c) Lamco Development LLC. Production use is free for a single server instance (one VM), non-profits, and education/research; running it on multiple VMs requires a commercial license (lamco.ai). It converts to Apache-2.0 on 2029-06-01."
                                 IsOpen="{Binding IsRdpBackendLamco, Mode=OneWay}" IsClosable="False" Margin="0,4,0,0"
                                 Visibility="{Binding LamcoOptionVisible, Converter={StaticResource BoolToVis}}"/>
-                    <RadioButton Content="wayrdp — MIT Wayland-native RDP on FreeRDP 3 (pre-release: install fails with TODO)"
+                    <RadioButton Content="wayrdp — MIT Wayland-native RDP on FreeRDP 3 (dev-only: package reachable from the CLI only)"
                                  GroupName="RdpBackend" FontSize="14" Margin="0,4,0,0"
                                  IsChecked="{Binding IsRdpBackendWayrdp}"
                                  Visibility="{Binding WayrdpOptionVisible, Converter={StaticResource BoolToVis}}"
-                                 ToolTip="wayrdp is the project's own MIT-licensed Wayland-native RDP server on FreeRDP 3, intended to replace the Lamco fork. Pre-release: there is no installable artifact yet, so deployment fails loudly with a TODO marker after first boot. Select this only to exercise the deployment pipeline end-to-end."
-                                 AutomationProperties.Name="Configure wayrdp (pre-release)"/>
-                    <ui:InfoBar Title="wayrdp: pre-release — deployment will fail during install" Severity="Warning"
-                                Message="wayrdp has no installable release yet (Phase 0 protocol spike). Choosing this backend exercises the full VMCreate deployment pipeline, but the guest install step intentionally fails with a clear TODO marker instead of silently skipping. Track progress in the wayrdp repository (docs/plan.md)."
+                                 ToolTip="wayrdp is the project's own MIT-licensed Wayland-native RDP server on FreeRDP 3. Not in the release GUI: the install needs the host-built package tarball, which only the CLI can pass (--wayrdp-package). Select it here only for pipeline testing with the CLI-provided package in mind — from the GUI alone the deploy fails at the install step after first boot. Exposed when the environment flag VMCREATE_DEV_WAYRDP=1 is set."
+                                 AutomationProperties.Name="Configure wayrdp (dev-only)"/>
+                    <ui:InfoBar Title="wayrdp: dev-only — the GUI cannot supply the package" Severity="Warning"
+                                Message="The wayrdp install step needs the host-built package tarball (scripts/build-package.sh output from the wayrdp repo). Only the CLI accepts it, via --wayrdp-package; the GUI has no file picker for it, so a deploy started here fails at the install step after first boot. This option is hidden in release builds and shown only when VMCREATE_DEV_WAYRDP=1 is set."
                                 IsOpen="{Binding IsRdpBackendWayrdp, Mode=OneWay}" IsClosable="False" Margin="0,8,0,0"
                                 Visibility="{Binding WayrdpOptionVisible, Converter={StaticResource BoolToVis}}"/>
                     <RadioButton Content="None — no remote desktop (console/SSH only)"

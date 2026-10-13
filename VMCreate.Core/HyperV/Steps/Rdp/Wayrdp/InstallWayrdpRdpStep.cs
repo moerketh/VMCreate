@@ -156,13 +156,19 @@ namespace VMCreate
             // ownership/perms before execution — see InstallLamcoRdpStep.
             string guestScript = $"/tmp/install_wayrdp_{Guid.NewGuid():N}.sh";
 
-            // Deliver the package tarball + its sha256 sidecar to the guest
-            // (unpredictable paths; the script expects them at these names).
-            string guestTarball = "/tmp/wayrdp-pkg.tar.gz";
-            string guestSha = "/tmp/wayrdp-pkg.sha256";
+            // Deliver the package tarball + its sha256 sidecar to the guest on
+            // per-deploy unpredictable paths too (same /tmp hardening rationale
+            // as the script name) and inject them into the script via
+            // placeholders, so concurrent deploys can never read or clobber
+            // each other's package files in /tmp.
+            string guestTarball = $"/tmp/wayrdp-pkg_{Guid.NewGuid():N}.tar.gz";
+            string guestSha = guestTarball + ".sha256";
+            script = script.Replace("__WAYRDP_PKG_TARBALL__", guestTarball);
+            script = script.Replace("__WAYRDP_PKG_SHA256_FILE__", guestSha);
+
             await shell.CopyContentAsync(script, guestScript, ct);
             await shell.CopyFileAsync(pkgHostPath, guestTarball, ct);
-            await shell.CopyContentAsync($"{pkgSha256}  wayrdp-pkg.tar.gz\n", guestSha, ct);
+            await shell.CopyContentAsync($"{pkgSha256}  {Path.GetFileName(guestTarball)}\n", guestSha, ct);
 
             string result = await shell.RunCommandAsync(
                 $"sudo chown root:root {guestScript} && sudo chmod 0700 {guestScript} && sudo bash {guestScript}; " +

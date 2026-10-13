@@ -3,6 +3,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Moq;
 using System;
 using System.IO;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using VMCreate;
@@ -175,16 +176,30 @@ namespace VMCreate.Tests.HyperV.Steps
                 It.Is<string>(p => p.StartsWith("/tmp/install_wayrdp_") && p.EndsWith(".sh")),
                 It.IsAny<CancellationToken>()), Times.Once);
 
-            // ...the tarball is scp'd from the host path to the guest...
+            // ...the tarball is scp'd from the host path to an unpredictable
+            // per-deploy /tmp path (same /tmp hardening rationale as the
+            // script name — concurrent deploys must never read or clobber
+            // each other's package files)...
             _shell.Verify(s => s.CopyFileAsync(
                 It.Is<string>(h => h == _wayrdpCustomizations.WayrdpPackagePath),
-                It.Is<string>(g => g == "/tmp/wayrdp-pkg.tar.gz"),
+                It.Is<string>(g => g.StartsWith("/tmp/wayrdp-pkg_") && g.EndsWith(".tar.gz")),
                 It.IsAny<CancellationToken>()), Times.Once);
 
-            // ...and the sha256 sidecar is uploaded alongside.
+            // ...the sha256 sidecar sits next to its tarball with the matching
+            // (cosmetic) filename in the digest line...
             _shell.Verify(s => s.CopyContentAsync(
-                It.Is<string>(content => content.TrimEnd().EndsWith("  wayrdp-pkg.tar.gz")),
-                It.Is<string>(g => g == "/tmp/wayrdp-pkg.sha256"),
+                It.Is<string>(content => Regex.IsMatch(content.TrimEnd(), @"^\S+  wayrdp-pkg_[0-9a-f]{32}\.tar\.gz$")),
+                It.Is<string>(g => g.StartsWith("/tmp/wayrdp-pkg_") && g.EndsWith(".tar.gz.sha256")),
+                It.IsAny<CancellationToken>()), Times.Once);
+
+            // ...and both per-deploy paths are injected into the script via
+            // placeholders, so the script reads exactly the files that were
+            // scp'd (never a predictable /tmp name).
+            _shell.Verify(s => s.CopyContentAsync(
+                It.Is<string>(content => !content.Contains("__WAYRDP_PKG_TARBALL__")
+                                         && !content.Contains("__WAYRDP_PKG_SHA256_FILE__")
+                                         && content.Contains("WAYRDP_PKG_TARBALL=")),
+                It.Is<string>(p => p.StartsWith("/tmp/install_wayrdp_") && p.EndsWith(".sh")),
                 It.IsAny<CancellationToken>()), Times.Once);
 
             // The run command hardens perms, captures the exit code so cleanup
