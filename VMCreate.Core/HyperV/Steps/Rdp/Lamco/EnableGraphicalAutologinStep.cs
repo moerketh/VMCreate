@@ -75,7 +75,10 @@ namespace VMCreate
             logger.LogInformation("Enabling graphical Wayland autologin for user '{User}' on VM {VMName}", autologinUser, shell.VmName);
 
             string script = ScriptResourceLoader.Load("enable_autologin.sh")
-                .Replace("__AUTOLOGIN_USER__", autologinUser);
+                .Replace("__AUTOLOGIN_USER__", autologinUser)
+                .Replace("__RDP_BACKEND__", customizations?.RdpBackend == RdpBackend.Wayrdp
+                    ? "wayrdp"
+                    : "lamco");
 
             // /tmp hardening: unpredictable path (host-generated GUID) +
             // root:0700 before execution — see InstallLamcoRdpStep for the

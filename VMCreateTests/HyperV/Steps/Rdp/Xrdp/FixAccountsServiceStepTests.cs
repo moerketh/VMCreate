@@ -117,7 +117,7 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
-        public void IsApplicable_TrueExceptForLamcoBackend()
+        public void IsApplicable_FalseForWaylandNativeBackends()
         {
             // AccountsService XSession Wayland-to-X11 rewrite is xrdp-only; Lamco keeps Wayland.
             Assert.IsTrue(_step.IsApplicable(null, null));
@@ -125,6 +125,7 @@ namespace VMCreate.Tests.HyperV.Steps
             Assert.IsTrue(_step.IsApplicable(new GalleryItem(), new VmCustomizations { RdpBackend = RdpBackend.Xrdp }));
             Assert.IsTrue(_step.IsApplicable(new GalleryItem(), new VmCustomizations { RdpBackend = RdpBackend.None }));
             Assert.IsFalse(_step.IsApplicable(new GalleryItem(), new VmCustomizations { RdpBackend = RdpBackend.Lamco }));
+            Assert.IsFalse(_step.IsApplicable(new GalleryItem(), new VmCustomizations { RdpBackend = RdpBackend.Wayrdp }));
         }
     }
 }

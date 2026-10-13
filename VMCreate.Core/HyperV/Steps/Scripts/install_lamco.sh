@@ -550,15 +550,15 @@ frame_ack_timeout = 5000
 periodic_idr_interval = 5
 codec = "avc420"
 encoder_backend = "x264"
-# QUALITY PROFILE: qp 8-10 keeps near-lossless 1080p while letting the
-# encoder breathe on a 2-vCPU guest. (The old qp_min=1 forced
-# lossless-mode x264 for EVERY frame — combined with
+# QUALITY PROFILE: qp 20-28 (live-tested) keeps good 1080p fidelity while
+# roughly HALVING encoder CPU vs the old qp 8-10 on a 2-vCPU guest. (The older
+# qp_min=1 forced lossless-mode x264 for EVERY frame — combined with
 # damage_tracking.pixel_threshold=1's full-frame diff per frame at 1080p,
 # the encoder starved the very desktop it was encoding.) Adaptation is
 # ON so sustained load can climb to max_qp instead of dropping frames.
-qp_min = 8
-qp_max = 10
-qp_default = 9
+qp_min = 20
+qp_max = 28
+qp_default = 24
 avc444_aux_bitrate_ratio = 1.0
 color_matrix = "identity"
 color_range = "full"
@@ -571,9 +571,10 @@ avc444_force_aux_idr_on_return = false
 [egfx.encoding_adaptation]
 # ON for the default profile: raises QP under sustained encoder load so a
 # small guest CPU trades fidelity for frame rate instead of stalling.
+# Floor/ceiling track the [egfx] qp 20-28 profile above.
 enabled = true
-base_qp = 9
-min_qp = 8
+base_qp = 24
+min_qp = 20
 max_qp = 42
 evaluation_interval_ms = 500
 moderate_queue_threshold = 3
@@ -581,7 +582,9 @@ severe_queue_threshold = 6
 
 [damage_tracking]
 enabled = true
-method = "diff"
+# "recommended" (live-tested) lets the server pick its best damage backend for
+# the platform, cutting CPU vs the explicit full-frame "diff" walker.
+method = "recommended"
 tile_size = 16
 diff_threshold = 0.01
 # 100 (not 1): pixel_threshold=1 meant even a single changed pixel marked a

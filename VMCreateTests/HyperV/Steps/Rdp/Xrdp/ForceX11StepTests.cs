@@ -209,7 +209,7 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
-        public void IsApplicable_TrueExceptForLamcoBackend()
+        public void IsApplicable_FalseForWaylandNativeBackends()
         {
             // Default (Xrdp) and None still force X11 for Hyper-V hyperv_drm stability;
             // only the Wayland-native Lamco backend skips this step.
@@ -218,6 +218,7 @@ namespace VMCreate.Tests.HyperV.Steps
             Assert.IsTrue(_step.IsApplicable(new GalleryItem(), new VmCustomizations { RdpBackend = RdpBackend.Xrdp }));
             Assert.IsTrue(_step.IsApplicable(new GalleryItem(), new VmCustomizations { RdpBackend = RdpBackend.None }));
             Assert.IsFalse(_step.IsApplicable(new GalleryItem(), new VmCustomizations { RdpBackend = RdpBackend.Lamco }));
+            Assert.IsFalse(_step.IsApplicable(new GalleryItem(), new VmCustomizations { RdpBackend = RdpBackend.Wayrdp }));
         }
     }
 }

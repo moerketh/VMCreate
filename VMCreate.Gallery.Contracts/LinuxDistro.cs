@@ -75,10 +75,11 @@ namespace VMCreate
         /// <summary>
         /// Returns true if the wayrdp backend is targetable on this
         /// distribution. wayrdp is the project's own MIT Wayland-native RDP
-        /// server on FreeRDP 3; its packaging line follows the same amd64
-        /// Debian-deb lineage as the Lamco fork, so the supported set is
-        /// identical for now. (During Phase 0 the install step fails loudly
-        /// regardless of distro — see <c>install_wayrdp.sh</c>.)
+        /// server on FreeRDP 3; its supported set tracks the Lamco set
+        /// (Debian-family via libfreerdp3 runtime libs, Arch-family via the
+        /// <c>freerdp</c> package). The package is delivered host-side as a
+        /// locally-built tarball (the wayrdp repo is private — no anonymous
+        /// curl flow like the Lamco fork) and installed to /usr/local.
         /// </summary>
         public static bool SupportsWayrdp(this LinuxDistro distro) =>
             distro.SupportsLamco();

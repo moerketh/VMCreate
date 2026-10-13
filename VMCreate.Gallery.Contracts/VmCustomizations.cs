@@ -125,6 +125,20 @@ namespace VMCreate
         public string? DesktopEnvironmentId { get; set; }
 
         /// <summary>
+        /// Optional host path to a locally-built wayrdp release tarball
+        /// (<c>wayrdp-&lt;ver&gt;-linux-x86_64.tar.gz</c>, produced by
+        /// <c>scripts/build-package.sh</c> in the wayrdp repo). Only used when
+        /// <see cref="RdpBackend"/> is <see cref="RdpBackend.Wayrdp"/>: the private
+        /// wayrdp repo has no public release asset, so the guest cannot fetch a
+        /// package over the network and the host scp's this tarball instead.
+        /// When null/empty, the step looks for a tarball under the wayrdp repo's
+        /// <c>dist/release/</c> next to nothing is uploaded and the guest script
+        /// fails loudly (same fail-fast contract). When wayrdp ships a public
+        /// release this becomes a pinned URL and this host-path fallback goes away.
+        /// </summary>
+        public string? WayrdpPackagePath { get; set; }
+
+        /// <summary>
         /// Per-distribution options selected by the user on the customization page.
         /// Order is preserved so the deployment UI can show cards in the intended sequence.
         /// </summary>

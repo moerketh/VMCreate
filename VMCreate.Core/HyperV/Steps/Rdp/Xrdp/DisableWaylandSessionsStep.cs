@@ -35,8 +35,16 @@ namespace VMCreate
         public int Order => 270;
         public string? ProgressPhaseId => "Sub_DisableWaylandSessions";
 
+        // xrdp/X11-path only: hiding the Wayland .desktop files breaks
+        // Wayland-native backends — for wayrdp (Hyprland), uwsm resolves its
+        // launcher ("hyprland.desktop") by desktop id and sddm autologin then
+        // dies on cold boot ("uwsm: Could not find entry"), leaving the VM at
+        // the greeter with no Hyprland and no wayrdp/vsock listener for
+        // vmconnect. Lamco/wayrdp keep the session files; None/Auto preserve
+        // the historical default-path behavior.
         public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
-            => customizations?.RdpBackend != RdpBackend.Lamco;
+            => customizations?.RdpBackend is not RdpBackend.Lamco
+                                      and not RdpBackend.Wayrdp;
 
         public async Task ExecuteAsync(IGuestShell shell, GalleryItem item, VmCustomizations customizations, ILogger logger, CancellationToken ct)
         {

@@ -18,7 +18,7 @@ namespace VMCreate
 
         private string _vmName = "";
         private int _memoryMB = 4096;
-        private int _cpuCount = 2;
+        private int _cpuCount = 4;
         private bool _virtualizationEnabled = true;
         private bool _replacePreviousVm;
         private string _newDriveSizeText = "";
