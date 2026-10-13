@@ -44,6 +44,21 @@ namespace VMCreate.Tests.GalleryTests
         }
 
         [TestMethod]
+        public void IsVisibleFor_ExcludesBlackArchOnOmarchy()
+        {
+            // The BlackArch-on-Omarchy twin carries both tags but keeps Hyprland —
+            // offering the desktop-switch catalog there would replace its desktop.
+            var item = new GalleryItem
+            {
+                Name = "BlackArch on Omarchy",
+                LinuxDistro = LinuxDistro.Arch,
+                Tags = new List<string> { "omarchy", "blackarch" }
+            };
+            Assert.IsFalse(_catalog.IsVisibleFor(item),
+                "BlackArch-on-Omarchy keeps Hyprland; the catalog applies to the headless Arch twin only");
+        }
+
+        [TestMethod]
         public void Catalog_UsesPacmanAndShipsNoDesktopPlusThreeDesktops()
         {
             Assert.AreEqual(DesktopPackageManager.Pacman, _catalog.PackageManager,

@@ -64,7 +64,7 @@ fi
 # A missing or failed individual package must not fail the deployment — the
 # repo and core group are in place. Track failure to report 'degraded'.
 degraded=0
-for pkg in nmap wireshark-qt metasploit burpsuite john hashcat sqlmap aircrack-ng hydra; do
+for pkg in nmap wireshark-qt metasploit burpsuite john hashcat sqlmap aircrack-ng hydra nuclei; do
     if ! pacman -S --noconfirm --needed "$pkg"; then
         echo "WARN: failed to install $pkg (continuing)." >&2
         degraded=1

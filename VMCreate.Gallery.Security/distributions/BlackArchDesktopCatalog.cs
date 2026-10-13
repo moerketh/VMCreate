@@ -91,9 +91,13 @@ namespace VMCreate.Gallery
 
         private static readonly List<DesktopEnvironmentOption> All = new() { NoDesktop, Xfce, Kde, Gnome };
 
-        /// <summary>Applies only to the BlackArch gallery item (plain Arch carries no catalog).</summary>
+        /// <summary>
+        /// Applies only to the BlackArch gallery item (plain Arch carries no catalog).
+        /// The BlackArch-on-Omarchy item also carries the <c>blackarch</c> tag but keeps
+        /// Omarchy's Hyprland desktop, so it is excluded — it never switches desktops.
+        /// </summary>
         public bool IsVisibleFor(GalleryItem? item)
-            => item.HasTag("blackarch");
+            => item.HasTag("blackarch") && !item.HasTag("omarchy");
 
         /// <summary>The Arch base is headless, so the default installs no desktop.</summary>
         public DesktopEnvironmentOption? Default => NoDesktop;
