@@ -433,29 +433,21 @@ fi
 run_as_user systemctl --user daemon-reload 2>/dev/null || true
 run_as_user systemctl --user enable wayrdp.service 2>/dev/null || true
 
-# graphical-session.target is not guaranteed under Hyprland (Omarchy starts
-# wayrdp-class units from an autostart hook because the target may never
-# activate). Mirror install_lamco.sh: add an exec_on_start hook to Hyprland's
-# autostart.lua so the unit starts with the session.
-HYPRLAND_CONF_HOME="$(getent passwd "$AUTOLOGIN_USER" | cut -d: -f6)/.config/hypr"
-if [ -d "$HYPRLAND_CONF_HOME" ] || command -v hyprctl >/dev/null 2>&1; then
-    AUTO_LUA="$HYPRLAND_CONF_HOME/autostart.lua"
-    mkdir -p "$HYPRLAND_CONF_HOME" 2>/dev/null || true
-    if ! grep -q "wayrdp.service" "$AUTO_LUA" 2>/dev/null; then
-        cat >> "$AUTO_LUA" <<'AUTO_LUA_EOF'
--- wayrdp autostart (added by VMCreate install_wayrdp.sh): Hyprland may not
--- raise graphical-session.target, so start the wayrdp user unit directly.
--- Race guard: exec_on_start fires before Hyprland owns the Wayland socket,
--- and wayrdp's backend has no retry — a pump started too early fails with
--- "Could not find wayland compositor" and the peer gets a black screen until
--- the unit is restarted. Poll for the socket first.
-o.exec_on_start("dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP HYPRLAND_INSTANCE_SIGNATURE")
-o.exec_on_start("sh -c 'for i in $(seq 1 40); do [ -S \"$XDG_RUNTIME_DIR/wayland-1\" ] || [ -S \"$XDG_RUNTIME_DIR/wayland-0\" ] && break; sleep 0.25; done; systemctl --user start wayrdp.service'")
-AUTO_LUA_EOF
-        chown "$AUTOLOGIN_USER":"$AUTOLOGIN_USER" "$AUTO_LUA" 2>/dev/null || true
-        echo "Wrote wayrdp autostart hook to $AUTO_LUA."
-    fi
+# Boot model (decision 2026-10-13): keep the stable socket-guarded autostart.
+# Omarchy boots Hyprland WITHOUT UWSM ("started without start-hyprland"), so
+# systemd never raises graphical-session.target (every omarchy-* session unit
+# is dormant for the same reason). Wayrdp therefore must NOT order itself
+# behind that target — it can only be activated by dependency (RefuseManualStart)
+# and nothing raises it. Wayrdp instead starts from Hyprland's autostart.lua
+# after the Wayland socket exists (main's exec_on_start hook, downstream).
+# Strip the stale BindsTo=graphical-session.target drop-in if an earlier
+# experiment wrote one, so it no longer gates starting.
+ORDER_DROPIN="$AUTO_DROPIN_DIR/order.conf"
+if [ -f "$ORDER_DROPIN" ]; then
+    rm -f "$ORDER_DROPIN" 2>/dev/null || true
+    echo "Removed stale order.conf (graphical-session.target gate); socket-guarded autostart owns start."
 fi
+run_as_user systemctl --user daemon-reload 2>/dev/null || true
 
 # -- Defang Omarchy start-hyprland's silent --safe-mode fallback -----------
 # Omarchy's /usr/bin/start-hyprland forks Hyprland behind a watchdog pipe and,
