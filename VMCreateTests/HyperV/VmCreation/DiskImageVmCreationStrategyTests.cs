@@ -31,6 +31,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
         private Mock<IPostBootCustomizationService> _postBootService = null!;
         private Mock<IHostNetworkService> _hostNetworkService = null!;
         private Mock<IIsoBootCycleRunner> _isoBootRunner = null!;
+        private Mock<IGuestShell> _shell = null!;
         private DiskImageVmCreationStrategy _strategy = null!;
         private VmSettings _vmSettings = null!;
         private VmDeploymentPlan _plan = null!;
@@ -85,12 +86,16 @@ namespace VMCreate.Tests.HyperV.VmCreation
             _sshKeyManager.Setup(s => s.EnsureKeyPairAsync(It.IsAny<CancellationToken>()))
                 .ReturnsAsync("ssh-ed25519 AAAAC3Nzatest vmcreate@test");
 
-            var shell = new Mock<IGuestShell>();
-            shell.Setup(s => s.WaitForReadyAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
-            _guestShellFactory.Setup(f => f.Create(It.IsAny<string>(), It.IsAny<string>())).Returns(shell.Object);
+            // Shared guest shell mock: tests can setup RunCommandAsync for
+            // witness probes (KVP gate timeout) and shell-dependent steps.
+            _shell = new Mock<IGuestShell>();
+            _shell.Setup(s => s.WaitForReadyAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+            _guestShellFactory.Setup(f => f.Create(It.IsAny<string>(), It.IsAny<string>())).Returns(_shell.Object);
             _sshKeyManager.Setup(s => s.GetPrivateKeyPath(It.IsAny<string>())).Returns("C:\\Users\\Test\\.ssh\\id_rsa");
 
             // KVP heartbeat gate: pass-through default (guest daemon alive).
+            // Loose mocks also produce a null LastDiagnostics — the strategy
+            // must tolerate that.
             _kvpHeartbeatGate.Setup(g => g.WaitForGuestKvpAsync(
                 It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<int>(), It.IsAny<int>()))
                 .ReturnsAsync(true);
@@ -214,7 +219,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
             Name = "Elastic SIEM",
             Publisher = "t",
             Description = "t",
-            DiskUri = "https://x/Rocky-10-GenericCloud-Base.latest.x86_64.qcow2",
+            DiskUri = "https://x/Rocky-10-Azure-Base.latest.x86_64.vhdfixed.xz",
             SecureBoot = "false",
             EnhancedSessionTransportType = "HvSocket",
             Version = "Rocky 10",
@@ -332,23 +337,39 @@ namespace VMCreate.Tests.HyperV.VmCreation
         }
 
         [TestMethod]
-        public async Task CreateVMAsync_KvpHeartbeatNotConfirmed_ThrowsAndSkipsPostBoot()
+        public async Task CreateVMAsync_KvpHeartbeatNotConfirmed_WitnessSaysDaemonDead_ThrowsAndSkipsPostBoot()
         {
             // The quickspawn bug class: SSH answers but the guest's KVP
-            // daemon was never started. The gate must fail the deployment
-            // with diagnostics instead of running post-boot steps into a
-            // dead integration stack.
+            // daemon was never started. The witness probe over SSH confirms
+            // the daemon is truly absent in the guest — the gate must fail
+            // the deployment with both naming schemes and guest diagnostics,
+            // instead of running post-boot steps into a dead integration stack.
             _kvpHeartbeatGate.Setup(g => g.WaitForGuestKvpAsync(
                 It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<int>(), It.IsAny<int>()))
                 .ReturnsAsync(false);
+            _kvpHeartbeatGate.SetupGet(g => g.LastDiagnostics).Returns(new KvpGateDiagnostics
+            {
+                StartedUtc = DateTime.UtcNow.AddSeconds(-420),
+                PollCount = 210,
+                VmGuidResolved = true,
+                PoolReadCount = 210
+            });
+            _shell.Setup(s => s.RunCommandAsync(
+                It.Is<string>(cmd => cmd.Contains("pgrep", StringComparison.Ordinal)),
+                It.IsAny<CancellationToken>()))
+                .ReturnsAsync("VMCREATE_KVP_DAEMON_ABSENT\n");
             _diagnosticsCollector.Setup(d => d.CollectAsync(
                 It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()))
-                .ReturnsAsync(new GuestDiagnostics { RawOutput = "hv_kvp_daemon: inactive (dead)" });
+                .ReturnsAsync(new GuestDiagnostics { RawOutput = "hypervkvpd: inactive (dead)" });
 
             var ex = await Assert.ThrowsAsync<InvalidOperationException>(
                 () => ExecuteAsync(generation: 2));
 
-            StringAssert.Contains(ex.Message, "hv_kvp_daemon", StringComparison.Ordinal);
+            StringAssert.Contains(ex.Message, "hv_kvp_daemon", StringComparison.Ordinal,
+                "RHEL/Debian binary name must be named for the fix hint");
+            StringAssert.Contains(ex.Message, "hypervkvpd", StringComparison.Ordinal,
+                "RHEL-class unit name must be named for the fix hint");
+            StringAssert.Contains(ex.Message, "TestVM", StringComparison.Ordinal);
             _postBootService.Verify(p => p.RunLinuxPostBootAsync(
                 It.IsAny<IGuestShell>(), It.IsAny<VmDeploymentPlan>(), It.IsAny<GalleryItem>(),
                 It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(),
@@ -357,13 +378,83 @@ namespace VMCreate.Tests.HyperV.VmCreation
             _diagnosticsCollector.Verify(d => d.CollectAsync(
                 It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()), Times.Once,
                 "failure path must collect guest diagnostics for the log");
+            _shell.Verify(s => s.RunCommandAsync(
+                It.Is<string>(cmd => cmd.Contains("pgrep", StringComparison.Ordinal)),
+                It.IsAny<CancellationToken>()), Times.Once,
+                "the witness probe must have distinguished dead-daemon from host lag");
         }
 
         [TestMethod]
-        public async Task CreateVMAsync_IntegrationServicesDisabled_SkipsHeartbeatGate()
+        public async Task CreateVMAsync_KvpPoolsLagButDaemonRunning_WitnessRescuesAndRunsPostBoot()
         {
-            // Opting out of integration services also opts out of the gate —
-            // the user explicitly accepted a degraded integration stack.
+            // Host-side first-boot pool materialization lag (proven live:
+            // daemon answering seconds after SSH, pools empty >120 s): the
+            // witness probe finds the daemon alive, so the deployment must
+            // proceed instead of failing a verifiably healthy guest.
+            _kvpHeartbeatGate.Setup(g => g.WaitForGuestKvpAsync(
+                It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<int>(), It.IsAny<int>()))
+                .ReturnsAsync(false);
+            _kvpHeartbeatGate.SetupGet(g => g.LastDiagnostics).Returns(new KvpGateDiagnostics
+            {
+                StartedUtc = DateTime.UtcNow.AddSeconds(-420),
+                PollCount = 210,
+                VmGuidResolved = true,
+                PoolReadCount = 210
+            });
+            _shell.Setup(s => s.RunCommandAsync(
+                It.Is<string>(cmd => cmd.Contains("pgrep", StringComparison.Ordinal)),
+                It.IsAny<CancellationToken>()))
+                .ReturnsAsync("VMCREATE_KVP_DAEMON_RUNNING\n");
+            _postBootService.Setup(s => s.HasLinuxPostBootSteps(_item, _customizations)).Returns(true);
+
+            await ExecuteAsync(generation: 2);
+
+            _postBootService.Verify(p => p.RunLinuxPostBootAsync(
+                It.IsAny<IGuestShell>(), It.IsAny<VmDeploymentPlan>(), It.IsAny<GalleryItem>(),
+                It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(),
+                It.IsAny<CancellationToken>()), Times.Once,
+                "a verifiably healthy guest must proceed through post boot");
+            _diagnosticsCollector.Verify(d => d.CollectAsync(
+                It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()), Times.Never,
+                "the rescue path is a warning, not a failure — no diagnostics collection");
+            _shell.Verify(s => s.RunCommandAsync(
+                It.Is<string>(cmd => cmd.Contains("pgrep", StringComparison.Ordinal)),
+                It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [TestMethod]
+        public async Task CreateVMAsync_KvpHeartbeatNotConfirmed_WitnessProbeFails_Throws()
+        {
+            // The witness probe itself failing (transport error, non-zero
+            // exit) must never rescue the deployment — unconfirmed means
+            // fail, so a broken probe degrades to the strict gate behavior.
+            _kvpHeartbeatGate.Setup(g => g.WaitForGuestKvpAsync(
+                It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<int>(), It.IsAny<int>()))
+                .ReturnsAsync(false);
+            _shell.Setup(s => s.RunCommandAsync(
+                It.Is<string>(cmd => cmd.Contains("pgrep", StringComparison.Ordinal)),
+                It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new TimeoutException("connection reset by peer"));
+            _diagnosticsCollector.Setup(d => d.CollectAsync(
+                It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()))
+                .ReturnsAsync(new GuestDiagnostics { RawOutput = "[no output]" });
+
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => ExecuteAsync(generation: 2));
+
+            StringAssert.Contains(ex.Message, "hypervkvpd", StringComparison.Ordinal);
+            _postBootService.Verify(p => p.RunLinuxPostBootAsync(
+                It.IsAny<IGuestShell>(), It.IsAny<VmDeploymentPlan>(), It.IsAny<GalleryItem>(),
+                It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(),
+                It.IsAny<CancellationToken>()), Times.Never);
+        }
+
+        [TestMethod]
+        public async Task CreateVMAsync_IntegrationServicesDisabled_SkipsHeartbeatGateAndWitness()
+        {
+            // Opting out of integration services also opts out of the gate
+            // and its witness — the user explicitly accepted a degraded
+            // integration stack.
             _customizations.EnableIntegrationServices = false;
             _kvpHeartbeatGate.Setup(g => g.WaitForGuestKvpAsync(
                 It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<int>(), It.IsAny<int>()))
@@ -373,6 +464,10 @@ namespace VMCreate.Tests.HyperV.VmCreation
 
             _kvpHeartbeatGate.Verify(g => g.WaitForGuestKvpAsync(
                 It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<int>(), It.IsAny<int>()), Times.Never);
+            _shell.Verify(s => s.RunCommandAsync(
+                It.Is<string>(cmd => cmd.Contains("pgrep", StringComparison.Ordinal)),
+                It.IsAny<CancellationToken>()), Times.Never,
+                "the witness probe must not run when integration services are disabled");
         }
 
         private async Task ExecuteAsync(int generation)

@@ -14,9 +14,10 @@ namespace VMCreate
     public class DiskFileDetector
     {
         // Ordered by preference — VMDK and QCOW2 first (most common OVA/archive contents),
-        // then native Hyper-V formats, then ISO.
+        // then native Hyper-V formats, then ISO. ".vhdfixed" covers Rocky's
+        // Hyper-V/Azure cloud images (…-Base.latest.x86_64.vhdfixed.xz).
         private static readonly string[] DiskExtensions =
-            { ".vmdk", ".qcow2", ".vhdx", ".vhd", ".iso" };
+            { ".vmdk", ".qcow2", ".vhdx", ".vhdfixed", ".vhd", ".iso" };
 
         private static readonly string[] ArchiveExtensions =
             { ".ova", ".zip", ".7z", ".tar", ".gz", ".xz", ".rar" };
@@ -90,6 +91,7 @@ namespace VMCreate
                 ".vmdk" => DiskImageFormat.Vmdk,
                 ".qcow2" => DiskImageFormat.Qcow2,
                 ".vhdx" => DiskImageFormat.Vhdx,
+                ".vhdfixed" => DiskImageFormat.Vhd,
                 ".vhd" => DiskImageFormat.Vhd,
                 ".iso" => DiskImageFormat.Iso,
                 _ => DiskImageFormat.Other

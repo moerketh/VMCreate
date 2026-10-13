@@ -44,7 +44,7 @@ namespace VMCreate.Tests.GalleryTests
         [TestMethod]
         public async Task LoadGalleryItems_ReturnsApplianceItemWithCloudInitTag()
         {
-            var html = "<a href=\"Rocky-10-GenericCloud-Base-10.2-20260525.0.x86_64.qcow2\">x</a>";
+            var html = "<a href=\"Rocky-10-Azure-Base-10.2-20260525.0.x86_64.vhdfixed.xz\">x</a>";
             var items = await new ElasticSiem(FactoryReturning(html)).LoadGalleryItems();
 
             Assert.AreEqual(1, items.Count);
@@ -60,13 +60,15 @@ namespace VMCreate.Tests.GalleryTests
         [TestMethod]
         public async Task LoadGalleryItems_PicksNewestVersionFromFileNames()
         {
-            var html = "<a href=\"Rocky-10-GenericCloud-Base-10.2-20260401.0.x86_64.qcow2\">x</a>" +
-                       "<a href=\"Rocky-10-GenericCloud-Base-10.2-20260525.0.x86_64.qcow2\">x</a>" +
-                       "<a href=\"Rocky-10-GenericCloud-LVM-10.2-20260525.0.x86_64.qcow2\">x</a>";
+            var html = "<a href=\"Rocky-10-Azure-Base-10.2-20260401.0.x86_64.vhdfixed.xz\">x</a>" +
+                       "<a href=\"Rocky-10-Azure-Base-10.2-20260525.0.x86_64.vhdfixed.xz\">x</a>" +
+                       "<a href=\"Rocky-10-Azure-LVM-10.2-20260525.0.x86_64.vhdfixed.xz\">x</a>" +
+                       "<a href=\"Rocky-10-GenericCloud-Base-10.2-20260525.0.x86_64.qcow2\">x</a>";
             var item = (await new ElasticSiem(FactoryReturning(html)).LoadGalleryItems())[0];
 
             StringAssert.Contains(item.Version, "10.2-20260525.0");
-            // The LVM variant must not leak into the Base version scrape.
+            // The LVM variant and the KVM-flavour GenericCloud must not leak
+            // into the Azure-Base version scrape.
         }
 
         [TestMethod]
@@ -76,8 +78,9 @@ namespace VMCreate.Tests.GalleryTests
             var item = (await new ElasticSiem(FactoryReturning("")).LoadGalleryItems())[0];
 
             StringAssert.Contains(item.Version, "unknown");
-            Assert.IsTrue(item.DiskUri.EndsWith("Rocky-10-GenericCloud-Base.latest.x86_64.qcow2", StringComparison.Ordinal));
+            Assert.IsTrue(item.DiskUri.EndsWith("Rocky-10-Azure-Base.latest.x86_64.vhdfixed.xz", StringComparison.Ordinal));
             Assert.IsTrue(item.ChecksumUri.EndsWith(".CHECKSUM", StringComparison.Ordinal));
+            Assert.IsTrue(item.NeedsExtraction, "the .xz wrapper must trigger extraction");
         }
 
         // ── Step gating ─────────────────────────────────────────────────────────
@@ -261,6 +264,57 @@ namespace VMCreate.Tests.GalleryTests
         }
 
         [TestMethod]
+        public void BuildScript_KibanaConfigReadableByKibanaUserAndPointsAtEsTls()
+        {
+            // Live E2E #2 on the Rocky appliance: `chmod 600` on a fresh
+            // root:root kibana.yml made the kibana service user unable to
+            // read its own config (FATAL EACCES). Vendor default is
+            // root:kibana 0660. ES 9.x ships http TLS on, so kibana.yml
+            // must also specify https hosts + the CA. The CA lives in
+            // /etc/elasticsearch/certs (root:elasticsearch 0750) which the
+            // kibana user cannot traverse — hence the copy into /etc/kibana.
+            var script = ElasticStackInstaller.BuildScriptForTest(false, false, "", "", "");
+
+            StringAssert.Contains(script, "chown root:kibana /etc/kibana/kibana.yml", StringComparison.Ordinal);
+            StringAssert.Contains(script, "chmod 0660 /etc/kibana/kibana.yml", StringComparison.Ordinal);
+            Assert.IsFalse(script.Contains("chmod 600 /etc/kibana", StringComparison.Ordinal), "600 on kibana config is vendor-divergent and breaks the kibana user");
+            StringAssert.Contains(script, "elasticsearch.hosts: [\"https://localhost:9200\"]", StringComparison.Ordinal);
+            StringAssert.Contains(script, "elasticsearch.ssl.certificateAuthorities: [\"/etc/kibana/http_ca.crt\"]", StringComparison.Ordinal);
+            StringAssert.Contains(script, "install -o root -g kibana -m 0640 /etc/elasticsearch/certs/http_ca.crt /etc/kibana/http_ca.crt", StringComparison.Ordinal);
+        }
+
+        [TestMethod]
+        public void BuildScript_HeapOptionsUseSafePrintfForm()
+        {
+            // `printf "-Xms${X}m\n…"` treats the leading-dash format string
+            // as an option ('printf: -X: invalid option', observed live) and
+            // silently writes an empty jvm options file. The '%s\n' form
+            // cannot be misread.
+            var script = ElasticStackInstaller.BuildScriptForTest(false, false, "", "", "");
+
+            StringAssert.Contains(script, "printf '%s\\n' \"-Xms${HEAP_MB}m\" \"-Xmx${HEAP_MB}m\"", StringComparison.Ordinal);
+            Assert.IsFalse(script.Contains("printf \"-Xms", StringComparison.Ordinal), "leading-dash printf format is parsed as an option by bash");
+        }
+
+        [TestMethod]
+        public void BuildScript_IsCrLfFree_GuestBashRequiresLf()
+        {
+            // The script is composed with AppendLine (CRLF on Windows) and
+            // runs under guest bash, which treats '\r' as part of the command
+            // ('set: pipefail\r: invalid option name' — observed live on the
+            // Rocky appliance E2E). Both branches (AI on/off) must be LF-only.
+            foreach (var script in new[]
+            {
+                ElasticStackInstaller.BuildScriptForTest(false, false, "", "", ""),
+                ElasticStackInstaller.BuildScriptForTest(true, true, "https://llm/v1/chat/completions", "key", "model"),
+            })
+            {
+                Assert.IsFalse(script.Contains('\r'),
+                    "guest script must not contain CR bytes — bash renders them as part of the command");
+            }
+        }
+
+        [TestMethod]
         public void BuildScript_BashSyntax_ValidWhenWslAvailable()
         {
             // WSL gives us a real bash for a syntax check (bash -n) on dev
@@ -274,7 +328,10 @@ namespace VMCreate.Tests.GalleryTests
 
             var script = ElasticStackInstaller.BuildScriptForTest(true, true, "https://llm/v1/chat/completions", "key", "model");
             var temp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"elastic-setup-{Guid.NewGuid():N}.sh");
-            System.IO.File.WriteAllText(temp, script.Replace("\r\n", "\n"));
+            // No CRLF normalization here — the temp file must be byte-identical
+            // to what the guest receives. bash -n on CRLF text fails exactly
+            // like the guest did ("set: pipefail\r: invalid option name").
+            System.IO.File.WriteAllText(temp, script);
 
             try
             {
@@ -297,6 +354,135 @@ namespace VMCreate.Tests.GalleryTests
             {
                 try { System.IO.File.Delete(temp); } catch { }
             }
+        }
+
+        [TestMethod]
+        public void BuildScript_FleetChain_MatchesLiveProvenSequence()
+        {
+            // The fleet section encodes five live-validated fixes from the
+            // E2E #3 rig (Rocky 10 / Elastic 9.x):
+            //   1. rpm flavor "servers" — the default flavor drops the
+            //      fleet-server binary (elastic/elastic-agent#6542).
+            //   2. service_tokens perms — ES 9.x ships root:root 0600, which
+            //      401s every Fleet API call until chown/chmod.
+            //   3. kibana encryption keys — without them Fleet APIs 503
+            //      until three keys + agents.enabled + restart.
+            //   4. has_fleet_server:true on the fleet-server policy — the
+            //      agent stalls "Waiting on default policy" otherwise.
+            //   5. enrollment token via the Kibana enrollment_api_keys API —
+            //      `elasticsearch-create-enrollment-token` is invalid 9.x
+            //      usage in this flow.
+            var script = ElasticStackInstaller.BuildScriptForTest(false, false, "", "", "");
+
+            // Defect #1 — flavor must be set before the install line runs.
+            var flavorPos = script.IndexOf("export ELASTIC_AGENT_FLAVOR=servers", StringComparison.Ordinal);
+            var installPos = script.IndexOf("elastic-agent\"", StringComparison.Ordinal);
+            Assert.IsTrue(flavorPos >= 0, "flavor export missing");
+            Assert.IsTrue(installPos >= 0, "package install line missing");
+            Assert.IsTrue(flavorPos < installPos, "flavor must be exported before the agent package installs");
+
+            // Defect #2 — perms fix before token creation.
+            var permsPos = script.IndexOf("chmod 0660 /etc/elasticsearch/service_tokens", StringComparison.Ordinal);
+            var tokenPos = script.IndexOf("elasticsearch-service-tokens create", StringComparison.Ordinal);
+            Assert.IsTrue(permsPos >= 0, "service_tokens perms fix missing");
+            Assert.IsTrue(tokenPos > permsPos, "token create must run after the perms fix");
+
+            // Defect #3 — kibana encryption keys + fleet agents toggled on.
+            StringAssert.Contains(script, "xpack.encryptedSavedObjects.encryptionKey:", StringComparison.Ordinal);
+            StringAssert.Contains(script, "xpack.security.encryptionKey:", StringComparison.Ordinal);
+            StringAssert.Contains(script, "xpack.reporting.encryptionKey:", StringComparison.Ordinal);
+            StringAssert.Contains(script, "xpack.fleet.agents.enabled: true", StringComparison.Ordinal);
+
+            // Fleet setup is retried via HTTP status code, not HTTPie output.
+            StringAssert.Contains(script, "curl -s --max-time 30 -o /opt/vmcreate-elastic/fleet-setup.json -w '%{http_code}'", StringComparison.Ordinal);
+            StringAssert.Contains(script, "/api/fleet/setup", StringComparison.Ordinal);
+
+            // Defect #4 — the default fleet-server policy carries
+            // has_fleet_server, and enroll consumes it (no policy flag).
+            StringAssert.Contains(script, "\"has_fleet_server\":true", StringComparison.Ordinal);
+            StringAssert.Contains(script, "timeout 180 elastic-agent enroll --force", StringComparison.Ordinal);
+            StringAssert.Contains(script, "--fleet-server-service-token", StringComparison.Ordinal);
+
+            // Health gate: the API that actually exists. The obsolete probe
+            // URL may only ever appear inside a comment, never a command.
+            StringAssert.Contains(script, "https://localhost:8220/api/status", StringComparison.Ordinal);
+            foreach (var rawLine in script.Split('\n'))
+            {
+                var line = rawLine.Trim();
+                if (line.Contains("server-info", StringComparison.Ordinal))
+                {
+                    StringAssert.StartsWith(line, "#", "server-info is a 404 even when healthy — it must not be probed");
+                }
+            }
+
+            // Defect #5 — enrollment key comes from Kibana, not the ES CLI.
+            // This post embeds ${AGENT_POLICY_ID}, so unlike the single-quoted
+            // static bodies it uses double-quoted bash with escaped JSON.
+            StringAssert.Contains(script, "api/fleet/enrollment_api_keys", StringComparison.Ordinal);
+            StringAssert.Contains(script, "--data \"{\\\"policy_id\\\":\\\"${AGENT_POLICY_ID}\\\",\\\"name\\\":\\\"VMCreate Agent Enrollment\\\"}\"", StringComparison.Ordinal);
+            Assert.IsFalse(script.Contains("elasticsearch-create-enrollment-token", StringComparison.Ordinal), "9.x uses the Kibana enrollment_api_keys API");
+            Assert.IsFalse(script.Contains("--auto-register", StringComparison.Ordinal));
+
+            // The policy names pin the exact POST bodies.
+            StringAssert.Contains(script, "\"name\":\"VMCreate Fleet Server Policy\"", StringComparison.Ordinal);
+            StringAssert.Contains(script, "\"name\":\"VMCreate Agent Policy\"", StringComparison.Ordinal);
+        }
+
+        [TestMethod]
+        public void BuildScript_FleetChain_BestEffort_NotFatal()
+        {
+            // Fleet availability is a soft requirement: any failure must
+            // warn and continue to the AI block, never fail the VM. The
+            // prompt-free enrollment (no --non-interactive, --force) must
+            // still be protected against hanging the RunCommandAsync budget.
+            var script = ElasticStackInstaller.BuildScriptForTest(false, false, "", "", "");
+
+            Assert.IsFalse(script.Contains("--non-interactive", StringComparison.Ordinal), "enroll --force replaces the install prompt chain");
+            // `elastic-agent install` legitimately appears in the credentials
+            // line (client VMs enroll that way) — only the package-CLI-TUI
+            // `elastic-agent install --non-interactive` chain must be gone.
+            Assert.IsFalse(script.Contains("elastic-agent install --non-interactive", StringComparison.Ordinal));
+
+            // --force is valid only on enroll. The service-tokens create must
+            // be a plain create (live-proven: "--force is not a recognized
+            // option" on the service-tokens CLI in 9.x).
+            var createPos = script.IndexOf("elasticsearch-service-tokens create", StringComparison.Ordinal);
+            Assert.IsTrue(createPos > 0);
+            var createLineEnd = script.IndexOf('\n', createPos);
+            var createLine = script[createPos..createLineEnd];
+            Assert.IsFalse(createLine.Contains("--force", StringComparison.Ordinal), "service-tokens create --force is invalid in 9.x");
+
+            // Warnings only — fleet failures cascade into WARN lines, not fail().
+            var fleetStart = script.IndexOf("/api/fleet/setup", StringComparison.Ordinal);
+            Assert.IsTrue(fleetStart > 0, "fleet section not found");
+            var tail = script[fleetStart..];
+            var failCalls = System.Text.RegularExpressions.Regex.Matches(tail, @"\bfail\(\s*\)");
+            Assert.AreEqual(0, failCalls.Count, "fleet chain failures must warn, not fail()");
+        }
+
+        [TestMethod]
+        public void BuildScript_FleetChain_ConditionalCredentials()
+        {
+            // credentials.txt must only claim what was verified. Both lines
+            // live under the FLEET_HEALTHY gate; inside that block the fleet
+            // server address is always written, while the enrollment command
+            // is gated on AGENT_TOKEN having been successfully minted.
+            var script = ElasticStackInstaller.BuildScriptForTest(false, false, "", "", "");
+
+            var credPos = script.IndexOf("Fleet server:", StringComparison.Ordinal);
+            Assert.IsTrue(credPos > 0, "fleet server credentials line missing");
+            var credLineEnd = script.IndexOf('\n', credPos);
+            StringAssert.Contains(script[credPos..credLineEnd], "https://${GUEST_IP:-<vm-ip>}:8220", StringComparison.Ordinal);
+
+            var enrollPos = script.IndexOf("Agent enrollment:", StringComparison.Ordinal);
+            Assert.IsTrue(enrollPos > 0, "agent enrollment credentials line missing");
+            // The gate is a one-line guard on the SAME line, before the echo.
+            var lineStart = script.LastIndexOf('\n', enrollPos) + 1;
+            var enrollLineEnd = script.IndexOf('\n', enrollPos);
+            var enrollLine = script[lineStart..enrollLineEnd].Trim();
+            StringAssert.Contains(enrollLine, "elastic-agent install --url=https://${GUEST_IP:-<vm-ip>}:8220", StringComparison.Ordinal);
+            StringAssert.Contains(enrollLine, "--enrollment-token=${AGENT_TOKEN}", StringComparison.Ordinal);
+            StringAssert.StartsWith(enrollLine, "[ -n \"${AGENT_TOKEN:-}\" ]", StringComparison.Ordinal, "enrollment credentials line must be gated on the minted token");
         }
 
         private static string ToWslPath(string windowsPath)

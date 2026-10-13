@@ -7,7 +7,12 @@ namespace VMCreate
     /// <summary>
     /// Installs OpenVPN and the NetworkManager OpenVPN plugin on the guest.
     /// Auto-detects the package manager (apt, dnf, yum, pacman, zypper).
-    /// After install, restarts NetworkManager so the VPN plugin is loaded.
+    /// Best-effort: on distros where the packages are not in the enabled
+    /// repositories (e.g. RHEL-family EL10 needs EPEL), the deployment
+    /// continues and a warning is logged rather than the whole run failing
+    /// - mirroring DeployVpnConfigsStep, a convenience install must never
+    /// kill a deployment. After install, restarts NetworkManager so the
+    /// VPN plugin is loaded.
     /// </summary>
     public class InstallOpenVpnStep : ICustomizationStep
     {
@@ -15,7 +20,7 @@ namespace VMCreate
         public CustomizationPhase Phase => CustomizationPhase.PostBoot;
         public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 200;
-        public string? ProgressPhaseId => "Sub_InstallOpenVpn";
+        public string ProgressPhaseId => "Sub_InstallOpenVpn";
 
         public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
             => customizations?.InstallOpenVpn == true;
@@ -24,20 +29,29 @@ namespace VMCreate
         {
             logger.LogInformation("Installing OpenVPN and NetworkManager plugin on VM {VMName}", shell.VmName);
 
+            // Every branch neutralises its exit status: the SSH automation
+            // path treats non-zero guest exits as fatal for the deployment,
+            // and a missing optional package must not abort a VM build.
             string installCmd = @"
                 if command -v apt-get >/dev/null 2>&1; then
-                    sudo DEBIAN_FRONTEND=noninteractive apt-get update -y -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openvpn network-manager-openvpn network-manager-openvpn-gnome 2>&1
+                    sudo DEBIAN_FRONTEND=noninteractive apt-get update -y -qq 2>&1 || echo 'WARNING: apt update failed'
+                    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openvpn network-manager-openvpn network-manager-openvpn-gnome 2>&1 || echo 'WARNING: openvpn packages unavailable via apt'
                 elif command -v dnf >/dev/null 2>&1; then
-                    sudo dnf install -y -q openvpn NetworkManager-openvpn NetworkManager-openvpn-gnome 2>&1
+                    sudo dnf install -y -q epel-release 2>/dev/null && sudo dnf config-manager --set-enabled epel 2>/dev/null || true
+                    sudo dnf install -y -q openvpn NetworkManager-openvpn NetworkManager-openvpn-gnome 2>&1 \
+                        || sudo dnf install -y -q openvpn NetworkManager-openvpn 2>&1 \
+                        || echo 'WARNING: openvpn packages unavailable in enabled dnf repos (EPEL may be required on this distro)'
                 elif command -v yum >/dev/null 2>&1; then
-                    sudo yum install -y -q openvpn NetworkManager-openvpn NetworkManager-openvpn-gnome 2>&1
+                    sudo yum install -y -q epel-release 2>/dev/null || true
+                    sudo yum install -y -q openvpn NetworkManager-openvpn NetworkManager-openvpn-gnome 2>&1 \
+                        || sudo yum install -y -q openvpn NetworkManager-openvpn 2>&1 \
+                        || echo 'WARNING: openvpn packages unavailable in enabled yum repos (EPEL may be required on this distro)'
                 elif command -v pacman >/dev/null 2>&1; then
-                    sudo pacman -Sy --noconfirm openvpn networkmanager-openvpn 2>&1
+                    sudo pacman -Sy --noconfirm openvpn networkmanager-openvpn 2>&1 || echo 'WARNING: openvpn packages unavailable via pacman'
                 elif command -v zypper >/dev/null 2>&1; then
-                    sudo zypper install -y openvpn NetworkManager-openvpn NetworkManager-openvpn-gnome 2>&1
+                    sudo zypper --non-interactive install openvpn NetworkManager-openvpn 2>&1 || echo 'WARNING: openvpn packages unavailable via zypper'
                 else
-                    echo 'ERROR: Unknown package manager' >&2
-                    exit 1
+                    echo 'WARNING: unknown package manager - skipping OpenVPN install'
                 fi
             ";
 
@@ -47,10 +61,25 @@ namespace VMCreate
             // Restart NetworkManager to pick up the new OpenVPN plugin
             await shell.RunCommandAsync("sudo systemctl restart NetworkManager 2>&1 || true", ct);
 
-            // Verify
-            string verify = await shell.RunCommandAsync(
-                "command -v openvpn || /usr/sbin/openvpn --version 2>&1 | head -1", ct);
-            logger.LogInformation("OpenVPN installed: {Version}", verify?.Trim());
+            // Verify (also neutralised: the transport throws on non-zero exits)
+            string verify = await shell.RunCommandAsync(@"
+                if command -v openvpn >/dev/null 2>&1; then
+                    openvpn --version 2>&1 | head -1
+                else
+                    echo 'WARNING: openvpn binary not present after install'
+                fi
+            ", ct);
+
+            if (verify == null || verify.Contains("WARNING"))
+            {
+                logger.LogWarning(
+                    "OpenVPN packages are unavailable on this distro (VM {VMName}) - VPN imports in later steps will fail if openvpn stays missing. Output: {Output}",
+                    shell.VmName, (result + System.Environment.NewLine + verify)?.Trim());
+            }
+            else
+            {
+                logger.LogInformation("OpenVPN installed: {Version}", verify.Trim());
+            }
         }
     }
 }

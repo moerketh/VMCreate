@@ -10,34 +10,35 @@ namespace VMCreate.Gallery
 {
     /// <summary>
     /// Gallery loader for the Elastic SIEM appliance image: Rocky Linux 10
-    /// GenericCloud — a headless qcow2 with a proper EFI System Partition
-    /// (verified: ESP + shim/grub), so the VM boots natively on Hyper-V
-    /// Generation 2 with no layout conversion and no cloning ISO. First boot
-    /// is customized by a cloud-init NoCloud seed ISO; the Elastic Stack
-    /// customization step (<c>ElasticStackInstallStep</c>) then installs
-    /// Elasticsearch, Kibana and a Fleet server from Elastic's rpm repository:
-    /// the VM boots straight into a working SIEM.
+    /// Azure cloud image — the Hyper-V-native flavour (hv_storvsc/hv_vmbus
+    /// in the initramfs, UEFI+BIOS dual layout with a populated ESP). The
+    /// KVM-flavoured GenericCloud image boots to an emergency shell on
+    /// Hyper-V Gen 2 ("Failed to mount /sysroot" — its initramfs cannot see
+    /// the Hyper-V SCSI disk), so the Azure image is the correct base for a
+    /// Hyper-V appliance despite the name.
+    /// <para>
+    /// First boot is customized by a cloud-init NoCloud seed ISO (ISO9660+
+    /// Joliet — no UDF descriptor, see <c>CloudInitSeedBuilder</c>); the
+    /// Elastic Stack customization step (<c>ElasticStackInstallStep</c>)
+    /// then installs Elasticsearch, Kibana and a Fleet server from Elastic's
+    /// rpm repository: the VM boots straight into a working SIEM.
+    /// </para>
     /// <para>
     /// Downloads use the stable <c>latest</c> aliases; the concrete build
     /// (e.g. <c>10.2-20260525.0</c>) is scraped from the image directory
-    /// listing for the card's version metadata.
-    /// </para>
-    /// <para>
-    /// Why Rocky: the Ubuntu/Debian cloud images ship GPT without an ESP
-    /// (GRUB-in-MBR-gap) and cannot boot Gen 2 UEFI directly; the EL-family
-    /// images are the only generic cloud images verified to carry a populated
-    /// ESP. See working-docs/ELASTIC-SIEM.md for the full decision matrix.
+    /// listing for the card's version metadata. See
+    /// working-docs/ELASTIC-SIEM.md for the full decision matrix.
     /// </para>
     /// </summary>
     public class ElasticSiem : IGalleryLoader
     {
-        private const string ImagesIndexUrl = "https://download.rockylinux.org/pub/rocky/10/images/x86_64/";
-        private const string DiskUrl = ImagesIndexUrl + "Rocky-10-GenericCloud-Base.latest.x86_64.qcow2";
+        private const string ImagesIndexUrl = "https://dl.rockylinux.org/pub/rocky/10/images/x86_64/";
+        private const string DiskUrl = ImagesIndexUrl + "Rocky-10-Azure-Base.latest.x86_64.vhdfixed.xz";
         private const string ChecksumUrl = DiskUrl + ".CHECKSUM";
 
-        // Versioned file next to the latest alias: "Rocky-10-GenericCloud-Base-10.2-20260525.0.x86_64.qcow2"
+        // Versioned file next to the latest alias: "Rocky-10-Azure-Base-10.2-20260525.0.x86_64.vhdfixed.xz"
         private static readonly Regex VersionedFileRegex = new(
-            @"Rocky-10-GenericCloud-Base-(\d+\.\d+-\d{8}\.\d+)\.x86_64\.qcow2", RegexOptions.Compiled);
+            @"Rocky-10-Azure-Base-(\d+\.\d+-\d{8}\.\d+)\.x86_64\.vhdfixed\.xz", RegexOptions.Compiled);
 
         private readonly IHttpClientFactory _clientFactory;
 
@@ -91,7 +92,7 @@ namespace VMCreate.Gallery
             {
                 Name        = "Elastic SIEM",
                 Publisher   = "Elastic + Rocky Linux",
-                Description = "Headless single-node Elastic SIEM: Rocky Linux 10 cloud image with Elasticsearch, Kibana and an Elastic Agent Fleet server installed on first deploy. SSH-only (no desktop); Kibana is reached over HTTP from the host. Optionally AI-enabled with a stored LLM endpoint.",
+                Description = "Headless single-node Elastic SIEM: Rocky Linux 10 (Hyper-V native cloud image) with Elasticsearch, Kibana and an Elastic Agent Fleet server installed on first deploy. SSH-only (no desktop); Kibana is reached over HTTP from the host. Optionally AI-enabled with a stored LLM endpoint.",
                 ThumbnailUri = logoUri,
                 SymbolUri    = logoUri,
                 DiskUri      = DiskUrl,
@@ -102,9 +103,10 @@ namespace VMCreate.Gallery
                 LastUpdated  = lastUpdated.ToString("o"),
                 Category     = "Security",
                 LinuxDistro  = LinuxDistro.Rocky,
-                // qcow2 in a .qcow2 — the override is belt-and-braces against
-                // future URL/extension drift on the latest alias.
-                FileTypeOverride = "QCOW2",
+                // xz-compressed fixed VHD: extraction peels the .xz wrapper and
+                // the inner .vhd is converted to VHDX. The override pins the
+                // outer archive type pre-download regardless of alias drift.
+                FileTypeOverride = "VHD",
                 Tags         = new List<string> { "cloud-init", "elastic-siem", "headless" }
             };
 

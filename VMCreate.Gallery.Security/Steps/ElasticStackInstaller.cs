@@ -108,7 +108,7 @@ log ""package manager: ${PKGMGR}""
 
 if [ ""$PKGMGR"" = ""dnf"" ]; then
   log ""installing prerequisites and Elastic rpm repository""
-  dnf install -y curl dnf-utils || fail ""prerequisites""
+  dnf install -y curl dnf-utils openssl || fail ""prerequisites""
   rpm --import https://artifacts.elastic.co/GPG-KEY-elasticsearch || fail ""GPG key""
   cat > /etc/yum.repos.d/elastic-9.x.repo <<'ELREPO'
 [elastic-9.x]
@@ -125,7 +125,7 @@ else
   log ""installing prerequisites and Elastic apt repository""
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -y || fail ""apt-get update""
-  apt-get install -y curl gnupg apt-transport-https ca-certificates || fail ""prerequisites""
+  apt-get install -y curl gnupg apt-transport-https ca-certificates openssl || fail ""prerequisites""
   curl -fsSL https://artifacts.elastic.co/GPG-KEY-elasticsearch | gpg --dearmor --yes -o /usr/share/keyrings/elasticsearch-keyring.gpg || fail ""GPG key""
   echo ""deb [signed-by=/usr/share/keyrings/elasticsearch-keyring.gpg] https://artifacts.elastic.co/packages/9.x/apt stable main"" > /etc/apt/sources.list.d/elastic-9.x.list
   apt-get update -y || fail ""apt-get update (elastic repo)""
@@ -138,6 +138,11 @@ HEAP_MB=$(( TOTAL_MB / 2 - 2048 ))
 [ ""$HEAP_MB"" -gt 30720 ] && HEAP_MB=30720
 log ""total RAM ${TOTAL_MB} MB -> heap ${HEAP_MB} MB""
 
+# Elastic 9.x installs the basic flavor by default, which omits the
+# fleet-server binary (breaking change elastic/elastic-agent#6542). The
+# rpm/dpkg maintainer scripts read this variable and stamp the flavor on
+# install. Without it, elastic-agent can never start a fleet server.
+export ELASTIC_AGENT_FLAVOR=servers
 log ""installing elasticsearch, kibana, elastic-agent""
 if [ ""$PKGMGR"" = ""dnf"" ]; then
   dnf install -y elasticsearch kibana elastic-agent || fail ""package install""
@@ -145,7 +150,7 @@ else
   apt-get install -y elasticsearch kibana elastic-agent || fail ""package install""
 fi
 mkdir -p /etc/elasticsearch/jvm.options.d
-printf ""-Xms%sm\n-Xmx%sm\n"" ""$HEAP_MB"" ""$HEAP_MB"" > /etc/elasticsearch/jvm.options.d/vmcreate.options
+printf '%s\n' ""-Xms${HEAP_MB}m"" ""-Xmx${HEAP_MB}m"" > /etc/elasticsearch/jvm.options.d/vmcreate.options
 
 systemctl daemon-reload
 systemctl enable elasticsearch.service kibana.service >/dev/null 2>&1
@@ -164,13 +169,32 @@ log ""generating credentials (kept inside the guest)""
 ES_PW=$(/usr/share/elasticsearch/bin/elasticsearch-reset-password -u elastic -b -s 2>/dev/null) || fail ""reset elastic password""
 KIBANA_PW=$(/usr/share/elasticsearch/bin/elasticsearch-reset-password -u kibana_system -b -s 2>/dev/null) || fail ""reset kibana_system password""
 
+# Kibana Fleet refuses to initialise without xpack encryption keys (every
+# fleet API stays uninitialised — live-observed on the Rocky E2E rig).
+# Random per install; 32-hex-char keys are the standard single-node pattern.
+ENC_KEY=$(openssl rand -hex 16)
+SEC_KEY=$(openssl rand -hex 16)
+REP_KEY=$(openssl rand -hex 16)
 cat > /etc/kibana/kibana.yml <<KIBANAYML
 server.host: 0.0.0.0
 server.name: vmcreate-elastic-siem
+elasticsearch.hosts: [""https://localhost:9200""]
 elasticsearch.username: kibana_system
 elasticsearch.password: ""${KIBANA_PW}""
+elasticsearch.ssl.certificateAuthorities: [""/etc/kibana/http_ca.crt""]
+xpack.encryptedSavedObjects.encryptionKey: ""${ENC_KEY}${SEC_KEY}""
+xpack.security.encryptionKey: ""${SEC_KEY}${REP_KEY}""
+xpack.reporting.encryptionKey: ""${REP_KEY}${ENC_KEY}""
+xpack.fleet.agents.enabled: true
 KIBANAYML
-chmod 600 /etc/kibana/kibana.yml
+# The RPM/deb default is root:kibana 0660 (cf. kibana.keystore); chmod 600
+# root:root made the kibana user unable to read the config (EACCES FATAL,
+# observed live) and dropped the TLS CA path the 9.x http stack requires.
+chown root:kibana /etc/kibana/kibana.yml
+chmod 0660 /etc/kibana/kibana.yml
+# /etc/elasticsearch/certs is root:elasticsearch 0750 — kibana cannot
+# traverse it, so the http CA must be copied to a kibana-readable spot.
+install -o root -g kibana -m 0640 /etc/elasticsearch/certs/http_ca.crt /etc/kibana/http_ca.crt
 
 systemctl restart kibana.service || fail ""start kibana""
 log ""waiting for Kibana to answer""
@@ -193,21 +217,86 @@ GUEST_IP=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}')
 } > /opt/vmcreate-elastic/credentials.txt
 
 log ""installing Elastic Agent as a Fleet server (best-effort)""
+# ES 9.x ships /etc/elasticsearch/service_tokens root:root 0600, so every
+# service-token auth 401s silently until ES can read the file (observed
+# live, defect #2 of the fleet chain). Fix perms BEFORE the first token
+# is created, then give the ES file-token watcher time to reload.
+touch /etc/elasticsearch/service_tokens
+chown root:elasticsearch /etc/elasticsearch/service_tokens
+chmod 0660 /etc/elasticsearch/service_tokens
 FLEET_TOKEN=$( /usr/share/elasticsearch/bin/elasticsearch-service-tokens create elastic/fleet-server vmcreate-fleet 2>/dev/null | awk '{print $NF}' )
+sleep 10
+FLEET_POLICY_ID=""""
+AGENT_POLICY_ID=""""
+AGENT_TOKEN=""""
+FLEET_HEALTHY=0
 if [ -n ""${FLEET_TOKEN:-}"" ]; then
-  if elastic-agent install --non-interactive \
-       --fleet-server-es=https://localhost:9200 \
-       --fleet-server-es-ca=/etc/elasticsearch/certs/http_ca.crt \
-       --fleet-server-service-token=""${FLEET_TOKEN}"" \
-       --fleet-server-port=8220 >/dev/null 2>&1; then
-    AGENT_TOKEN=$( /usr/share/elasticsearch/bin/elasticsearch-create-enrollment-token -s agent --auto-register 2>/dev/null | tail -n 1 )
+  # One-time Fleet index initialisation via Kibana (idempotent; needs the
+  # xpack keys above). Can take up to ~2 min on a fresh node — observed
+  # live that it returns HTTP 200 once initialised.
+  FLEET_SETUP_OK=0
+  for i in $(seq 1 12); do
+    SETUP_CODE=$(curl -s --max-time 30 -o /opt/vmcreate-elastic/fleet-setup.json -w '%{http_code}' -u ""elastic:${ES_PW}"" -H 'kbn-xsrf: true' -X POST http://localhost:5601/api/fleet/setup)
+    echo ""fleet setup attempt ${i}: http ${SETUP_CODE}""
+    [ ""${SETUP_CODE}"" = ""200"" ] && { FLEET_SETUP_OK=1; break; }
+    sleep 10
+  done
+  if [ ""${FLEET_SETUP_OK}"" -eq 1 ]; then
+    # Default fleet-server policy. has_fleet_server must be true or the
+    # agent stalls on ""Waiting on default policy"" (live-observed defect #4).
+    FLEET_POLICY_RESP=$(curl -s --max-time 30 -u ""elastic:${ES_PW}"" -H 'kbn-xsrf: true' -H 'Content-Type: application/json' -X POST http://localhost:5601/api/fleet/agent_policies --data '{""name"":""VMCreate Fleet Server Policy"",""namespace"":""default"",""is_default_fleet_server"":true,""has_fleet_server"":true}')
+    FLEET_POLICY_ID=$(printf '%s' ""${FLEET_POLICY_RESP}"" | sed -n 's/.*""id"": *""\([^""]*\)"".*/\1/p')
+    echo ""fleet-server policy response: ${FLEET_POLICY_RESP}""
+  else
+    log ""WARNING: Kibana fleet setup never returned 200 — skipping fleet enrollment""
+  fi
+  if [ -n ""${FLEET_POLICY_ID}"" ]; then
+    # enroll (not install): the package already provides the systemd unit,
+    # enroll writes the fleet-server config and starts it. --force skips the
+    # replace-settings prompt. timeout guards a hang on a slow guest.
+    if timeout 180 elastic-agent enroll --force \
+         --fleet-server-es=https://localhost:9200 \
+         --fleet-server-es-ca=/etc/elasticsearch/certs/http_ca.crt \
+         --fleet-server-service-token=""${FLEET_TOKEN}"" \
+         --fleet-server-port=8220 </dev/null; then
+      # /api/fleet/server-info stays 404 even when healthy — the fleet
+      # server status endpoint is /api/status (live-observed).
+      for i in $(seq 1 18); do
+        FLEET_STATUS=$(curl -sk --max-time 5 https://localhost:8220/api/status)
+        echo ""fleet status attempt ${i}: ${FLEET_STATUS}""
+        case ""${FLEET_STATUS}"" in *HEALTHY*) FLEET_HEALTHY=1; break ;; esac
+        sleep 10
+      done
+      [ ""${FLEET_HEALTHY}"" -eq 1 ] || log ""WARNING: fleet server did not report HEALTHY in time — see /var/log/vmcreate-elastic.log""
+    else
+      log ""WARNING: elastic-agent enroll failed — ES+Kibana are up; see /var/log/vmcreate-elastic.log""
+    fi
+  else
+    log ""WARNING: could not create the fleet-server agent policy — skipping enroll""
+  fi
+  if [ ""${FLEET_HEALTHY}"" -eq 1 ]; then
+    # Default agent policy + enrollment key for OTHER VMs reporting to this
+    # SIEM. The ES 9.x CLI dropped its enrollment-token subcommand, so the
+    # Kibana fleet API is the supported way to mint the key (live-verified).
+    AGENT_POLICY_RESP=$(curl -s --max-time 30 -u ""elastic:${ES_PW}"" -H 'kbn-xsrf: true' -H 'Content-Type: application/json' -X POST http://localhost:5601/api/fleet/agent_policies --data '{""name"":""VMCreate Agent Policy"",""namespace"":""default"",""is_default"":true}')
+    AGENT_POLICY_ID=$(printf '%s' ""${AGENT_POLICY_RESP}"" | sed -n 's/.*""id"": *""\([^""]*\)"".*/\1/p')
+    echo ""agent policy response: ${AGENT_POLICY_RESP}""
+    if [ -n ""${AGENT_POLICY_ID}"" ]; then
+      AGENT_KEY_RESP=$(curl -s --max-time 30 -u ""elastic:${ES_PW}"" -H 'kbn-xsrf: true' -H 'Content-Type: application/json' -X POST http://localhost:5601/api/fleet/enrollment_api_keys --data ""{\""policy_id\"":\""${AGENT_POLICY_ID}\"",\""name\"":\""VMCreate Agent Enrollment\""}"")
+      AGENT_TOKEN=$(printf '%s' ""${AGENT_KEY_RESP}"" | sed -n 's/.*""api_key"": *""\([^""]*\)"".*/\1/p')
+      echo ""agent enrollment key response: ${AGENT_KEY_RESP}""
+    fi
     {
       echo ""Fleet server:      https://${GUEST_IP:-<vm-ip>}:8220""
       [ -n ""${AGENT_TOKEN:-}"" ] && echo ""Agent enrollment:  elastic-agent install --url=https://${GUEST_IP:-<vm-ip>}:8220 --enrollment-token=${AGENT_TOKEN} --insecure""
     } >> /opt/vmcreate-elastic/credentials.txt
-    log ""fleet server installed""
+    if [ -n ""${AGENT_TOKEN:-}"" ]; then
+      log ""fleet server healthy; agent enrollment key created""
+    else
+      log ""WARNING: agent enrollment key could not be created — see /var/log/vmcreate-elastic.log""
+    fi
   else
-    log ""WARNING: fleet server install failed — ES+Kibana are up; see /var/log/vmcreate-elastic.log""
+    log ""WARNING: fleet server not HEALTHY — agent enrollment left out of credentials.txt""
   fi
 else
   log ""WARNING: could not create fleet service token — skipping fleet server""
@@ -247,7 +336,13 @@ touch /opt/vmcreate-elastic/.installed
 log ""done""
 echo ""ELASTIC_SETUP_OK""
 exit 0");
-            return sb.ToString();
+
+            // The script is composed with AppendLine (Environment.NewLine =
+            // CRLF on Windows) and executes under guest bash, which chokes on
+            // CR ('set: pipefail\r: invalid option name' — observed live on
+            // the Rocky appliance E2E). Bash must always receive LF, the same
+            // contract ScriptResourceLoader enforces for the .sh resources.
+            return sb.ToString().Replace("\r\n", "\n");
         }
 
         private static string JsonEscape(string value) =>

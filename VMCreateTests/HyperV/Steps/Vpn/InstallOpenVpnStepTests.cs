@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Moq;
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using VMCreate;
@@ -61,9 +62,9 @@ namespace VMCreate.Tests.HyperV.Steps
 
             _shellMock
                 .Setup(s => s.RunCommandAsync(
-                    "command -v openvpn || /usr/sbin/openvpn --version 2>&1 | head -1",
+                    It.Is<string>(cmd => cmd.Contains("openvpn --version")),
                     It.IsAny<CancellationToken>()))
-                .ReturnsAsync("OpenVPN 2.6");
+                .ReturnsAsync("OpenVPN 2.6\n");
 
             await _step.ExecuteAsync(
                 _shellMock.Object,
@@ -79,6 +80,64 @@ namespace VMCreate.Tests.HyperV.Steps
             _shellMock.Verify(s => s.RunCommandAsync(
                 "sudo systemctl restart NetworkManager 2>&1 || true",
                 It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_InstallCommandNeverHardFails_EveryBranchNeutralisesExitStatus()
+        {
+            // The SSH automation path treats non-zero guest exits as fatal for
+            // the whole deployment ("Unable to find a match: openvpn" exit 1
+            // observed live on Rocky EL10 without EPEL). A convenience
+            // install must never kill a VM build — every package-manager
+            // branch must end in an exit-neutraliser.
+            _shellMock.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync("WARNING: openvpn packages unavailable");
+
+            await _step.ExecuteAsync(
+                _shellMock.Object,
+                new GalleryItem(),
+                new VmCustomizations { InstallOpenVpn = true },
+                _loggerMock.Object,
+                CancellationToken.None);
+
+            _shellMock.Verify(s => s.RunCommandAsync(
+                It.Is<string>(cmd => !cmd.Contains("exit 1") && !cmd.Contains("echo 'ERROR")),
+                It.IsAny<CancellationToken>()), Times.AtLeast(3));
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_OpenVpnMissingAfterInstall_LogsWarningAndCompletes()
+        {
+            const string dnfOutput =
+                "dnf install -y -q openvpn NetworkManager-openvpn\nUnable to find a match: openvpn\nWARNING: openvpn packages unavailable in enabled dnf repos (EPEL may be required on this distro)";
+
+            _shellMock
+                .Setup(s => s.RunCommandAsync(
+                    It.Is<string>(cmd => cmd.Contains("apt-get") || cmd.Contains("dnf")),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(dnfOutput);
+
+            _shellMock
+                .Setup(s => s.RunCommandAsync(
+                    It.Is<string>(cmd => cmd.Contains("openvpn --version")),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync("WARNING: openvpn binary not present after install");
+
+            await _step.ExecuteAsync(
+                _shellMock.Object,
+                new GalleryItem(),
+                new VmCustomizations { InstallOpenVpn = true },
+                _loggerMock.Object,
+                CancellationToken.None);
+
+            _loggerMock.Verify(
+                l => l.Log(
+                    LogLevel.Warning,
+                    It.IsAny<EventId>(),
+                    It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("unavailable")),
+                    It.IsAny<Exception?>(),
+                    It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+                Times.Once);
         }
     }
 }

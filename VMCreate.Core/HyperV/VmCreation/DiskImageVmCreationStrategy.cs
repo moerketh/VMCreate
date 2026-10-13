@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using VMCreate.MediaHandlers;
 
@@ -285,21 +286,60 @@ namespace VMCreate.HyperV.VmCreation
                             plan.VmName, cancellationToken);
                         if (!kvpAlive)
                         {
-                            var diagnostics = await _diagnosticsCollector.CollectAsync(
-                                plan.VmName, cancellationToken,
-                                _sshKeyManager.GetPrivateKeyPath(vmCustomizations.CustomSshPublicKeyPath));
-                            _logger.LogError(
-                                "KVP heartbeat not confirmed for {VMName} within the timeout — the guest's " +
-                                "Hyper-V integration daemon (hv_kvp_daemon) appears to be installed but not " +
-                                "answering. Guest diagnostics:\n{Diagnostics}",
-                                plan.VmName, diagnostics.RawOutput);
-                            throw new InvalidOperationException(
-                                $"The Hyper-V integration daemon (hv_kvp_daemon) in VM '{plan.VmName}' did not " +
-                                $"answer within the heartbeat timeout. The image may ship it unstarted. " +
-                                $"Start it in the guest (systemctl enable --now hv_kvp_daemon) and retry, " +
-                                $"or disable integration services for this deployment.");
+                            // The gate watches the HOST-side pools, which can
+                            // lag the guest daemon by many minutes on first
+                            // boot (observed live: guest answering ~4 s after
+                            // SSH, pools still empty after 120 s, filled
+                            // ~19 min after boot). "Unconfirmed" is therefore
+                            // not "dead": witness the daemon over the already-
+                            // open SSH session before failing — an answering
+                            // daemon means the pipeline is healthy and the
+                            // empty pools are a host artifact.
+                            string gateState =
+                                _kvpHeartbeatGate.LastDiagnostics?.ToString()
+                                ?? "no gate diagnostics available";
+                            bool daemonRunningInGuest = await TryConfirmGuestKvpDaemonAsync(
+                                shell, cancellationToken);
+                            if (daemonRunningInGuest)
+                            {
+                                _logger.LogWarning(
+                                    "KVP pools stayed empty for {VMName} ({GateState}), but the guest's KVP " +
+                                    "daemon is running (SSH witness probe). This matches the known host-side " +
+                                    "first-boot pool materialization lag — proceeding with deployment. " +
+                                    "Host↔guest KVP exchange may take a few more minutes to become usable in " +
+                                    "this VM. (The gate timeout is a caller-visible default; the witness " +
+                                    "prevents failing a verifiably healthy deployment.)",
+                                    plan.VmName, gateState);
+                            }
+                            else
+                            {
+                                var diagnostics = await _diagnosticsCollector.CollectAsync(
+                                    plan.VmName, cancellationToken,
+                                    _sshKeyManager.GetPrivateKeyPath(vmCustomizations.CustomSshPublicKeyPath));
+                                _logger.LogError(
+                                    "KVP heartbeat not confirmed for {VMName} ({GateState}) and the guest's KVP " +
+                                    "daemon is not running. Hyper-V integration daemon binaries: hv_kvp_daemon " +
+                                    "(Debian- and RHEL-class), unit hypervkvpd (RHEL-class, static) or " +
+                                    "hv-kvp-daemon (Debian). Guest diagnostics:\n{Diagnostics}",
+                                    plan.VmName, gateState, diagnostics.RawOutput);
+                                throw new InvalidOperationException(
+                                    $"The Hyper-V KVP heartbeat for VM '{plan.VmName}' was not confirmed " +
+                                    $"({gateState}) and the guest's KVP integration daemon (binary " +
+                                    $"hv_kvp_daemon, unit hypervkvpd on RHEL-class — hv-kvp-daemon on Debian) " +
+                                    $"is not running. The image may ship it unstarted: on Debian-class " +
+                                    $"guests start it with 'systemctl enable --now hv-kvp-daemon'; on " +
+                                    $"RHEL-class guests the unit is static by design — check it with " +
+                                    $"'systemctl status hypervkvpd'. If it is active, the HOST-side KVP pool " +
+                                    $"may simply lag on first boot — wait a few minutes and retry the " +
+                                    $"deployment, or disable integration services for this VM.");
+                            }
                         }
-                        _logger.LogInformation("KVP heartbeat confirmed for {VMName} — guest integration daemon is answering.", plan.VmName);
+                        else
+                        {
+                            _logger.LogInformation(
+                                "KVP heartbeat confirmed for {VMName} — guest integration daemon is answering.",
+                                plan.VmName);
+                        }
                     }
 
                     if (needsIsoBootCycle)
@@ -387,6 +427,43 @@ namespace VMCreate.HyperV.VmCreation
             return _postBootService.HasLinuxPostBootSteps(item, customizations)
                 ? new ICustomizationStep?[] { null }
                 : Array.Empty<ICustomizationStep?>();
+        }
+
+        /// <summary>
+        /// Witness probe for a KVP gate timeout: asks the guest itself, over the
+        /// already-open shell, whether the KVP daemon runs. This distinguishes
+        /// the two timeout classes — daemon absent in the guest (a real image
+        /// defect) vs daemon alive while the host-side pools lag (a host
+        /// artifact on first boot). Returns <c>false</c> whenever the probe
+        /// cannot confirm, so an uncertain witness fails the deployment rather
+        /// than falsely rescuing it.
+        /// </summary>
+        private async Task<bool> TryConfirmGuestKvpDaemonAsync(IGuestShell shell, CancellationToken cancellationToken)
+        {
+            const string runningToken = "VMCREATE_KVP_DAEMON_RUNNING";
+            try
+            {
+                // Must ALWAYS exit 0: IGuestShell.RunCommandAsync throws on a
+                // non-zero exit code, so presence/absence is reported on stdout
+                // instead. Covers both naming schemes — binary hv_kvp_daemon
+                // (Debian- and RHEL-class hyperv-daemons package), unit
+                // hypervkvpd (RHEL-class) or hv-kvp-daemon (Debian).
+                string stdout = await shell.RunCommandAsync(
+                    "if pgrep -x hv_kvp_daemon >/dev/null 2>&1" +
+                    " || pgrep -x hypervkvpd >/dev/null 2>&1" +
+                    " || systemctl is-active --quiet hypervkvpd hv-kvp-daemon hv_kvp_daemon 2>/dev/null" +
+                    $"; then echo {runningToken}; else echo VMCREATE_KVP_DAEMON_ABSENT; fi",
+                    cancellationToken);
+                return !string.IsNullOrEmpty(stdout) &&
+                       stdout.Contains(runningToken, StringComparison.Ordinal);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Transport failure, command timeout or a non-zero exit code:
+                // unconfirmed — the caller must treat this as "not running".
+                _logger.LogWarning(ex, "KVP daemon witness probe over SSH failed — treating the guest daemon as unconfirmed");
+                return false;
+            }
         }
     }
 }

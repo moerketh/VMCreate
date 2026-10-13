@@ -22,6 +22,7 @@ namespace VMCreate.MediaHandlers
             {
                 DiskImageFormat.Vmdk => new VmdkMediaHandler(_loggerFactory.CreateLogger<VmdkMediaHandler>(), _diskConverter, _generationResolver),
                 DiskImageFormat.Qcow2 => new Qcow2MediaHandler(_loggerFactory.CreateLogger<Qcow2MediaHandler>(), _diskConverter, _generationResolver),
+                DiskImageFormat.Vhd => new VhdMediaHandler(_loggerFactory.CreateLogger<VhdMediaHandler>(), _diskConverter, _generationResolver),
                 DiskImageFormat.Vhdx => new VhdxMediaHandler(_loggerFactory.CreateLogger<VhdxMediaHandler>(), _generationResolver, _diskConverter),
                 DiskImageFormat.Iso => new IsoMediaHandler(_loggerFactory.CreateLogger<IsoMediaHandler>()),
                 _ => throw new NotSupportedException($"Unsupported file type: {format}")
