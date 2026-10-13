@@ -263,24 +263,36 @@ SHM_EOF
             AUTO_LUA="$PLUGIN_HOME/.config/hypr/autostart.lua"
             if [ -d "$PLUGIN_HOME/.config/hypr" ] || command -v hyprctl >/dev/null 2>&1; then
                 mkdir -p "$PLUGIN_HOME/.config/hypr" 2>/dev/null || true
+                # Remove the previous hook variant: it gated on
+                # `hyprctl devices -j` every 250ms at compositor start, and
+                # Hyprland 0.56.2 devicesRequest null-derefs an IKeyboard
+                # when that poll races virtual-keyboard create/destroy —
+                # exactly what vmconnect's connect/fail/retry churn produces
+                # right after a wrapper relaunch (observed live: compositor
+                # SIGSEGV in IKeyboard::getActiveLayoutIndex on every restart
+                # while the client retried). Never call devices from here
+                # again. Plain `plugin load` is a plain hyprctl subcommand
+                # (PluginSystem), not a HyprCtl JSON request, so it is safe
+                # before xkb init; the retry loop alone covers the early
+                # "socket not up yet" window it was written for.
+                if grep -q "active_keymap" "$AUTO_LUA" 2>/dev/null; then
+                    sed -i '/-- wayrdp shm-capture plugin/,/^os\.execute/d' "$AUTO_LUA" 2>/dev/null || true
+                    echo "Removed stale devices-poll plugin hook from $AUTO_LUA."
+                fi
                 if ! grep -q "hyprland-capture.so" "$AUTO_LUA" 2>/dev/null; then
                     cat >> "$AUTO_LUA" <<'PLUG_EOF'
 -- wayrdp shm-capture plugin (added by VMCreate install_wayrdp.sh): loads the
 -- compositor plugin that feeds /dev/shm/wayrdp-capture-<output>. Runs during
 -- config parse, before the Hyprland IPC socket necessarily exists, so a
 -- bare load races the socket (observed live: "no plugins loaded" after
--- login). Retry in a backgrounded shell for up to ~10s. If it ultimately
+-- login). Retry in a backgrounded shell for up to ~15s. If it ultimately
 -- fails, wayrdp falls back to waiting on shm; the ext-image-copy path only
 -- returns after removing the shm.conf drop-in.
 --
--- Boot-crash avoidance (Hyprland <=0.56): an early hyprctl IPC query on
--- workspaces/monitors null-derefs the keyboard layout index before xkb init
--- (getWorkspaceData -> IKeyboard::getActiveLayoutIndex -> SIGSEGV), and the
--- Omarchy start-hyprland wrapper then relaunches with --safe-mode. Wait for
--- compositor input readiness (a keyboard reporting a non-empty active_keymap)
--- via `hyprctl devices -j` -- which is itself safe pre-init (empty list, no
--- layout deref) -- before issuing any plugin-load query.
-os.execute("sh -c '(for i in $(seq 1 40); do hyprctl devices -j 2>/dev/null | grep -q \"\\\"active_keymap\\\":[ ]*\\\"[^\\\"]\" && break; sleep 0.25; done; for i in $(seq 1 40); do hyprctl plugin load $HOME/.local/share/wayrdp/hyprland-capture.so >/dev/null 2>&1 && exit 0; sleep 0.25; done) &'")
+-- NOTE: do not gate this on `hyprctl devices` — devicesRequest has a
+-- null-deref race against virtual-keyboard create/destroy in Hyprland
+-- 0.56.2 and SEGV'd the compositor during real-client churn.
+os.execute("sh -c '(for i in $(seq 1 60); do hyprctl plugin load $HOME/.local/share/wayrdp/hyprland-capture.so >/dev/null 2>&1 && exit 0; sleep 0.25; done) &'")
 PLUG_EOF
                     chown "$PLUGIN_USER":"$PLUGIN_USER" "$AUTO_LUA" 2>/dev/null || true
                     echo "Wrote plugin autoload hook to $AUTO_LUA."
