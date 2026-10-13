@@ -41,6 +41,10 @@ namespace VMCreate
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
             _vmName = _wizardData.SelectedItem?.Name ?? "";
+            // Memory/CPU seed from Settings, which MainWindow populated from
+            // the user's stored preferences (WizardData.ApplyPreferences).
+            _memoryMB = _wizardData.Settings.MemoryInMB;
+            _cpuCount = _wizardData.Settings.CPUCount;
             _newDriveSizeText = _wizardData.Settings.NewDriveSizeInGB.ToString();
             _autoDetectDiskSize = IsDiskImage;
 

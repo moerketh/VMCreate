@@ -20,16 +20,18 @@ namespace VMCreate
         private readonly CreateVM _createVM;
         private readonly ILogger _logger;
         private readonly IDeploymentProgressPresenter _presenter;
+        private readonly IUserPreferencesStore? _preferencesStore;
         private CancellationTokenSource? _cts;
         private bool _autoScrollEnabled = true;
         private bool _isScrollingProgrammatically;
         private string _effectiveVmName = "";
 
-        public DeployPage(WizardData wizardData, CreateVM createVM, ILoggerFactory loggerFactory, IEnumerable<IConfigurableCustomizationStep> configurableSteps, IReadOnlyDictionary<string, ICustomizationStep> allSteps)
+        public DeployPage(WizardData wizardData, CreateVM createVM, ILoggerFactory loggerFactory, IEnumerable<IConfigurableCustomizationStep> configurableSteps, IReadOnlyDictionary<string, ICustomizationStep> allSteps, IUserPreferencesStore? preferencesStore = null)
         {
             _wizardData = wizardData ?? throw new ArgumentNullException(nameof(wizardData));
             _createVM = createVM ?? throw new ArgumentNullException(nameof(createVM));
             if (loggerFactory == null) throw new ArgumentNullException(nameof(loggerFactory));
+            _preferencesStore = preferencesStore;
 
             _logger = loggerFactory.CreateLogger<DeployPage>();
             _viewModel = new DeployPageViewModel(wizardData, _logger, configurableSteps);
@@ -71,6 +73,41 @@ namespace VMCreate
             }
             _cts?.Dispose();
             _cts = null;
+        }
+
+        /// <summary>
+        /// Persists the last-used wizard values (DNS, RDP backend, sizing and,
+        /// when provided this run, the HTB token) so the next run pre-fills from
+        /// them. Credentials are never blanked out by a run that didn't use
+        /// them; LLM credentials are owned by the Settings window only.
+        /// </summary>
+        private void SaveBackPreferences()
+        {
+            if (_preferencesStore == null)
+                return;
+
+            try
+            {
+                var prefs = _preferencesStore.Load(); // keep fields this run didn't touch
+                var c = _wizardData.Customizations;
+                var s = _wizardData.Settings;
+
+                prefs.DnsMode = c.DnsMode;
+                prefs.CustomNameservers = c.DnsMode == DnsMode.Custom ? c.CustomNameservers : null;
+                prefs.RdpBackend = c.RdpBackend;
+                prefs.DefaultMemoryInMB = s.MemoryInMB;
+                prefs.DefaultCpuCount = s.CPUCount;
+                prefs.DefaultDiskSizeInGB = s.NewDriveSizeInGB;
+                if (!string.IsNullOrWhiteSpace(_wizardData.LastUsedHtbApiToken))
+                    prefs.HtbApiToken = _wizardData.LastUsedHtbApiToken;
+
+                _preferencesStore.Save(prefs);
+            }
+            catch (Exception ex)
+            {
+                // Save-back is pure convenience — never surface as a deploy error.
+                _logger.LogWarning(ex, "Failed to save preferences after successful deploy.");
+            }
         }
 
         private void OnCancelRequested()
@@ -146,6 +183,7 @@ namespace VMCreate
                 BottomSpacer.Height = 0;
                 ScrollToPhase(DeployPageViewModel.PhaseDone);
                 _logger.LogInformation("Deployment completed successfully for {VMName}", effectiveVmName);
+                SaveBackPreferences();
             }
             catch (OperationCanceledException)
             {

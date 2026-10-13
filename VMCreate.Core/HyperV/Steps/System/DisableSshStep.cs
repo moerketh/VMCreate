@@ -18,7 +18,12 @@ namespace VMCreate
         public int Order => 900;
         public string? ProgressPhaseId => "Sub_RestoreSsh";
 
-        public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations) => true;
+        /// <summary>
+        /// Skips headless appliances (tag "headless", e.g. Elastic SIEM):
+        /// SSH is their only management access and is never disabled.
+        /// </summary>
+        public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
+            => !item.HasTag("headless");
 
         public async Task ExecuteAsync(IGuestShell shell, GalleryItem item, VmCustomizations customizations, ILogger logger, CancellationToken ct)
         {

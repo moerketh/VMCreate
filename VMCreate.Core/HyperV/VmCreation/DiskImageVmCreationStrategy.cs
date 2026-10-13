@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using VMCreate.MediaHandlers;
 
@@ -93,10 +94,20 @@ namespace VMCreate.HyperV.VmCreation
             var cancellationToken = ctx.CancellationToken;
             var progress = ctx.Progress;
 
-            int detectedGeneration = ctx.MediaResult.VmGeneration;
-            const int targetGen = 2;
+            // Cloud-init gallery items (tag "cloud-init", e.g. Elastic SIEM)
+            // are customized by a NoCloud seed ISO instead of the cloning ISO.
+            bool isCloudInit = item.HasTag("cloud-init");
+            string? seedIsoPath = null;
 
-            ctx.Logger.Log($"Detected generation {detectedGeneration}, targeting Gen {targetGen}");
+            int detectedGeneration = ctx.MediaResult.VmGeneration;
+            // Like every VMCreate deployment, the VM is Generation 2. A source
+            // disk classified "BIOS" (no ESP) is handled by the stock cloning
+            // cycle, which converts the layout to UEFI-bootable before first
+            // boot; cloud-init items only ADD the NoCloud seed ISO so the
+            // post-clone first boot provisions the automation user (the seed
+            // replaces the cloning ISO's SSH-key injection).
+            const int targetGen = 2;
+            ctx.Logger.Log($"Detected generation {detectedGeneration}, targeting Gen {targetGen} (cloud-init: {isCloudInit})");
 
             progress.Report(new CreateVMProgressInfo { Phase = VmDeploymentPhase.CreateVM, DetectedGeneration = detectedGeneration });
 
@@ -120,25 +131,49 @@ namespace VMCreate.HyperV.VmCreation
                 progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.AttachDisk));
                 await _diskManager.AddExistingHardDrive(plan, mediaPath, cancellationToken);
 
-                bool needsIsoBoot = vmCustomizations.ConfigureXrdp
-                    || vmCustomizations.SyncTimezone
-                    || _postBootService.HasLinuxPostBootSteps(item, vmCustomizations);
-
-                if (needsIsoBoot)
+                // Cloud-init items (UEFI-bootable cloud images, e.g. Rocky 10):
+                // attach the NoCloud seed and boot the disk directly — no
+                // cloning-ISO cycle. The seed carries the SSH key; cloud-init
+                // provisions the automation user on first boot.
+                if (isCloudInit)
                 {
                     progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.AttachBootDvd));
-                    await _bootManager.AddBootDvd(plan, cloningIsoPath, cancellationToken);
-                    progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.SetBootOrder));
-                    await _bootManager.SetFirstBootToDvd(plan, cancellationToken);
-                }
-                else
-                {
+                    string publicKey = await _sshKeyManager.EnsureKeyPairAsync(cancellationToken);
+                    seedIsoPath = Path.Combine(_pathService.DefaultVhdxPath, $"{plan.VmName}_cidata.iso");
+                    CloudInitSeedBuilder.BuildSeedIso(seedIsoPath, plan.VmName, publicKey, _logger);
+                    await _bootManager.AddBootDvd(plan, seedIsoPath, cancellationToken);
                     progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.SetBootOrder));
                     await _bootManager.SetFirstBootToHardDrive(plan, cancellationToken);
                 }
+                else
+                {
+                    bool needsIsoBoot = vmCustomizations.ConfigureXrdp
+                        || vmCustomizations.SyncTimezone
+                        || _postBootService.HasLinuxPostBootSteps(item, vmCustomizations);
+
+                    if (needsIsoBoot)
+                    {
+                        progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.AttachBootDvd));
+                        await _bootManager.AddBootDvd(plan, cloningIsoPath, cancellationToken);
+                        progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.SetBootOrder));
+                        await _bootManager.SetFirstBootToDvd(plan, cancellationToken);
+                    }
+                    else
+                    {
+                        progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.SetBootOrder));
+                        await _bootManager.SetFirstBootToHardDrive(plan, cancellationToken);
+                    }
+                }
             }
-            else if (detectedGeneration == 1)
+            else
             {
+                // "GPT_BIOS"/MBR source: the cloning ISO converts the layout to
+                // UEFI-bootable on this Gen 2 VM. Cloud-init items get the
+                // NoCloud seed ISO attached as a SECOND DVD: the clone cycle
+                // boots first (DVD 1), then the cloned disk's first boot finds
+                // the seed and provisions the automation user (replacing the
+                // cloning ISO's SSH-key injection, which the cloud image's
+                // cloud-init re-runs would overwrite anyway).
                 progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.AttachDisk));
                 await _diskManager.AddNewHardDrive(plan, _pathService.DefaultVhdxPath, cancellationToken);
 
@@ -149,12 +184,16 @@ namespace VMCreate.HyperV.VmCreation
                 progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.AttachBootDvd));
                 await _bootManager.AddBootDvd(plan, cloningIsoPath, cancellationToken);
 
+                if (isCloudInit)
+                {
+                    string publicKey = await _sshKeyManager.EnsureKeyPairAsync(cancellationToken);
+                    seedIsoPath = Path.Combine(_pathService.DefaultVhdxPath, $"{plan.VmName}_cidata.iso");
+                    CloudInitSeedBuilder.BuildSeedIso(seedIsoPath, plan.VmName, publicKey, _logger);
+                    await _bootManager.AddBootDvd(plan, seedIsoPath, cancellationToken);
+                }
+
                 progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.SetBootOrder));
                 await _bootManager.SetFirstBootToDvd(plan, cancellationToken);
-            }
-            else
-            {
-                throw new Exception($"Unsupported generation detected: {detectedGeneration}");
             }
 
             if (plan.VirtualizationEnabled)
@@ -171,8 +210,15 @@ namespace VMCreate.HyperV.VmCreation
             await _lifecycleManager.StartVM(plan, cancellationToken);
 
             bool needsPostBoot = GetPostBootSteps(item, vmCustomizations).Any();
+            // The cloning-ISO cycle runs when the source layout needs
+            // conversion (detectedGeneration == 1 means "BIOS/MBR-classified,
+            // clone to UEFI") or when a non-cloud-init Gen 2 image requests
+            // pre-boot ISO customization. UEFI-bootable cloud-init images
+            // (detectedGeneration == 2) never enter the cycle — the seed
+            // already carries their first-boot customization.
             bool needsIsoBootCycle = detectedGeneration == 1
-                || (detectedGeneration == 2 && (vmCustomizations.ConfigureXrdp || needsPostBoot));
+                || (!isCloudInit && detectedGeneration == 2 && (vmCustomizations.ConfigureXrdp || needsPostBoot));
+            bool needsCloudInitPostBoot = isCloudInit && needsPostBoot;
 
             if (needsIsoBootCycle)
             {
@@ -202,19 +248,22 @@ namespace VMCreate.HyperV.VmCreation
 
             var postBootSteps = GetPostBootSteps(item, vmCustomizations).ToList();
 
-            if (needsIsoBootCycle)
+            if (needsIsoBootCycle || needsCloudInitPostBoot)
             {
                 if (postBootSteps.Count > 0)
                     progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.PostBoot));
 
-                progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.PostBoot, VmDeploymentSubStep.AddTempNic));
-                await _networkManager.RemoveTemporaryNetworkAdapter(plan, cancellationToken);
-                await _networkManager.AddTemporaryNetworkAdapter(plan, cancellationToken);
+                if (needsIsoBootCycle)
+                {
+                    progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.PostBoot, VmDeploymentSubStep.AddTempNic));
+                    await _networkManager.RemoveTemporaryNetworkAdapter(plan, cancellationToken);
+                    await _networkManager.AddTemporaryNetworkAdapter(plan, cancellationToken);
+
+                    await _lifecycleManager.StartVM(plan, cancellationToken);
+                }
 
                 try
                 {
-                    await _lifecycleManager.StartVM(plan, cancellationToken);
-
                     string privateKeyPath = _sshKeyManager.GetPrivateKeyPath(vmCustomizations.CustomSshPublicKeyPath);
                     var shell = _guestShellFactory.Create(plan.VmName, privateKeyPath);
 
@@ -256,16 +305,36 @@ namespace VMCreate.HyperV.VmCreation
                         }
                     }
 
-                    try
+                    if (needsIsoBootCycle)
                     {
-                        string autorunLog = await shell.RunCommandAsync(
-                            "sudo cat /var/log/vmcreate-autorun.log 2>/dev/null || echo '[no autorun log found]'",
-                            cancellationToken);
-                        _logger.LogInformation("Autorun log for {VMName}:\n{Log}", plan.VmName, autorunLog);
+                        try
+                        {
+                            string autorunLog = await shell.RunCommandAsync(
+                                "sudo cat /var/log/vmcreate-autorun.log 2>/dev/null || echo '[no autorun log found]'",
+                                cancellationToken);
+                            _logger.LogInformation("Autorun log for {VMName}:\n{Log}", plan.VmName, autorunLog);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to collect autorun log (non-fatal)");
+                        }
                     }
-                    catch (Exception ex)
+
+                    if (isCloudInit)
                     {
-                        _logger.LogWarning(ex, "Failed to collect autorun log (non-fatal)");
+                        // Confirm the seed ran so failures surface in the
+                        // deployment log instead of only in the guest.
+                        try
+                        {
+                            string cloudInitStatus = await shell.RunCommandAsync(
+                                "cloud-init status --format json 2>/dev/null || sudo cloud-init status 2>/dev/null || echo '[cloud-init status unavailable]'",
+                                cancellationToken);
+                            _logger.LogInformation("cloud-init status for {VMName}: {Status}", plan.VmName, cloudInitStatus.Trim());
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to collect cloud-init status (non-fatal)");
+                        }
                     }
 
                     if (postBootSteps.Count > 0)
@@ -283,9 +352,13 @@ namespace VMCreate.HyperV.VmCreation
                     // failing after the heartbeat timeout. If the daemon is
                     // still not answering even then, fail loudly with
                     // diagnostics instead of proceeding into a dead
-                    // integration stack (the quickspawn lesson). Still
-                    // inside the try: diagnostics collection needs the SSH
-                    // shell and the temp NIC the finally removes.
+                    // integration stack (the quickspawn lesson). Before
+                    // failing, witness the daemon over the still-open SSH
+                    // session: an answering daemon with empty HOST-side pools
+                    // is a known first-boot artifact, not a dead pipeline.
+                    // Still inside the try: the witness probe and
+                    // diagnostics collection need the SSH shell and the temp
+                    // NIC the finally removes.
                     if (vmCustomizations.EnableIntegrationServices)
                     {
                         progress.Report(CreateVMProgressInfo.ForPhase(
@@ -294,35 +367,97 @@ namespace VMCreate.HyperV.VmCreation
                             plan.VmName, cancellationToken);
                         if (!kvpAlive)
                         {
-                            var diagnostics = await _diagnosticsCollector.CollectAsync(
-                                plan.VmName, cancellationToken,
-                                _sshKeyManager.GetPrivateKeyPath(vmCustomizations.CustomSshPublicKeyPath));
-                            _logger.LogError(
-                                "KVP heartbeat not confirmed for {VMName} within the timeout — the guest's " +
-                                "Hyper-V integration daemon (hv_kvp_daemon) appears to be installed but not " +
-                                "answering. Guest diagnostics:\n{Diagnostics}",
-                                plan.VmName, diagnostics.RawOutput);
-                            throw new InvalidOperationException(
-                                $"The Hyper-V integration daemon (hv_kvp_daemon) in VM '{plan.VmName}' did not " +
-                                $"answer within the heartbeat timeout, even after post-boot customization " +
-                                $"installed and enabled the Hyper-V daemons. The image may ship it unstarted " +
-                                $"or broken. Start it in the guest (systemctl enable --now hv_kvp_daemon) and " +
-                                $"retry, or disable integration services for this deployment.");
+                            // The gate watches the HOST-side pools, which can
+                            // lag the guest daemon by many minutes on first
+                            // boot (observed live: guest answering ~4 s after
+                            // SSH, pools still empty after 120 s, filled
+                            // ~19 min after boot). "Unconfirmed" is therefore
+                            // not "dead": witness the daemon over the already-
+                            // open SSH session before failing — an answering
+                            // daemon means the pipeline is healthy and the
+                            // empty pools are a host artifact.
+                            string gateState =
+                                _kvpHeartbeatGate.LastDiagnostics?.ToString()
+                                ?? "no gate diagnostics available";
+                            bool daemonRunningInGuest = await TryConfirmGuestKvpDaemonAsync(
+                                shell, cancellationToken);
+                            if (daemonRunningInGuest)
+                            {
+                                _logger.LogWarning(
+                                    "KVP pools stayed empty for {VMName} ({GateState}) even after post-boot, but " +
+                                    "the guest's KVP daemon is running (SSH witness probe). This matches the known " +
+                                    "host-side first-boot pool materialization lag — proceeding with deployment. " +
+                                    "Host↔guest KVP exchange may take a few more minutes to become usable in " +
+                                    "this VM. (The gate timeout is a caller-visible default; the witness " +
+                                    "prevents failing a verifiably healthy deployment.)",
+                                    plan.VmName, gateState);
+                            }
+                            else
+                            {
+                                var diagnostics = await _diagnosticsCollector.CollectAsync(
+                                    plan.VmName, cancellationToken,
+                                    _sshKeyManager.GetPrivateKeyPath(vmCustomizations.CustomSshPublicKeyPath));
+                                _logger.LogError(
+                                    "KVP heartbeat not confirmed for {VMName} ({GateState}) and the guest's KVP " +
+                                    "daemon is not running. Hyper-V integration daemon binaries: hv_kvp_daemon " +
+                                    "(Debian- and RHEL-class), unit hypervkvpd (RHEL-class, static) or " +
+                                    "hv-kvp-daemon (Debian). Guest diagnostics:\n{Diagnostics}",
+                                    plan.VmName, gateState, diagnostics.RawOutput);
+                                throw new InvalidOperationException(
+                                    $"The Hyper-V KVP heartbeat for VM '{plan.VmName}' was not confirmed " +
+                                    $"({gateState}) and the guest's KVP integration daemon (binary " +
+                                    $"hv_kvp_daemon, unit hypervkvpd on RHEL-class — hv-kvp-daemon on Debian) " +
+                                    $"is not running. The image may ship it unstarted: on Debian-class " +
+                                    $"guests start it with 'systemctl enable --now hv-kvp-daemon'; on " +
+                                    $"RHEL-class guests the unit is static by design — check it with " +
+                                    $"'systemctl status hypervkvpd'. If it is active, the HOST-side KVP pool " +
+                                    $"may simply lag on first boot — wait a few minutes and retry the " +
+                                    $"deployment, or disable integration services for this VM.");
+                            }
                         }
-                        _logger.LogInformation("KVP heartbeat confirmed for {VMName} — guest integration daemon is answering.", plan.VmName);
+                        else
+                        {
+                            _logger.LogInformation("KVP heartbeat confirmed for {VMName} — guest integration daemon is answering.", plan.VmName);
+                        }
                     }
                 }
                 finally
                 {
-                    try
+                    if (needsIsoBootCycle)
                     {
-                        await _networkManager.RemoveTemporaryNetworkAdapter(plan, cancellationToken);
+                        try
+                        {
+                            await _networkManager.RemoveTemporaryNetworkAdapter(plan, cancellationToken);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to remove temporary network adapter (non-fatal)");
+                        }
                     }
-                    catch (Exception ex)
+
+                    if (seedIsoPath != null)
                     {
-                        _logger.LogWarning(ex, "Failed to remove temporary network adapter (non-fatal)");
+                        try
+                        {
+                            await _bootManager.RemoveBootDvd(plan, seedIsoPath, cancellationToken);
+                            if (File.Exists(seedIsoPath))
+                                File.Delete(seedIsoPath);
+                            _logger.LogInformation("Cleaned up cloud-init seed ISO for VM {VMName}", plan.VmName);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to clean up cloud-init seed ISO for VM {VMName}", plan.VmName);
+                        }
                     }
                 }
+            }
+            else if (isCloudInit && seedIsoPath != null)
+            {
+                // No post-boot steps ran, so we never waited for the guest:
+                // leave the seed attached rather than risk ejecting it
+                // mid-first-boot. It is a tiny read-only DVD and cloud-init
+                // ignores it on subsequent boots.
+                _logger.LogInformation("Cloud-init seed ISO left attached to VM {VMName} (no post-boot steps)", plan.VmName);
             }
         }
 
@@ -333,6 +468,43 @@ namespace VMCreate.HyperV.VmCreation
             return _postBootService.HasLinuxPostBootSteps(item, customizations)
                 ? new ICustomizationStep?[] { null }
                 : Array.Empty<ICustomizationStep?>();
+        }
+
+        /// <summary>
+        /// Witness probe for a KVP gate timeout: asks the guest itself, over the
+        /// already-open shell, whether the KVP daemon runs. This distinguishes
+        /// the two timeout classes — daemon absent in the guest (a real image
+        /// defect) vs daemon alive while the host-side pools lag (a host
+        /// artifact on first boot). Returns <c>false</c> whenever the probe
+        /// cannot confirm, so an uncertain witness fails the deployment rather
+        /// than falsely rescuing it.
+        /// </summary>
+        private async Task<bool> TryConfirmGuestKvpDaemonAsync(IGuestShell shell, CancellationToken cancellationToken)
+        {
+            const string runningToken = "VMCREATE_KVP_DAEMON_RUNNING";
+            try
+            {
+                // Must ALWAYS exit 0: IGuestShell.RunCommandAsync throws on a
+                // non-zero exit code, so presence/absence is reported on stdout
+                // instead. Covers both naming schemes — binary hv_kvp_daemon
+                // (Debian- and RHEL-class hyperv-daemons package), unit
+                // hypervkvpd (RHEL-class) or hv-kvp-daemon (Debian).
+                string stdout = await shell.RunCommandAsync(
+                    "if pgrep -x hv_kvp_daemon >/dev/null 2>&1" +
+                    " || pgrep -x hypervkvpd >/dev/null 2>&1" +
+                    " || systemctl is-active --quiet hypervkvpd hv-kvp-daemon hv_kvp_daemon 2>/dev/null" +
+                    $"; then echo {runningToken}; else echo VMCREATE_KVP_DAEMON_ABSENT; fi",
+                    cancellationToken);
+                return !string.IsNullOrEmpty(stdout) &&
+                       stdout.Contains(runningToken, StringComparison.Ordinal);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Transport failure, command timeout or a non-zero exit code:
+                // unconfirmed — the caller must treat this as "not running".
+                _logger.LogWarning(ex, "KVP daemon witness probe over SSH failed — treating the guest daemon as unconfirmed");
+                return false;
+            }
         }
     }
 }

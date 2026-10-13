@@ -45,6 +45,19 @@ namespace VMCreate
         /// <param name="isoPath">Output path of the .iso file.</param>
         /// <param name="volumeName">Volume label stored in the image.</param>
         public static void CreateIsoFromDirectory(string sourceDirectory, string isoPath, string volumeName)
+            => CreateIsoFromDirectory(sourceDirectory, isoPath, volumeName, FsiFileSystems.ISO9660 | FsiFileSystems.Joliet | FsiFileSystems.UDF);
+
+        /// <summary>
+        /// Creates an ISO image with an explicit filesystem set. Cloud-init
+        /// NoCloud seeds MUST NOT carry a UDF descriptor: blkid then reports
+        /// TYPE=udf and cloud images' ds-identify stage ignores the disc
+        /// entirely (verified on Rocky 10 / cloud-init 24.4 — the seed was
+        /// never mounted and the datasource fell back to None). The
+        /// battle-tested seed layout is plain ISO9660 + Joliet, exactly what
+        /// <c>genisoimage -joliet</c> produces.
+        /// </summary>
+        /// <param name="fileSystems">Filesystems to embed in the image.</param>
+        public static void CreateIsoFromDirectory(string sourceDirectory, string isoPath, string volumeName, FsiFileSystems fileSystems)
         {
             if (!OperatingSystem.IsWindows())
             {
@@ -70,7 +83,7 @@ namespace VMCreate
                 {
                     try
                     {
-                        CreateIsoOnSta(sourceDirectory, isoPath, volumeName);
+                        CreateIsoOnSta(sourceDirectory, isoPath, volumeName, fileSystems);
                     }
                     catch (Exception ex)
                     {
@@ -101,7 +114,7 @@ namespace VMCreate
         /// volume name, tree import and result streaming — same call sequence
         /// the old PowerShell script performed.
         /// </summary>
-        private static void CreateIsoOnSta(string sourceDirectory, string isoPath, string volumeName)
+        private static void CreateIsoOnSta(string sourceDirectory, string isoPath, string volumeName, FsiFileSystems fileSystems)
         {
             // IMAPI2 composes the image through a "stash" file in its working
             // directory. Give each burn a dedicated directory so concurrent burns
@@ -110,7 +123,7 @@ namespace VMCreate
             Directory.CreateDirectory(workingDirectory);
             try
             {
-                CreateIsoOnStaCore(sourceDirectory, isoPath, volumeName, workingDirectory);
+                CreateIsoOnStaCore(sourceDirectory, isoPath, volumeName, fileSystems, workingDirectory);
             }
             finally
             {
@@ -141,14 +154,14 @@ namespace VMCreate
         /// volume name, tree import and result streaming — same call sequence
         /// the old PowerShell script performed.
         /// </summary>
-        private static void CreateIsoOnStaCore(string sourceDirectory, string isoPath, string volumeName, string workingDirectory)
+        private static void CreateIsoOnStaCore(string sourceDirectory, string isoPath, string volumeName, FsiFileSystems fileSystems, string workingDirectory)
         {
             // throwOnError:true guarantees non-null (the annotation is Type? —
             // the CLR doesn't encode the guarantee), hence the forgiving !.
             Type fileSystemImageType = Type.GetTypeFromProgID(FileSystemImageProgId, throwOnError: true)!;
             var image = (IFileSystemImage)Activator.CreateInstance(fileSystemImageType)!;
 
-            image.FileSystemsToCreate = FsiFileSystems.ISO9660 | FsiFileSystems.Joliet | FsiFileSystems.UDF;
+            image.FileSystemsToCreate = fileSystems;
             image.VolumeName = volumeName;
             image.WorkingDirectory = workingDirectory;
 

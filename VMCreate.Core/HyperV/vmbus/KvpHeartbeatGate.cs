@@ -14,6 +14,15 @@ namespace CreateVM.HyperV.vmbus
     /// entries into <c>Msvm_KvpExchangeComponent.GuestExchangeItems</c> /
     /// <c>GuestIntrinsicItems</c>; an empty pair of pools after boot means the
     /// guest side of the exchange is dead — installed but not started.
+    /// <para>
+    /// Caveat proven live on a 2025-era host: the HOST-side pools can lag the
+    /// guest daemon by many minutes on first boot (daemon answering ~4 s after
+    /// SSH became available, pools still empty after the 120 s default, filled
+    /// ~19 min after boot). Callers must therefore treat a timeout as
+    /// "unconfirmed", not "dead", and disambiguate with a guest-side witness
+    /// probe before failing; <see cref="LastDiagnostics"/> carries what this
+    /// gate observed for that message.
+    /// </para>
     /// </summary>
     public class KvpHeartbeatGate : KvpBase, IKvpHeartbeatGate
     {
@@ -46,32 +55,46 @@ namespace CreateVM.HyperV.vmbus
             return kvps;
         }
 
+        public KvpGateDiagnostics? LastDiagnostics { get; private set; }
+
         public async Task<bool> WaitForGuestKvpAsync(
             string vmName,
             CancellationToken cancellationToken,
-            int timeoutSeconds = 120,
+            int timeoutSeconds = 420,
             int pollIntervalMs = 2000)
         {
             ValidateVmName(vmName);
             cancellationToken.ThrowIfCancellationRequested();
 
             DateTime startTime = DateTime.UtcNow;
+            var diagnostics = new KvpGateDiagnostics { StartedUtc = startTime };
+            LastDiagnostics = diagnostics;
+
             while (!cancellationToken.IsCancellationRequested)
             {
+                diagnostics.PollCount++;
                 string? vmGuid = GetVMGuid(vmName);
                 if (!string.IsNullOrEmpty(vmGuid))
                 {
+                    diagnostics.VmGuidResolved = true;
                     try
                     {
                         var items = ReadGuestKvpItems(vmGuid);
+                        diagnostics.PoolReadCount++;
                         if (items.Count > 0)
+                        {
+                            diagnostics.ConfirmedGuestKvp = true;
+                            diagnostics.LastPollUtc = DateTime.UtcNow;
                             return true;
+                        }
                     }
-                    catch (ManagementException)
+                    catch (ManagementException ex)
                     {
                         // Transient WMI failure while the VM settles — keep polling.
+                        diagnostics.LastException = ex.Message;
                     }
                 }
+                diagnostics.LastPollUtc = DateTime.UtcNow;
 
                 if (timeoutSeconds > 0 && (DateTime.UtcNow - startTime).TotalSeconds > timeoutSeconds)
                     return false;

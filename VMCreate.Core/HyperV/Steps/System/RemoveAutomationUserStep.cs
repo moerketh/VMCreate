@@ -22,7 +22,13 @@ namespace VMCreate
         public int Order => 850;
         public string? ProgressPhaseId => null;
 
-        public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations) => true;
+        /// <summary>
+        /// Skips headless appliances (tag "headless", e.g. Elastic SIEM):
+        /// the <c>vmcreate</c> user is their only SSH access — there is no
+        /// desktop login to fall back on, so it must never be removed.
+        /// </summary>
+        public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
+            => !item.HasTag("headless");
 
         public async Task ExecuteAsync(IGuestShell shell, GalleryItem item, VmCustomizations customizations, ILogger logger, CancellationToken ct)
         {

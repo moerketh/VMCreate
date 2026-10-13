@@ -59,7 +59,10 @@ namespace VMCreate
         public string? ProgressPhaseId => "Sub_AutoRdpResolve";
 
         public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
-            => customizations?.RdpBackend == RdpBackend.Auto;
+            // Headless appliances (tag "headless", e.g. Elastic SIEM) have no
+            // desktop to share — the whole RDP pipeline is skipped.
+            => !item.HasTag("headless")
+               && customizations?.RdpBackend == RdpBackend.Auto;
 
         public async Task ExecuteAsync(IGuestShell shell, GalleryItem item, VmCustomizations customizations, ILogger logger, CancellationToken ct)
         {

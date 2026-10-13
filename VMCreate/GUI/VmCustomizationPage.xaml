@@ -204,12 +204,13 @@
                 <StackPanel>
                     <TextBlock Text="Hack The Box VPN" FontSize="14" FontWeight="SemiBold"
                                Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,0,4"/>
-                    <TextBlock Text="Enter your HTB App Token to download VPN keys for all platforms, or browse for a .ovpn file."
+                    <TextBlock Text="Your HTB App Token downloads VPN keys for all platforms (remembered for next time), or browse for a .ovpn file."
                                FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,10"
                                TextWrapping="Wrap"/>
 
                     <!-- API Token input -->
-                    <TextBlock Text="App Token  (from app.hackthebox.com/profile/settings)" FontSize="12"
+                    <TextBlock Text="App Token  (from app.hackthebox.com/profile/settings — stored securely after a successful deploy)"
+                               FontSize="12"
                                Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,4"/>
                     <Grid Margin="0,0,0,6">
                         <Grid.ColumnDefinitions>
@@ -281,6 +282,30 @@
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
+
+            <!-- Elastic AI card: shown only when an Elastic SIEM step targets this
+                 image and a complete LLM configuration is stored in Settings. -->
+            <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
+                    CornerRadius="8" Padding="20,16" Margin="0,0,0,12"
+                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1"
+                    Visibility="{Binding ShowElasticAi, Converter={StaticResource BoolToVis}}">
+                <StackPanel>
+                    <TextBlock Text="Elastic SIEM — AI Features" FontSize="14" FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,0,4"/>
+                    <TextBlock Text="AI-enable the deployed SIEM using the LLM endpoint stored in Settings (menu: ⚙ Settings → AI / LLM)."
+                               FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,10"
+                               TextWrapping="Wrap"/>
+                    <CheckBox Content="Enable AI features (AI Assistant / Attack Discovery)"
+                              IsChecked="{Binding ElasticAiEnabled}"
+                              FontSize="14"
+                              AutomationProperties.Name="Enable Elastic AI features"/>
+                    <CheckBox Content="Start a 30-day Enterprise trial license (AI features require Enterprise on self-hosted stacks)"
+                              IsChecked="{Binding ElasticAiStartTrial}"
+                              FontSize="12" Margin="24,6,0,0"
+                              IsEnabled="{Binding ElasticAiEnabled}"
+                              AutomationProperties.Name="Start Elastic trial license"/>
+                </StackPanel>
+            </Border>
 
             <!-- Advanced: SSH Key card (Linux only) -->
             <Border Background="{DynamicResource ControlFillColorDefaultBrush}"

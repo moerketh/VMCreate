@@ -26,8 +26,8 @@ namespace VMCreate
         private readonly IHtbApiClient _htbApiClient;
         private readonly IEnumerable<IConfigurableCustomizationStep> _configurableSteps;
         private readonly IEnumerable<IDesktopEnvironmentCatalog> _desktopCatalogs;
-        private readonly UserPreferencesStore _prefsStore;
-        private readonly UserPreferences _prefs;
+        private readonly IUserPreferencesStore _preferencesStore;
+        private UserPreferences _uiPrefs = new();
         private WizardData? _wizardData;
 
         public MainWindow(
@@ -36,6 +36,7 @@ namespace VMCreate
             IHtbApiClient htbApiClient,
             IEnumerable<IConfigurableCustomizationStep> configurableSteps,
             IEnumerable<IDesktopEnvironmentCatalog> desktopCatalogs,
+            IUserPreferencesStore preferencesStore,
             ILogger<MainWindow> logger,
             ILoggerFactory loggerFactory)
         {
@@ -44,6 +45,7 @@ namespace VMCreate
             _htbApiClient = htbApiClient ?? throw new ArgumentNullException(nameof(htbApiClient));
             _configurableSteps = configurableSteps ?? throw new ArgumentNullException(nameof(configurableSteps));
             _desktopCatalogs = desktopCatalogs ?? throw new ArgumentNullException(nameof(desktopCatalogs));
+            _preferencesStore = preferencesStore ?? throw new ArgumentNullException(nameof(preferencesStore));
             _logger = logger;
             _loggerFactory = loggerFactory;
 
@@ -54,18 +56,17 @@ namespace VMCreate
 
             // Apply persisted preferences: theme (explicit choice wins over following the
             // Windows system theme) and window size.
-            _prefsStore = new UserPreferencesStore(_logger);
-            _prefs = _prefsStore.Load();
+            _uiPrefs = _preferencesStore.Load();
 
-            if (_prefs.Theme.Equals("Dark", StringComparison.OrdinalIgnoreCase))
+            if (_uiPrefs.Theme.Equals("Dark", StringComparison.OrdinalIgnoreCase))
                 ApplicationThemeManager.Apply(ApplicationTheme.Dark, WindowBackdropType.Mica, true);
-            else if (_prefs.Theme.Equals("Light", StringComparison.OrdinalIgnoreCase))
+            else if (_uiPrefs.Theme.Equals("Light", StringComparison.OrdinalIgnoreCase))
                 ApplicationThemeManager.Apply(ApplicationTheme.Light, WindowBackdropType.Mica, true);
             else
                 SystemThemeWatcher.Watch(this); // follow the Windows system theme
 
-            Width = ClampSize(_prefs.WindowWidth, MinWidth, SystemParameters.PrimaryScreenWidth, 1050);
-            Height = ClampSize(_prefs.WindowHeight, MinHeight, SystemParameters.PrimaryScreenHeight, 720);
+            Width = ClampSize(_uiPrefs.WindowWidth, MinWidth, SystemParameters.PrimaryScreenWidth, 1050);
+            Height = ClampSize(_uiPrefs.WindowHeight, MinHeight, SystemParameters.PrimaryScreenHeight, 720);
 
             Loaded += MyWindow_LoadedAsync;
             // First-frame milestone, then kick off the background PowerShell
@@ -109,7 +110,7 @@ namespace VMCreate
                 ? ApplicationTheme.Light
                 : ApplicationTheme.Dark;
             ApplicationThemeManager.Apply(next, WindowBackdropType.Mica, true);
-            _prefs.Theme = next == ApplicationTheme.Dark ? "Dark" : "Light";
+            _uiPrefs.Theme = next == ApplicationTheme.Dark ? "Dark" : "Light";
             SavePreferences();
             SyncThemeIcon();
         }
@@ -119,10 +120,10 @@ namespace VMCreate
             // RestoreBounds/ActualWidth are device-dependent; guard against minimized state.
             if (WindowState == WindowState.Normal)
             {
-                _prefs.WindowWidth = ActualWidth;
-                _prefs.WindowHeight = ActualHeight;
+                _uiPrefs.WindowWidth = ActualWidth;
+                _uiPrefs.WindowHeight = ActualHeight;
             }
-            _prefsStore.Save(_prefs);
+            _preferencesStore.Save(_uiPrefs);
         }
 
         private void SyncThemeIcon()
@@ -131,6 +132,21 @@ namespace VMCreate
             ThemeToggleButton.Icon = theme == ApplicationTheme.Dark
                 ? new SymbolIcon(SymbolRegular.WeatherMoon24)
                 : new SymbolIcon(SymbolRegular.WeatherSunny24);
+        }
+
+        private void Settings_Click(object sender, RoutedEventArgs e)
+        {
+            var dialog = new SettingsWindow(_preferencesStore, _loggerFactory)
+            {
+                Owner = this
+            };
+            if (dialog.ShowDialog() == true && _wizardData != null)
+            {
+                // Saved settings apply to the in-flight wizard too — pages not
+                // yet visited pick up the new values immediately.
+                _wizardData.Preferences = _preferencesStore.Load();
+                _wizardData.ApplyPreferences();
+            }
         }
 
         private void UpdateStepIndicator()
@@ -205,6 +221,8 @@ namespace VMCreate
             // Navigate to the first page IMMEDIATELY so the UI is visible straight away.
             // Gallery items will stream into _galleryItems in the background below.
             _wizardData = new WizardData { GalleryItems = _galleryItems, DemoMode = App.DemoMode };
+            _wizardData.Preferences = _preferencesStore.Load();
+            _wizardData.ApplyPreferences();
             var firstPage = new SelectImagePage(_wizardData, _htbApiClient, _configurableSteps, _desktopCatalogs, _loggerFactory);
             firstPage.WizardCompleted += WizardPage_Completed;
             _mainFrame.Navigate(firstPage);
@@ -299,6 +317,7 @@ namespace VMCreate
                 if (sender is DeployPage)
                 {
                     _wizardData = new WizardData { GalleryItems = _galleryItems, DemoMode = App.DemoMode };
+                    _wizardData.Preferences = _preferencesStore.Load();
                     _wizardData.ResetForNewWizard();
                     var firstPage = new SelectImagePage(_wizardData, _htbApiClient, _configurableSteps, _desktopCatalogs, _loggerFactory);
                     firstPage.WizardCompleted += WizardPage_Completed;

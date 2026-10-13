@@ -29,7 +29,6 @@
     <Compile Include="Gallery\DateStringConverter.cs" />
     <Compile Include="GUI\MainWindow.xaml.cs" />
     <Compile Include="GUI\HostCapabilities.cs" />
-    <Compile Include="GUI\UserPreferences.cs" />
     <Compile Include="GUI\SelectImagePage.xaml.cs">
     <DependentUpon>SelectImagePage.xaml</DependentUpon>
   	  <SubType>Code</SubType>
@@ -44,6 +43,10 @@
 	</Compile>
     <Compile Include="GUI\WizardData.cs" />
     <Compile Include="GUI\WizardFlow.cs" />
+    <Compile Include="GUI\SettingsWindow.xaml.cs">
+      <DependentUpon>SettingsWindow.xaml</DependentUpon>
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="GUI\ViewModels\ViewModelBase.cs" />
     <Compile Include="GUI\ViewModels\RelayCommand.cs" />
     <Compile Include="GUI\ViewModels\SelectImagePageViewModel.cs" />
@@ -94,6 +97,9 @@
 		  <SubType>Designer</SubType>
 	  </ApplicationDefinition>
     <Page Include="GUI\MainWindow.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="GUI\SettingsWindow.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
     <Page Include="GUI\SelectImagePage.xaml">

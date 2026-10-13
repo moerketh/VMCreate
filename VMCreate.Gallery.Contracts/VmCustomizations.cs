@@ -33,6 +33,43 @@ namespace VMCreate
         public int Order { get; set; }
     }
 
+    /// <summary>
+    /// Elastic SIEM AI configuration for a single deployment. Hydrated by the
+    /// front ends from the machine-level credential store
+    /// (<see cref="UserPreferences"/>) right before deployment — secrets live
+    /// in memory only, are never logged (see <see cref="SecretMask"/>) and are
+    /// never sent over KVP; the Elastic step delivers them to Elasticsearch's
+    /// inference API itself.
+    /// </summary>
+    public class ElasticAiSettings
+    {
+        /// <summary>Enable AI features on the deployed Elastic Stack (inference endpoint).</summary>
+        public bool Enabled { get; set; }
+
+        /// <summary>
+        /// Start a 30-day Enterprise <c>start_trial</c> license. AI features
+        /// (AI Assistant, Attack Discovery) require Enterprise on self-hosted
+        /// stacks; without this the SIEM runs on the free Basic license.
+        /// </summary>
+        public bool StartTrialLicense { get; set; }
+
+        /// <summary>OpenAI-compatible chat-completions URL (full endpoint path).</summary>
+        public string? ChatCompletionsUrl { get; set; }
+
+        /// <summary>API key for the endpoint (dummy values are valid for local LLMs).</summary>
+        public string? ApiKey { get; set; }
+
+        /// <summary>Model id passed to the endpoint.</summary>
+        public string? Model { get; set; }
+
+        /// <summary>True when <see cref="Enabled"/> and all fields are present.</summary>
+        public bool IsComplete =>
+            Enabled
+            && !string.IsNullOrWhiteSpace(ChatCompletionsUrl)
+            && !string.IsNullOrWhiteSpace(ApiKey)
+            && !string.IsNullOrWhiteSpace(Model);
+    }
+
     public class VmCustomizations
     {
         /// <summary>
@@ -143,6 +180,13 @@ namespace VMCreate
         /// Order is preserved so the deployment UI can show cards in the intended sequence.
         /// </summary>
         public List<DistributionOptionSelection> DistributionOptions { get; set; } = new();
+
+        /// <summary>
+        /// AI enablement for Elastic SIEM deployments (and the Elastic add-on step).
+        /// Filled from the machine-level LLM credentials by the front ends; see
+        /// <see cref="ElasticAiSettings"/> for the secrecy rules.
+        /// </summary>
+        public ElasticAiSettings ElasticAi { get; set; } = new();
 
         /// <summary>
         /// Returns true if any pre-boot customizations are enabled

@@ -14,9 +14,10 @@ namespace VMCreate
     public class DiskFileDetector
     {
         // Ordered by preference — VMDK and QCOW2 first (most common OVA/archive contents),
-        // then native Hyper-V formats, then ISO.
+        // then native Hyper-V formats, then ISO. ".vhdfixed" covers Rocky's
+        // Hyper-V/Azure cloud images (…-Base.latest.x86_64.vhdfixed.xz).
         private static readonly string[] DiskExtensions =
-            { ".vmdk", ".qcow2", ".vhdx", ".vhd", ".iso" };
+            { ".vmdk", ".qcow2", ".vhdx", ".vhdfixed", ".vhd", ".iso" };
 
         private static readonly string[] ArchiveExtensions =
             { ".ova", ".zip", ".7z", ".tar", ".gz", ".xz", ".rar" };
@@ -85,15 +86,75 @@ namespace VMCreate
                 return DiskImageFormat.Other;
 
             string ext = Path.GetExtension(filePath).ToLowerInvariant();
-            return ext switch
+            var byExtension = ext switch
             {
                 ".vmdk" => DiskImageFormat.Vmdk,
                 ".qcow2" => DiskImageFormat.Qcow2,
                 ".vhdx" => DiskImageFormat.Vhdx,
+                ".vhdfixed" => DiskImageFormat.Vhd,
                 ".vhd" => DiskImageFormat.Vhd,
                 ".iso" => DiskImageFormat.Iso,
                 _ => DiskImageFormat.Other
             };
+
+            // Ambiguous extension (e.g. Ubuntu cloud images ship qcow2 data
+            // in ".img"): sniff magic bytes when a local file exists. URLs
+            // and not-yet-downloaded paths keep the extension verdict.
+            if (byExtension == DiskImageFormat.Other && File.Exists(filePath))
+            {
+                var sniffed = SniffLocalFile(filePath);
+                if (sniffed.HasValue)
+                    return sniffed.Value;
+            }
+
+            return byExtension;
+        }
+
+        /// <summary>
+        /// Resolves the media type for a deployment, honoring a loader's
+        /// explicit <see cref="GalleryItem.FileTypeOverride"/> (which wins —
+        /// the loader knows the source content) and otherwise falling back to
+        /// <see cref="DetectFileType"/> for the URI/path.
+        /// </summary>
+        public static DiskImageFormat ResolveDiskImageFormat(GalleryItem? item, string? sourceFileOrUri)
+        {
+            if (!string.IsNullOrEmpty(item?.FileTypeOverride)
+                && Enum.TryParse<DiskImageFormat>(item.FileTypeOverride, ignoreCase: true, out var declared))
+            {
+                return declared;
+            }
+
+            return DetectFileType(sourceFileOrUri);
+        }
+
+        private static DiskImageFormat? SniffLocalFile(string path)
+        {
+            try
+            {
+                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
+                    bufferSize: 4096, FileOptions.Asynchronous | FileOptions.SequentialScan);
+
+                Span<byte> header = stackalloc byte[4096];
+                int read = 0;
+                while (read < header.Length)
+                {
+                    int n = stream.Read(header[read..]);
+                    if (n == 0) break;
+                    read += n;
+                }
+
+                if (read >= 4 && header[0] == (byte)'Q' && header[1] == (byte)'F' && header[2] == (byte)'I' && header[3] == 0xFB)
+                    return DiskImageFormat.Qcow2;
+                if (read >= 8 && header[0] == (byte)'v' && header[1] == (byte)'h' && header[2] == (byte)'d' && header[3] == (byte)'x')
+                    return DiskImageFormat.Vhdx;
+                if (read >= 516 && header[512] == (byte)'K' && header[513] == (byte)'D' && header[514] == (byte)'M' && header[515] == (byte)'V')
+                    return DiskImageFormat.Vmdk;
+                return null;
+            }
+            catch
+            {
+                return null; // unreadable/locked — caller falls back to extension
+            }
         }
 
         private string? ScanForDisk(string directory)

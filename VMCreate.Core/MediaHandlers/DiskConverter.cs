@@ -34,11 +34,14 @@ namespace VMCreate
                 throw new FileNotFoundException($"Source disk file not found: {sourcePath}");
             }
 
-            string sourceExtension = Path.GetExtension(sourcePath).ToLower();
-            if (sourceExtension != ".vmdk" && sourceExtension != ".qcow2")
+            // Format is resolved by content first (Ubuntu cloud images ship
+            // qcow2 data in ".img" files; Rocky's Hyper-V flavour is a fixed
+            // VHD that qemu-img calls "vpc"), falling back to the extension.
+            string sourceFormat = ResolveSourceFormat(sourcePath);
+            if (sourceFormat is not ("vmdk" or "qcow2" or "vpc"))
             {
-                _logger.LogError("Unsupported source format: {SourceExtension}. Supported formats: .vmdk, .qcow2", sourceExtension);
-                throw new NotSupportedException($"Unsupported disk format: {sourceExtension}");
+                _logger.LogError("Unsupported source format: {SourceFormat}. Supported formats: vmdk, qcow2, vpc (VHD)", sourceFormat);
+                throw new NotSupportedException($"Unsupported disk format: {sourceFormat}");
             }
 
             if (Path.GetExtension(destinationPath).ToLower() != ".vhdx")
@@ -129,7 +132,7 @@ namespace VMCreate
                 {
                     FileName = _qemuImgPath,
                     // -p for progress output on stdout
-                    Arguments = $"convert -p -f {GetQemuSourceFormat(sourceExtension)} -O vhdx \"{sourcePath}\" \"{destinationPath}\"",
+                    Arguments = $"convert -p -f {sourceFormat} -O vhdx \"{sourcePath}\" \"{destinationPath}\"",
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     UseShellExecute = false,
@@ -312,10 +315,75 @@ namespace VMCreate
                     return "vmdk";
                 case ".qcow2":
                     return "qcow2";
+                case ".vhd":
+                case ".vhdfixed":
+                    // qemu's name for the (fixed/dynamic) VHD container family.
+                    return "vpc";
                 default:
                     _logger.LogError("Unknown disk format: {Extension}", extension);
                     throw new NotSupportedException($"Unknown disk format: {extension}");
             }
+        }
+
+        /// <summary>
+        /// Resolves the qemu source format for a local file by sniffing magic
+        /// bytes (qcow2: "QFI\xFB" at offset 0; VMDK: "KDMV" at offset 512;
+        /// VHD: "conectix" footer at the last 512 bytes), falling back to the
+        /// extension for raw/unknown content. Needed because cloud images
+        /// (Ubuntu) ship qcow2 data in ".img" files and Rocky publishes its
+        /// Hyper-V flavour as fixed ".vhd".
+        /// </summary>
+        private string ResolveSourceFormat(string sourcePath)
+        {
+            try
+            {
+                // VHD is identified by its TRAILER: check the end first so the
+                // header sniff below can't misread a raw disk that happens to
+                // carry a GPT.
+                var fi = new FileInfo(sourcePath);
+                if (fi.Length >= 512)
+                {
+                    using var tailStream = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read,
+                        bufferSize: 512, FileOptions.Asynchronous | FileOptions.SequentialScan);
+                    tailStream.Seek(-512, SeekOrigin.End);
+                    Span<byte> footer = stackalloc byte[512];
+                    int tread = 0;
+                    while (tread < footer.Length)
+                    {
+                        int n = tailStream.Read(footer[tread..]);
+                        if (n == 0) break;
+                        tread += n;
+                    }
+                    if (tread == 512
+                        && footer[0] == (byte)'c' && footer[1] == (byte)'o' && footer[2] == (byte)'n'
+                        && footer[3] == (byte)'e' && footer[4] == (byte)'c' && footer[5] == (byte)'t'
+                        && footer[6] == (byte)'i' && footer[7] == (byte)'x')
+                        return "vpc";
+                }
+
+                using var stream = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read,
+                    bufferSize: 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
+
+                Span<byte> header = stackalloc byte[1024];
+                int read = 0;
+                while (read < header.Length)
+                {
+                    int n = stream.Read(header[read..]);
+                    if (n == 0) break;
+                    read += n;
+                }
+
+                if (read >= 4 && header[0] == (byte)'Q' && header[1] == (byte)'F' && header[2] == (byte)'I' && header[3] == 0xFB)
+                    return "qcow2";
+                if (read >= 516 && header[512] == (byte)'K' && header[513] == (byte)'D' && header[514] == (byte)'M' && header[515] == (byte)'V')
+                    return "vmdk";
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Magic-byte format sniffing failed for {Path}; falling back to extension", sourcePath);
+            }
+
+            return GetQemuSourceFormat(Path.GetExtension(sourcePath));
         }
     }
 }

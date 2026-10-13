@@ -137,5 +137,73 @@ namespace VMCreate.Tests
         {
             Assert.AreEqual(expected, DiskFileDetector.DetectFileType(path));
         }
+
+        // ── Cloud-image ".img" handling (Elastic SIEM appliance) ─────────
+
+        [TestMethod]
+        public void DetectFileType_Qcow2MagicInDotImgFile_ReturnsQcow2()
+        {
+            // Ubuntu cloud images ship qcow2 data as ".img".
+            string path = Path.Combine(_tempDir, "noble-server-cloudimg-amd64.img");
+            byte[] qcow2Header = { (byte)'Q', (byte)'F', (byte)'I', 0xFB, 0x00, 0x00, 0x00, 0x03 };
+            File.WriteAllBytes(path, qcow2Header);
+
+            Assert.AreEqual(DiskImageFormat.Qcow2, DiskFileDetector.DetectFileType(path));
+        }
+
+        [TestMethod]
+        public void DetectFileType_UnknownExtensionNonQcow2LocalFile_StaysOther()
+        {
+            string path = Path.Combine(_tempDir, "random-data.img");
+            File.WriteAllBytes(path, new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 });
+
+            Assert.AreEqual(DiskImageFormat.Other, DiskFileDetector.DetectFileType(path));
+        }
+
+        [TestMethod]
+        public void DetectFileType_DotImgUrlWithoutLocalFile_StaysOther()
+        {
+            // Pre-download gating (URI only): no bytes to sniff — the loader's
+            // FileTypeOverride covers this case via ResolveDiskImageFormat.
+            Assert.AreEqual(DiskImageFormat.Other,
+                DiskFileDetector.DetectFileType("https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"));
+        }
+
+        [TestMethod]
+        public void ResolveDiskImageFormat_LoaderOverrideWinsOverUriExtension()
+        {
+            var item = new GalleryItem
+            {
+                Name = "Elastic SIEM",
+                Publisher = "t",
+                Description = "t",
+                DiskUri = "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img",
+                SecureBoot = "false",
+                EnhancedSessionTransportType = "HvSocket",
+                Version = "24.04",
+                FileTypeOverride = "QCOW2",
+            };
+
+            Assert.AreEqual(DiskImageFormat.Qcow2,
+                DiskFileDetector.ResolveDiskImageFormat(item, item.DiskUri));
+        }
+
+        [TestMethod]
+        public void ResolveDiskImageFormat_NoOverride_FallsBackToDetection()
+        {
+            var item = new GalleryItem
+            {
+                Name = "x",
+                Publisher = "t",
+                Description = "t",
+                DiskUri = "install.iso",
+                SecureBoot = "false",
+                EnhancedSessionTransportType = "HvSocket",
+                Version = "1",
+            };
+
+            Assert.AreEqual(DiskImageFormat.Iso,
+                DiskFileDetector.ResolveDiskImageFormat(item, item.DiskUri));
+        }
     }
 }

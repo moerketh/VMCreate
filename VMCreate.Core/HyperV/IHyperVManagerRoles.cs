@@ -21,6 +21,12 @@ namespace VMCreate
     public interface IVmDiskManager
     {
         Task AddExistingHardDrive(VmDeploymentPlan plan, string mediaPath, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Attaches an existing VHDX choosing the controller: IDE is required
+        /// for boot disks on Gen 1 VMs (BIOS firmware cannot boot SCSI).
+        /// </summary>
+        Task AddExistingHardDriveAsync(VmDeploymentPlan plan, string mediaPath, bool ide, CancellationToken cancellationToken);
         Task AddNewHardDrive(VmDeploymentPlan plan, string vmPath, CancellationToken cancellationToken);
         Task RemoveHardDrive(VmDeploymentPlan plan, int location, CancellationToken cancellationToken);
         Task<string[]> GetVmHardDiskPathsAsync(string vmName, CancellationToken cancellationToken);

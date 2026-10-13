@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Management;
 using System.Threading;
 using System.Threading.Tasks;
@@ -63,6 +64,15 @@ namespace VMCreate.Tests.HyperV
 
             Assert.IsFalse(await gate.WaitAsync(timeoutSeconds: 1, pollMs: 1, CancellationToken.None),
                 "empty pools after timeout must return false, not hang or throw");
+
+            var diag = gate.LastDiagnostics;
+            Assert.IsNotNull(diag, "a completed wait must leave diagnostics behind");
+            Assert.IsTrue(diag.VmGuidResolved, "the VM was running and locatable");
+            Assert.IsTrue(diag.PoolReadCount >= 1, "pools were readable");
+            Assert.IsFalse(diag.ConfirmedGuestKvp, "no guest-written data was seen");
+            Assert.IsNull(diag.LastException, "no WMI errors occurred");
+            StringAssert.Contains(diag.ToString(), "pools read empty", StringComparison.Ordinal,
+                "timeout diagnostics must name the host-side lag signature");
         }
 
         [TestMethod]
@@ -86,6 +96,13 @@ namespace VMCreate.Tests.HyperV
             var gate = new FakeGate(_ => null, _ => new Dictionary<string, string?>());
 
             Assert.IsFalse(await gate.WaitAsync(timeoutSeconds: 1, pollMs: 1, CancellationToken.None));
+
+            var diag = gate.LastDiagnostics;
+            Assert.IsNotNull(diag);
+            Assert.IsFalse(diag.VmGuidResolved, "the VM never became locatable");
+            Assert.AreEqual(0, diag.PoolReadCount, "no pool read can succeed without a GUID");
+            StringAssert.Contains(diag.ToString(), "VM GUID never resolved", StringComparison.Ordinal,
+                "diagnostics must distinguish 'VM not locatable' from 'pools empty'");
         }
 
         [TestMethod]
@@ -99,6 +116,55 @@ namespace VMCreate.Tests.HyperV
 
             Assert.IsTrue(await gate.WaitAsync(timeoutSeconds: 10, pollMs: 1, CancellationToken.None),
                 "a transient WMI error must not fail the gate");
+
+            var diag = gate.LastDiagnostics;
+            Assert.IsNotNull(diag);
+            Assert.IsTrue(diag.ConfirmedGuestKvp, "the wait ended in a confirmed heartbeat");
+            Assert.AreEqual("transient", diag.LastException,
+                "the swallowed WMI error must be recorded for post-mortem diagnostics");
+            StringAssert.Contains(diag.ToString(), "guest KVP confirmed", StringComparison.Ordinal);
+        }
+
+        [TestMethod]
+        public async Task ConfirmedHeartbeat_DiagnosticsShowConfirmation()
+        {
+            var gate = new FakeGate(
+                _ => "11111111-1111-1111-1111-111111111111",
+                _ => new Dictionary<string, string?> { ["OSName"] = "Linux" });
+
+            Assert.IsTrue(await gate.WaitAsync(timeoutSeconds: 5, pollMs: 1, CancellationToken.None));
+
+            var diag = gate.LastDiagnostics;
+            Assert.IsNotNull(diag);
+            Assert.IsTrue(diag.ConfirmedGuestKvp);
+            Assert.AreEqual(1, diag.PollCount, "an answering daemon confirms on the first poll");
+            Assert.IsNull(diag.LastException);
+        }
+
+        [TestMethod]
+        public async Task EachWait_ResetsDiagnostics()
+        {
+            bool daemonAlive = false;
+            var gate = new FakeGate(
+                _ => "11111111-1111-1111-1111-111111111111",
+                _ => daemonAlive
+                    ? new Dictionary<string, string?> { ["OSName"] = "Linux" }
+                    : new Dictionary<string, string?>());
+
+            Assert.IsFalse(await gate.WaitAsync(timeoutSeconds: 1, pollMs: 1, CancellationToken.None));
+            var firstWait = gate.LastDiagnostics;
+            Assert.IsNotNull(firstWait);
+            Assert.IsTrue(firstWait.PollCount > 1, "the timed-out wait polled repeatedly");
+            Assert.IsFalse(firstWait.ConfirmedGuestKvp);
+
+            daemonAlive = true;
+            Assert.IsTrue(await gate.WaitAsync(timeoutSeconds: 5, pollMs: 1, CancellationToken.None));
+            var secondWait = gate.LastDiagnostics;
+            Assert.IsNotNull(secondWait);
+            Assert.AreNotSame(firstWait, secondWait, "each wait must produce fresh diagnostics");
+            Assert.AreEqual(1, secondWait.PollCount,
+                "the fresh wait's poll counter must start from zero, not accumulate");
+            Assert.IsTrue(secondWait.ConfirmedGuestKvp);
         }
 
         [TestMethod]

@@ -68,6 +68,12 @@ namespace VMCreate
             return string.Empty;
         }
 
+        /// <summary>
+        /// Maps <c>os-release</c> ID / ID_LIKE values to a distro. Exposed for
+        /// tests (the SSH path only adds transport around this mapping).
+        /// </summary>
+        internal static LinuxDistro ClassifyForTest(string id, string idLike) => Classify(id, string.IsNullOrEmpty(idLike) ? "" : idLike);
+
         private static LinuxDistro Classify(string id, string idLike)
         {
             // ALL exact-ID checks BEFORE any ID_LIKE fallback. Parrot ships
@@ -78,6 +84,8 @@ namespace VMCreate
             if (Is(id, "ubuntu")) return LinuxDistro.Ubuntu;
             if (Is(id, "debian")) return LinuxDistro.Debian;
             if (Is(id, "fedora")) return LinuxDistro.Fedora;
+            if (Is(id, "rocky")) return LinuxDistro.Rocky;
+            if (Is(id, "almalinux")) return LinuxDistro.Rocky;
             if (Is(id, "opensuse-tumbleweed") || Is(id, "opensuse-leap")
                 || Is(id, "opensuse") || Is(id, "suse")) return LinuxDistro.OpenSuse;
             if (Is(id, "parrot")) return LinuxDistro.Parrot;
@@ -95,6 +103,7 @@ namespace VMCreate
             if (HasLike(idLike, "ubuntu")) return LinuxDistro.Ubuntu;
             if (HasLike(idLike, "debian")) return LinuxDistro.Debian;
             if (HasLike(idLike, "fedora")) return LinuxDistro.Fedora;
+            if (HasLike(idLike, "rhel") || HasLike(idLike, "rocky") || HasLike(idLike, "almalinux")) return LinuxDistro.Rocky;
             if (HasLike(idLike, "opensuse") || HasLike(idLike, "suse")) return LinuxDistro.OpenSuse;
             if (HasLike(idLike, "parrot")) return LinuxDistro.Parrot;
             // Arch derivatives (e.g. Manjaro, EndeavourOS) ship ID_LIKE=arch.

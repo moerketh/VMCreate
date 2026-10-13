@@ -22,6 +22,13 @@ namespace VMCreate
         Kali,
 
         /// <summary>
+        /// RHEL-compatible family (Rocky, AlmaLinux, and other ID_LIKE=rhel
+        /// derivatives). rpm/dnf-based; the Elastic SIEM appliance (Rocky 10
+        /// GenericCloud) lives here.
+        /// </summary>
+        Rocky,
+
+        /// <summary>
         /// pacman-family distributions (Arch, Athena Arch, Manjaro and other
         /// ID_LIKE=arch derivatives). Lamco-capable via the fork pipeline's
         /// amd64 Arch pacman package (lamco-rdp-server-1.4.5-hyperv6-1),

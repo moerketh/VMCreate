@@ -75,15 +75,22 @@ namespace VMCreate.HyperV.VmCreation
                 cancellationToken.ThrowIfCancellationRequested();
 
                 IProgress<CreateVMProgressInfo> effectiveProgress = progress ?? new Progress<CreateVMProgressInfo>(_ => { });
-                IMediaHandler mediaHandler = _mediaHandlerFactory.CreateHandler(DiskFileDetector.DetectFileType(sourceFileOrUri));
+                IMediaHandler mediaHandler = _mediaHandlerFactory.CreateHandler(
+                    DiskFileDetector.ResolveDiskImageFormat(galleryItem, sourceFileOrUri));
                 DiskImageFormat actualFileType = mediaHandler.FileType;
 
                 Task isoProvisioningTask = EnsureCloningIsoAsync(plan, cancellationToken, effectiveProgress);
 
                 cancellationToken.ThrowIfCancellationRequested();
+                string diskDirectory = _pathService.GetVirtualHardDiskPath(plan.VmName);
+                // Archive extraction creates this directory as a side effect;
+                // bare disk images (ISO, QCOW2, VHDX — no extraction step)
+                // would otherwise hand qemu-img / the disk attach a path whose
+                // parent doesn't exist.
+                Directory.CreateDirectory(diskDirectory);
                 MediaPreparationResult mediaResult = await mediaHandler.PrepareMediaAsync(
                     sourceFileOrUri,
-                    _pathService.GetVirtualHardDiskPath(plan.VmName),
+                    diskDirectory,
                     plan,
                     galleryItem,
                     effectiveProgress,
