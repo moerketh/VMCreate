@@ -1,6 +1,5 @@
 using Microsoft.Extensions.Logging;
 using System;
-using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -17,17 +16,13 @@ namespace VMCreate
     /// via <c>hyprctl output create headless</c> + ext-image-copy-capture.
     /// </para>
     /// <para>
-    /// Package delivery (pre-public-release): the wayrdp repo is PRIVATE
-    /// and has no public release asset, so the guest cannot download a
-    /// package. The host instead scp's a locally-built tarball
-    /// (<see cref="VmCustomizations.WayrdpPackagePath"/> — produced by
-    /// <c>scripts/build-package.sh</c> in the wayrdp repo) to the guest
-    /// alongside the script, computes its sha256 host-side and injects it
-    /// into <c>install_wayrdp.sh</c> (<c>__WAYRDP_PKG_SHA256__</c>) so the
-    /// guest verifies the digest before installing — same tamper-evident
-    /// pin as <see cref="InstallLamcoRdpStep"/>, just host-delivered instead
-    /// of network-fetched. When wayrdp ships a public release this becomes
-    /// a pinned URL and the scp path is removed.
+    /// Package delivery: the wayrdp repo publishes public releases via CI,
+    /// so the guest downloads the PINNED release asset itself — the script
+    /// curls <c>releases/latest/download/wayrdp-&lt;ver&gt;-linux-x86_64.tar.gz</c>
+    /// and verifies it against the sha256 pinned in
+    /// <c>install_wayrdp.sh</c> before installing — the same
+    /// pinned-URL-and-digest contract as <see cref="InstallLamcoRdpStep"/>'s
+    /// fork-deb download, including the refuse-on-mismatch rule.
     /// </para>
     /// <para>
     /// Gating: only when <see cref="VmCustomizations.RdpBackend"/> is
@@ -40,8 +35,9 @@ namespace VMCreate
     /// rather than inside a root-run script.
     /// </para>
     /// <para>
-    /// Not part of <see cref="RdpBackend.Auto"/> resolution — wayrdp is only
-    /// reachable by explicit selection while it is pre-release.
+    /// Not part of <see cref="RdpBackend.Auto"/> resolution — by design,
+    /// wayrdp is an explicit opt-in selection rather than an automatic
+    /// verdict.
     /// Runs at Order 237 (between the Lamco install at 235 and the
     /// <see cref="EnableGraphicalAutologinStep"/> at 238 — wayrdp's user
     /// unit is installed before the session is brought up). The result
@@ -67,28 +63,10 @@ namespace VMCreate
 
             string script = ScriptResourceLoader.Load("install_wayrdp.sh");
 
-            // The wayrdp repo is private with no public release asset, so the
-            // guest cannot fetch the package: the host delivers the locally-built
-            // tarball over SSH instead. Resolve it from the customization, else
-            // fail loudly before touching the guest (missing package is not a
-            // retryable SSH error).
-            string? pkgHost = customizations?.WayrdpPackagePath;
-            if (string.IsNullOrWhiteSpace(pkgHost) || !File.Exists(pkgHost))
-            {
-                throw new InvalidOperationException(
-                    $"VM {shell.VmName}: wayrdp package tarball not found. " +
-                    $"Set VmCustomizations.WayrdpPackagePath to the output of scripts/build-package.sh " +
-                    $"(dist/release/wayrdp-<ver>-linux-x86_64.tar.gz). Resolved path: '{pkgHost ?? "(unset)"}'.");
-            }
-            string pkgHostPath = pkgHost;
-
-            // Compute the sha256 host-side and inject it so the guest verifies the
-            // exact tarball it received (tamper-evident pin, mirroring the Lamco
-            // sha256 contract but host-delivered instead of network-fetched).
-            string pkgSha256;
-            using (var stream = File.OpenRead(pkgHostPath))
-                pkgSha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream)).ToLowerInvariant();
-            script = script.Replace("__WAYRDP_PKG_SHA256__", pkgSha256);
+            // Package download is fully guest-side: the script curls the
+            // pinned public release asset and verifies its sha256 against
+            // the digest pinned in the script itself, so the host injects
+            // no package data.
 
             // Same autologin-user contract as InstallLamcoRdpStep: the C#
             // side is the authoritative source; a blank field falls back to
@@ -155,24 +133,14 @@ namespace VMCreate
             // /tmp hardening: unpredictable guest path + tightened
             // ownership/perms before execution — see InstallLamcoRdpStep.
             string guestScript = $"/tmp/install_wayrdp_{Guid.NewGuid():N}.sh";
-
-            // Deliver the package tarball + its sha256 sidecar to the guest on
-            // per-deploy unpredictable paths too (same /tmp hardening rationale
-            // as the script name) and inject them into the script via
-            // placeholders, so concurrent deploys can never read or clobber
-            // each other's package files in /tmp.
-            string guestTarball = $"/tmp/wayrdp-pkg_{Guid.NewGuid():N}.tar.gz";
-            string guestSha = guestTarball + ".sha256";
-            script = script.Replace("__WAYRDP_PKG_TARBALL__", guestTarball);
-            script = script.Replace("__WAYRDP_PKG_SHA256_FILE__", guestSha);
-
             await shell.CopyContentAsync(script, guestScript, ct);
-            await shell.CopyFileAsync(pkgHostPath, guestTarball, ct);
-            await shell.CopyContentAsync($"{pkgSha256}  {Path.GetFileName(guestTarball)}\n", guestSha, ct);
 
+            // The install pulls apt/pacman deps and downloads the pinned
+            // release tarball — beyond the transport's default command
+            // timeout, but well under 20 minutes.
             string result = await shell.RunCommandAsync(
                 $"sudo chown root:root {guestScript} && sudo chmod 0700 {guestScript} && sudo bash {guestScript}; " +
-                $"rc=$?; sudo rm -f {guestScript} {guestTarball} {guestSha}; exit $rc",
+                $"rc=$?; sudo rm -f {guestScript}; exit $rc",
                 TimeSpan.FromMinutes(20), ct);
 
             // Result contract: the script prints a machine-readable terminal

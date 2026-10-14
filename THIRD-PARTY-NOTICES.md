@@ -332,6 +332,31 @@ the license in `/usr/share/doc/lamco-rdp-server/LICENSE` on the guest
 
 ---
 
+## wayrdp (deploy-time download, not bundled)
+
+- **Upstream:** https://github.com/moerketh/wayrdp
+  (version and sha256 pinned in `VMCreate.Core/HyperV/Steps/Scripts/install_wayrdp.sh` — see its `WAYRDP_*` constants for the current values)
+- **License:** MIT
+
+VMCreate does not bundle or redistribute wayrdp binaries. When the wayrdp
+RDP backend is selected, the pinned release tarball is downloaded at deploy
+time directly from the wayrdp GitHub Releases and installed on the guest VM,
+verified against the pinned sha256 before anything is extracted.
+
+The licensed work is MIT (c) moerketh. Permission is granted, free of charge,
+to any person obtaining a copy of the software and associated documentation
+files, to deal in the software without restriction, including without
+limitation the rights to use, copy, modify, merge, publish, distribute,
+sublicense, and/or sell copies, subject to the MIT license notice surviving
+in all copies or substantial portions of the software.
+
+The install script additionally installs the FreeRDP 3 client libraries
+(Apache-2.0) on the guest via the distro's package manager (apt/pacman) as
+runtime dependencies; those packages are provided by the distribution and
+are not redistributed by VMCreate.
+
+---
+
 ## Athena OS logo (bundled)
 
 - **Upstream:** https://athenaos.org (official brand assets)

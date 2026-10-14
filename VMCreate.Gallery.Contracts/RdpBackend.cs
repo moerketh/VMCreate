@@ -45,21 +45,19 @@ namespace VMCreate
         /// PipeWire via the shared <c>hyperv-rdp-extras</c> crate; synthetic
         /// for headless smoke tests).
         /// <para>
-        /// Because the wayrdp repo is private (no anonymous release-asset
-        /// fetch like the Lamco fork's curl flow), the package is delivered
-        /// host-side: the deployment step scp's a locally-built tarball
-        /// (<c>VmCustomizations.WayrdpPackagePath</c>, produced by wayrdp's
-        /// <c>scripts/build-package.sh</c>) to the guest, injects its
-        /// host-computed sha256 into the install script so the guest verifies
-        /// the exact bits it received, then runs the bundle's install.sh
-        /// (prefix /usr/local). A missing/unset package path fails the
-        /// deployment loudly on the host before touching the guest — same
-        /// fail-fast contract as the Lamco install (a silently absent RDP
-        /// server is the worse failure). The script prints a machine-readable
-        /// <c>WAYRDP_RESULT=ok|degraded</c> terminal line; install-time
-        /// readiness is the systemd user unit being active, with a
-        /// session-absent state reported as DEGRADED rather than a hard error
-        /// (mirrors the Lamco gate).
+        /// The package is fetched from the wayrdp repo's public releases: the
+        /// install script curls the pinned release asset
+        /// (<c>releases/latest/download/wayrdp-&lt;ver&gt;-linux-x86_64.tar.gz</c>)
+        /// and verifies its sha256 against the digest pinned in the script
+        /// before extracting and running the bundle's install.sh (prefix
+        /// /usr/local) — the same pinned-URL-and-digest contract as the Lamco
+        /// fork's curl flow. A download or digest mismatch fails the
+        /// deployment loudly (no fallback paths — a silently absent or
+        /// re-pointed RDP server is the worse failure). The script prints a
+        /// machine-readable <c>WAYRDP_RESULT=ok|degraded</c> terminal line;
+        /// install-time readiness is the systemd user unit being active,
+        /// with a session-absent state reported as DEGRADED rather than a
+        /// hard error (mirrors the Lamco gate).
         /// </para>
         /// Requires a graphical Wayland session to share, so graphical
         /// autologin is enabled. Supported distro families: Debian trixie+

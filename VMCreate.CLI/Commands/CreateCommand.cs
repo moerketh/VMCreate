@@ -80,14 +80,7 @@ namespace VMCreate.CLI.Commands
             var rdpBackendOpt = new Option<string>(
                 "--rdp-backend",
                 getDefaultValue: () => "auto",
-                description: "RDP server backend: auto (default — detects Wayland vs X11 in the guest post-boot and picks the best backend), xrdp (disables Wayland), lamco (Wayland-native Lamco RDP Server), wayrdp (MIT FreeRDP-3 successor — requires --wayrdp-package; the wayrdp repo is private, so the host scp's a locally-built tarball instead of curl-ing a release asset), or none.");
-
-            var wayrdpPackageOpt = new Option<string>(
-                "--wayrdp-package",
-                description: "Path to a locally-built wayrdp package tarball (wayrdp-<ver>-linux-x86_64.tar.gz), " +
-                             "produced by wayrdp's scripts/build-package.sh. Required with --rdp-backend wayrdp: " +
-                             "the step scp's the tarball to the guest over SSH (sha256-pinned) because the private " +
-                             "repo cannot serve a release asset to anonymous curl.");
+                description: "RDP server backend: auto (default — detects Wayland vs X11 in the guest post-boot and picks the best backend), xrdp (disables Wayland), lamco (Wayland-native Lamco RDP Server), wayrdp (MIT Wayland-native RDP on FreeRDP 3 — installed from a pinned public release download), or none.");
 
             var desktopOpt = new Option<string>(
                 "--desktop",
@@ -191,7 +184,6 @@ namespace VMCreate.CLI.Commands
             cmd.AddOption(replaceOpt);
             cmd.AddOption(noXrdpOpt);
             cmd.AddOption(rdpBackendOpt);
-            cmd.AddOption(wayrdpPackageOpt);
             cmd.AddOption(desktopOpt);
             cmd.AddOption(releaseOpt);
             cmd.AddOption(noIntegrationSvcOpt);
@@ -230,7 +222,6 @@ namespace VMCreate.CLI.Commands
                     Replace = r.GetValueForOption(replaceOpt),
                     NoXrdp = r.GetValueForOption(noXrdpOpt),
                     RdpBackend = r.GetValueForOption(rdpBackendOpt),
-                    WayrdpPackagePath = r.GetValueForOption(wayrdpPackageOpt),
                     Desktop = r.GetValueForOption(desktopOpt),
                     Release = r.GetValueForOption(releaseOpt),
                     NoIntegrationServices = r.GetValueForOption(noIntegrationSvcOpt),
@@ -450,20 +441,6 @@ namespace VMCreate.CLI.Commands
             if (!rdpBackendValid)
                 return ExitCodes.InvalidArguments;
 
-            // wayrdp needs its package tarball on the host (the repo is
-            // private — the guest cannot curl a release asset). Fail fast
-            // here, before any VM/disk work, instead of mid-pipeline in the
-            // post-boot install step.
-            if (rdpBackend == RdpBackend.Wayrdp
-                && (string.IsNullOrWhiteSpace(args.WayrdpPackagePath) || !File.Exists(args.WayrdpPackagePath)))
-            {
-                PrintError(jsonMode, "validation",
-                    "--rdp-backend wayrdp requires --wayrdp-package <path> pointing at a locally-built " +
-                    "wayrdp tarball (wayrdp-<ver>-linux-x86_64.tar.gz) from wayrdp's scripts/build-package.sh. " +
-                    $"Resolved path: '{args.WayrdpPackagePath ?? "(unset)"}'.");
-                return ExitCodes.InvalidArguments;
-            }
-
             // ── Validate & resolve --desktop against the image's catalog ────
             // Same fail-loudly contract as --rdp-backend: an unknown or
             // unoffered desktop must not silently deploy the stock desktop.
@@ -506,7 +483,6 @@ namespace VMCreate.CLI.Commands
             {
                 RdpBackend = rdpBackend,
                 DesktopEnvironmentId = desktopEnvironmentId,
-                WayrdpPackagePath = args.WayrdpPackagePath,
                 EnableIntegrationServices = !args.NoIntegrationServices,
                 DnsMode = string.Equals(args.DnsMode, "custom", StringComparison.OrdinalIgnoreCase)
                     ? DnsMode.Custom
@@ -776,7 +752,6 @@ namespace VMCreate.CLI.Commands
         public bool Replace { get; set; }
         public bool NoXrdp { get; set; }
         public string? RdpBackend { get; set; }
-        public string? WayrdpPackagePath { get; set; }
         public string? Desktop { get; set; }
         public string? Release { get; set; }
         public bool NoIntegrationServices { get; set; }

@@ -101,8 +101,8 @@ namespace VMCreate.Tests.GalleryTests
         [TestMethod]
         public void HasPreBootCustomizations_FalseForWayrdp()
         {
-            // No pre-boot ISO cycle for wayrdp: the install (placeholder
-            // today) runs post-boot, gated by InstallWayrdpRdpStep.
+            // No pre-boot ISO cycle for wayrdp: the pinned-release install
+            // runs post-boot, gated by InstallWayrdpRdpStep.
             var c = new VmCustomizations { RdpBackend = RdpBackend.Wayrdp };
             Assert.IsFalse(c.HasPreBootCustomizations);
         }
@@ -111,10 +111,11 @@ namespace VMCreate.Tests.GalleryTests
         public void Wayrdp_IsNotResolvedFromAuto()
         {
             // Regression guard for the explicit-selection design: the Auto
-            // resolver only ever produces Lamco or Xrdp — wayrdp stays
-            // opt-in-only while pre-release. If a future change routes
-            // Auto→Wayrdp, the deploy-progress idempotence guard that keys
-            // on the lamco/xrdp card IDs would need revisiting too.
+            // resolver only ever produces Lamco or Xrdp — wayrdp is a
+            // deliberate explicit opt-in, never an auto-nudged default. If a
+            // future change routes Auto→Wayrdp, the deploy-progress
+            // idempotence guard that keys on the lamco/xrdp card IDs
+            // would need revisiting too.
             Assert.AreNotEqual(RdpBackend.Wayrdp, new VmCustomizations().RdpBackend,
                 "default must stay Auto, not Wayrdp");
         }

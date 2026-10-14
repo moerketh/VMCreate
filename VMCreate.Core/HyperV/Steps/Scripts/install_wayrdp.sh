@@ -21,38 +21,31 @@ set -o pipefail
 #     WAYRDP_RESULT=ok|degraded — hard failures exit non-zero BEFORE that
 #     line is reached.
 #
-# PACKAGE DELIVERY (current): wayrdp lives in a PRIVATE repo with no public
-# release asset, so the guest cannot fetch a package over the network. The
-# host step (InstallWayrdpRdpStep) scp's the portable tarball
-# (wayrdp-<ver>-linux-x86_64.tar.gz, built by scripts/build-package.sh) to a
-# per-deploy /tmp path alongside this script, and its sha256 into a sidecar
-# next to it; both paths are injected into the WAYRDP_PKG_TARBALL /
-# WAYRDP_PKG_SHA256_FILE placeholders below. Per-deploy paths (same /tmp
-# hardening rationale as the script name): concurrent deploys must never
-# read or clobber each other's files in a shared /tmp. This script verifies
-# the digest, extracts the bundle, and runs its install.sh. When wayrdp
-# ships a public release this becomes a pinned curl of $WAYRDP_PKG_URL —
-# mirror install_lamco.sh.
+# wayrdp lives in the PUBLIC repo moerketh/wayrdp: CI (GitHub Actions)
+# publishes tagged releases, and this script downloads the PINNED release
+# asset, verifies its sha256 against the pinned digest, extracts the
+# bundle and runs its install.sh — the same pinned-curl contract as
+# install_lamco.sh's fork-deb download.
 #
-# The tarball layout (scripts/build-package.sh):
+# The tarball layout (CI release workflow):
 #   wayrdp-<ver>-linux-x86_64/
 #     bin/wayrdp
 #     lib/systemd/user/wayrdp.service
 #     share/doc/wayrdp/LICENSE
+#     share/wayrdp/plugins/hyprland-capture/{Makefile,main.cpp}
 #     install.sh            — installs to /usr/local (default prefix)
+#
+# Pinned release constants — bump these three together when pinning a new
+# release (sha256 from the release's SHA256SUMS asset). The filename is
+# version-numbered, so a `releases/latest` that no longer carries this
+# exact asset 404s loudly instead of silently installing a different one.
+WAYRDP_REPO="moerketh/wayrdp"
+WAYRDP_VERSION="0.1.0"
+WAYRDP_TARBALL="wayrdp-${WAYRDP_VERSION}-linux-x86_64.tar.gz"
+WAYRDP_TARBALL_SHA256="b7d88525dad6e7542865a6b389d1ff91c685d9c2cae035f80928a4bc7bcaa9d0"
+WAYRDP_TARBALL_URL="https://github.com/${WAYRDP_REPO}/releases/latest/download/${WAYRDP_TARBALL}"
 
 DEGRADED=0
-
-# Where the host scp'd the package tarball and its sha256 sidecar, plus the
-# pinned digest of the tarball. All three are injected by
-# InstallWayrdpRdpStep by substituting the placeholders on the next three
-# lines (per-deploy /tmp paths + host-computed sha256). When the digest
-# placeholder is left un-replaced — manual/local deploys: copy the script,
-# the tarball and its sidecar into /tmp yourself and fill in all three
-# values — the digest is read from the sidecar file instead.
-WAYRDP_PKG_TARBALL="__WAYRDP_PKG_TARBALL__"
-WAYRDP_PKG_SHA256_FILE="__WAYRDP_PKG_SHA256_FILE__"
-WAYRDP_PKG_SHA256="__WAYRDP_PKG_SHA256__"
 
 echo "=== wayrdp install (Wayland-native, FreeRDP 3) ==="
 echo "NOTICE: wayrdp is MIT-licensed (c) moerketh — the project's own"
@@ -118,46 +111,61 @@ install_freerdp_deps() {
 }
 install_freerdp_deps
 
-# -- Locate + verify the uploaded tarball -----------------------------------
-if [ ! -f "$WAYRDP_PKG_TARBALL" ]; then
-    echo "ERROR: wayrdp package tarball not found at $WAYRDP_PKG_TARBALL." >&2
-    echo "       The host step scp's dist/release/wayrdp-<ver>-linux-x86_64.tar.gz" >&2
-    echo "       there before running this script; it is missing." >&2
+# -- Download + verify the pinned release tarball ---------------------------
+download_tool=""
+if command -v curl >/dev/null 2>&1; then
+    download_tool="curl"
+elif command -v wget >/dev/null 2>&1; then
+    download_tool="wget"
+else
+    echo "ERROR: neither curl nor wget is available." >&2
     exit 1
 fi
 
-# Resolve the expected digest: injected constant, else sidecar file.
-if [ "$WAYRDP_PKG_SHA256" = "__WAYRDP_PKG_SHA256__" ]; then
-    if [ -f "$WAYRDP_PKG_SHA256_FILE" ]; then
-        WAYRDP_PKG_SHA256="$(awk '{print $1}' "$WAYRDP_PKG_SHA256_FILE" | head -1)"
+fetch_url() {
+    # $1 = URL, $2 = output file
+    if [ "$download_tool" = "curl" ]; then
+        curl -fsSL "$1" -o "$2"
     else
-        echo "ERROR: no pinned sha256 for the wayrdp tarball (placeholder not" >&2
-        echo "       substituted and $WAYRDP_PKG_SHA256_FILE missing)." >&2
-        exit 1
+        wget -q "$1" -O "$2"
     fi
+}
+
+echo "Downloading $WAYRDP_TARBALL from the pinned wayrdp release ..."
+PKG_TMP="$(mktemp /tmp/wayrdp-pkg.XXXXXX)"
+if ! fetch_url "$WAYRDP_TARBALL_URL" "$PKG_TMP"; then
+    echo "ERROR: download failed for $WAYRDP_TARBALL_URL" >&2
+    rm -f "$PKG_TMP"
+    exit 1
 fi
 
-echo "Verifying sha256 of $(basename "$WAYRDP_PKG_TARBALL") ..."
-ACTUAL_SHA256="$(sha256sum "$WAYRDP_PKG_TARBALL" | awk '{print $1}')"
-if [ "$ACTUAL_SHA256" != "$WAYRDP_PKG_SHA256" ]; then
+echo "Verifying sha256 of $WAYRDP_TARBALL ..."
+ACTUAL_SHA256="$(sha256sum "$PKG_TMP" | awk '{print $1}')"
+if [ "$ACTUAL_SHA256" != "$WAYRDP_TARBALL_SHA256" ]; then
     echo "ERROR: sha256 mismatch for the wayrdp tarball." >&2
-    echo "       expected: $WAYRDP_PKG_SHA256" >&2
+    echo "       expected: $WAYRDP_TARBALL_SHA256" >&2
     echo "       actual:   $ACTUAL_SHA256" >&2
+    echo "       The 'latest' release may no longer carry this exact asset, or the" >&2
+    echo "       asset was replaced. Pin the new version + digest in the install" >&2
+    echo "       script only after verifying the release." >&2
     echo "       Refusing to install an unverified/re-pointed package." >&2
+    rm -f "$PKG_TMP"
     exit 1
 fi
 echo "sha256 OK."
 
 # -- Extract + run the bundle's install.sh ----------------------------------
-# NOTE on the mktemp name: do NOT use the /tmp/wayrdp-pkg.XXXXXX template
-# here — its basename starts with 'wayrdp-', so
-# `find "$EXTRACT_DIR" -maxdepth 1 -type d -name 'wayrdp-*'` would match the
-# extract dir ITSELF (basename wayrdp-pkg.*) and `head -1` could pick it over
-# the real nested bundle dir (that exact false-match caused "extracted bundle
-# has no executable install.sh"). Use a non-matching template instead.
+# NOTE on the mktemp name: do NOT use a /tmp/wayrdp-*.XXXXXX template for
+# the extract dir — its basename would start with 'wayrdp-', so the
+# `for d in "$EXTRACT_DIR"/wayrdp-*/` glob below could match the extract
+# dir ITSELF and the loop could pick it over the real nested bundle dir
+# (that exact false-match once caused "extracted bundle has no executable
+# install.sh"). Use a non-matching template instead.
+# The EXIT trap also removes the downloaded tarball, so no root-owned
+# package residue is left behind on any exit path.
 EXTRACT_DIR="$(mktemp -d /tmp/wrdp-extract.XXXXXX)"
-trap 'rm -rf "$EXTRACT_DIR"' EXIT
-if ! tar -xzf "$WAYRDP_PKG_TARBALL" -C "$EXTRACT_DIR" 2>&1; then
+trap 'rm -rf "$EXTRACT_DIR"; rm -f "$PKG_TMP"' EXIT
+if ! tar -xzf "$PKG_TMP" -C "$EXTRACT_DIR" 2>&1; then
     echo "ERROR: failed to extract the wayrdp tarball." >&2
     exit 1
 fi
@@ -552,10 +560,6 @@ else
 fi
 
 # -- Result contract (terminal line) -----------------------------------------
-# Cleanup: leave no root-owned guest script/tarball behind. The tarball +
-# sha256 sidecar are consumed; remove them.
-rm -f "$WAYRDP_PKG_TARBALL" "$WAYRDP_PKG_SHA256_FILE" 2>/dev/null || true
-
 if [ "${DEGRADED:-0}" = "1" ]; then
     echo "WAYRDP_RESULT=degraded"
     exit 0

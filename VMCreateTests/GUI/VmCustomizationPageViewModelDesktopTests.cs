@@ -13,15 +13,14 @@ namespace VMCreate.Tests.GUI
     /// desktop selection must drive Lamco availability (an X11-only desktop
     /// like Xfce can never be served by the Wayland-native Lamco RDP Server),
     /// reset now-impossible explicit Lamco choices to Auto, and normalize the
-    /// finished wizard data so the stock desktop means "no switch". Also
-    /// pins the wayrdp radio's dev gate: the GUI cannot supply the host-built
-    /// wayrdp package, so the radio must stay hidden in release GUIs.
+    /// finished wizard data so the stock desktop means "no switch". Also pins
+    /// the wayrdp radio's visibility: it renders exactly on wayrdp-targetable
+    /// distros, like the Lamco radio.
     /// </summary>
     [TestClass]
     public sealed class VmCustomizationPageViewModelDesktopTests
     {
-        private static VmCustomizationPageViewModel Create(
-            GalleryItem? item, out WizardData wizardData, bool wayrdpDevOptionEnabled = false)
+        private static VmCustomizationPageViewModel Create(GalleryItem? item, out WizardData wizardData)
         {
             wizardData = new WizardData { SelectedItem = item };
             var htbApi = new Mock<IHtbApiClient>();
@@ -29,10 +28,7 @@ namespace VMCreate.Tests.GUI
             return new VmCustomizationPageViewModel(
                 wizardData, htbApi.Object, NullLogger.Instance,
                 configurableSteps: Enumerable.Empty<IConfigurableCustomizationStep>(),
-                desktopCatalogs: new[] { new KaliDesktopCatalog() })
-            {
-                WayrdpDevOptionEnabled = wayrdpDevOptionEnabled
-            };
+                desktopCatalogs: new[] { new KaliDesktopCatalog() });
         }
 
         private static GalleryItem KaliItem() =>
@@ -159,35 +155,26 @@ namespace VMCreate.Tests.GUI
             Assert.IsFalse(vm.DesktopOptions.Single(o => o.Id == "gnome").IsSelected);
         }
 
-        // ── wayrdp dev gate ─────────────────────────────────────────────
-        // The GUI has no way to collect WayrdpPackagePath (the package is a
-        // host-built tarball; only the CLI's --wayrdp-package feeds it), so a
-        // GUI wayrdp selection can never deploy: it fails at the install
-        // step after the full install + first boot. The radio is therefore
-        // hidden behind VMCREATE_DEV_WAYRDP=1 for release.
+        // ── wayrdp radio visibility ────────────────────────────────────
+        // wayrdp now installs from a pinned public release download verified
+        // on the guest, so the radio renders for every wayrdp-targetable
+        // distro — same shape as the Lamco radio's visibility.
 
         [TestMethod]
-        public void WayrdpRadio_HiddenByDefault_EvenOnSupportedDistro()
+        public void WayrdpRadio_VisibleOnSupportedDistro()
         {
             var vm = Create(KaliItem(), out _);
 
-            Assert.IsFalse(vm.WayrdpOptionVisible,
-                "release GUI must not offer a backend it cannot supply the package for");
+            Assert.IsTrue(vm.WayrdpOptionVisible,
+                "Kali (Debian family) is wayrdp-targetable — the pinned-release install works from the GUI end-to-end");
         }
 
         [TestMethod]
-        public void WayrdpRadio_DevFlag_AndSupportedDistro_ShowIt()
+        public void WayrdpRadio_HiddenOnUnsupportedDistro()
         {
-            // Kali (Debian family) is wayrdp-targetable; the dev gate is the
-            // only thing hiding the radio.
-            var vm = Create(KaliItem(), out _, wayrdpDevOptionEnabled: true);
+            var vm = Create(new GalleryItem { Name = "Fedora", LinuxDistro = LinuxDistro.Unknown }, out _);
 
-            Assert.IsTrue(vm.WayrdpOptionVisible);
-
-            // On an unsupported distro the gate alone is not enough.
-            var vmFedora = Create(new GalleryItem { Name = "Fedora", LinuxDistro = LinuxDistro.Unknown },
-                out _, wayrdpDevOptionEnabled: true);
-            Assert.IsFalse(vmFedora.WayrdpOptionVisible);
+            Assert.IsFalse(vm.WayrdpOptionVisible);
         }
     }
 }
