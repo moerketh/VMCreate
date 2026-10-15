@@ -95,6 +95,24 @@ namespace VMCreate
                 logger.LogWarning("Gallery item has no InitialUsername for VM {VMName}; the install script will resolve the autologin user from /etc/passwd.", shell.VmName);
             }
 
+            // Console resolution: same host-side substitution contract as
+            // EnableGraphicalAutologinStep — the settings-file value reaches
+            // this root-run script's compositor configurations (Hyprland
+            // Lua, monitors.xml, kscreen-doctor), so it is shape-validated
+            // before any token is replaced.
+            if (!ConsoleResolutionValidator.TryGetTokenValues(customizations?.ConsoleResolution,
+                    out string consoleMode, out string consoleWidth, out string consoleHeight, out string consoleRateXml))
+            {
+                throw new InvalidOperationException(
+                    $"Console resolution '{customizations?.ConsoleResolution}' is not a valid Width x Height @ Rate value (e.g. 1920x1080@60). " +
+                    "Refusing to substitute it into a root-run script (the value can be hand-edited into settings.json).");
+            }
+            script = script
+                .Replace("__CONSOLE_RESOLUTION__", consoleMode)
+                .Replace("__CONSOLE_W__", consoleWidth)
+                .Replace("__CONSOLE_H__", consoleHeight)
+                .Replace("__CONSOLE_RATE_XML__", consoleRateXml);
+
             // Runtime distro re-verification: the gallery metadata is a HINT
             // (some loaders scrape mirror pages); the pinned fork package
             // exists only for the Debian and pacman lineages, so a mismatched

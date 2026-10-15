@@ -14,12 +14,18 @@ DEGRADED=0
 USER="__AUTOLOGIN_USER__"
 
 # RDP backend driving this deployment ("lamco" or "wayrdp"). The forced
-# 1920x1080 display section below applies to lamco only: its portal capture
+# display section below applies to lamco only: its portal capture
 # targets the PHYSICAL output, so the physical monitor must run at the RDP
 # resolution. wayrdp creates its own headless output at the exact client
 # size and captures that (verified at unlisted resolutions incl. 1366x768),
 # so forcing the physical mode only degrades console use — skipped for it.
 RDP_BACKEND="__RDP_BACKEND__"
+
+# Console resolution: __CONSOLE_RESOLUTION__ (e.g. 1920x1080@60), plus the
+# split forms __CONSOLE_W__/__CONSOLE_H__/__CONSOLE_RATE_XML__ (XML rate,
+# e.g. 60.000), are substituted host-side by EnableGraphicalAutologinStep —
+# they sit inside single-quoted sed/heredoc contexts, so no shell variable
+# could expand them.
 
 # -- Detect the installed display managers (REAL detection, no mkdir) -----
 # The old unconditional `mkdir -p` of all four DM config dirs made the
@@ -171,14 +177,14 @@ if [ "$has_greetd" = "1" ]; then
     fi
 fi
 
-# -- Create monitors.xml to force 1920x1080@60 resolution -----------------
+# -- Force the configured console resolution (lamco) ----------------------
 # The hyperv_drm driver reports 1024x768 as the preferred mode. mutter/GNOME
 # reads monitors.xml to override the DRM preferred mode. KWin uses KScreen
 # config instead but falls through to DRM default without a config file.
 # (lamco only — see RDP_BACKEND note above.)
 USER_HOME=$(getent passwd "$USER" | cut -d: -f6)
 if [ "$RDP_BACKEND" = "wayrdp" ]; then
-    echo "Skipping forced 1920x1080 (wayrdp sizes its own headless output to the client)."
+    echo "Skipping forced __CONSOLE_RESOLUTION__ (wayrdp sizes its own headless output to the client)."
 elif [ -n "$USER_HOME" ] && [ -d "$USER_HOME" ]; then
     if [ "$has_greetd" = "1" ]; then
         # Hyprland under greetd: monitors.xml (mutter) and a KDE autostart
@@ -195,21 +201,21 @@ elif [ -n "$USER_HOME" ] && [ -d "$USER_HOME" ]; then
             if grep -q 'VMCreate: forced RDP resolution' "$MON_LUA"; then
                 echo "monitors.lua already carries the VMCreate rule."
             elif grep -qE '^hl\.monitor\(\{ output = "", mode = "preferred"' "$MON_LUA"; then
-                sed -i 's|^hl\.monitor({ output = "", mode = "preferred", position = "auto", scale = omarchy_monitor_scale })|-- VMCreate: forced RDP resolution on Hyper-V (replaces the preferred-wildcard: last rule wins)\nhl.monitor({ output = "", mode = "1920x1080@60", position = "auto", scale = 1 })|' "$MON_LUA"
-                echo "Replaced Omarchy's preferred-mode wildcard with 1920x1080@60 in monitors.lua."
+                sed -i 's|^hl\.monitor({ output = "", mode = "preferred", position = "auto", scale = omarchy_monitor_scale })|-- VMCreate: forced RDP resolution on Hyper-V (replaces the preferred-wildcard: last rule wins)\nhl.monitor({ output = "", mode = "__CONSOLE_RESOLUTION__", position = "auto", scale = 1 })|' "$MON_LUA"
+                echo "Replaced Omarchy's preferred-mode wildcard with __CONSOLE_RESOLUTION__ in monitors.lua."
             else
-                printf '\n-- VMCreate: forced RDP resolution on Hyper-V (last rule wins)\nhl.monitor({ output = "", mode = "1920x1080@60", position = "auto", scale = 1 })\n' >> "$MON_LUA"
-                echo "Appended 1920x1080@60 rule to monitors.lua."
+                printf '\n-- VMCreate: forced RDP resolution on Hyper-V (last rule wins)\nhl.monitor({ output = "", mode = "__CONSOLE_RESOLUTION__", position = "auto", scale = 1 })\n' >> "$MON_LUA"
+                echo "Appended __CONSOLE_RESOLUTION__ rule to monitors.lua."
             fi
         else
             cat > "$MON_LUA" << 'MON_LUA_EOF'
 -- VMCreate: forced RDP resolution on Hyper-V.
-hl.monitor({ output = "", mode = "1920x1080@60", position = "auto", scale = 1 })
+hl.monitor({ output = "", mode = "__CONSOLE_RESOLUTION__", position = "auto", scale = 1 })
 MON_LUA_EOF
             chown "$USER" "$MON_LUA" 2>/dev/null || true
-            echo "Created monitors.lua with the 1920x1080@60 rule."
+            echo "Created monitors.lua with the __CONSOLE_RESOLUTION__ rule."
         fi
-        echo "Configured Hyprland (Lua config) for 1920x1080@60 resolution."
+        echo "Configured Hyprland (Lua config) for __CONSOLE_RESOLUTION__ resolution."
     else
     mkdir -p "$USER_HOME/.config"
     cat > "$USER_HOME/.config/monitors.xml" << 'MONITORS_EOF'
@@ -229,9 +235,9 @@ MON_LUA_EOF
           <serial>unknown</serial>
         </monitorspec>
         <mode>
-          <width>1920</width>
-          <height>1080</height>
-          <rate>60.000</rate>
+          <width>__CONSOLE_W__</width>
+          <height>__CONSOLE_H__</height>
+          <rate>__CONSOLE_RATE_XML__</rate>
         </mode>
       </monitor>
     </logicalmonitor>
@@ -239,7 +245,7 @@ MON_LUA_EOF
 </monitors>
 MONITORS_EOF
     chown "$USER" "$USER_HOME/.config/monitors.xml" 2>/dev/null || true
-    echo "Created monitors.xml for 1920x1080@60 resolution."
+    echo "Created monitors.xml for __CONSOLE_RESOLUTION__ resolution."
 
     # -- Set display resolution via kscreen-doctor for KDE/KWin -----------
     # KWin ignores monitors.xml and uses KScreen config instead. Without a
@@ -255,12 +261,12 @@ MONITORS_EOF
 [Desktop Entry]
 Type=Application
 Name=Set Display Resolution
-Exec=kscreen-doctor output.1.mode.1920x1080@60
+Exec=kscreen-doctor output.1.mode.__CONSOLE_RESOLUTION__
 X-KDE-autostart-phase=2
 NoDisplay=true
 KSCREEN_AUTOSTART_EOF
         chown "$USER" "$USER_HOME/.config/autostart/kscreen-set-resolution.desktop" 2>/dev/null || true
-        echo "Created KDE autostart script for 1920x1080@60 via kscreen-doctor."
+        echo "Created KDE autostart script for __CONSOLE_RESOLUTION__ via kscreen-doctor."
     else
         echo "kscreen-doctor not found — KWin will use DRM default (1024x768)."
     fi

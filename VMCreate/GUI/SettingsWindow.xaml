@@ -34,6 +34,18 @@
                              ToolTip="API key. For local LLMs without auth, any non-empty dummy value works."/>
                 <ui:TextBox x:Name="LlmModelBox" PlaceholderText="Model name (e.g. gpt-4o)" Margin="0,0,0,16"/>
 
+                <!-- ── Console resolution ─────────────────────────── -->
+                <TextBlock Text="Console resolution" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                <TextBlock Text="Resolution forced on Linux graphical consoles (Lamco RDP backend). Sane defaults over the Hyper-V synthetic display — pick something smaller for laptops, larger for big screens." FontSize="12" Opacity="0.7" TextWrapping="Wrap" Margin="0,0,0,4"/>
+                <ComboBox x:Name="ConsoleResolutionBox" Margin="0,0,0,16"
+                          ToolTip="Console resolution &amp; refresh rate forced on Lamco graphical consoles, formatted WxH@Hz. Unsupported modes fall back to the in-guest default.">
+                    <ComboBoxItem Content="1280x720 — small laptop" Tag="1280x720@60"/>
+                    <ComboBoxItem Content="1360x768 — laptop" Tag="1360x768@60"/>
+                    <ComboBoxItem Content="1600x900 — standard desktop" Tag="1600x900@60"/>
+                    <ComboBoxItem Content="1920x1080 — Full HD (default)" Tag="1920x1080@60"/>
+                    <ComboBoxItem Content="1920x1200 — Full HD+ big screen" Tag="1920x1200@60"/>
+                </ComboBox>
+
                 <!-- ── Network ──────────────────────────────────── -->
                 <TextBlock Text="Network" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,6"/>
                 <StackPanel Margin="0,0,0,4">

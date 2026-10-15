@@ -57,6 +57,7 @@ namespace VMCreate
             Settings.NewDriveSizeInGB = Preferences.DefaultDiskSizeInGB;
 
             Customizations.RdpBackend = Preferences.RdpBackend;
+            Customizations.ConsoleResolution = Preferences.DefaultConsoleResolution;
             Customizations.DnsMode = Preferences.DnsMode;
             Customizations.CustomNameservers = Preferences.CustomNameservers;
         }

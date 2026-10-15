@@ -810,6 +810,54 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
+        public async Task ExecuteAsync_SubstitutesConfiguredConsoleResolution()
+        {
+            // The console resolution from the Settings window (DefaultConsoleResolution
+            // → VmCustomizations) is substituted host-side into every compositor
+            // config the script writes: Hyprland Lua mode, GNOME monitors.xml
+            // WxH@R triple, and the kscreen-doctor autostart command.
+            string? captured = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("LAMCO_RESULT=ok");
+
+            var customizations = new VmCustomizations { RdpBackend = RdpBackend.Lamco, ConsoleResolution = "1600x900@60" };
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, customizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(captured);
+            StringAssert.Contains(captured, "mode = \"1600x900@60\"",
+                "Hyprland Lua rule carries the configured mode");
+            StringAssert.Contains(captured, "<width>1600</width>",
+                "GNOME monitors.xml width");
+            StringAssert.Contains(captured, "<height>900</height>",
+                "GNOME monitors.xml height");
+            StringAssert.Contains(captured, "<rate>60.000</rate>",
+                "GNOME monitors.xml rate uses the three-decimal form");
+            StringAssert.Contains(captured, "kscreen-doctor output.1.mode.1600x900@60",
+                "KDE autostart forces the configured mode");
+            Assert.IsFalse(captured.Contains("__CONSOLE_"),
+                "every console token must be substituted before the script reaches the guest");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_InvalidConsoleResolution_ThrowsBeforeDistroVerification()
+        {
+            // The resolution comes from a hand-editable settings file; a
+            // hostile value must fail host-side shape validation before the
+            // distro re-verification runs or anything is copied to the VM.
+            var customizations = new VmCustomizations { RdpBackend = RdpBackend.Lamco, ConsoleResolution = "1600x900@60; rm -rf /" };
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                _step.ExecuteAsync(_shell.Object, _supportedItem, customizations, _logger.Object, CancellationToken.None));
+
+            _shell.Verify(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+            // Validation sits before the runtime distro re-verification, so no
+            // SSH round-trip should have happened either.
+            _shell.Verify(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+            _shell.Verify(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
+
+        [TestMethod]
         public async Task ExecuteAsync_DegradedReasons_ReachTheHostLog()
         {
             // The SSH transport returns STDOUT ONLY on zero-exit runs

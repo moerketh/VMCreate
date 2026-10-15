@@ -42,6 +42,7 @@ namespace VMCreate.Tests
 
             Assert.AreEqual(DnsMode.Host, prefs.DnsMode);
             Assert.AreEqual(RdpBackend.Auto, prefs.RdpBackend);
+            Assert.AreEqual(ConsoleResolutionValidator.Default, prefs.DefaultConsoleResolution);
             Assert.IsNull(prefs.HtbApiToken);
             Assert.AreEqual(4096, prefs.DefaultMemoryInMB);
             Assert.AreEqual(2, prefs.DefaultCpuCount);
@@ -63,6 +64,7 @@ namespace VMCreate.Tests
                 DnsMode = DnsMode.Custom,
                 CustomNameservers = "9.9.9.9,1.1.1.1",
                 RdpBackend = RdpBackend.Lamco,
+                DefaultConsoleResolution = "1600x900@60",
                 DefaultMemoryInMB = 8192,
                 DefaultCpuCount = 4,
                 DefaultDiskSizeInGB = 200,
@@ -79,6 +81,7 @@ namespace VMCreate.Tests
             Assert.AreEqual(DnsMode.Custom, loaded.DnsMode);
             Assert.AreEqual("9.9.9.9,1.1.1.1", loaded.CustomNameservers);
             Assert.AreEqual(RdpBackend.Lamco, loaded.RdpBackend);
+            Assert.AreEqual("1600x900@60", loaded.DefaultConsoleResolution);
             Assert.AreEqual(8192, loaded.DefaultMemoryInMB);
             Assert.AreEqual(4, loaded.DefaultCpuCount);
             Assert.AreEqual(200, loaded.DefaultDiskSizeInGB);

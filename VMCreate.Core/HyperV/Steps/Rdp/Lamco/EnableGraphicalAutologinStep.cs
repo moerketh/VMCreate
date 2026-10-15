@@ -74,11 +74,29 @@ namespace VMCreate
 
             logger.LogInformation("Enabling graphical Wayland autologin for user '{User}' on VM {VMName}", autologinUser, shell.VmName);
 
+            // Console resolution originates from the machine-level settings
+            // file and is substituted host-side into this root-run script's
+            // sed replacements, config heredocs and log lines — shape-validate
+            // it on the host first, the same trust boundary as the username
+            // above. Replaced unconditionally: the wayrdp branch references
+            // the resolution in its skip message too.
+            if (!ConsoleResolutionValidator.TryGetTokenValues(customizations?.ConsoleResolution,
+                    out string consoleMode, out string consoleWidth, out string consoleHeight, out string consoleRateXml))
+            {
+                throw new InvalidOperationException(
+                    $"Console resolution '{customizations?.ConsoleResolution}' is not a valid Width x Height @ Rate value (e.g. 1920x1080@60). " +
+                    "Refusing to substitute it into a root-run script (the value can be hand-edited into settings.json).");
+            }
+
             string script = ScriptResourceLoader.Load("enable_autologin.sh")
                 .Replace("__AUTOLOGIN_USER__", autologinUser)
                 .Replace("__RDP_BACKEND__", customizations?.RdpBackend == RdpBackend.Wayrdp
                     ? "wayrdp"
-                    : "lamco");
+                    : "lamco")
+                .Replace("__CONSOLE_RESOLUTION__", consoleMode)
+                .Replace("__CONSOLE_W__", consoleWidth)
+                .Replace("__CONSOLE_H__", consoleHeight)
+                .Replace("__CONSOLE_RATE_XML__", consoleRateXml);
 
             // /tmp hardening: unpredictable path (host-generated GUID) +
             // root:0700 before execution — see InstallLamcoRdpStep for the

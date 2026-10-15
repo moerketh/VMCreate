@@ -57,6 +57,11 @@ LAMCO_FORK_PKG_URL="https://github.com/${LAMCO_FORK_REPO}/releases/download/${LA
 # captured — it flows into the thrown SSH exception).
 DEGRADED=0
 
+# Console resolution tokens: __CONSOLE_RESOLUTION__ (e.g. 1920x1080@60),
+# __CONSOLE_W__/__CONSOLE_H__ and __CONSOLE_RATE_XML__ (XML rate, e.g.
+# 60.000) are substituted host-side by InstallLamcoRdpStep — they sit in
+# single-quoted sed/heredoc contexts where no shell variable could expand.
+
 echo "=== Lamco RDP Server install (pinned fork ${LAMCO_FORK_TAG}) ==="
 echo "NOTICE: lamco-rdp-server is third-party software licensed under the"
 echo "        Business Source License 1.1 (BSL 1.1) - (c) Lamco Development LLC."
@@ -832,7 +837,7 @@ WantedBy=graphical-session.target
 GRANT_EOF
     chown "$AUTOLOGIN_USER" "$USER_HOME/.config/systemd/user/lamco-grant.service"
 
-    # -- Display resolution: force 1920x1080@60 ----------------------------
+    # -- Display resolution: force the configured console mode ------------
     # The hyperv_drm driver reports 1024x768 as the preferred mode, which
     # every compositor picks by default. The override is per-compositor.
     if is_arch_family; then
@@ -844,7 +849,7 @@ GRANT_EOF
         # sourced vmcreate-monitors.conf). And Hyprland Lua monitor rules are
         # LAST-WINS: prepending a rule does nothing while Omarchy's own
         # wildcard (mode "preferred") sits below it (verified live: 1024x768
-        # until Omarchy's rule was neutralized, then 1920x1080 applied).
+        # until Omarchy's rule was neutralized, then the forced mode applied).
         # The fix therefore REPLACES Omarchy's wildcard rule in-place.
         #  - autostart.lua: launch the lamco units at hyprland.start.
         #    graphical-session.target NEVER activates on Omarchy — its
@@ -865,21 +870,21 @@ GRANT_EOF
             elif grep -qE '^hl\.monitor\(\{ output = "", mode = "preferred"' "$MON_LUA"; then
                 # Replace Omarchy's preferred-wildcard with our fixed mode —
                 # same slot in the rule order, so precedence is preserved.
-                sed -i 's|^hl\.monitor({ output = "", mode = "preferred", position = "auto", scale = omarchy_monitor_scale })|-- VMCreate: forced RDP resolution on Hyper-V (replaces the preferred-wildcard: last rule wins)\nhl.monitor({ output = "", mode = "1920x1080@60", position = "auto", scale = 1 })|' "$MON_LUA"
-                echo "Replaced Omarchy's preferred-mode wildcard with 1920x1080@60 in monitors.lua."
+                sed -i 's|^hl\.monitor({ output = "", mode = "preferred", position = "auto", scale = omarchy_monitor_scale })|-- VMCreate: forced RDP resolution on Hyper-V (replaces the preferred-wildcard: last rule wins)\nhl.monitor({ output = "", mode = "__CONSOLE_RESOLUTION__", position = "auto", scale = 1 })|' "$MON_LUA"
+                echo "Replaced Omarchy's preferred-mode wildcard with __CONSOLE_RESOLUTION__ in monitors.lua."
             else
                 # No Omarchy wildcard found (customized file): append our
                 # rule at the END — last-wins makes it take effect.
-                printf '\n-- VMCreate: forced RDP resolution on Hyper-V (last rule wins)\nhl.monitor({ output = "", mode = "1920x1080@60", position = "auto", scale = 1 })\n' >> "$MON_LUA"
-                echo "Appended 1920x1080@60 rule to monitors.lua."
+                printf '\n-- VMCreate: forced RDP resolution on Hyper-V (last rule wins)\nhl.monitor({ output = "", mode = "__CONSOLE_RESOLUTION__", position = "auto", scale = 1 })\n' >> "$MON_LUA"
+                echo "Appended __CONSOLE_RESOLUTION__ rule to monitors.lua."
             fi
         else
             cat > "$MON_LUA" << 'MON_LUA_EOF'
 -- VMCreate: forced RDP resolution on Hyper-V.
-hl.monitor({ output = "", mode = "1920x1080@60", position = "auto", scale = 1 })
+hl.monitor({ output = "", mode = "__CONSOLE_RESOLUTION__", position = "auto", scale = 1 })
 MON_LUA_EOF
             chown "$AUTOLOGIN_USER" "$MON_LUA"
-            echo "Created monitors.lua with the 1920x1080@60 rule."
+            echo "Created monitors.lua with the __CONSOLE_RESOLUTION__ rule."
         fi
 
         AUTO_LUA="$USER_HOME/.config/hypr/autostart.lua"
@@ -898,11 +903,12 @@ AUTO_LUA_EOF
             echo "Wrote lamco autostart hooks to autostart.lua."
         fi
         chown -R "$AUTOLOGIN_USER" "$USER_HOME/.config/hypr" 2>/dev/null || true
-        echo "Configured Hyprland (Lua config) for 1920x1080@60 + lamco autostart."
+        echo "Configured Hyprland (Lua config) for __CONSOLE_RESOLUTION__ + lamco autostart."
     else
-    # -- Create monitors.xml to force 1920x1080@60 resolution ------------
+    # -- Create monitors.xml to force the console resolution --------------
     # The hyperv_drm driver reports 1024x768 as the preferred mode, which
-    # mutter/GNOME picks by default. This overrides it to 1920x1080.
+    # mutter/GNOME picks by default. This overrides it to the configured
+    # console mode.
     mkdir -p "$USER_HOME/.config"
     cat > "$USER_HOME/.config/monitors.xml" << 'MONITORS_EOF'
 <monitors>
@@ -921,9 +927,9 @@ AUTO_LUA_EOF
           <serial>unknown</serial>
         </monitorspec>
         <mode>
-          <width>1920</width>
-          <height>1080</height>
-          <rate>60.000</rate>
+          <width>__CONSOLE_W__</width>
+          <height>__CONSOLE_H__</height>
+          <rate>__CONSOLE_RATE_XML__</rate>
         </mode>
       </monitor>
     </logicalmonitor>
@@ -931,7 +937,7 @@ AUTO_LUA_EOF
 </monitors>
 MONITORS_EOF
     chown "$AUTOLOGIN_USER" "$USER_HOME/.config/monitors.xml"
-    echo "Created monitors.xml for 1920x1080@60 resolution."
+    echo "Created monitors.xml for __CONSOLE_RESOLUTION__ resolution."
 
     # -- Set display resolution via kscreen-doctor for KDE/KWin ----------
     # KWin ignores monitors.xml and uses KScreen config instead. Without
@@ -941,10 +947,10 @@ MONITORS_EOF
     # This runs after the Wayland session starts (the systemd service has
     # ConditionEnvironment=WAYLAND_DISPLAY), so kscreen-doctor can connect.
     if command -v kscreen-doctor >/dev/null 2>&1; then
-        # Try to set 1920x1080 — the best mode for RDP on Hyper-V
+        # Try to set the configured resolution — the best mode for RDP
         sudo -u "$AUTOLOGIN_USER" WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/"$(id -u "$AUTOLOGIN_USER")" \
-            kscreen-doctor output.1.mode.1920x1080@60 2>/dev/null || true
-        echo "Set KScreen resolution to 1920x1080@60 via kscreen-doctor."
+            kscreen-doctor output.1.mode.__CONSOLE_RESOLUTION__ 2>/dev/null || true
+        echo "Set KScreen resolution to __CONSOLE_RESOLUTION__ via kscreen-doctor."
     else
         echo "kscreen-doctor not found — KWin will use DRM default (1024x768)."
     fi

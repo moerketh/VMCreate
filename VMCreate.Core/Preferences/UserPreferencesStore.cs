@@ -93,6 +93,7 @@ namespace VMCreate
                     DefaultMemoryInMB = dto.DefaultMemoryInMB,
                     DefaultCpuCount = dto.DefaultCpuCount,
                     DefaultDiskSizeInGB = dto.DefaultDiskSizeInGB,
+                    DefaultConsoleResolution = dto.DefaultConsoleResolution,
                     QemuImgPathOverride = dto.QemuImgPathOverride,
                     ExtractPathOverride = dto.ExtractPathOverride,
                 };
@@ -125,6 +126,7 @@ namespace VMCreate
                     DefaultMemoryInMB = preferences.DefaultMemoryInMB,
                     DefaultCpuCount = preferences.DefaultCpuCount,
                     DefaultDiskSizeInGB = preferences.DefaultDiskSizeInGB,
+                    DefaultConsoleResolution = preferences.DefaultConsoleResolution,
                     QemuImgPathOverride = preferences.QemuImgPathOverride,
                     ExtractPathOverride = preferences.ExtractPathOverride,
                 };
@@ -165,6 +167,7 @@ namespace VMCreate
             public int DefaultMemoryInMB { get; set; } = 4096;
             public int DefaultCpuCount { get; set; } = 2;
             public int DefaultDiskSizeInGB { get; set; } = 150;
+            public string DefaultConsoleResolution { get; set; } = ConsoleResolutionValidator.Default;
             public string? QemuImgPathOverride { get; set; }
             public string? ExtractPathOverride { get; set; }
         }

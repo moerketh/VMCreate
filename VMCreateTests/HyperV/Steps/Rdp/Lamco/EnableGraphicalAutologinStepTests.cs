@@ -170,5 +170,52 @@ namespace VMCreate.Tests.HyperV.Steps
                 It.IsAny<Exception?>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
         }
+
+        [TestMethod]
+        public async Task ExecuteAsync_SubstitutesConfiguredConsoleResolution()
+        {
+            // The console resolution from the Settings window (DefaultConsoleResolution
+            // → VmCustomizations) is substituted host-side into greetd/Hyprland's
+            // Lua monitor rule, GDM's monitors.xml and the kscreen-doctor
+            // autostart entry.
+            string? captured = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("AUTOLOGIN_RESULT=ok");
+
+            var customizations = new VmCustomizations { RdpBackend = RdpBackend.Lamco, ConsoleResolution = "1600x900@60" };
+            await _step.ExecuteAsync(_shell.Object, _item, customizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(captured);
+            StringAssert.Contains(captured, "mode = \"1600x900@60\"",
+                "Hyprland Lua rule (greetd/Omarchy path) carries the configured mode");
+            StringAssert.Contains(captured, "<width>1600</width>",
+                "GDM monitors.xml width");
+            StringAssert.Contains(captured, "<height>900</height>",
+                "GDM monitors.xml height");
+            StringAssert.Contains(captured, "<rate>60.000</rate>",
+                "GDM monitors.xml rate uses the three-decimal form");
+            StringAssert.Contains(captured, "Exec=kscreen-doctor output.1.mode.1600x900@60",
+                "KDE autostart entry forces the configured mode");
+            Assert.IsFalse(captured.Contains("__CONSOLE_"),
+                "every console token must be substituted before the script reaches the guest");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_InvalidConsoleResolution_ThrowsBeforeCopy()
+        {
+            // The resolution comes from a hand-editable settings file; a
+            // hostile value must fail host-side shape validation — it is
+            // substituted into root-run sed/heredoc commands. The item's
+            // username is valid so the run gets past the username checks
+            // to the console validation.
+            var customizations = new VmCustomizations { RdpBackend = RdpBackend.Lamco, ConsoleResolution = "1600x900@60 && reboot" };
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                _step.ExecuteAsync(_shell.Object, _item, customizations, _logger.Object, CancellationToken.None));
+
+            _shell.Verify(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+            _shell.Verify(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
     }
 }

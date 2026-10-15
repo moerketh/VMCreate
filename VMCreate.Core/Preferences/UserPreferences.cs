@@ -85,6 +85,15 @@ namespace VMCreate
         /// <summary>Default disk size in GB (mirrors <see cref="VmSettings.NewDriveSizeInGB"/>).</summary>
         public int DefaultDiskSizeInGB { get; set; } = 150;
 
+        /// <summary>
+        /// Default console resolution forced on Linux graphical RDP consoles,
+        /// formatted <c>&lt;width&gt;x&lt;height&gt;@&lt;rate&gt;</c> (e.g.
+        /// <c>1920x1080@60</c>). Validated before it is substituted into
+        /// guest scripts — see <see cref="ConsoleResolutionValidator"/> for
+        /// the shape contract.
+        /// </summary>
+        public string DefaultConsoleResolution { get; set; } = ConsoleResolutionValidator.Default;
+
         // ── Advanced / machine paths ─────────────────────────────────
 
         /// <summary>
@@ -118,6 +127,7 @@ namespace VMCreate
             DefaultMemoryInMB = DefaultMemoryInMB,
             DefaultCpuCount = DefaultCpuCount,
             DefaultDiskSizeInGB = DefaultDiskSizeInGB,
+            DefaultConsoleResolution = DefaultConsoleResolution,
             QemuImgPathOverride = QemuImgPathOverride,
             ExtractPathOverride = ExtractPathOverride,
         };

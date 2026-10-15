@@ -107,6 +107,16 @@ namespace VMCreate
         }
 
         /// <summary>
+        /// Console resolution forced on Linux guests whose RDP backend shares
+        /// the physical console (Lamco), formatted
+        /// <c>&lt;width&gt;x&lt;height&gt;@&lt;rate&gt;</c> (e.g. <c>1920x1080@60</c>).
+        /// Substituted host-side into the guest scripts — see
+        /// <c>ConsoleResolutionValidator</c> for the shape contract and why
+        /// the value must be validated before substitution.
+        /// </summary>
+        public string ConsoleResolution { get; set; } = "1920x1080@60";
+
+        /// <summary>
         /// DNS configuration mode. Default is <see cref="DnsMode.Host"/>
         /// which resolves the host machine's DNS servers and sends them to the guest.
         /// </summary>

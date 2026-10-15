@@ -520,6 +520,21 @@ namespace VMCreate.CLI.Commands
                 DistributionOptions = distributionOptions,
             };
 
+            // ── Console resolution: hydrate from the machine-level store ────
+            // No dedicated CLI flag: the value is a machine-level default the
+            // Settings window (GUI) owns, shared with settings.json. Invalid
+            // hand-edits must fail here — the deploying steps would otherwise
+            // throw mid-deployment after the disk has been created.
+            var consolePrefs = services.GetRequiredService<IUserPreferencesStore>().Load();
+            if (!ConsoleResolutionValidator.IsValidConsoleResolution(consolePrefs.DefaultConsoleResolution))
+            {
+                PrintError(jsonMode, "validation",
+                    $"Stored default console resolution '{consolePrefs.DefaultConsoleResolution}' is invalid — " +
+                    "expected the form WxH@Hz (e.g. 1600x900@60). Fix it in the Settings window or settings.json.");
+                return ExitCodes.InvalidArguments;
+            }
+            vmCustomizations.ConsoleResolution = consolePrefs.DefaultConsoleResolution;
+
             // ── Elastic SIEM AI: hydrate from the machine-level store ─────
             if (args.ElasticAi)
             {

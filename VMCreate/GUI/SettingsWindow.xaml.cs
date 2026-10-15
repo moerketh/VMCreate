@@ -42,6 +42,7 @@ namespace VMCreate
             DnsNameserversBox.Text = p.CustomNameservers ?? "";
 
             SelectRdpBackend(p.RdpBackend);
+            SelectConsoleResolution(p.DefaultConsoleResolution);
             MemoryBox.Text = p.DefaultMemoryInMB.ToString(CultureInfo.InvariantCulture);
             CpuBox.Text = p.DefaultCpuCount.ToString(CultureInfo.InvariantCulture);
             DiskBox.Text = p.DefaultDiskSizeInGB.ToString(CultureInfo.InvariantCulture);
@@ -65,6 +66,34 @@ namespace VMCreate
                 : RdpBackend.Auto;
         }
 
+        private void SelectConsoleResolution(string? resolution)
+        {
+            // Presets only: a hand-edited settings.json value outside the list
+            // surfaces as a transient "(custom)" marker so nothing silently
+            // rounds to a preset; the Settings window only ever saves preset
+            // values (Save_Click shape-validates whatever the list yields).
+            var match = ConsoleResolutionBox.Items.OfType<ComboBoxItem>()
+                .FirstOrDefault(i => string.Equals((string?)i.Tag, resolution, StringComparison.OrdinalIgnoreCase));
+            if (match != null)
+            {
+                ConsoleResolutionBox.SelectedItem = match;
+                return;
+            }
+
+            ConsoleResolutionBox.SelectedIndex = 0;
+            var item = (ComboBoxItem)ConsoleResolutionBox.SelectedItem;
+            item.Content = $"(custom: {resolution ?? "unset"}) — edit settings.json";
+            item.Tag = resolution;
+        }
+
+        private static string ParseConsoleResolution(ComboBox? box)
+        {
+            var tag = (box?.SelectedItem as ComboBoxItem)?.Tag as string;
+            return ConsoleResolutionValidator.TryGetTokenValues(tag, out var value, out _, out _, out _)
+                ? value
+                : ConsoleResolutionValidator.Default;
+        }
+
         private void Save_Click(object sender, RoutedEventArgs e)
         {
             if (!int.TryParse(MemoryBox.Text?.Trim(), out var memory) || memory < 512)
@@ -85,6 +114,14 @@ namespace VMCreate
                     System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
                 return;
             }
+            var consoleResolution = ParseConsoleResolution(ConsoleResolutionBox);
+            if (consoleResolution != (ConsoleResolutionBox.SelectedItem as ComboBoxItem)?.Tag as string)
+            {
+                System.Windows.MessageBox.Show(this,
+                    "Console resolution must look like 1600x900@60 (width x height @ refresh rate).",
+                    "Settings", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
+                return;
+            }
 
             var p = _store.Load(); // preserve any fields not shown here
             p.HtbApiToken = NullIfEmpty(HtbTokenBox.Password);
@@ -94,6 +131,7 @@ namespace VMCreate
             p.DnsMode = DnsCustomRadio.IsChecked == true ? DnsMode.Custom : DnsMode.Host;
             p.CustomNameservers = DnsCustomRadio.IsChecked == true ? NullIfEmpty(DnsNameserversBox.Text) : null;
             p.RdpBackend = ParseRdpBackend(RdpBackendBox);
+            p.DefaultConsoleResolution = consoleResolution;
             p.DefaultMemoryInMB = memory;
             p.DefaultCpuCount = cpu;
             p.DefaultDiskSizeInGB = disk;
