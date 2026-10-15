@@ -3,8 +3,6 @@ using Microsoft.Extensions.Logging;
 using Serilog;
 using System;
 using System.CommandLine;
-using System.CommandLine.Builder;
-using System.CommandLine.Parsing;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -126,17 +124,13 @@ namespace VMCreate.CLI
             // ── Command tree ─────────────────────────────────────────────────
             var rootCommand = new RootCommand("VMCreate CLI — create and manage Hyper-V VMs from pre-built images.");
 
-            rootCommand.AddCommand(CreateCommand.Build(provider));
-            rootCommand.AddCommand(ListCommand.Build(provider));
-            rootCommand.AddCommand(GalleryCommand.Build(provider));
-
-            var parser = new CommandLineBuilder(rootCommand)
-                .UseDefaults()
-                .Build();
+            rootCommand.Subcommands.Add(CreateCommand.Build(provider));
+            rootCommand.Subcommands.Add(ListCommand.Build(provider));
+            rootCommand.Subcommands.Add(GalleryCommand.Build(provider));
 
             try
             {
-                return await parser.InvokeAsync(args);
+                return await rootCommand.Parse(args).InvokeAsync();
             }
             finally
             {

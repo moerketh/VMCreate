@@ -19,22 +19,26 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
-    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.13" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.13" />
     <!-- Startup-milestone logging (Serilog.Log.Information in the PowerShell
          executor) — frontends configure the static sink; Core only writes. -->
-    <PackageReference Include="Serilog" Version="4.2.0" />
-    <PackageReference Include="System.Management.Automation" Version="7.6.6" />
+    <PackageReference Include="Serilog" Version="4.4.0" />
+    <PackageReference Include="System.Management.Automation" Version="7.6.7" />
     <!-- PS7 engine assemblies for the CDXML/CIM cmdlet machinery (Storage cmdlets,
          Hyper-V CDXML). Without them, assembly resolution falls back to the
          Windows PowerShell 5.1 GAC copies (Microsoft.PowerShell.Commands.Management
          v3.0.0.0, CimCmdlets v1.0.0.0), whose cmdletization engine JITs against
          WinPS-only SMA internals (EnumerableExtensions.Append) and dies with
          MissingMethodException when a CIM method invoke succeeds. -->
-    <PackageReference Include="Microsoft.Management.Infrastructure.CimCmdlets" Version="7.6.6" />
-    <PackageReference Include="Microsoft.PowerShell.Commands.Management" Version="7.6.6" />
-    <PackageReference Include="SharpCompress" Version="0.50.4" />
+    <PackageReference Include="Microsoft.Management.Infrastructure.CimCmdlets" Version="7.6.7" />
+    <PackageReference Include="Microsoft.PowerShell.Commands.Management" Version="7.6.7" />
+    <PackageReference Include="SharpCompress" Version="0.50.5" />
     <PackageReference Include="XZ.NET-netstandard" Version="2.0.0.2" />
+    <!-- CVE-2026-84008 (high) + CVE-2026-70162 (moderate): the PowerShell
+         7.6.7 SDK still floors this at 10.0.5; a direct reference forces
+         the patched 10.0.13 through the whole graph (NU1902/NU1903 clean). -->
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.13" />
   </ItemGroup>
 
   <!-- Default SDK globs cover .cs only; embedded shell scripts and SVG

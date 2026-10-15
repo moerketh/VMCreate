@@ -2,7 +2,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Spectre.Console;
 using System;
 using System.CommandLine;
-using System.CommandLine.Invocation;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -16,8 +15,8 @@ namespace VMCreate.CLI.Commands
         {
             var cmd = new Command("gallery", "Manage gallery sources and cache.");
 
-            cmd.AddCommand(BuildRefresh(services));
-            cmd.AddCommand(BuildListSources(services));
+            cmd.Subcommands.Add(BuildRefresh(services));
+            cmd.Subcommands.Add(BuildListSources(services));
 
             return cmd;
         }
@@ -26,11 +25,8 @@ namespace VMCreate.CLI.Commands
         {
             var cmd = new Command("refresh", "Force-refresh the gallery cache from all remote sources.");
 
-            cmd.SetHandler(async (InvocationContext ctx) =>
-            {
-                var ct = ctx.GetCancellationToken();
-                ctx.ExitCode = await RunRefreshAsync(services, ct);
-            });
+            cmd.SetAction(async (parseResult, ct) =>
+                await RunRefreshAsync(services, ct));
 
             return cmd;
         }
@@ -64,7 +60,7 @@ namespace VMCreate.CLI.Commands
         {
             var cmd = new Command("list-sources", "List registered gallery source types.");
 
-            cmd.SetHandler((InvocationContext ctx) =>
+            cmd.SetAction(parseResult =>
             {
                 // GetServices returns each individual loader plus the AggregateGalleryLoader at the end.
                 // Show only the concrete per-source types (exclude the aggregate wrapper).
@@ -79,8 +75,7 @@ namespace VMCreate.CLI.Commands
                 if (i == 0)
                     AnsiConsole.MarkupLine("[grey]No gallery sources registered.[/]");
 
-                ctx.ExitCode = ExitCodes.Success;
-                return Task.CompletedTask;
+                return ExitCodes.Success;
             });
 
             return cmd;
