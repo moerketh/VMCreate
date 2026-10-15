@@ -193,7 +193,7 @@ namespace VMCreate.Tests.HyperV.Steps
             _logger.Verify(l => l.Log(
                 LogLevel.Warning,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("DEGRADED")),
+                It.Is<It.IsAnyType>((v, t) => string.Concat(v).Contains("DEGRADED")),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
         }

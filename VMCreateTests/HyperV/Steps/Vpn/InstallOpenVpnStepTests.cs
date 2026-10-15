@@ -134,7 +134,7 @@ namespace VMCreate.Tests.HyperV.Steps
                 l => l.Log(
                     LogLevel.Warning,
                     It.IsAny<EventId>(),
-                    It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("unavailable")),
+                    It.Is<It.IsAnyType>((v, t) => string.Concat(v).Contains("unavailable")),
                     It.IsAny<Exception?>(),
                     It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
                 Times.Once);
