@@ -8,7 +8,7 @@ reproduced below.
 
 ## SharpCompress
 
-- **Version:** 0.50.4
+- **Version:** 0.50.5
 - **Project:** https://github.com/adamhathcock/sharpcompress
 - **License:** MIT
 
@@ -164,7 +164,7 @@ SOFTWARE.
 
 ## Serilog
 
-- **Version:** 4.2.0+ (transitive: Serilog 4.2.0)
+- **Version:** 4.4.0+ (transitive: Serilog 4.4.0)
 - **Project:** https://serilog.net/
 - **License:** Apache-2.0
 
@@ -230,7 +230,7 @@ the License.
 
 ## Microsoft.PowerShell.SDK
 
-- **Version:** 7.6.6 (System.Management.Automation et al.)
+- **Version:** 7.6.7 (System.Management.Automation et al.)
 - **Project:** https://github.com/PowerShell/PowerShell
 - **License:** MIT
 
@@ -258,7 +258,7 @@ SOFTWARE.
 
 ## Microsoft.Extensions.DependencyInjection
 
-- **Version:** 10.0.12
+- **Version:** 10.0.13
 - **Project:** https://dot.net/
 - **License:** MIT
 
@@ -286,7 +286,7 @@ SOFTWARE.
 
 ## Microsoft.Extensions.Http
 
-- **Version:** 10.0.12
+- **Version:** 10.0.13
 - **Project:** https://dot.net/
 - **License:** MIT
 
@@ -374,7 +374,7 @@ MIT-licensed software available at https://github.com/Athena-OS/athena.
 
 ## Microsoft.Extensions.Logging.Abstractions
 
-- **Version:** 10.0.12
+- **Version:** 10.0.13
 - **Project:** https://dot.net/
 - **License:** MIT
 
@@ -384,23 +384,9 @@ Licensed under the MIT License. See above for full text.
 
 ---
 
-## Spectre.Console
-
-- **Version:** 0.50.0
-- **Project:** https://github.com/spectreconsole/spectre.console
-- **License:** MIT
-
-Copyright © Patrik Svensson, Mattias Åkerberg, Phil Scott, Nils Andresen and contributors.
-
-Spectre.Console is licensed under the MIT License. See above for full text.
-
-Used by the VMCreate.CLI application.
-
----
-
 ## System.CommandLine
 
-- **Version:** 2.0.0-beta4.22272.1
+- **Version:** 2.0.13
 - **Project:** https://github.com/dotnet/command-line-api
 - **License:** MIT
 

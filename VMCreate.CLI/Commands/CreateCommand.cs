@@ -3,7 +3,6 @@ using Spectre.Console;
 using System;
 using System.Collections.Generic;
 using System.CommandLine;
-using System.CommandLine.Invocation;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -20,228 +19,252 @@ namespace VMCreate.CLI.Commands
             var cmd = new Command("create", "Create a new Hyper-V virtual machine.");
 
             // ── Image selection ────────────────────────────────────────────────
-            var imageOpt = new Option<string>(
-                "--image",
-                "Gallery image name to use (partial match). List names with 'vmcreate list'.");
+            var imageOpt = new Option<string>("--image")
+            {
+                Description = "Gallery image name to use (partial match). List names with 'vmcreate list'."
+            };
 
-            var imageUriOpt = new Option<string>(
-                "--image-uri",
-                "URL or local path to a disk image (VMDK, QCOW2, VHDX, VHD, OVA, or archive).");
+            var imageUriOpt = new Option<string>("--image-uri")
+            {
+                Description = "URL or local path to a disk image (VMDK, QCOW2, VHDX, VHD, OVA, or archive)."
+            };
 
-            var checksumOpt = new Option<string>(
-                "--checksum",
-                "Expected SHA-256 hash of the file at --image-uri.");
+            var checksumOpt = new Option<string>("--checksum")
+            {
+                Description = "Expected SHA-256 hash of the file at --image-uri."
+            };
 
-            var checksumUriOpt = new Option<string>(
-                "--checksum-uri",
-                "URL to a checksum file for the file at --image-uri.");
+            var checksumUriOpt = new Option<string>("--checksum-uri")
+            {
+                Description = "URL to a checksum file for the file at --image-uri."
+            };
 
-            var nameOpt = new Option<string>(
-                "--name",
-                "VM name. Defaults to the gallery image name.");
+            var nameOpt = new Option<string>("--name")
+            {
+                Description = "VM name. Defaults to the gallery image name."
+            };
 
             // ── VM hardware ────────────────────────────────────────────────────
-            var memoryOpt = new Option<int>(
-                "--memory",
-                getDefaultValue: () => 4096,
-                description: "Memory in MB (default: 4096).");
+            var memoryOpt = new Option<int>("--memory")
+            {
+                Description = "Memory in MB (default: 4096).",
+                DefaultValueFactory = _ => 4096
+            };
 
-            var cpuOpt = new Option<int>(
-                "--cpu",
-                getDefaultValue: () => 4,
-                description: "Number of virtual CPUs (default: 4).");
+            var cpuOpt = new Option<int>("--cpu")
+            {
+                Description = "Number of virtual CPUs (default: 4).",
+                DefaultValueFactory = _ => 4
+            };
 
-            var diskSizeOpt = new Option<int>(
-                "--disk-size",
-                getDefaultValue: () => 0,
-                description: "New disk size in GB. 0 = auto-detect from source image.");
+            var diskSizeOpt = new Option<int>("--disk-size")
+            {
+                Description = "New disk size in GB. 0 = auto-detect from source image.",
+                DefaultValueFactory = _ => 0
+            };
 
-            var noAutoDetectDiskOpt = new Option<bool>(
-                "--no-auto-detect-disk",
-                getDefaultValue: () => false,
-                description: "Disable auto-detect disk size. Requires --disk-size.");
+            var noAutoDetectDiskOpt = new Option<bool>("--no-auto-detect-disk")
+            {
+                Description = "Disable auto-detect disk size. Requires --disk-size.",
+                DefaultValueFactory = _ => false
+            };
 
-            var noNestedVirtOpt = new Option<bool>(
-                "--no-nested-virt",
-                getDefaultValue: () => false,
-                description: "Disable nested virtualization extensions.");
+            var noNestedVirtOpt = new Option<bool>("--no-nested-virt")
+            {
+                Description = "Disable nested virtualization extensions.",
+                DefaultValueFactory = _ => false
+            };
 
-            var replaceOpt = new Option<bool>(
-                "--replace",
-                getDefaultValue: () => false,
-                description: "Stop and remove an existing VM with the same name before creating.");
+            var replaceOpt = new Option<bool>("--replace")
+            {
+                Description = "Stop and remove an existing VM with the same name before creating.",
+                DefaultValueFactory = _ => false
+            };
 
             // ── Customization ──────────────────────────────────────────────────
-            var noXrdpOpt = new Option<bool>(
-                "--no-xrdp",
-                getDefaultValue: () => false,
-                description: "Disable xRDP / Enhanced Session setup. (Deprecated alias for --rdp-backend none.)");
+            var noXrdpOpt = new Option<bool>("--no-xrdp")
+            {
+                Description = "Disable xRDP / Enhanced Session setup. (Deprecated alias for --rdp-backend none.)",
+                DefaultValueFactory = _ => false
+            };
 
-            var rdpBackendOpt = new Option<string>(
-                "--rdp-backend",
-                getDefaultValue: () => "auto",
-                description: "RDP server backend: auto (default — detects Wayland vs X11 in the guest post-boot and picks the best backend), xrdp (disables Wayland), lamco (Wayland-native Lamco RDP Server), wayrdp (MIT Wayland-native RDP on FreeRDP 3 — installed from a pinned public release download), or none.");
+            var rdpBackendOpt = new Option<string>("--rdp-backend")
+            {
+                Description = "RDP server backend: auto (default — detects Wayland vs X11 in the guest post-boot and picks the best backend), xrdp (disables Wayland), lamco (Wayland-native Lamco RDP Server), wayrdp (MIT Wayland-native RDP on FreeRDP 3 — installed from a pinned public release download), or none.",
+                DefaultValueFactory = _ => "auto"
+            };
 
-            var desktopOpt = new Option<string>(
-                "--desktop",
-                description: "Desktop environment to install post-boot (e.g. xfce, kde, gnome). " +
+            var desktopOpt = new Option<string>("--desktop")
+            {
+                Description = "Desktop environment to install post-boot (e.g. xfce, kde, gnome). " +
                              "Only valid for images that offer desktop switching — run without the flag to keep the image's stock desktop. " +
-                             "Couples with --rdp-backend: X11-only desktops cannot use lamco.");
+                             "Couples with --rdp-backend: X11-only desktops cannot use lamco."
+            };
 
-            var releaseOpt = new Option<string>(
-                "--release",
-                description: "Release variant of the image to download (e.g. kali: stable, weekly). " +
+            var releaseOpt = new Option<string>("--release")
+            {
+                Description = "Release variant of the image to download (e.g. kali: stable, weekly). " +
                              "Also accepts the exact version string (e.g. 2026-W26). " +
-                             "Defaults to the image's recommended release; only valid for images that offer multiple releases.");
+                             "Defaults to the image's recommended release; only valid for images that offer multiple releases."
+            };
 
-            var noIntegrationSvcOpt = new Option<bool>(
-                "--no-integration-services",
-                getDefaultValue: () => false,
-                description: "Disable Hyper-V integration services (maximum isolation mode).");
+            var noIntegrationSvcOpt = new Option<bool>("--no-integration-services")
+            {
+                Description = "Disable Hyper-V integration services (maximum isolation mode).",
+                DefaultValueFactory = _ => false
+            };
 
-            var dnsModeOpt = new Option<string>(
-                "--dns-mode",
-                getDefaultValue: () => "host",
-                description: "DNS mode: host (auto-detect) or custom.");
+            var dnsModeOpt = new Option<string>("--dns-mode")
+            {
+                Description = "DNS mode: host (auto-detect) or custom.",
+                DefaultValueFactory = _ => "host"
+            };
 
-            var nameserversOpt = new Option<string>(
-                "--nameservers",
-                description: "Comma-separated DNS nameservers. Requires --dns-mode custom.");
+            var nameserversOpt = new Option<string>("--nameservers")
+            {
+                Description = "Comma-separated DNS nameservers. Requires --dns-mode custom."
+            };
 
-            var sshKeyOpt = new Option<string>(
-                "--ssh-key",
-                description: "Path to a custom SSH public key (.pub). Defaults to auto-generated key.");
+            var sshKeyOpt = new Option<string>("--ssh-key")
+            {
+                Description = "Path to a custom SSH public key (.pub). Defaults to auto-generated key."
+            };
 
-            var noTimezoneOpt = new Option<bool>(
-                "--no-timezone-sync",
-                getDefaultValue: () => false,
-                description: "Disable guest timezone synchronization.");
+            var noTimezoneOpt = new Option<bool>("--no-timezone-sync")
+            {
+                Description = "Disable guest timezone synchronization.",
+                DefaultValueFactory = _ => false
+            };
 
             // ── HTB VPN ────────────────────────────────────────────────────────
-            var htbTokenOpt = new Option<string>(
-                "--htb-token",
-                description: "Hack The Box API token for downloading VPN configuration. Falls back to the token stored in settings.json (GUI Settings) when omitted.");
+            var htbTokenOpt = new Option<string>("--htb-token")
+            {
+                Description = "Hack The Box API token for downloading VPN configuration. Falls back to the token stored in settings.json (GUI Settings) when omitted."
+            };
 
-            var htbVpnOpt = new Option<string>(
-                "--htb-vpn",
-                description: "Comma-separated HTB VPN endpoint types: labs, sp, academy.");
+            var htbVpnOpt = new Option<string>("--htb-vpn")
+            {
+                Description = "Comma-separated HTB VPN endpoint types: labs, sp, academy."
+            };
 
             // ── Elastic SIEM AI ─────────────────────────────────────────────────
-            var elasticAiOpt = new Option<bool>(
-                "--elastic-ai",
-                description: "Enable AI features on an Elastic SIEM deployment using the LLM endpoint stored in settings.json (GUI: Settings → AI / LLM).");
-            var elasticAiNoTrialOpt = new Option<bool>(
-                "--elastic-ai-no-trial",
-                description: "With --elastic-ai: skip starting the 30-day Enterprise trial license (AI features need Enterprise on self-hosted stacks).");
+            var elasticAiOpt = new Option<bool>("--elastic-ai")
+            {
+                Description = "Enable AI features on an Elastic SIEM deployment using the LLM endpoint stored in settings.json (GUI: Settings → AI / LLM)."
+            };
+            var elasticAiNoTrialOpt = new Option<bool>("--elastic-ai-no-trial")
+            {
+                Description = "With --elastic-ai: skip starting the 30-day Enterprise trial license (AI features need Enterprise on self-hosted stacks)."
+            };
 
-            var ovpnOpt = new Option<string>(
-                "--ovpn",
-                description: "Path to a manually downloaded .ovpn file.");
+            var ovpnOpt = new Option<string>("--ovpn")
+            {
+                Description = "Path to a manually downloaded .ovpn file."
+            };
 
-            var noOpenVpnOpt = new Option<bool>(
-                "--no-openvpn",
-                getDefaultValue: () => false,
-                description: "Skip installing OpenVPN and the NetworkManager OpenVPN plugin.");
+            var noOpenVpnOpt = new Option<bool>("--no-openvpn")
+            {
+                Description = "Skip installing OpenVPN and the NetworkManager OpenVPN plugin.",
+                DefaultValueFactory = _ => false
+            };
 
             // ── Distribution-specific ──────────────────────────────────────────
-            var optionOpt = new Option<string[]>(
-                "--option",
-                description: "Distribution-specific option in key=value form (repeatable). " +
-                             "E.g. --option pwncloudos-sync=true")
+            var optionOpt = new Option<string[]>("--option")
             {
+                Description = "Distribution-specific option in key=value form (repeatable). " +
+                             "E.g. --option pwncloudos-sync=true",
                 AllowMultipleArgumentsPerToken = false,
-                Arity = ArgumentArity.ZeroOrMore,
+                Arity = ArgumentArity.ZeroOrMore
             };
-            optionOpt.AllowMultipleArgumentsPerToken = false;
 
             // ── Output / behaviour ─────────────────────────────────────────────
-            var formatOpt = new Option<string>(
-                "--format",
-                getDefaultValue: () => "text",
-                description: "Output format: text or json.");
+            var formatOpt = new Option<string>("--format")
+            {
+                Description = "Output format: text or json.",
+                DefaultValueFactory = _ => "text"
+            };
 
-            var quietOpt = new Option<bool>(
-                "--quiet",
-                getDefaultValue: () => false,
-                description: "Suppress progress output. Exit code still reflects success/failure.");
+            var quietOpt = new Option<bool>("--quiet")
+            {
+                Description = "Suppress progress output. Exit code still reflects success/failure.",
+                DefaultValueFactory = _ => false
+            };
 
-            var nonInteractiveOpt = new Option<bool>(
-                "--non-interactive",
-                getDefaultValue: () => false,
-                description: "Fail with an error instead of prompting for missing information.");
+            var nonInteractiveOpt = new Option<bool>("--non-interactive")
+            {
+                Description = "Fail with an error instead of prompting for missing information.",
+                DefaultValueFactory = _ => false
+            };
 
             // Register all options
-            cmd.AddOption(imageOpt);
-            cmd.AddOption(imageUriOpt);
-            cmd.AddOption(checksumOpt);
-            cmd.AddOption(checksumUriOpt);
-            cmd.AddOption(nameOpt);
-            cmd.AddOption(memoryOpt);
-            cmd.AddOption(cpuOpt);
-            cmd.AddOption(diskSizeOpt);
-            cmd.AddOption(noAutoDetectDiskOpt);
-            cmd.AddOption(noNestedVirtOpt);
-            cmd.AddOption(replaceOpt);
-            cmd.AddOption(noXrdpOpt);
-            cmd.AddOption(rdpBackendOpt);
-            cmd.AddOption(desktopOpt);
-            cmd.AddOption(releaseOpt);
-            cmd.AddOption(noIntegrationSvcOpt);
-            cmd.AddOption(dnsModeOpt);
-            cmd.AddOption(nameserversOpt);
-            cmd.AddOption(sshKeyOpt);
-            cmd.AddOption(noTimezoneOpt);
-            cmd.AddOption(htbTokenOpt);
-            cmd.AddOption(htbVpnOpt);
-            cmd.AddOption(elasticAiOpt);
-            cmd.AddOption(elasticAiNoTrialOpt);
-            cmd.AddOption(ovpnOpt);
-            cmd.AddOption(noOpenVpnOpt);
-            cmd.AddOption(optionOpt);
-            cmd.AddOption(formatOpt);
-            cmd.AddOption(quietOpt);
-            cmd.AddOption(nonInteractiveOpt);
+            cmd.Options.Add(imageOpt);
+            cmd.Options.Add(imageUriOpt);
+            cmd.Options.Add(checksumOpt);
+            cmd.Options.Add(checksumUriOpt);
+            cmd.Options.Add(nameOpt);
+            cmd.Options.Add(memoryOpt);
+            cmd.Options.Add(cpuOpt);
+            cmd.Options.Add(diskSizeOpt);
+            cmd.Options.Add(noAutoDetectDiskOpt);
+            cmd.Options.Add(noNestedVirtOpt);
+            cmd.Options.Add(replaceOpt);
+            cmd.Options.Add(noXrdpOpt);
+            cmd.Options.Add(rdpBackendOpt);
+            cmd.Options.Add(desktopOpt);
+            cmd.Options.Add(releaseOpt);
+            cmd.Options.Add(noIntegrationSvcOpt);
+            cmd.Options.Add(dnsModeOpt);
+            cmd.Options.Add(nameserversOpt);
+            cmd.Options.Add(sshKeyOpt);
+            cmd.Options.Add(noTimezoneOpt);
+            cmd.Options.Add(htbTokenOpt);
+            cmd.Options.Add(htbVpnOpt);
+            cmd.Options.Add(elasticAiOpt);
+            cmd.Options.Add(elasticAiNoTrialOpt);
+            cmd.Options.Add(ovpnOpt);
+            cmd.Options.Add(noOpenVpnOpt);
+            cmd.Options.Add(optionOpt);
+            cmd.Options.Add(formatOpt);
+            cmd.Options.Add(quietOpt);
+            cmd.Options.Add(nonInteractiveOpt);
 
-            cmd.SetHandler(async (InvocationContext ctx) =>
+            cmd.SetAction(async (parseResult, ct) =>
             {
-                var r = ctx.ParseResult;
-                var ct = ctx.GetCancellationToken();
-
                 var args = new CreateArgs
                 {
-                    Image = r.GetValueForOption(imageOpt),
-                    ImageUri = r.GetValueForOption(imageUriOpt),
-                    Checksum = r.GetValueForOption(checksumOpt),
-                    ChecksumUri = r.GetValueForOption(checksumUriOpt),
-                    Name = r.GetValueForOption(nameOpt),
-                    MemoryMb = r.GetValueForOption(memoryOpt),
-                    CpuCount = r.GetValueForOption(cpuOpt),
-                    DiskSizeGb = r.GetValueForOption(diskSizeOpt),
-                    NoAutoDetectDisk = r.GetValueForOption(noAutoDetectDiskOpt),
-                    NoNestedVirt = r.GetValueForOption(noNestedVirtOpt),
-                    Replace = r.GetValueForOption(replaceOpt),
-                    NoXrdp = r.GetValueForOption(noXrdpOpt),
-                    RdpBackend = r.GetValueForOption(rdpBackendOpt),
-                    Desktop = r.GetValueForOption(desktopOpt),
-                    Release = r.GetValueForOption(releaseOpt),
-                    NoIntegrationServices = r.GetValueForOption(noIntegrationSvcOpt),
-                    DnsMode = r.GetValueForOption(dnsModeOpt),
-                    Nameservers = r.GetValueForOption(nameserversOpt),
-                    SshKeyPath = r.GetValueForOption(sshKeyOpt),
-                    NoTimezoneSync = r.GetValueForOption(noTimezoneOpt),
-                    HtbToken = r.GetValueForOption(htbTokenOpt),
-                    HtbVpn = r.GetValueForOption(htbVpnOpt),
-                    ElasticAi = r.GetValueForOption(elasticAiOpt),
-                    ElasticAiNoTrial = r.GetValueForOption(elasticAiNoTrialOpt),
-                    OvpnPath = r.GetValueForOption(ovpnOpt),
-                    NoOpenVpn = r.GetValueForOption(noOpenVpnOpt),
-                    Options = r.GetValueForOption(optionOpt) ?? Array.Empty<string>(),
-                    Format = r.GetValueForOption(formatOpt),
-                    Quiet = r.GetValueForOption(quietOpt),
-                    NonInteractive = r.GetValueForOption(nonInteractiveOpt),
+                    Image = parseResult.GetValue(imageOpt),
+                    ImageUri = parseResult.GetValue(imageUriOpt),
+                    Checksum = parseResult.GetValue(checksumOpt),
+                    ChecksumUri = parseResult.GetValue(checksumUriOpt),
+                    Name = parseResult.GetValue(nameOpt),
+                    MemoryMb = parseResult.GetValue(memoryOpt),
+                    CpuCount = parseResult.GetValue(cpuOpt),
+                    DiskSizeGb = parseResult.GetValue(diskSizeOpt),
+                    NoAutoDetectDisk = parseResult.GetValue(noAutoDetectDiskOpt),
+                    NoNestedVirt = parseResult.GetValue(noNestedVirtOpt),
+                    Replace = parseResult.GetValue(replaceOpt),
+                    NoXrdp = parseResult.GetValue(noXrdpOpt),
+                    RdpBackend = parseResult.GetValue(rdpBackendOpt),
+                    Desktop = parseResult.GetValue(desktopOpt),
+                    Release = parseResult.GetValue(releaseOpt),
+                    NoIntegrationServices = parseResult.GetValue(noIntegrationSvcOpt),
+                    DnsMode = parseResult.GetValue(dnsModeOpt),
+                    Nameservers = parseResult.GetValue(nameserversOpt),
+                    SshKeyPath = parseResult.GetValue(sshKeyOpt),
+                    NoTimezoneSync = parseResult.GetValue(noTimezoneOpt),
+                    HtbToken = parseResult.GetValue(htbTokenOpt),
+                    HtbVpn = parseResult.GetValue(htbVpnOpt),
+                    ElasticAi = parseResult.GetValue(elasticAiOpt),
+                    ElasticAiNoTrial = parseResult.GetValue(elasticAiNoTrialOpt),
+                    OvpnPath = parseResult.GetValue(ovpnOpt),
+                    NoOpenVpn = parseResult.GetValue(noOpenVpnOpt),
+                    Options = parseResult.GetValue(optionOpt) ?? Array.Empty<string>(),
+                    Format = parseResult.GetValue(formatOpt),
+                    Quiet = parseResult.GetValue(quietOpt),
+                    NonInteractive = parseResult.GetValue(nonInteractiveOpt),
                 };
 
-                ctx.ExitCode = await RunAsync(services, args, ct);
+                return await RunAsync(services, args, ct);
             });
 
             return cmd;
@@ -256,7 +279,7 @@ namespace VMCreate.CLI.Commands
         /// desktop stack than the user asked for.
         /// Returns false (and reports a validation error) on unrecognized values;
         /// TryResolveRdpBackend is a pure parse, checked before any VM work starts.
-        /// (System.CommandLine 2.0.0-beta4 has no CommandLineConfigurationException;
+        /// (System.CommandLine 2.0 exposes no value-validation callbacks here;
         /// the CLI validates values itself and returns exit codes instead.)
         /// <para>
         /// Note: RdpBackend.Auto (the default) is resolved at runtime in the

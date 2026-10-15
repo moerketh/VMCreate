@@ -52,7 +52,7 @@ namespace VMCreate.Tests.HyperV.Steps
         private static bool LoggedWarning<T>(Mock<ILogger<T>> logger)
             => logger.Invocations.Any(i =>
                 i.Method.Name == "Log" &&
-                (LogLevel)i.Arguments[0] == LogLevel.Warning);
+                i.Arguments[0] is LogLevel.Warning);
 
         [TestMethod]
         public void StepMetadata_IsCorrect()

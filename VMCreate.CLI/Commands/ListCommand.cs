@@ -3,7 +3,6 @@ using Spectre.Console;
 using System;
 using System.Collections.Generic;
 using System.CommandLine;
-using System.CommandLine.Invocation;
 using System.Linq;
 using System.Text.Json;
 using System.Threading;
@@ -18,46 +17,50 @@ namespace VMCreate.CLI.Commands
         {
             var cmd = new Command("list", "List available gallery images.");
 
-            var categoryOpt = new Option<string>(
-                "--category",
-                getDefaultValue: () => "all",
-                description: "Filter by category: security, general, or all.");
-
-            var showIsoOpt = new Option<bool>(
-                "--show-iso",
-                getDefaultValue: () => false,
-                description: "Include ISO installer images (require manual OS installation).");
-
-            var filterOpt = new Option<string>(
-                "--filter",
-                description: "Full-text search across name, publisher, and description.");
-
-            var formatOpt = new Option<string>(
-                "--format",
-                getDefaultValue: () => "table",
-                description: "Output format: table, json, or csv.");
-
-            var noCacheOpt = new Option<bool>(
-                "--no-cache",
-                getDefaultValue: () => false,
-                description: "Force refresh from remote sources, ignoring local cache.");
-
-            cmd.AddOption(categoryOpt);
-            cmd.AddOption(showIsoOpt);
-            cmd.AddOption(filterOpt);
-            cmd.AddOption(formatOpt);
-            cmd.AddOption(noCacheOpt);
-
-            cmd.SetHandler(async (InvocationContext ctx) =>
+            var categoryOpt = new Option<string>("--category")
             {
-                var category = ctx.ParseResult.GetValueForOption(categoryOpt);
-                var showIso = ctx.ParseResult.GetValueForOption(showIsoOpt);
-                var filter = ctx.ParseResult.GetValueForOption(filterOpt);
-                var format = ctx.ParseResult.GetValueForOption(formatOpt);
-                var noCache = ctx.ParseResult.GetValueForOption(noCacheOpt);
-                var ct = ctx.GetCancellationToken();
+                Description = "Filter by category: security, general, or all.",
+                DefaultValueFactory = _ => "all"
+            };
 
-                ctx.ExitCode = await RunAsync(services, category, showIso, filter, format, noCache, ct);
+            var showIsoOpt = new Option<bool>("--show-iso")
+            {
+                Description = "Include ISO installer images (require manual OS installation).",
+                DefaultValueFactory = _ => false
+            };
+
+            var filterOpt = new Option<string>("--filter")
+            {
+                Description = "Full-text search across name, publisher, and description."
+            };
+
+            var formatOpt = new Option<string>("--format")
+            {
+                Description = "Output format: table, json, or csv.",
+                DefaultValueFactory = _ => "table"
+            };
+
+            var noCacheOpt = new Option<bool>("--no-cache")
+            {
+                Description = "Force refresh from remote sources, ignoring local cache.",
+                DefaultValueFactory = _ => false
+            };
+
+            cmd.Options.Add(categoryOpt);
+            cmd.Options.Add(showIsoOpt);
+            cmd.Options.Add(filterOpt);
+            cmd.Options.Add(formatOpt);
+            cmd.Options.Add(noCacheOpt);
+
+            cmd.SetAction(async (parseResult, ct) =>
+            {
+                var category = parseResult.GetValue(categoryOpt);
+                var showIso = parseResult.GetValue(showIsoOpt);
+                var filter = parseResult.GetValue(filterOpt);
+                var format = parseResult.GetValue(formatOpt);
+                var noCache = parseResult.GetValue(noCacheOpt);
+
+                return await RunAsync(services, category, showIso, filter, format, noCache, ct);
             });
 
             return cmd;
