@@ -39,25 +39,43 @@ namespace VMCreate
             ct.ThrowIfCancellationRequested();
             logger.LogInformation("Installing VulnHunter (agentic AI scanner) on VM {VMName}...", shell.VmName);
 
-            string script = ScriptResourceLoader.Load("vulnhunter_install.sh");
-            string guestScript = $"/tmp/vulnhunter_install_{Guid.NewGuid():N}.sh";
-            await shell.CopyContentAsync(script, guestScript, ct);
-
-            string result = await shell.RunCommandAsync(
-                $"chmod 0755 {guestScript} && bash {guestScript}; rc=$?; rm -f {guestScript}; exit $rc",
-                TimeSpan.FromMinutes(20), ct);
-
-            switch (ParseResult(result))
+            try
             {
-                case "ok":
-                    logger.LogInformation("VulnHunter installed on VM {VMName}.", shell.VmName);
-                    break;
-                case "skipped":
-                    logger.LogWarning("VulnHunter install SKIPPED on VM {VMName} — missing prerequisite (harness/python); install later via /opt/VulnHunter. {Result}", shell.VmName, result.Trim());
-                    break;
-                default:
-                    logger.LogWarning("VulnHunter install on VM {VMName} completed DEGRADED (details in the deployment log): {Result}", shell.VmName, result.Trim());
-                    break;
+                // CopyContentAsync lands the script as root:root 0644: world
+                // readable, so bash runs it directly (a chmod by the SSH user
+                // EPERMs), but only root can remove it — hence sudo rm.
+                string script = ScriptResourceLoader.Load("vulnhunter_install.sh");
+                string guestScript = $"/tmp/vulnhunter_install_{Guid.NewGuid():N}.sh";
+                await shell.CopyContentAsync(script, guestScript, ct);
+
+                string result = await shell.RunCommandAsync(
+                    $"bash {guestScript}; rc=$?; sudo rm -f {guestScript}; exit $rc",
+                    TimeSpan.FromMinutes(20), ct);
+
+                switch (ParseResult(result))
+                {
+                    case "ok":
+                        logger.LogInformation("VulnHunter installed on VM {VMName}.", shell.VmName);
+                        break;
+                    case "skipped":
+                        logger.LogWarning("VulnHunter install SKIPPED on VM {VMName} — missing prerequisite (harness/python); install later via /opt/VulnHunter. {Result}", shell.VmName, result.Trim());
+                        break;
+                    default:
+                        logger.LogWarning("VulnHunter install on VM {VMName} completed DEGRADED (details in the deployment log): {Result}", shell.VmName, result.Trim());
+                        break;
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // SshTransport throws untyped Exceptions; per the class doc
+                // this best-effort step never fails the deployment.
+                logger.LogWarning(ex,
+                    "VulnHunter install failed on VM {VMName} — optional step, the deployment continues: {Message}",
+                    shell.VmName, ex.Message);
             }
         }
 

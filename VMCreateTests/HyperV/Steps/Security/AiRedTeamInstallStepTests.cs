@@ -76,6 +76,54 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
+        public async Task Execute_ShellCommandRunsScriptUnderBash_CleansUpWithSudoRm()
+        {
+            // Regression (2026-10-15 deployment abort): CopyContentAsync lands
+            // scripts as root:root 0644. An unprivileged "chmod 0755" EPERMs
+            // (SSH exit 1), and a bare "rm -f" of the root-owned file EPERMs
+            // too — bash needs only world-readable and cleanup needs sudo.
+            string? guestPath = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((_, p, _) => guestPath = p)
+                  .Returns(Task.CompletedTask);
+            string? command = null;
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, TimeSpan, CancellationToken>((c, _, _) => command = c)
+                  .ReturnsAsync("AIREdTEAM_RESULT=ok");
+
+            await _step.ExecuteAsync(_shell.Object, _item, _enabled, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(guestPath);
+            Assert.AreEqual($"bash {guestPath}; rc=$?; sudo rm -f {guestPath}; exit $rc", command);
+            Assert.IsFalse(command!.Contains("chmod"), command);
+        }
+
+        [TestMethod]
+        public async Task Execute_CommandFailure_LogsWarning_NotThrows()
+        {
+            // SshTransport throws a plain Exception on non-zero SSH exit; per
+            // this optional step's contract it never fails the deployment.
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+                  .ThrowsAsync(new Exception("SSH command failed (exit code 1) on VM 'TestVM': Operation not permitted"));
+
+            await _step.ExecuteAsync(_shell.Object, _item, _enabled, _logger.Object, CancellationToken.None);
+
+            _logger.Verify(l => l.Log(LogLevel.Warning, It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => string.Concat(v).Contains("deployment continues")),
+                It.IsAny<Exception?>(), It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
+        }
+
+        [TestMethod]
+        public async Task Execute_CancellationStillThrows()
+        {
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+                  .ThrowsAsync(new OperationCanceledException());
+
+            await Assert.ThrowsAsync<OperationCanceledException>(
+                () => _step.ExecuteAsync(_shell.Object, _item, _enabled, _logger.Object, CancellationToken.None));
+        }
+
+        [TestMethod]
         public void ParseResult_HandlesContract()
         {
             Assert.AreEqual("ok", AiRedTeamInstallStep.ParseResult("AIREdTEAM_RESULT=ok"));

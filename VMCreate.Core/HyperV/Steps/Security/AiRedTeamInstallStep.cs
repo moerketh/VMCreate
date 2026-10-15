@@ -35,25 +35,43 @@ namespace VMCreate
             ct.ThrowIfCancellationRequested();
             logger.LogInformation("Installing AI red-team tools (garak, PyRIT, promptmap2) on VM {VMName}...", shell.VmName);
 
-            string script = ScriptResourceLoader.Load("ai_redteam_install.sh");
-            string guestScript = $"/tmp/ai_redteam_install_{Guid.NewGuid():N}.sh";
-            await shell.CopyContentAsync(script, guestScript, ct);
-
-            string result = await shell.RunCommandAsync(
-                $"chmod 0755 {guestScript} && bash {guestScript}; rc=$?; rm -f {guestScript}; exit $rc",
-                TimeSpan.FromMinutes(20), ct);
-
-            switch (ParseResult(result))
+            try
             {
-                case "ok":
-                    logger.LogInformation("AI red-team tools installed on VM {VMName}.", shell.VmName);
-                    break;
-                case "skipped":
-                    logger.LogWarning("AI red-team install SKIPPED on VM {VMName} — no python/pipx base. {Result}", shell.VmName, result.Trim());
-                    break;
-                default:
-                    logger.LogWarning("AI red-team install on VM {VMName} completed DEGRADED (one or more tools failed): {Result}", shell.VmName, result.Trim());
-                    break;
+                // CopyContentAsync lands the script as root:root 0644: world
+                // readable, so bash runs it directly (a chmod by the SSH user
+                // EPERMs), but only root can remove it — hence sudo rm.
+                string script = ScriptResourceLoader.Load("ai_redteam_install.sh");
+                string guestScript = $"/tmp/ai_redteam_install_{Guid.NewGuid():N}.sh";
+                await shell.CopyContentAsync(script, guestScript, ct);
+
+                string result = await shell.RunCommandAsync(
+                    $"bash {guestScript}; rc=$?; sudo rm -f {guestScript}; exit $rc",
+                    TimeSpan.FromMinutes(20), ct);
+
+                switch (ParseResult(result))
+                {
+                    case "ok":
+                        logger.LogInformation("AI red-team tools installed on VM {VMName}.", shell.VmName);
+                        break;
+                    case "skipped":
+                        logger.LogWarning("AI red-team install SKIPPED on VM {VMName} — no python/pipx base. {Result}", shell.VmName, result.Trim());
+                        break;
+                    default:
+                        logger.LogWarning("AI red-team install on VM {VMName} completed DEGRADED (one or more tools failed): {Result}", shell.VmName, result.Trim());
+                        break;
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // SshTransport throws untyped Exceptions; per the class doc
+                // this best-effort step never fails the deployment.
+                logger.LogWarning(ex,
+                    "AI red-team install failed on VM {VMName} — optional step, the deployment continues: {Message}",
+                    shell.VmName, ex.Message);
             }
         }
 

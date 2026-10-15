@@ -44,25 +44,43 @@ namespace VMCreate
             ct.ThrowIfCancellationRequested();
             logger.LogInformation("Registering security web apps and tools in Omarchy launcher on VM {VMName}...", shell.VmName);
 
-            string script = ScriptResourceLoader.Load("omarchy_register_apps.sh");
-            string guestScript = $"/tmp/omarchy_register_apps_{Guid.NewGuid():N}.sh";
-            await shell.CopyContentAsync(script, guestScript, ct);
-
-            string result = await shell.RunCommandAsync(
-                $"chmod 0755 {guestScript} && bash {guestScript}; rc=$?; rm -f {guestScript}; exit $rc",
-                TimeSpan.FromMinutes(10), ct);
-
-            switch (ParseResult(result))
+            try
             {
-                case "ok":
-                    logger.LogInformation("Security apps registered in Omarchy launcher on VM {VMName}.", shell.VmName);
-                    break;
-                case "skipped":
-                    logger.LogWarning("App registration SKIPPED on VM {VMName}: {Result}", shell.VmName, result.Trim());
-                    break;
-                default:
-                    logger.LogWarning("App registration on VM {VMName} completed DEGRADED (some entries may be missing): {Result}", shell.VmName, result.Trim());
-                    break;
+                // CopyContentAsync lands the script as root:root 0644: world
+                // readable, so bash runs it directly (a chmod by the SSH user
+                // EPERMs), but only root can remove it — hence sudo rm.
+                string script = ScriptResourceLoader.Load("omarchy_register_apps.sh");
+                string guestScript = $"/tmp/omarchy_register_apps_{Guid.NewGuid():N}.sh";
+                await shell.CopyContentAsync(script, guestScript, ct);
+
+                string result = await shell.RunCommandAsync(
+                    $"bash {guestScript}; rc=$?; sudo rm -f {guestScript}; exit $rc",
+                    TimeSpan.FromMinutes(10), ct);
+
+                switch (ParseResult(result))
+                {
+                    case "ok":
+                        logger.LogInformation("Security apps registered in Omarchy launcher on VM {VMName}.", shell.VmName);
+                        break;
+                    case "skipped":
+                        logger.LogWarning("App registration SKIPPED on VM {VMName}: {Result}", shell.VmName, result.Trim());
+                        break;
+                    default:
+                        logger.LogWarning("App registration on VM {VMName} completed DEGRADED (some entries may be missing): {Result}", shell.VmName, result.Trim());
+                        break;
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // SshTransport throws untyped Exceptions; per the class doc a
+                // registration miss is cosmetic and never fails the deployment.
+                logger.LogWarning(ex,
+                    "App registration failed on VM {VMName} — the deployment continues (launcher entries are cosmetic): {Message}",
+                    shell.VmName, ex.Message);
             }
         }
 
