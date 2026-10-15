@@ -110,8 +110,9 @@ namespace VMCreate
                 }
                 else
                 {
-                    // Visible, not silent: 13 of 23 gallery loaders (Parrot
-                    // among them) ship no checksum — a compromised or MITM'd
+                    // Visible, not silent: 7 of 27 gallery loaders (Ubuntu,
+                    // NixOS, CAINE, FedoraSecurityLab, Pentoo, SecurityOnion,
+                    // Tsurugi) ship no checksum — a compromised or MITM'd
                     // mirror controls the downloaded bytes. The ArchiveExtractor's
                     // Zip-Slip defenses catch path escapes, but content
                     // integrity is simply unverified for these items. Say so

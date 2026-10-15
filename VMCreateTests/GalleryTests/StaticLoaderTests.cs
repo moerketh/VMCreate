@@ -106,6 +106,21 @@ namespace VMCreate.Tests.GalleryTests
         }
 
         [TestMethod]
+        public async Task Arch_LoadGalleryItems_HasMirrorSha256Sidecar()
+        {
+            var item = (await new Arch().LoadGalleryItems())[0];
+
+            // The Arch mirror publishes a GNU-format .SHA256 file next to the
+            // qcow2 template (uppercase extension — lowercase 404s on nginx).
+            Assert.IsTrue(item.HasChecksum,
+                "Arch must publish a checksum so the downloaded template can be verified");
+            Assert.AreEqual(item.DiskUri + ".SHA256", item.ChecksumUri,
+                $"ChecksumUri must be the mirror's .SHA256 sidecar beside the qcow2, got: {item.ChecksumUri}");
+            Assert.IsTrue(string.IsNullOrEmpty(item.Checksum),
+                "No inline hash expected — verification must ride the sidecar");
+        }
+
+        [TestMethod]
         public async Task Arch_LoadGalleryItems_CancellationTokenIgnored()
         {
             // Static loaders do not observe the token — calling with a cancelled token

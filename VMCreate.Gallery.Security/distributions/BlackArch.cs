@@ -20,11 +20,15 @@ namespace VMCreate.Gallery
     /// <para>
     /// Static loader: <c>DiskUri</c> is the hardcoded Arch basic cloud image
     /// template, so no HTTP scrape is required to enumerate the item.
+    /// Verification rides the Arch mirror's <c>.SHA256</c> sidecar published
+    /// alongside the template, so the downloaded image is verified just
+    /// like the native Arch entry.
     /// </para>
     /// </summary>
     public class BlackArch : IGalleryLoader
     {
         private const string ArchTemplateUrl = "https://geo.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-basic.qcow2";
+        private const string ChecksumUrl = ArchTemplateUrl + ".SHA256";
         private const string SymbolUri = "https://archlinux.org/static/archlinux_common_style/favicon.png";
 
         public Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
@@ -36,7 +40,8 @@ namespace VMCreate.Gallery
                 Description = "BlackArch Linux as an Arch Linux base with the BlackArch repositories added post-boot, installing a curated subset of pentesting tools. Uses the current rolling Arch image, so this stays up to date where the BlackArch 2023 ISO is not. Ships headless; a desktop environment (Xfce, KDE Plasma, GNOME) can be installed from the customization page.",
                 ThumbnailUri = "",
                 SymbolUri = SymbolUri,
-                DiskUri = ArchTemplateUrl,
+                DiskUri      = ArchTemplateUrl,
+                ChecksumUri = ChecksumUrl,
                 SecureBoot = "false",
                 EnhancedSessionTransportType = "HvSocket",
                 LastUpdated = DateTime.UtcNow.ToString("o"),

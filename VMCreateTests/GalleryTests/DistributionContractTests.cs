@@ -155,6 +155,10 @@ namespace VMCreate.Tests.GalleryTests
             Assert.AreEqual("Security", items[0].Category, "BlackArch must be categorized as Security");
             // Rides the Arch cloud image, not a stale BlackArch ISO.
             StringAssert.Contains(items[0].DiskUri, "Arch-Linux-x86_64-basic.qcow2");
+            // Verification rides the same Arch mirror .SHA256 sidecar as Arch.
+            Assert.IsTrue(items[0].HasChecksum, "BlackArch must be verifiable like its Arch base");
+            Assert.AreEqual(items[0].DiskUri + ".SHA256", items[0].ChecksumUri,
+                "BlackArch ChecksumUri must be the Arch mirror's .SHA256 sidecar");
         }
 
         [TestMethod]

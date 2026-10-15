@@ -9,8 +9,9 @@ namespace VMCreate.Tests.GalleryTests
 {
     /// <summary>
     /// End-to-end integration tests that call real loaders against live servers,
-    /// then verify every returned URL (DiskUri, ThumbnailUri, SymbolUri)
-    /// responds with a non-error HTTP status (HEAD request).
+    /// then verify every returned URL (DiskUri, ThumbnailUri, SymbolUri, plus
+    /// ChecksumUri when populated) responds with a non-error HTTP status (HEAD
+    /// request).
     ///
     /// Run with:  dotnet test --filter TestCategory=Integration
     /// Skip with: dotnet test --filter TestCategory!=Integration
@@ -83,7 +84,9 @@ namespace VMCreate.Tests.GalleryTests
 
         /// <summary>
         /// Verifies DiskUri, ThumbnailUri and SymbolUri for every item
-        /// returned by the loader, all in parallel.
+        /// returned by the loader, plus ChecksumUri when populated (that
+        /// sidecar is needed at deployment time for image verification).
+        /// All checks run in parallel.
         /// </summary>
         private static async Task VerifyAllUrisAsync(List<GalleryItem> items, string loaderName)
         {
@@ -97,6 +100,7 @@ namespace VMCreate.Tests.GalleryTests
                 checks.Add(AssertUriRespondsAsync(item.DiskUri,      $"{n}.DiskUri"));
                 checks.Add(AssertUriRespondsAsync(item.ThumbnailUri, $"{n}.ThumbnailUri"));
                 checks.Add(AssertUriRespondsAsync(item.SymbolUri,    $"{n}.SymbolUri"));
+                checks.Add(AssertUriRespondsAsync(item.ChecksumUri,  $"{n}.ChecksumUri"));
             }
             await Task.WhenAll(checks);
         }

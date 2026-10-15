@@ -1,6 +1,6 @@
 # Gallery checksum coverage & loader update policy
 
-Status after the quickspawn-backport pass (2026-09). The download pipeline
+Status after the Arch/BlackArch verification pass (2026-09). The download pipeline
 verifies whenever a `GalleryItem` carries `Checksum` (inline) or
 `ChecksumUri` (publisher's checksum file); inline takes precedence.
 
@@ -9,15 +9,20 @@ verifies whenever a `GalleryItem` carries `Checksum` (inline) or
 | Loader | Verification | Notes |
 |---|---|---|
 | AlpineLinux | `ChecksumUri` (.sha256 sidecar) | |
+| Arch | `ChecksumUri` (.SHA256 sidecar) | Mirror publishes GNU-format `hash␠␠filename` beside the qcow2; extension is uppercase — lowercase `.sha256` 404s |
 | AthenaOS | `ChecksumUri` (.iso.sha256) | |
-| BlackArch | none | No checksums published for the pinned ISO/OVA |
+| BlackArch | `ChecksumUri` (.SHA256 sidecar) | Rides the Arch base image, so verification reuses the Arch mirror's sidecar |
+| BlackArchOmarchy | `ChecksumUri` (.iso.sha256) | |
 | CAINE | none | No checksum file at a stable URL |
 | Debian | `ChecksumUri` | |
+| ElasticSiem | `ChecksumUri` (.CHECKSUM) | |
+| FedoraSecurityLab | none | Labs `-CHECKSUM` is a 404 via download.fedoraproject.org — no usable sidecar |
 | FedoraWorkstation | `ChecksumUri` | |
 | FedoraSilverBlue | `ChecksumUri` | |
 | FlareVm | inline `Checksum` (SHA-256) | Pinned dev VM |
 | Kali (stable/weekly variants) | `ChecksumUri` (SHA256SUMS) | Per-directory sums: the item carries /current/'s, each `ReleaseVariant` its own directory's; `ResolveRelease` swaps the checksum with the disk |
 | LinuxMint | `ChecksumUri` | |
+| NixOS | none | Upstream publishes no checksum file for the unversioned `latest-nixos-*.iso` symlinks |
 | Omarchy | `ChecksumUri` (.iso.sha256) | |
 | OpenSuseTumbleweed | `ChecksumUri` | |
 | Parrot (all editions) | `ChecksumUri` (signed-hashes.txt, SHA-256 section) | Multi-algorithm PGP-cleartext file; disambiguated by digest length |
@@ -28,6 +33,7 @@ verifies whenever a `GalleryItem` carries `Checksum` (inline) or
 | SecurityOnion | none | download.securityonion.net returns an SPA for .sha256 URLs — no usable sidecar |
 | Tails | inline `Checksum` (SHA-256) | Added; the Tails JSON API ships the hash per target file |
 | Tsurugi | none | No checksums published |
+| Ubuntu | none | partner-images publishes no checksum; noble `.vhdx.zip.sha256` → 404 |
 | Whonix | `ChecksumUri` (.ova.sha512sums, SHA-512) | Added; upstream publishes SHA-512 only — keep the algorithm at SHA512, do not "fix" it to SHA-256 |
 
 Unverified loaders log a visible warning at download time ("proceeding
