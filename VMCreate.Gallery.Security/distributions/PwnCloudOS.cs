@@ -52,9 +52,17 @@ namespace VMCreate.Gallery.distributions
 
                 var html = await client.GetStringAsync(ChecksumPageUrl, cancellationToken);
 
-                // The checksums page has a table row like:
+                // The checksums are published in a table with a row like:
                 //   AMD64 Virtual Machine | 2f6b12183003bee17066fe8066acc2f4af74262456828018197647420360dd55
-                var match = Regex.Match(html,
+                // The live page wraps the cells in styled <td> attributes
+                // (hex colors like #cccccc, sizes like 16px) that would
+                // otherwise satisfy the non-hex bridge below; strip tags and
+                // normalize whitespace first so only the text content matters.
+                var text = Regex.Replace(html, "<[^>]+>", " ")
+                    .Replace("&nbsp;", " ");
+                text = Regex.Replace(text, @"\s+", " ");
+
+                var match = Regex.Match(text,
                     @"AMD64\s+Virtual\s+Machine[^a-fA-F0-9]*([a-fA-F0-9]{64})",
                     RegexOptions.IgnoreCase | RegexOptions.Singleline);
 
