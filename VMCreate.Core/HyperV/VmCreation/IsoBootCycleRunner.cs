@@ -35,7 +35,6 @@ namespace VMCreate.HyperV.VmCreation
     public enum IsoBootCycleState
     {
         Start,
-        SendPadding,
         SendSshKey,
         SendCustomizationFlags,
         WaitForGuest,
@@ -158,13 +157,6 @@ namespace VMCreate.HyperV.VmCreation
                     }
                     await Task.Delay(TimeSpan.FromSeconds(10), cancellationToken);
                     context.Logger.Log("ISO boot-cycle: warming up guest");
-                    return (IsoBootCycleState.SendPadding, null);
-
-                case IsoBootCycleState.SendPadding:
-                    await _kvpSender.SendKVPToGuestAsync(vmName, "PADDING_1", "true", cancellationToken);
-                    await _kvpSender.SendKVPToGuestAsync(vmName, "PADDING_2", "true", cancellationToken);
-                    await _kvpSender.SendKVPToGuestAsync(vmName, "PADDING_3", "true", cancellationToken);
-                    context.Logger.Log("ISO boot-cycle: padding KVP sent");
                     return (IsoBootCycleState.SendSshKey, null);
 
                 case IsoBootCycleState.SendSshKey:

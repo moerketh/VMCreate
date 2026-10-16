@@ -13,8 +13,10 @@ namespace VMCreate
     public interface ICloningIsoDownloader
     {
         /// <summary>
-        /// Ensures the cloning ISO is present at <see cref="VmDeploymentPlan.CloningIsoPath"/>.
-        /// Downloads the latest release from GitHub if the file is missing.
+        /// Ensures the cloning ISO at <see cref="VmDeploymentPlan.CloningIsoPath"/> is the latest
+        /// hyperv-convert-iso release. Downloads from GitHub when the ISO is missing, when the
+        /// version file written next to it is missing, or when the recorded version is outdated.
+        /// Keeps the cached copy when GitHub cannot be reached and its version is already known.
         /// </summary>
         Task EnsureIsoAsync(VmDeploymentPlan plan, CancellationToken cancellationToken,
                             IProgress<CreateVMProgressInfo>? progress);
@@ -51,16 +53,49 @@ namespace VMCreate
             cancellationToken.ThrowIfCancellationRequested();
 
             string isoPath = plan.CloningIsoPath;
+            string versionPath = GetVersionFilePath(isoPath);
+            bool isoExists = File.Exists(isoPath);
+            string? cachedVersion = isoExists ? TryReadCachedVersion(versionPath) : null;
 
-            if (File.Exists(isoPath))
+            string isoUrl;
+            string? checksumUrl;
+            string version;
+
+            if (cachedVersion != null)
             {
-                _logger.LogInformation("Cloning ISO already present at {IsoPath}", isoPath);
-                return;
+                try
+                {
+                    (isoUrl, checksumUrl, version) = await GetLatestReleaseAsync(cancellationToken);
+                }
+                catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+                {
+                    _logger.LogWarning(ex,
+                        "Could not check for a newer hyperv-convert-iso release. Using cached ISO {Version} at {IsoPath}.",
+                        cachedVersion, isoPath);
+                    return;
+                }
+
+                if (string.Equals(cachedVersion, version, StringComparison.Ordinal))
+                {
+                    _logger.LogInformation("Cloning ISO {Version} already present at {IsoPath}", cachedVersion, isoPath);
+                    return;
+                }
+
+                _logger.LogInformation(
+                    "Cached cloning ISO at {IsoPath} is version {CachedVersion}, latest is {LatestVersion}. Downloading the updated release.",
+                    isoPath, cachedVersion, version);
             }
+            else
+            {
+                if (isoExists)
+                    _logger.LogInformation(
+                        "Cloning ISO found at {IsoPath} without a readable version file. Treating it as outdated and fetching the latest release.",
+                        isoPath);
+                else
+                    _logger.LogInformation("Cloning ISO not found at {IsoPath}. Fetching latest release from GitHub.", isoPath);
 
-            _logger.LogInformation("Cloning ISO not found at {IsoPath}. Fetching latest release from GitHub.", isoPath);
-
-            var (isoUrl, checksumUrl) = await GetLatestReleaseUrlsAsync(cancellationToken);
+                (isoUrl, checksumUrl, version) = await GetLatestReleaseAsync(cancellationToken);
+            }
 
             progress?.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.DownloadCloningIso));
 
@@ -80,7 +115,8 @@ namespace VMCreate
                     Directory.CreateDirectory(directory);
 
                 File.Move(tempPath, isoPath, overwrite: true);
-                _logger.LogInformation("Cloning ISO saved to {IsoPath}", isoPath);
+                await File.WriteAllTextAsync(versionPath, version, cancellationToken);
+                _logger.LogInformation("Cloning ISO {Version} saved to {IsoPath}", version, isoPath);
             }
             catch
             {
@@ -90,7 +126,26 @@ namespace VMCreate
             }
         }
 
-        private async Task<(string IsoUrl, string? ChecksumUrl)> GetLatestReleaseUrlsAsync(CancellationToken cancellationToken)
+        private static string GetVersionFilePath(string isoPath)
+            => isoPath + ".version";
+
+        private static string? TryReadCachedVersion(string versionPath)
+        {
+            try
+            {
+                if (!File.Exists(versionPath))
+                    return null;
+
+                string? version = File.ReadAllText(versionPath).Trim();
+                return string.IsNullOrEmpty(version) ? null : version;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return null;
+            }
+        }
+
+        private async Task<(string IsoUrl, string? ChecksumUrl, string Version)> GetLatestReleaseAsync(CancellationToken cancellationToken)
         {
             HttpRequestException? lastError = null;
 
@@ -127,8 +182,17 @@ namespace VMCreate
                             "No .iso asset found in the latest hyperv-convert-iso release. " +
                             "Check https://github.com/moerketh/hyperv-convert-iso/releases");
 
-                    _logger.LogInformation("Latest hyperv-convert-iso release: {IsoUrl}", isoUrl);
-                    return (isoUrl, checksumUrl);
+                    string? tag = null;
+                    if (!doc.RootElement.TryGetProperty("tag_name", out var tagElement) ||
+                        string.IsNullOrEmpty(tag = tagElement.GetString()))
+                        throw new InvalidOperationException(
+                            "The latest hyperv-convert-iso release has no tag_name. " +
+                            "Check https://github.com/moerketh/hyperv-convert-iso/releases");
+
+                    string version = tag.StartsWith("v", StringComparison.OrdinalIgnoreCase) ? tag[1..] : tag;
+
+                    _logger.LogInformation("Latest hyperv-convert-iso release {Version}: {IsoUrl}", version, isoUrl);
+                    return (isoUrl, checksumUrl, version);
                 }
                 catch (HttpRequestException ex)
                 {
