@@ -155,8 +155,6 @@ namespace VMCreate.HyperV.VmCreation
                             DetectedGeneration = 2
                         });
                     }
-                    await Task.Delay(TimeSpan.FromSeconds(10), cancellationToken);
-                    context.Logger.Log("ISO boot-cycle: warming up guest");
                     return (IsoBootCycleState.SendSshKey, null);
 
                 case IsoBootCycleState.SendSshKey:
