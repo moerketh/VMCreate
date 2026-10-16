@@ -196,7 +196,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
         }
 
         [TestMethod]
-        public async Task RunAsync_SendsPaddingKvpBeforeRealKeys()
+        public async Task RunAsync_SendsNoPaddingKeys_FirstSlotHoldsRealKey()
         {
             _kvpPoller.Setup(p => p.WaitForShutdownWithProgressAsync(
                 It.IsAny<string>(),
@@ -216,12 +216,13 @@ namespace VMCreate.Tests.HyperV.VmCreation
 
             await RunAsync(generation: 2);
 
-            // Padding absorbs corruption in the first KVP pool slots at guest boot;
-            // it must be present and must precede all real configuration keys.
-            CollectionAssert.AreEquivalent(
-                new[] { "PADDING_1", "PADDING_2", "PADDING_3" },
-                sentKeys.Take(3).ToList());
-            Assert.IsTrue(sentKeys.IndexOf("VMCREATE_MODE") > 2, "Real keys must be sent after the padding.");
+            // The guest reader now stops at each field's first NUL byte, so the
+            // padding keys that absorbed daemon buffer garbage are obsolete and
+            // must not be sent. Real configuration keys must start at slot 0.
+            Assert.IsFalse(sentKeys.Any(k => k.StartsWith("PADDING_", StringComparison.Ordinal)),
+                "No padding KVP keys may be sent.");
+            Assert.AreEqual(0, sentKeys.IndexOf("VMCREATE_SSH_PUBKEY"),
+                "The first KVP pool slot must carry a real configuration key.");
         }
 
         [TestMethod]
