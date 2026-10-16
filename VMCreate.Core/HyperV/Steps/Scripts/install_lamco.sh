@@ -32,7 +32,7 @@ LAMCO_FORK_DEB_VERSION="1.4.5-hyperv6"
 # same upstream version plus the pkgrel '-1'; Arch pkgver cannot contain
 # hyphens, hence the dot; keep the pins and this sentence in step).
 LAMCO_FORK_CRATE_VERSION="1.4.5"
-LAMCO_FORK_DEB_SHA256="8439c0a35d1cc89ee5d4e7ba1b1f771cdb1e6185d2e8f9be7239bd3481daaea6"
+LAMCO_FORK_DEB_SHA256="c4d1579c2a683c42af37501c606ab9a45289a35d3e831596662c271bef2f203a"
 LAMCO_FORK_DEB_URL="https://github.com/${LAMCO_FORK_REPO}/releases/download/${LAMCO_FORK_TAG}/lamco-rdp-server_${LAMCO_FORK_DEB_VERSION}_amd64.deb"
 # Same release, pacman packaging. Built by the same workflow from the same
 # tag and carrying the same binary payload; the .PKGINFO pkgver is
