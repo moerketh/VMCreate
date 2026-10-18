@@ -124,8 +124,10 @@ namespace VMCreate.HyperV.VmCreation
                 _logger.LogInformation("Target vsock capability: {Capability}", cap);
 
             // Scripts exit non-zero on failure — the transport throws on
-            // that, so reaching here means exit 0.
-            return IsoBootCycleResult.Succeeded();
+            // that, so reaching here means exit 0. CollectedOutput is the
+            // ONLY record of what the guest did once the flip removes the
+            // guest-side autorun log (plan §1.4) — keep it on success too.
+            return IsoBootCycleResult.Succeeded(parser.CollectedOutput);
         }
 
         /// <summary>POSIX single-quote wrapping for argv safety.</summary>

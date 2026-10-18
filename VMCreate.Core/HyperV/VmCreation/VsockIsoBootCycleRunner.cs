@@ -156,6 +156,12 @@ namespace VMCreate.HyperV.VmCreation
                     return IsoBootCycleResult.Failed(stepsResult.ErrorMessage ?? "guest steps failed", logs);
                 }
 
+                // Success: the scenario's CollectedOutput is the only record
+                // of what the guest did (the autorun log dies at the flip,
+                // plan §1.4) — write it to the deployment log.
+                if (!string.IsNullOrWhiteSpace(stepsResult.DiagnosticsLog))
+                    context.Logger.Log($"ISO boot-cycle v2: guest scenario output:\n{stepsResult.DiagnosticsLog.Trim()}");
+
                 // Power off OUTSIDE the steps' try/catch: the guest killing
                 // sshd mid-command races this call, and the losing side is
                 // usually us (ssh exits 255). --no-block returns immediately
@@ -189,15 +195,29 @@ namespace VMCreate.HyperV.VmCreation
                     await _diskManager.RemoveHardDrive(context.Plan, IsoBootCycleRunner.MbrSourceDiskScsiControllerLocation, cancellationToken);
                     if (System.IO.File.Exists(mediaPath))
                     {
-                        System.IO.File.Delete(mediaPath);
-                        context.Logger.Log($"ISO boot-cycle v2: deleted original MBR source disk {mediaPath}");
+                        // The clone is DONE — a locked file here (e.g. a
+                        // lingering checkpoint, AV scanner) must not fail the
+                        // cycle: the whole-body catch would surface it as a
+                        // deploy failure and the orchestrator would delete a
+                        // VM whose clone succeeded. Leave the file behind and
+                        // warn; the disk is already detached.
+                        try
+                        {
+                            System.IO.File.Delete(mediaPath);
+                            context.Logger.Log($"ISO boot-cycle v2: deleted original MBR source disk {mediaPath}");
+                        }
+                        catch (Exception deleteEx) when (!cancellationToken.IsCancellationRequested)
+                        {
+                            context.Logger.LogWarning(
+                                $"ISO boot-cycle v2: could not delete detached MBR source disk {mediaPath} ({deleteEx.Message}); leaving the file — manual cleanup may be needed");
+                        }
                     }
                 }
 
                 await _bootManager.RemoveBootDvd(context.Plan, context.Plan.EffectiveCloningIsoPath, cancellationToken);
                 await _bootManager.SetFirstBootToHardDrive(context.Plan, cancellationToken);
                 context.Logger.Log("ISO boot-cycle v2: finalized boot order and removed clone DVD");
-                return IsoBootCycleResult.Succeeded();
+                return IsoBootCycleResult.Succeeded(stepsResult.DiagnosticsLog);
             }
             catch (Exception ex) when (ex is not OperationCanceledException
                                        || !cancellationToken.IsCancellationRequested)

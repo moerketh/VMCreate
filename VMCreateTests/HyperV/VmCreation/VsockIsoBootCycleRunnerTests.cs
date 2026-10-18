@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Moq;
 using System;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using VMCreate.HyperV.VmCreation;
@@ -132,6 +133,54 @@ namespace VMCreate.Tests.HyperV.VmCreation
             _scriptRunner.Verify(m => m.RunAsync(It.IsAny<IGuestShell>(), "clone", It.IsAny<string?>(), It.IsAny<VmCreationContext>(), It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(), It.IsAny<CancellationToken>()), Times.Once);
             // MBR source detached at the shared SCSI location.
             _diskManager.Verify(m => m.RemoveHardDrive(It.IsAny<VmDeploymentPlan>(), IsoBootCycleRunner.MbrSourceDiskScsiControllerLocation, It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [TestMethod]
+        public async Task Success_KeepsScenarioOutputInResultAndDeploymentLog()
+        {
+            // The scenario's CollectedOutput is the only record of what the
+            // guest did once the flip removes the guest-side autorun log —
+            // it must reach both the result and the context log.
+            _scriptRunner
+                .Setup(m => m.RunAsync(It.IsAny<IGuestShell>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<VmCreationContext>(),
+                    It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(IsoBootCycleResult.Succeeded("VMCREATE:MSG:CUSTOMIZE_START: Starting customize-only mode\nTarget disk: /dev/sda"));
+
+            var context = CreateContext();
+            var result = await _runner.RunAsync(context, 2, "media.vhdx", _customizations,
+                new Progress<CreateVMProgressInfo>(), CancellationToken.None);
+
+            Assert.IsTrue(result.Success, result.ErrorMessage);
+            StringAssert.Contains(result.DiagnosticsLog, "CUSTOMIZE_START");
+            StringAssert.Contains(context.Logger.GetLog(), "guest scenario output");
+            StringAssert.Contains(context.Logger.GetLog(), "Target disk: /dev/sda");
+        }
+
+        [TestMethod]
+        public async Task CloneSourceDeleteFailure_StillSucceeds()
+        {
+            // A locked source file (lingering checkpoint, AV) must not fail
+            // a finished clone: the whole-body catch would turn it into a
+            // deploy failure and the orchestrator would delete a VM whose
+            // clone succeeded.
+            string lockedPath = Path.Combine(Path.GetTempPath(), $"vmcreate-locked-{Guid.NewGuid():N}.vhdx");
+            File.WriteAllText(lockedPath, "x");
+            try
+            {
+                // Open with FileShare.None to make File.Delete throw.
+                using var handle = File.Open(lockedPath, FileMode.Open, FileAccess.Read, FileShare.None);
+
+                var result = await _runner.RunAsync(CreateContext(), 1, lockedPath, _customizations,
+                    new Progress<CreateVMProgressInfo>(), CancellationToken.None);
+
+                Assert.IsTrue(result.Success,
+                    "A failed source-file delete must not fail the cycle: " + result.ErrorMessage);
+                _diskManager.Verify(m => m.RemoveHardDrive(It.IsAny<VmDeploymentPlan>(), IsoBootCycleRunner.MbrSourceDiskScsiControllerLocation, It.IsAny<CancellationToken>()), Times.Once);
+            }
+            finally
+            {
+                File.Delete(lockedPath);
+            }
         }
 
         [TestMethod]

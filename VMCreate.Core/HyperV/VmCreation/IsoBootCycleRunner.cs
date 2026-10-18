@@ -24,7 +24,7 @@ namespace VMCreate.HyperV.VmCreation
         public string? ErrorMessage { get; }
         public string? DiagnosticsLog { get; }
 
-        public static IsoBootCycleResult Succeeded() => new(true);
+        public static IsoBootCycleResult Succeeded(string? log = null) => new(true, diagnosticsLog: log);
         public static IsoBootCycleResult Failed(string message, string? diagnostics = null)
             => new(false, message, diagnostics);
     }
