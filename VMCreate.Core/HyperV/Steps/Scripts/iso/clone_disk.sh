@@ -73,8 +73,9 @@ echo "Cloning root from $root_part to ${new_disk}2 using $clone_tool"
 
 # Run partclone in background with logfile
 # Use a named pipe so we can capture partclone's exit code directly
-$clone_tool --force --dev-to-dev --source "$root_part" --output "${new_disk}2" --logfile /tmp/partclone.log 2>&1 | tee -a /tmp/partclone_process.log &
+$clone_tool --force --dev-to-dev --source "$root_part" --output "${new_disk}2" --logfile /tmp/partclone.log 2>&1 | tee -a /tmp/partclone_process.log >/dev/null &
 clone_pipeline_pid=$!
+last_progress=""
 
 while kill -0 $clone_pipeline_pid 2>/dev/null; do
     if [ -f /tmp/partclone_process.log ]; then
@@ -107,12 +108,20 @@ while kill -0 $clone_pipeline_pid 2>/dev/null; do
         ' | tail -n 1)
 
         if [ -n "$progress" ]; then
+            # Emit only when the parsed progress line CHANGED: a hung partclone
+        # re-prints the same percentage forever, and re-emitting it would
+        # keep the host's idle clock fed until the total timeout. The
+        # decimals (45.12) change continuously on a healthy clone.
+        if [ "$progress" != "$last_progress" ]; then
+            last_progress="$progress"
             case "$progress" in
             *"%"*)
                 pct=$(echo "$progress" | grep -oE '[0-9]+' | head -1)
                 [ -n "$pct" ] && progress "$((10 + pct / 2))" "cloning root: $progress"
                 ;;
         esac
+        fi
+
         fi
     else
         echo "Waiting for partclone.log to be created..."  # Optional debug message
@@ -201,13 +210,13 @@ mount --bind /sys/firmware/efi/efivars /mnt/new/sys/firmware/efi/efivars || true
 setup_chroot_dns /mnt/new "$VMCREATE_NAMESERVERS"
 
 # copy autorun files
-mkdir -p /mnt/new/opt/autorun
-cp /opt/autorun/* /mnt/new/opt/autorun
+mkdir -p /mnt/new/opt/vmcreate
+cp /opt/vmcreate/* /mnt/new/opt/vmcreate
 
 # Install grub with UEFI support
 report_progress "INSTALL_GRUB" "Installing GRUB bootloader"
-chroot /mnt/new /bin/bash /opt/autorun/install_grub.sh "$new_disk"
-rm /mnt/new/opt/autorun/install_grub.sh
+chroot /mnt/new /bin/bash /opt/vmcreate/install_grub.sh "$new_disk"
+rm /mnt/new/opt/vmcreate/install_grub.sh
 
 # ── Disable stale resume (hibernate) device ──────────────────────────
 # The old MBR disk may have had a swap partition configured as the resume
@@ -279,13 +288,13 @@ if [ "$XRDP_FLAG" = "true" ]; then
     report_progress "INSTALL_XRDP" "Installing XRDP for Enhanced Session support"
     echo "Installing xrdp for Hyper-V Enhanced Session support"
     # Non-fatal: a failed XRDP install should not invalidate a successful conversion
-    if chroot /mnt/new /bin/bash -c "/opt/autorun/install_xrdp.sh"; then
+    if chroot /mnt/new /bin/bash -c "/opt/vmcreate/install_xrdp.sh"; then
         echo "XRDP installation completed successfully"
     else
         report_progress "XRDP_WARNING" "XRDP installation failed, VM will boot without XRDP"
         echo "WARNING: XRDP installation failed, continuing..." | tee -a /tmp/error.log
     fi
-    rm -f /mnt/new/opt/autorun/install_xrdp.sh
+    rm -f /mnt/new/opt/vmcreate/install_xrdp.sh
 fi
 
 # NOTE: guest PowerShell (pwsh) installation removed — all Linux post-boot
@@ -353,12 +362,7 @@ else
 fi
 
 # Clean up autorun scripts from the target VM
-rm -rf /mnt/new/opt/autorun
-
-# Save autorun journal to the target disk so the host can collect it
-# after the VM reboots from the hard drive.
-journalctl --no-pager > /mnt/new/var/log/vmcreate-autorun.log 2>&1 || true
-echo "Saved autorun journal to /mnt/new/var/log/vmcreate-autorun.log"
+rm -rf /mnt/new/opt/vmcreate
 
 report_progress "REBOOT" "Shutting down VM to boot from converted disk"
 echo "autorun completed"

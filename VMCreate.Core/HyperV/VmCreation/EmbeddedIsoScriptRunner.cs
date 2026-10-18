@@ -23,10 +23,11 @@ namespace VMCreate.HyperV.VmCreation
     /// </remarks>
     public sealed class EmbeddedIsoScriptRunner : IVsockGuestScriptRunner
     {
-        // Total: partclone of a large disk is the long pole; the legacy
-        // cycle's shutdown budget was 10 min but cloning ran far longer —
-        // v1 had no single timeout over the whole guest workflow.
-        private static readonly TimeSpan ScenarioTotalTimeout = TimeSpan.FromMinutes(90);
+        // Total: a backstop only — idle detection is the real liveness
+        // check (scripts stream continuously). Large-disk clones ran far
+        // longer than the legacy 10-min budget; several hours covers a few
+        // hundred GB at partclone speeds.
+        private static readonly TimeSpan ScenarioTotalTimeout = TimeSpan.FromHours(4);
         // Idle: scripts must not go silent longer than this without a
         // protocol line (partclone percentages arrive at least every few
         // seconds; apt/dnf can print nothing for a while — 5 min headroom).
@@ -44,10 +45,14 @@ namespace VMCreate.HyperV.VmCreation
         private const string XrdpScript = "install_xrdp.sh";
         private const string GuestScriptDir = "/opt/vmcreate";
 
+        private readonly IHostNetworkService _hostNetworkService;
         private readonly ILogger<EmbeddedIsoScriptRunner> _logger;
 
-        public EmbeddedIsoScriptRunner(ILogger<EmbeddedIsoScriptRunner> logger)
+        public EmbeddedIsoScriptRunner(
+            IHostNetworkService hostNetworkService,
+            ILogger<EmbeddedIsoScriptRunner> logger)
         {
+            _hostNetworkService = hostNetworkService ?? throw new ArgumentNullException(nameof(hostNetworkService));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
@@ -59,25 +64,29 @@ namespace VMCreate.HyperV.VmCreation
                 throw new ArgumentException($"Unknown ISO scenario '{scenario}'.");
 
             // ── Upload: common + scenario + chroot-executed helpers ──────
-            // The chroot scripts are placed where the scenario scripts
-            // expect them (v1 layout: /opt/autorun → v2: /opt/vmcreate).
+            // The scripts land in /opt/vmcreate, which is where the
+            // scenario scripts look for each other and for the chroot
+            // helpers. CopyContentAsync writes root:root 644 — no chmod:
+            // everything runs via 'bash <script>', never as a binary.
             await shell.RunCommandAsync($"sudo mkdir -p {GuestScriptDir}", ct);
             foreach (string script in new[] { CommonScript, scenarioScript, GrubScript, XrdpScript })
             {
                 string content = ScriptResourceLoader.Load(script);
                 string guestPath = $"{GuestScriptDir}/{script}";
                 await shell.CopyContentAsync(content, guestPath, ct);
-                await shell.RunCommandAsync($"chmod +x '{guestPath}'", ct);
                 _logger.LogDebug("Uploaded {Script} -> {GuestPath}", script, guestPath);
             }
 
             // ── Scenario arguments (v1's KVP keys, now argv) ─────────────
+            // DNS: same switch as the legacy runner — Host mode resolves
+            // the HOST's resolvers (the ISO's chroot has no resolv.conf
+            // provisioning of its own; without this, package installs in
+            // the chroot cannot resolve mirrors).
             string xrdp = customizations.ConfigureXrdp ? "true" : "false";
             string? nameservers = customizations.DnsMode switch
             {
                 DnsMode.Custom => customizations.CustomNameservers,
-                _ => null, // Host mode: the chroot keeps its own resolv.conf
-                           // (v1's host-side resolution moved to post-boot).
+                _ => _hostNetworkService.ResolveHostDnsServers(),
             };
             string swapMb = "8192";
 
@@ -85,18 +94,23 @@ namespace VMCreate.HyperV.VmCreation
             string command = $"sudo bash {GuestScriptDir}/{scenarioScript} {args}";
 
             // ── Streamed execution with the v2 protocol ─────────────────
-            var concrete = (SshGuestShell)shell;
+            if (shell is not SshGuestShell concrete)
+                throw new InvalidOperationException(
+                    $"The ISO script runner requires a {nameof(SshGuestShell)} (streaming exec); got {shell.GetType().Name}.");
             var parser = new ProtocolLineParser(progress, _logger, scenario);
-            string output;
             try
             {
-                output = await concrete.RunStreamingCommandAsync(
+                await concrete.RunStreamingCommandAsync(
                     command, ScenarioTotalTimeout, ScenarioIdleTimeout, parser.OnLine, ct);
             }
             catch (TimeoutException tex)
             {
                 return IsoBootCycleResult.Failed(
                     $"ISO {scenario} scenario timed out: {tex.Message}", parser.CollectedOutput);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw; // user cancel is not a scenario failure
             }
             catch (Exception ex)
             {

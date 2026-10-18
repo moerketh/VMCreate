@@ -300,13 +300,13 @@ namespace VMCreate
         }
 
         /// <inheritdoc/>
-        public async Task<string> RunCommandAsync(string command, CancellationToken ct)
+        public virtual async Task<string> RunCommandAsync(string command, CancellationToken ct)
         {
             return await RunWithRetryAsync(command, CommandTimeout, ct);
         }
 
         /// <inheritdoc/>
-        public async Task<string> RunCommandAsync(string command, TimeSpan timeout, CancellationToken ct)
+        public virtual async Task<string> RunCommandAsync(string command, TimeSpan timeout, CancellationToken ct)
         {
             return await RunWithRetryAsync(command, timeout, ct);
         }
@@ -324,7 +324,7 @@ namespace VMCreate
         private const int CopyChunkBase64Length = 12 * 1024;
 
         /// <inheritdoc/>
-        public async Task CopyContentAsync(string content, string guestPath, CancellationToken ct)
+        public virtual async Task CopyContentAsync(string content, string guestPath, CancellationToken ct)
         {
             byte[] bytes = Encoding.UTF8.GetBytes(content);
             await CopyBase64ToGuestAsync(Convert.ToBase64String(bytes), guestPath, "644", ct);
@@ -569,7 +569,7 @@ namespace VMCreate
         /// <c>IGuestShell</c> contract stays buffered; only the ISO-cycle
         /// runner needs live lines.
         /// </summary>
-        public async Task<string> RunStreamingCommandAsync(
+        public virtual async Task<string> RunStreamingCommandAsync(
             string linuxCommand, TimeSpan timeout, TimeSpan idleTimeout,
             Action<string> onStdoutLine, CancellationToken ct)
         {

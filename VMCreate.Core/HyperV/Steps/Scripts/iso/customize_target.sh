@@ -177,8 +177,8 @@ mount --bind /sys/firmware/efi/efivars /mnt/new/sys/firmware/efi/efivars || true
 setup_chroot_dns /mnt/new "$VMCREATE_NAMESERVERS"
 
 # Copy autorun files for chroot scripts
-mkdir -p /mnt/new/opt/autorun
-cp /opt/autorun/install_xrdp.sh /mnt/new/opt/autorun/ 2>/dev/null || true
+mkdir -p /mnt/new/opt/vmcreate
+cp /opt/vmcreate/install_xrdp.sh /mnt/new/opt/vmcreate/ 2>/dev/null || true
 
 # ── Capture SSH state BEFORE any chroot apt calls ────────────────────
 capture_ssh_state /mnt/new
@@ -215,7 +215,7 @@ if [ "$XRDP_FLAG" = "true" ]; then
     report_progress "INSTALL_XRDP" "Installing XRDP for Enhanced Session support"
     echo "Installing xrdp for Hyper-V Enhanced Session support"
     # Non-fatal: a failed XRDP install should not invalidate a successful customization
-    if chroot /mnt/new /bin/bash -c "/opt/autorun/install_xrdp.sh"; then
+    if chroot /mnt/new /bin/bash -c "/opt/vmcreate/install_xrdp.sh"; then
         echo "XRDP installation completed successfully"
     else
         report_progress "XRDP_WARNING" "XRDP installation failed, VM will boot without XRDP"
@@ -223,7 +223,7 @@ if [ "$XRDP_FLAG" = "true" ]; then
     fi
     # Safety: remove policy-rc.d in case install_xrdp.sh failed mid-way
     rm -f /mnt/new/usr/sbin/policy-rc.d
-    rm -f /mnt/new/opt/autorun/install_xrdp.sh
+    rm -f /mnt/new/opt/vmcreate/install_xrdp.sh
 fi
 
 # NOTE: guest PowerShell (pwsh) installation removed — all Linux post-boot
@@ -250,16 +250,16 @@ rm -rf /mnt/new/opt/vmcreate
 # The host logs this; Phase 4b decides the post-boot NIC question from
 # it. Read the target's own module tree for every installed kernel —
 # never modinfo in the ISO (that reports the ISO's kernel).
-hvspock_found=no
+hvsock_found=no
 for kdir in /mnt/new/lib/modules/*; do
     [ -d "$kdir" ] || continue
     if compgen -G "$kdir/kernel/net/vmw_vsock/hv_sock.ko*" >/dev/null \
        || grep -q '/hv_sock\.ko' "$kdir/modules.builtin" 2>/dev/null; then
-        hvspock_found=yes
+        hvsock_found=yes
         break
     fi
 done
-echo "VMCREATE:HVSOCK:${hvspock_found}"
+echo "VMCREATE:HVSOCK:${hvsock_found}"
 
 # ── Final contract: everything unmounted and synced ──────────────────
 progress 100 "customize workflow complete"
