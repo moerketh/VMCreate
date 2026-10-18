@@ -215,7 +215,7 @@ if [ "$XRDP_FLAG" = "true" ]; then
     report_progress "INSTALL_XRDP" "Installing XRDP for Enhanced Session support"
     echo "Installing xrdp for Hyper-V Enhanced Session support"
     # Non-fatal: a failed XRDP install should not invalidate a successful customization
-    if chroot /mnt/new /bin/bash -c "/opt/vmcreate/install_xrdp.sh"; then
+    if chroot /mnt/new /bin/bash /opt/vmcreate/install_xrdp.sh; then
         echo "XRDP installation completed successfully"
     else
         report_progress "XRDP_WARNING" "XRDP installation failed, VM will boot without XRDP"
