@@ -79,10 +79,7 @@ namespace VMCreate
                 settings.SecureBoot,
                 settings.SecureBootTemplate,
                 settings.ReplacePreviousVm,
-                settings.CloningIsoPath)
-            {
-                IsoVsockEnabled = settings.IsoVsockEnabled,
-            };
+                settings.CloningIsoPath);
         }
 
         /// <summary>
@@ -106,8 +103,10 @@ namespace VMCreate
 
         /// <summary>
         /// ISO vsock mode (vmcreate-iso 2.x) drives the boot-cycle over the
-        /// Hyper-V socket channel. Copied from <see cref="AppSettings"/> at
-        /// plan creation so one deployment is consistent end to end.
+        /// Hyper-V socket channel. Stamped from <see cref="AppSettings"/> by
+        /// <see cref="CreateVM.BuildPlan"/> when the plan is built — the
+        /// one source of truth per deployment; VmSettings deliberately has
+        /// no copy so it can never claim to work and be ignored.
         /// </summary>
         public bool IsoVsockEnabled { get; init; }
 

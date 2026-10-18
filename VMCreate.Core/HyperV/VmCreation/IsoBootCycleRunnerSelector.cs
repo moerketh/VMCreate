@@ -70,6 +70,21 @@ namespace VMCreate.HyperV.VmCreation
             }
 
             IIsoBootCycleRunner picked = vsockEnabled ? _vsock : _legacy;
+
+            // The reverse mistake: override active but flag OFF. The legacy
+            // runner would boot the v2 ISO and wait for KVP progress that
+            // never arrives — 120 s of silence per attempt. Dev lever, but
+            // make the mistake obvious.
+            if (!vsockEnabled && context.Plan.IsIsoPathOverridden)
+            {
+                string message =
+                    $"VMCREATE_ISO_PATH is active ({context.Plan.EffectiveCloningIsoPath}) but IsoVsockEnabled is off — " +
+                    "if that ISO is a vmcreate-iso 2.x build, the legacy KVP runner cannot talk to it. " +
+                    "Enable the flag or clear the override.";
+                _logger.LogWarning("{Message}", message);
+                context.Logger?.LogWarning($"ISO boot-cycle: {message}");
+            }
+
             _logger.LogInformation("ISO boot-cycle: using {Implementation} (IsoVsockEnabled={Flag})",
                 picked.GetType().Name, vsockEnabled);
             return picked.RunAsync(context, detectedGeneration, mediaPath, customizations, progress, cancellationToken);

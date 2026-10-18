@@ -51,9 +51,8 @@ namespace VMCreate.Tests.HyperV.VmCreation
             var plan = VmDeploymentPlan.FromSettings(new VmSettings
             {
                 VMName = "t",
-                IsoVsockEnabled = true,
                 CloningIsoPath = Path.Combine(dir, "hyperv-convert.iso"),
-            });
+            }) with { IsoVsockEnabled = true };
             string iso = plan.CloningIsoV2Path; // effective when the flag is on
             File.WriteAllText(iso, "x");
             File.WriteAllText(iso + ".version", version);
@@ -148,7 +147,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
             Environment.SetEnvironmentVariable("VMCREATE_ISO_PATH", localIso);
             try
             {
-                var plan = VmDeploymentPlan.FromSettings(new VmSettings { VMName = "t", IsoVsockEnabled = true });
+                var plan = VmDeploymentPlan.FromSettings(new VmSettings { VMName = "t" }) with { IsoVsockEnabled = true };
                 Assert.IsTrue(plan.IsIsoPathOverridden, "fixture sanity: no sidecar exists — the interlock would reject");
                 var (selector, legacy, vsock) = Create();
 
@@ -168,6 +167,36 @@ namespace VMCreate.Tests.HyperV.VmCreation
         }
 
         [TestMethod]
+        public async Task EnvOverrideActive_FlagOff_PicksLegacy_WithWarning()
+        {
+            // Reverse mistake: a 2.x ISO behind the override but the flag
+            // off — the legacy runner would boot it and wait for KVP
+            // progress that never arrives. Legacy still runs (the flag is
+            // the source of truth), but the selector warns.
+            string localIso = Path.Combine(Path.GetTempPath(), $"vmcreate-sel-{Guid.NewGuid():N}.iso");
+            File.WriteAllText(localIso, "x");
+            Environment.SetEnvironmentVariable("VMCREATE_ISO_PATH", localIso);
+            try
+            {
+                var plan = VmDeploymentPlan.FromSettings(new VmSettings { VMName = "t" });
+                var (selector, legacy, vsock) = Create();
+
+                await selector.RunAsync(Context(plan), 2, "media.vhdx", new VmCustomizations(),
+                    new Progress<CreateVMProgressInfo>(), CancellationToken.None);
+
+                legacy.Verify(r => r.RunAsync(It.IsAny<VmCreationContext>(), It.IsAny<int>(), It.IsAny<string>(),
+                    It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(), It.IsAny<CancellationToken>()), Times.Once);
+                vsock.Verify(r => r.RunAsync(It.IsAny<VmCreationContext>(), It.IsAny<int>(), It.IsAny<string>(),
+                    It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(), It.IsAny<CancellationToken>()), Times.Never);
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("VMCREATE_ISO_PATH", null);
+                File.Delete(localIso);
+            }
+        }
+
+        [TestMethod]
         public void StaleEnvOverride_IsNotActive_InterlockStillApplies()
         {
             // A stale VMCREATE_ISO_PATH (file missing) must NOT disable the
@@ -175,7 +204,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
             Environment.SetEnvironmentVariable("VMCREATE_ISO_PATH", @"C:\definitely\not\here.iso");
             try
             {
-                var plan = VmDeploymentPlan.FromSettings(new VmSettings { VMName = "t", IsoVsockEnabled = true });
+                var plan = VmDeploymentPlan.FromSettings(new VmSettings { VMName = "t" }) with { IsoVsockEnabled = true };
                 Assert.IsFalse(plan.IsIsoPathOverridden, "stale override must not be active on the plan");
             }
             finally
