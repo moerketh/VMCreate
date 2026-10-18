@@ -49,7 +49,17 @@ namespace VMCreate
             if (services == null) throw new ArgumentNullException(nameof(services));
 
             // ── Configuration ───────────────────────────────────────────────
-            services.AddSingleton(Options.Create(new AppSettings()));
+            services.AddSingleton(sp =>
+            {
+                var s = new AppSettings();
+                // Dev lever for the v2 boot-cycle channel: no config file is
+                // bound anywhere, so this is how a flip-gate deploy turns the
+                // flag on for one process run (VMCREATE_ISO_VSOCK=1).
+                string? env = Environment.GetEnvironmentVariable("VMCREATE_ISO_VSOCK");
+                if (env is "1" or "true" or "yes")
+                    s.IsoVsockEnabled = true;
+                return Microsoft.Extensions.Options.Options.Create(s);
+            });
 
             // ── Infrastructure / low-level services ─────────────────────────
             services.AddTransient<IFileStreamProvider, FileStreamProvider>();
@@ -80,6 +90,7 @@ namespace VMCreate
             services.AddTransient<UnattendInjector>();
             services.AddSingleton<ISshKeyManager, SshKeyManager>();
             services.AddTransient<IKvpSender, KvpHostToGuest>();
+            services.AddTransient<IKvpMaintenance, KvpHostToGuest>();
             services.AddTransient<IKvpPoller, HyperVKVPPoller>();
             services.AddTransient<IKvpHeartbeatGate, KvpHeartbeatGate>();
             services.AddTransient<IVmShutdownWatcher, HyperVKVPPoller>();
