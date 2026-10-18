@@ -11,6 +11,7 @@ namespace VMCreate.Tests.Downloaders
     /// plan-level.
     /// </summary>
     [TestClass]
+    [DoNotParallelize] // sets VMCREATE_ISO_PATH; plan construction resolves it
     public class CloningIsoDownloaderV2Tests
     {
         #region Semver / candidate ordering
@@ -40,6 +41,31 @@ namespace VMCreate.Tests.Downloaders
         {
             Assert.IsTrue(CloningIsoDownloader.CompareCandidates("v2.0.0-beta.1", "", "v2.0.0-alpha.9", "") > 0);
             Assert.IsTrue(CloningIsoDownloader.CompareCandidates("v2.0.0-rc.1", "", "v2.0.0-beta.1", "") > 0);
+        }
+
+        [TestMethod]
+        public void Compare_PrereleaseNumericIdentifiers_NotLexical()
+        {
+            // Semver compares dot-separated numeric identifiers numerically:
+            // a lexical compare would sort alpha.10 BELOW alpha.9 ("1" < "9")
+            // and quietly roll the channel back to the tenth alpha.
+            Assert.IsTrue(CloningIsoDownloader.CompareCandidates("v2.0.0-alpha.10", "", "v2.0.0-alpha.9", "") > 0,
+                "alpha.10 must outrank alpha.9");
+            Assert.IsTrue(CloningIsoDownloader.CompareCandidates("v2.0.0-alpha.2", "", "v2.0.0-alpha.10", "") < 0);
+            Assert.IsTrue(CloningIsoDownloader.CompareCandidates("v2.0.0-rc.10", "", "v2.0.0-rc.9", "") > 0);
+        }
+
+        [TestMethod]
+        public void Compare_PrereleaseSemverEdgeCases()
+        {
+            // Fewer identifiers sort lower when the shared prefix ties.
+            Assert.IsTrue(CloningIsoDownloader.CompareCandidates("v2.0.0-alpha.1", "", "v2.0.0-alpha", "") > 0,
+                "alpha.1 > alpha");
+            // Numeric identifiers rank below alphanumeric ones (semver 11.4).
+            Assert.IsTrue(CloningIsoDownloader.CompareCandidates("v2.0.0-alpha.x", "", "v2.0.0-alpha.1", "") > 0,
+                "alpha.x > alpha.1");
+            // Non-numeric identifiers still compare lexically (alpha < beta).
+            Assert.IsTrue(CloningIsoDownloader.ComparePrereleaseSuffixes("beta.1", "alpha.99") > 0);
         }
 
         [TestMethod]

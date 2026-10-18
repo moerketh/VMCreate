@@ -55,6 +55,20 @@ namespace VMCreate
             if (plan == null) throw new ArgumentNullException(nameof(plan));
             cancellationToken.ThrowIfCancellationRequested();
 
+            // Dev override (VMCREATE_ISO_PATH): the plan points at a locally
+            // built ISO. It is NOT this downloader's cache to manage — a
+            // missing sidecar would read as "outdated" and the download
+            // below would either fail the deploy (no release published yet)
+            // or REPLACE the dev's build with the published one and write a
+            // sidecar next to it. Use it exactly as-is.
+            if (plan.IsIsoPathOverridden)
+            {
+                _logger.LogInformation(
+                    "VMCREATE_ISO_PATH override active: using {IsoPath} as-is (no version check, no download).",
+                    plan.EffectiveCloningIsoPath);
+                return;
+            }
+
             // Channel per flag: v2 caches at its own path with its own
             // sidecar, so toggling never re-downloads and the generations
             // never overwrite each other.
@@ -119,6 +133,13 @@ namespace VMCreate
                     string isoFileName = Path.GetFileName(new Uri(isoUrl).LocalPath);
                     await _checksumVerifier.VerifyAsync(tempPath, checksumUrl, "sha256",
                         cancellationToken, progress, expectedFileName: isoFileName);
+                }
+                else if (v2)
+                {
+                    // v2 releases ship a .sha256 asset; a missing one means
+                    // the ISO can't be integrity-checked before boot.
+                    _logger.LogWarning(
+                        "vmcreate-iso release {Version} has no .sha256 asset — skipping checksum verification.", version);
                 }
 
                 string? directory = Path.GetDirectoryName(isoPath);
@@ -338,11 +359,37 @@ namespace VMCreate
             if (preA != preB) return preB ? 1 : -1;
             if (!preA) return 0; // identical stable tags
 
-            // Both prereleases on the same core: compare suffixes
-            // lexically-by-dot-segment (alpha < beta < rc), then fall back
-            // to published time.
-            int cmp = StringComparer.OrdinalIgnoreCase.Compare(suffixA, suffixB);
+            // Both prereleases on the same core: compare suffixes per
+            // semver — dot-separated identifiers, numeric where both parse
+            // as numbers (alpha.10 > alpha.9), then fall back to publish
+            // time.
+            int cmp = ComparePrereleaseSuffixes(suffixA!, suffixB!);
             return cmp != 0 ? cmp : StringComparer.OrdinalIgnoreCase.Compare(publishedA, publishedB);
+        }
+
+        /// <summary>
+        /// Semver prerelease-suffix ordering: dot-separated identifiers.
+        /// Numeric identifiers compare numerically and rank BELOW
+        /// alphanumeric ones ("alpha.1" &lt; "alpha.x"); when all compared
+        /// identifiers tie, fewer fields means lower ("alpha" &lt;
+        /// "alpha.1"). Positive = a is newer.
+        /// </summary>
+        internal static int ComparePrereleaseSuffixes(string suffixA, string suffixB)
+        {
+            string[] a = suffixA.Split('.');
+            string[] b = suffixB.Split('.');
+            int common = Math.Min(a.Length, b.Length);
+            for (int i = 0; i < common; i++)
+            {
+                bool aNum = int.TryParse(a[i], out int aVal);
+                bool bNum = int.TryParse(b[i], out int bVal);
+                int cmp = aNum && bNum ? aVal.CompareTo(bVal)
+                    : aNum ? -1 // numeric identifiers rank below alphanumeric
+                    : bNum ? 1
+                    : string.Compare(a[i], b[i], StringComparison.OrdinalIgnoreCase);
+                if (cmp != 0) return cmp;
+            }
+            return a.Length.CompareTo(b.Length);
         }
 
         /// <summary>Encodes a semver tag's numeric core as a comparable

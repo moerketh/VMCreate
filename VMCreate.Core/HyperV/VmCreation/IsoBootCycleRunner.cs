@@ -65,10 +65,19 @@ namespace VMCreate.HyperV.VmCreation
             CancellationToken cancellationToken);
     }
 
+    /// <summary>Marker: the legacy KVP-progress runner. Lets the selector
+    /// depend on this specific implementation (and tests mock it) without a
+    /// circular IIsoBootCycleRunner resolution.</summary>
+    public interface ILegacyIsoBootCycleRunner : IIsoBootCycleRunner { }
+
+    /// <summary>Marker: the v2 vsock runner. Same purpose as
+    /// <see cref="ILegacyIsoBootCycleRunner"/>.</summary>
+    public interface IVsockIsoBootCycleRunner : IIsoBootCycleRunner { }
+
     /// <summary>
     /// Default implementation of <see cref="IIsoBootCycleRunner"/>.
     /// </summary>
-    public sealed class IsoBootCycleRunner : IIsoBootCycleRunner
+    public sealed class IsoBootCycleRunner : ILegacyIsoBootCycleRunner
     {
         private readonly IKvpSender _kvpSender;
         private readonly IKvpPoller _kvpPoller;

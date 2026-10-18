@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using System;
 using System.IO;
 using System.Threading;
@@ -9,33 +8,27 @@ namespace VMCreate.HyperV.VmCreation
 {
     /// <summary>
     /// Selects the ISO boot-cycle implementation per deployment from the
-    /// <see cref="AppSettings.IsoVsockEnabled"/> flag: the v2 vsock runner
+    /// plan's <see cref="VmDeploymentPlan.IsoVsockEnabled"/> flag (stamped
+    /// from <see cref="AppSettings"/> when the plan is built — one source
+    /// of truth per deployment): the v2 vsock runner
     /// (SSH over the Hyper-V socket channel, logic-free vmcreate-iso 2.x)
     /// or the legacy KVP-progress runner (hyperv-convert-iso 1.x). The flag
     /// defaults off until the v2 cycle validates on both deploy paths; it
     /// dies with the old path's removal.
     /// </summary>
-    /// <remarks>
-    /// The flag is read once at construction (IOptions snapshot): toggling
-    /// it takes effect on the next application start. Fine for a dev flag;
-    /// revisit if it ever becomes user-facing.
-    /// </summary>
     public sealed class IsoBootCycleRunnerSelector : IIsoBootCycleRunner
     {
         private readonly IIsoBootCycleRunner _legacy;
         private readonly IIsoBootCycleRunner _vsock;
-        private readonly bool _vsockEnabled;
         private readonly ILogger<IsoBootCycleRunnerSelector> _logger;
 
         public IsoBootCycleRunnerSelector(
-            IsoBootCycleRunner legacy,
-            VsockIsoBootCycleRunner vsock,
-            IOptions<AppSettings> settings,
+            ILegacyIsoBootCycleRunner legacy,
+            IVsockIsoBootCycleRunner vsock,
             ILogger<IsoBootCycleRunnerSelector> logger)
         {
             _legacy = legacy ?? throw new ArgumentNullException(nameof(legacy));
             _vsock = vsock ?? throw new ArgumentNullException(nameof(vsock));
-            _vsockEnabled = settings?.Value?.IsoVsockEnabled ?? false;
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
@@ -47,14 +40,19 @@ namespace VMCreate.HyperV.VmCreation
             IProgress<CreateVMProgressInfo> progress,
             CancellationToken cancellationToken)
         {
+            // The flag comes from the PLAN — the same single source the
+            // downloader and strategy used — never re-read from AppSettings.
+            bool vsockEnabled = context.Plan.IsoVsockEnabled;
+
             // Safety interlock: v2 needs a vmcreate-iso 2.x guest (vsock
             // sshd). If the flag is on but the cached ISO predates the v2
             // downloader, booting the old hyperv-convert-iso would wait
             // 120 s for a vsock listener that never appears. The version
             // sidecar tells us which world the cache is in. SKIPPED when
-            // VMCREATE_ISO_PATH is set: a dev pointing at a locally built
-            // ISO knows what they built — no sidecar exists to read.
-            if (_vsockEnabled && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("VMCREATE_ISO_PATH")))
+            // the VMCREATE_ISO_PATH override is active on this plan: a dev
+            // pointing at a locally built ISO knows what they built — no
+            // sidecar exists to read.
+            if (vsockEnabled && !context.Plan.IsIsoPathOverridden)
             {
                 string? isoVersion = TryReadCachedIsoVersion(context.Plan.EffectiveCloningIsoPath);
                 if (isoVersion is null || !isoVersion.StartsWith("2.", StringComparison.Ordinal))
@@ -71,9 +69,9 @@ namespace VMCreate.HyperV.VmCreation
                 }
             }
 
-            IIsoBootCycleRunner picked = _vsockEnabled ? _vsock : _legacy;
+            IIsoBootCycleRunner picked = vsockEnabled ? _vsock : _legacy;
             _logger.LogInformation("ISO boot-cycle: using {Implementation} (IsoVsockEnabled={Flag})",
-                picked.GetType().Name, _vsockEnabled);
+                picked.GetType().Name, vsockEnabled);
             return picked.RunAsync(context, detectedGeneration, mediaPath, customizations, progress, cancellationToken);
         }
 

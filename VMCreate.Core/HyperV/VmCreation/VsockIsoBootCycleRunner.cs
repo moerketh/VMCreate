@@ -24,7 +24,7 @@ namespace VMCreate.HyperV.VmCreation
     /// guest work runs with per-line stdout streaming plus an idle timeout —
     /// see <see cref="SshGuestShell.RunStreamingCommandAsync"/>.
     /// </remarks>
-    public sealed class VsockIsoBootCycleRunner : IIsoBootCycleRunner
+    public sealed class VsockIsoBootCycleRunner : IVsockIsoBootCycleRunner
     {
         private const string KvpKeyName = "VMCREATE_SSH_PUBKEY";
 

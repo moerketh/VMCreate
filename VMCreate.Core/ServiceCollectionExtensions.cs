@@ -94,6 +94,11 @@ namespace VMCreate
             services.AddTransient<IsoBootCycleRunner>();
             services.AddTransient<VsockIsoBootCycleRunner>();
             services.AddTransient<IVsockGuestScriptRunner, EmbeddedIsoScriptRunner>();
+            // Marker interfaces let the selector depend on the two runners
+            // (for Moq in tests) without a circular IIsoBootCycleRunner
+            // resolution.
+            services.AddTransient<ILegacyIsoBootCycleRunner>(sp => sp.GetRequiredService<IsoBootCycleRunner>());
+            services.AddTransient<IVsockIsoBootCycleRunner>(sp => sp.GetRequiredService<VsockIsoBootCycleRunner>());
             services.AddTransient<IIsoBootCycleRunner, IsoBootCycleRunnerSelector>();
             services.AddTransient<IVmCreationStrategy, IsoVmCreationStrategy>();
             services.AddTransient<IVmCreationStrategy, NativeHyperVVmCreationStrategy>();

@@ -46,6 +46,19 @@ namespace VMCreate
             CloningIsoV2Path = Path.Combine(
                 Path.GetDirectoryName(CloningIsoPath) ?? ".",
                 "vmcreate-iso-v2.iso");
+            // Resolve the VMCREATE_ISO_PATH dev override ONCE, at plan
+            // creation: every consumer (downloader, attach/detach, the
+            // selector's interlock) then sees the same path for the whole
+            // deployment instead of re-reading the environment.
+            IsoPathOverride = ResolveIsoPathOverride();
+        }
+
+        private static string? ResolveIsoPathOverride()
+        {
+            string? overridePath = Environment.GetEnvironmentVariable("VMCREATE_ISO_PATH");
+            return !string.IsNullOrWhiteSpace(overridePath) && File.Exists(overridePath)
+                ? overridePath
+                : null;
         }
 
         /// <summary>
@@ -110,16 +123,19 @@ namespace VMCreate
         /// the v2 cache when the flag is on, the legacy cache otherwise.
         /// The <c>VMCREATE_ISO_PATH</c> environment variable overrides both
         /// (dev lever: point a deploy at a locally built ISO — must exist).
+        /// Resolved once at plan creation; see <see cref="IsoPathOverride"/>.
         /// </summary>
         public string EffectiveCloningIsoPath
-        {
-            get
-            {
-                string? overridePath = Environment.GetEnvironmentVariable("VMCREATE_ISO_PATH");
-                if (!string.IsNullOrWhiteSpace(overridePath) && File.Exists(overridePath))
-                    return overridePath;
-                return IsoVsockEnabled ? CloningIsoV2Path : CloningIsoPath;
-            }
-        }
+            => IsoPathOverride ?? (IsoVsockEnabled ? CloningIsoV2Path : CloningIsoPath);
+
+        /// <summary>
+        /// The resolved <c>VMCREATE_ISO_PATH</c> override, or null when the
+        /// variable is unset or stale (file missing). Frozen at plan creation
+        /// so one deployment never sees two different ISO paths.
+        /// </summary>
+        public string? IsoPathOverride { get; init; }
+
+        /// <summary>True when the dev override is active for this plan.</summary>
+        public bool IsIsoPathOverridden => IsoPathOverride != null;
     }
 }
