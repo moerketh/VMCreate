@@ -7,8 +7,111 @@ using System.Threading.Tasks;
 
 namespace CreateVM.HyperV.vmbus
 {
-    public class KvpHostToGuest : KvpBase, IKvpSender
+    public class KvpHostToGuest : KvpBase, IKvpSender, IKvpMaintenance
     {
+        /// <summary>
+        /// Builds the embedded-XML form of a host-sent (Source=0) KVP item.
+        /// AddKvpItems/ModifyKvpItems/RemoveKvpItems all take DataItems as
+        /// these XML strings — the WMI-object form silently fails on Remove
+        /// (live-verified: JobState 10 with no diagnostic).
+        /// </summary>
+        private static string BuildItemXml(string name, string? data) =>
+            $@"<INSTANCE CLASSNAME=""Msvm_KvpExchangeDataItem"">
+  <PROPERTY NAME=""Data"" TYPE=""string"">
+    <VALUE>{SecurityElement.Escape(data ?? string.Empty)}</VALUE>
+  </PROPERTY>
+  <PROPERTY NAME=""Name"" TYPE=""string"">
+    <VALUE>{SecurityElement.Escape(name)}</VALUE>
+  </PROPERTY>
+  <PROPERTY NAME=""Source"" TYPE=""uint16"">
+    <VALUE>0</VALUE>
+  </PROPERTY>
+</INSTANCE>";
+
+        /// <summary>Removes a host-sent KVP item. Live-verified semantics:
+        /// works with the VM powered off; the Data must match what is stored
+        /// when provided.</summary>
+        public async Task RemoveKvpItemAsync(string vmName, string name, string? data, CancellationToken ct = default)
+        {
+            ValidateVmName(vmName);
+            await InvokeItemsMethodAsync(vmName, "RemoveKvpItems", BuildItemXml(name, data), ct);
+        }
+
+        /// <summary>Modifies an existing host-sent KVP item in place. Used by
+        /// the v2 cycle's Add-then-Modify replace semantics (Add fails on a
+        /// duplicate Name; JobState 10 is generic, so Modify is attempted on
+        /// any Add failure and the original Add error surfaces if both fail).
+        /// </summary>
+        public async Task ModifyKvpItemAsync(string vmName, string name, string data, CancellationToken ct = default)
+        {
+            ValidateVmName(vmName);
+            await InvokeItemsMethodAsync(vmName, "ModifyKvpItems", BuildItemXml(name, data), ct);
+        }
+
+        /// <summary>Resolves the VM GUID regardless of power state (the
+        /// vsock SSH host string). Throws when the name is ambiguous.</summary>
+        public Task<string?> ResolveVmGuidAsync(string vmName, CancellationToken ct = default)
+            => Task.FromResult(ResolveVmGuidAnyState(vmName));
+
+        /// <summary>
+        /// Shared plumbing for the Add/Modify/Remove item methods: resolves
+        /// the management service and VM, invokes the method with one
+        /// embedded-XML DataItem, and awaits the WMI job to a terminal state.
+        /// </summary>
+        private static async Task InvokeItemsMethodAsync(string vmName, string method, string itemXml, CancellationToken ct)
+        {
+            ManagementScope scope = new ManagementScope(@"root\virtualization\v2");
+            ObjectQuery vmQuery = new ObjectQuery($"SELECT * FROM Msvm_ComputerSystem WHERE ElementName = '{EscapeWql(vmName)}'");
+            using (ManagementObjectSearcher vmSearcher = new ManagementObjectSearcher(scope, vmQuery))
+            using (ManagementObjectCollection vmResults = vmSearcher.Get())
+            {
+                ManagementObject? vm = vmResults.Cast<ManagementObject>().FirstOrDefault();
+                if (vm == null)
+                    throw new Exception($"VM '{vmName}' not found for {method}.");
+                string? target = vm.Path?.Path;
+                vm.Dispose();
+
+                ManagementPath servicePath = new ManagementPath("Msvm_VirtualSystemManagementService");
+                using (ManagementClass serviceClass = new ManagementClass(scope, servicePath, null!))
+                using (ManagementObject service = serviceClass.GetInstances().Cast<ManagementObject>().First())
+                {
+                    ManagementBaseObject inParams = service.GetMethodParameters(method);
+                    inParams["TargetSystem"] = new ManagementPath(target);
+                    inParams["DataItems"] = new string[] { itemXml };
+                    ManagementBaseObject outParams = await Task.Run(() => service.InvokeMethod(method, inParams, null), ct);
+                    await AwaitJobAsync(scope, outParams, method, ct);
+                }
+            }
+        }
+
+        private static async Task AwaitJobAsync(ManagementScope scope, ManagementBaseObject outParams, string operation, CancellationToken ct)
+        {
+            uint returnValue = (uint)outParams["ReturnValue"]!;
+            if (returnValue == 0)
+                return;
+            if (returnValue != 4096)
+                throw new Exception($"{operation} failed: return code {returnValue}");
+
+            string? jobPath = (string?)outParams["Job"];
+            if (string.IsNullOrEmpty(jobPath))
+                throw new Exception($"{operation} started a job but no job path was returned.");
+            using (ManagementObject job = new ManagementObject(scope, new ManagementPath(jobPath), null))
+            {
+                while (true)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    job.Get();
+                    ushort state = (ushort)job["JobState"];
+                    if (state == 7) return;                     // completed
+                    if (state >= 11)                            // 11+ = failed/cancelled
+                        throw new Exception($"{operation} failed: JobState {state} ({job["ErrorDescription"]})");
+                    await Task.Delay(500, ct);
+                }
+            }
+        }
+
+        private static string EscapeWql(string value) => value.Replace("'", "''");
+
         /// <summary>
         /// Async method to send a KVP from host to guest, waits for VM to be in a running state
         /// </summary>

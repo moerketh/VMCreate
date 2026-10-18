@@ -81,6 +81,10 @@ namespace VMCreate.HyperV.VmCreation
         private readonly IVmBootManager _bootManager;
         private readonly ILogger<IsoBootCycleRunner> _logger;
         private const int OriginalDiskScsiControllerLocation = 1;
+
+        /// <summary>The SCSI location the MBR source disk is attached at;
+        /// shared with the v2 runner for its cleanup step.</summary>
+        public const int MbrSourceDiskScsiControllerLocation = OriginalDiskScsiControllerLocation;
         private const int ShutdownTimeoutSeconds = 600;
 
         public IsoBootCycleRunner(

@@ -41,5 +41,14 @@ namespace VMCreate
         public string UserPreferencesPath { get; set; } = System.IO.Path.Combine(
             System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData),
             "VMCreate", "settings.json");
+
+        /// <summary>
+        /// Drive the ISO boot-cycle over the Hyper-V socket channel
+        /// (vmcreate-iso 2.x) instead of the legacy KVP progress protocol
+        /// (hyperv-convert-iso 1.x). Default off until the v2 cycle
+        /// validates on both deploy paths (BIOS clone + customize); flips to
+        /// default-on with the old path's removal.
+        /// </summary>
+        public bool IsoVsockEnabled { get; set; } = false;
     }
 }

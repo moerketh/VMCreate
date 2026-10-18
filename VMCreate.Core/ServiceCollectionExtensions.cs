@@ -91,7 +91,9 @@ namespace VMCreate
             services.AddSingleton<IVmPathService, VmPathService>();
             services.AddSingleton<IHostNetworkService, HostNetworkService>();
             services.AddTransient<IPostBootCustomizationService, PostBootCustomizationService>();
-            services.AddTransient<IIsoBootCycleRunner, IsoBootCycleRunner>();
+            services.AddTransient<IsoBootCycleRunner>();
+            services.AddTransient<VsockIsoBootCycleRunner>();
+            services.AddTransient<IIsoBootCycleRunner, IsoBootCycleRunnerSelector>();
             services.AddTransient<IVmCreationStrategy, IsoVmCreationStrategy>();
             services.AddTransient<IVmCreationStrategy, NativeHyperVVmCreationStrategy>();
             services.AddTransient<IVmCreationStrategy, DiskImageVmCreationStrategy>();
