@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -13,6 +14,11 @@ namespace VMCreate.HyperV.VmCreation
     /// or the legacy KVP-progress runner (hyperv-convert-iso 1.x). The flag
     /// defaults off until the v2 cycle validates on both deploy paths; it
     /// dies with the old path's removal.
+    /// </summary>
+    /// <remarks>
+    /// The flag is read once at construction (IOptions snapshot): toggling
+    /// it takes effect on the next application start. Fine for a dev flag;
+    /// revisit if it ever becomes user-facing.
     /// </summary>
     public sealed class IsoBootCycleRunnerSelector : IIsoBootCycleRunner
     {
@@ -41,10 +47,44 @@ namespace VMCreate.HyperV.VmCreation
             IProgress<CreateVMProgressInfo> progress,
             CancellationToken cancellationToken)
         {
+            // Safety interlock: v2 needs a vmcreate-iso 2.x guest (vsock
+            // sshd). If the flag is on but the cached ISO predates W4's
+            // downloader switch, booting the old hyperv-convert-iso would
+            // wait 120 s for a vsock listener that never appears. The
+            // version sidecar tells us which world the cache is in.
+            if (_vsockEnabled)
+            {
+                string? isoVersion = TryReadCachedIsoVersion(context.Plan.CloningIsoPath);
+                if (isoVersion is null || !isoVersion.StartsWith("2.", StringComparison.Ordinal))
+                {
+                    _logger.LogWarning(
+                        "IsoVsockEnabled is set but the cloning ISO is version {Version} (need 2.x); using the legacy runner. " +
+                        "The vsock runner will become usable once the downloader fetches vmcreate-iso 2.x.",
+                        isoVersion ?? "(no version sidecar)");
+                    return _legacy.RunAsync(context, detectedGeneration, mediaPath, customizations, progress, cancellationToken);
+                }
+            }
+
             IIsoBootCycleRunner picked = _vsockEnabled ? _vsock : _legacy;
             _logger.LogInformation("ISO boot-cycle: using {Implementation} (IsoVsockEnabled={Flag})",
                 picked.GetType().Name, _vsockEnabled);
             return picked.RunAsync(context, detectedGeneration, mediaPath, customizations, progress, cancellationToken);
+        }
+
+        /// <summary>Reads the &lt;iso&gt;.version sidecar written by the
+        /// downloader. Null when absent/unreadable (= treat as not-2.x).</summary>
+        private static string? TryReadCachedIsoVersion(string? isoPath)
+        {
+            if (string.IsNullOrEmpty(isoPath)) return null;
+            try
+            {
+                string versionPath = isoPath + ".version";
+                return File.Exists(versionPath) ? File.ReadAllText(versionPath).Trim() : null;
+            }
+            catch
+            {
+                return null;
+            }
         }
     }
 }

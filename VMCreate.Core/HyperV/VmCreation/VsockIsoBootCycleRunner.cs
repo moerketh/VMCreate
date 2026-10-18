@@ -98,7 +98,26 @@ namespace VMCreate.HyperV.VmCreation
                 // The single KVP item: auth bootstrap for the guest's vmcreate
                 // user. Sent before anything else so the guest's injection
                 // service (running ~5 s after boot) has it by first connect.
-                await _kvpSender.SendKVPToGuestAsync(vmName, KvpKeyName, sshPublicKey, cancellationToken);
+                // Replace semantics: Add, and on failure Modify in place (a
+                // stale item from an aborted deploy makes Add fail; Modify
+                // overwrites it). If both fail, the ADD error surfaces — it
+                // names the real problem.
+                try
+                {
+                    await _kvpSender.SendKVPToGuestAsync(vmName, KvpKeyName, sshPublicKey, cancellationToken);
+                }
+                catch (Exception addEx) when (!cancellationToken.IsCancellationRequested)
+                {
+                    _logger.LogWarning(addEx, "KVP Add for {Key} failed; trying Modify in place (stale item from an aborted deploy?)", KvpKeyName);
+                    try
+                    {
+                        await _kvpMaintenance.ModifyKvpItemAsync(vmName, KvpKeyName, sshPublicKey, cancellationToken);
+                    }
+                    catch
+                    {
+                        throw addEx;
+                    }
+                }
 
                 // GUID resolution must succeed — it is the vsock host string.
                 string? vmGuid = await _kvpMaintenance.ResolveVmGuidAsync(vmName, cancellationToken);
@@ -112,21 +131,16 @@ namespace VMCreate.HyperV.VmCreation
                 context.Logger.Log("ISO boot-cycle v2: vsock SSH connection established");
 
                 // Failure forensics: collect guest logs over the live shell
-                // BEFORE any force-stop. Best-effort with its own short
-                // timeout — a hung guest has a dead shell too.
+                // BEFORE any stop. Best-effort with its own short timeout —
+                // a hung guest has a dead shell too. Logs flow to BOTH the
+                // context log and the failed result (the GUI shows the
+                // result's DiagnosticsLog).
+                IsoBootCycleResult stepsResult;
                 try
                 {
-                    IsoBootCycleResult result = detectedGeneration == 1
+                    stepsResult = detectedGeneration == 1
                         ? await RunCloneAsync(shell, context, mediaPath, customizations, progress, cancellationToken)
                         : await RunCustomizeAsync(shell, context, customizations, progress, cancellationToken);
-
-                    if (!result.Success)
-                        await CollectGuestLogsAsync(shell, context, "guest steps failed");
-
-                    if (!result.Success)
-                        return result;
-
-                    await shell.RunCommandAsync("sudo systemctl poweroff", cancellationToken);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -134,8 +148,33 @@ namespace VMCreate.HyperV.VmCreation
                 }
                 catch (Exception ex)
                 {
-                    await CollectGuestLogsAsync(shell, context, $"exception: {ex.Message}");
+                    string logs = await CollectGuestLogsAsync(shell, context, $"exception: {ex.Message}");
+                    // The runner stops the VM itself: debug-preserved runs
+                    // (preserveInDebug) bypass the orchestrator's cleanup, so
+                    // leaving the VM running would strand it on the ISO.
+                    await StopVmQuietlyAsync(vmName, cancellationToken);
                     throw;
+                }
+
+                if (!stepsResult.Success)
+                {
+                    string logs = await CollectGuestLogsAsync(shell, context, "guest steps failed");
+                    await StopVmQuietlyAsync(vmName, cancellationToken);
+                    return IsoBootCycleResult.Failed(stepsResult.ErrorMessage ?? "guest steps failed", logs);
+                }
+
+                // Power off OUTSIDE the steps' try/catch: the guest killing
+                // sshd mid-command races this call, and the losing side is
+                // usually us (ssh exits 255). --no-block returns immediately
+                // before the shutdown begins, and a transport error from
+                // this one call is EXPECTED, not a deploy failure.
+                try
+                {
+                    await shell.RunCommandAsync("sudo systemctl --no-block poweroff", cancellationToken);
+                }
+                catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+                {
+                    context.Logger.Log($"ISO boot-cycle v2: poweroff transport error (expected if sshd died first): {ex.Message}");
                 }
 
                 bool shutDown = await _shutdownWatcher.WaitForVMShutdownAsync(
@@ -168,10 +207,13 @@ namespace VMCreate.HyperV.VmCreation
                 // KVP hygiene on EVERY exit path: success, timeout, exception,
                 // cancellation. The item persists in the VM configuration
                 // otherwise and blocks the next deploy's Add. Diagnostics-only
-                // — cleanup must never mask the original result/exception.
+                // — cleanup must never mask the original result/exception, and
+                // must be BOUNDED (a failed Remove with no token would hang
+                // the deploy forever; 30 s then log-and-move-on).
                 try
                 {
-                    await _kvpMaintenance.RemoveKvpItemAsync(vmName, KvpKeyName, sshPublicKey, CancellationToken.None);
+                    using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                    await _kvpMaintenance.RemoveKvpItemAsync(vmName, KvpKeyName, sshPublicKey, cleanupCts.Token);
                 }
                 catch (Exception cleanupEx)
                 {
@@ -199,10 +241,11 @@ namespace VMCreate.HyperV.VmCreation
         /// <summary>
         /// Best-effort guest log capture over the live vsock shell: journal
         /// tail plus the guest-side deploy log. Short-bounded so a dying
-        /// guest cannot hang the failure path; every line lands in the
-        /// context log (and the result diagnostics when steps failed).
+        /// guest cannot hang the failure path. Lines land in the context log
+        /// AND are returned (callers attach them to the failed result — the
+        /// GUI renders DiagnosticsLog, not the deployment log).
         /// </summary>
-        private async Task CollectGuestLogsAsync(IGuestShell shell, VmCreationContext context, string reason)
+        private async Task<string> CollectGuestLogsAsync(IGuestShell shell, VmCreationContext context, string reason)
         {
             try
             {
@@ -212,11 +255,21 @@ namespace VMCreate.HyperV.VmCreation
                     "sudo journalctl -b -n 100 --no-pager 2>/dev/null; echo '--- guest log ---'; sudo tail -n 100 /var/log/vmcreate-iso.log 2>/dev/null || true",
                     TimeSpan.FromSeconds(25), cts.Token);
                 context.Logger.LogError($"ISO boot-cycle v2 guest diagnostics ({reason}):\n{logs}");
+                return logs;
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Guest log collection failed ({Reason}) — guest shell likely dead", reason);
+                return $"(guest log collection failed: {ex.Message})";
             }
+        }
+
+        /// <summary>Stop the VM, swallowing errors: failure paths must not
+        /// trade their original error for a WMI failure.</summary>
+        private async Task StopVmQuietlyAsync(string vmName, CancellationToken ct)
+        {
+            try { await _lifecycleManager.StopVMAsync(vmName, ct); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Failed to stop VM {VMName} on the failure path", vmName); }
         }
 
         /// <summary>

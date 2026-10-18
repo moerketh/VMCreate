@@ -116,7 +116,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
             // Customize scenario for generation 2.
             _scriptRunner.Verify(m => m.RunAsync(It.IsAny<IGuestShell>(), "customize", It.IsAny<VmCreationContext>(), It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(), It.IsAny<CancellationToken>()), Times.Once);
             // Poweroff + shutdown confirm + boot finalized.
-            _shell.Verify(m => m.RunCommandAsync("sudo systemctl poweroff", It.IsAny<CancellationToken>()), Times.Once);
+            _shell.Verify(m => m.RunCommandAsync("sudo systemctl --no-block poweroff", It.IsAny<CancellationToken>()), Times.Once);
             _bootManager.Verify(m => m.RemoveBootDvd(It.IsAny<VmDeploymentPlan>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
             _bootManager.Verify(m => m.SetFirstBootToHardDrive(It.IsAny<VmDeploymentPlan>(), It.IsAny<CancellationToken>()), Times.Once);
             // KVP item removed on the success path too.
@@ -132,6 +132,70 @@ namespace VMCreate.Tests.HyperV.VmCreation
             _scriptRunner.Verify(m => m.RunAsync(It.IsAny<IGuestShell>(), "clone", It.IsAny<VmCreationContext>(), It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(), It.IsAny<CancellationToken>()), Times.Once);
             // MBR source detached at the shared SCSI location.
             _diskManager.Verify(m => m.RemoveHardDrive(It.IsAny<VmDeploymentPlan>(), IsoBootCycleRunner.MbrSourceDiskScsiControllerLocation, It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [TestMethod]
+        public async Task PoweroffTransportError_IsExpected_DeployStillSucceeds()
+        {
+            // The guest kills sshd while the poweroff command is in flight:
+            // ssh exits 255. That transport error must NOT fail the deploy.
+            _shell
+                .Setup(m => m.RunCommandAsync("sudo systemctl --no-block poweroff", It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new Exception("SSH command failed (exit code 255)"));
+
+            var result = await RunAsync(2);
+
+            Assert.IsTrue(result.Success, result.ErrorMessage);
+        }
+
+        [TestMethod]
+        public async Task ScriptFailure_StopsTheVm_DiagnosticsReachTheResult()
+        {
+            _scriptRunner
+                .Setup(m => m.RunAsync(It.IsAny<IGuestShell>(), It.IsAny<string>(), It.IsAny<VmCreationContext>(),
+                    It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(IsoBootCycleResult.Failed("partclone failed"));
+            // The live shell returns journal text; the mock must too.
+            _shell
+                .Setup(m => m.RunCommandAsync(It.Is<string>(c => c.Contains("journalctl")), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync("journal-line-1\njournal-line-2");
+
+            var result = await RunAsync(2);
+
+            Assert.IsFalse(result.Success);
+            // Self-contained failure path: the VM is stopped even when the
+            // orchestrator's cleanup is bypassed (debug-preserved runs).
+            _lifecycleManager.Verify(m => m.StopVMAsync("TestVM", It.IsAny<CancellationToken>()), Times.Once);
+            // Guest logs are attached to the result the GUI renders.
+            Assert.IsFalse(string.IsNullOrEmpty(result.DiagnosticsLog), "diagnostics must reach the failed result");
+            StringAssert.Contains(result.DiagnosticsLog, "journal-line-1");
+        }
+
+        [TestMethod]
+        public async Task AddFailure_FallsBackToModify_OriginalAddErrorSurfacesIfBothFail()
+        {
+            _kvpSender
+                .Setup(m => m.SendKVPToGuestAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new Exception("Add failed: JobState 10"));
+
+            // Modify succeeds → deploy proceeds normally.
+            var result = await RunAsync(2);
+            Assert.IsTrue(result.Success, result.ErrorMessage);
+            _kvpMaintenance.Verify(m => m.ModifyKvpItemAsync("TestVM", "VMCREATE_SSH_PUBKEY", "ssh-ed25519 AAAATESTKEY vmcreate", It.IsAny<CancellationToken>()), Times.Once);
+
+            // Modify also fails → the ADD error surfaces (names the real problem).
+            _kvpMaintenance
+                .Setup(m => m.ModifyKvpItemAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new Exception("Modify failed: wmi down"));
+            try
+            {
+                await RunAsync(2);
+                Assert.Fail("Expected the Add error to surface");
+            }
+            catch (Exception ex)
+            {
+                StringAssert.Contains(ex.Message, "Add failed", "the original Add error must surface, not the Modify error");
+            }
         }
 
         [TestMethod]

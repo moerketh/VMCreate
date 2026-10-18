@@ -285,11 +285,11 @@ namespace VMCreate
             {
                 // The callback's kill raced the idle deadline: the callback
                 // is the real cause; report it, not the timeout.
-                throw callbackException;
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(callbackException).Throw(); throw;
             }
             catch (OperationCanceledException) when (callbackException is not null)
             {
-                throw callbackException;
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(callbackException).Throw(); throw;
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
@@ -305,16 +305,19 @@ namespace VMCreate
 
             // Normal exit with a captured callback exception (the handler's
             // kill ended the process before any timeout): rethrow it so the
-            // caller sees its own failure.
+            // caller sees its own failure. ExceptionDispatchInfo preserves
+            // the callback's original stack trace.
             if (callbackException is not null)
-                throw callbackException;
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(callbackException).Throw();
 
             string stdoutStr = stdout.ToString();
             string stderrStr = stderr.ToString();
 
             if (process.ExitCode != 0)
             {
-                string errorDetail = !string.IsNullOrEmpty(FilterSignificantStderr(stderrStr)) ? stderrStr.Trim() : stdoutStr.Trim();
+                string errorDetail = !string.IsNullOrEmpty(FilterSignificantStderr(stderrStr))
+                    ? stderrStr.Trim()
+                    : stdoutStr.Trim();
 
                 if (tolerateNonZeroExit && !string.IsNullOrWhiteSpace(stdoutStr))
                 {

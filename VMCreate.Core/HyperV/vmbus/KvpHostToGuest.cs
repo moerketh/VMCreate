@@ -55,19 +55,28 @@ namespace CreateVM.HyperV.vmbus
 
         /// <summary>
         /// Shared plumbing for the Add/Modify/Remove item methods: resolves
-        /// the management service and VM, invokes the method with one
-        /// embedded-XML DataItem, and awaits the WMI job to a terminal state.
+        /// the VM GUID FIRST (duplicate names throw instead of silently
+        /// writing to the wrong VM), queries by GUID, invokes the method with
+        /// one embedded-XML DataItem, and awaits the WMI job via
+        /// WaitForJobCompletionAsync (correct failure states 8-11 + its own
+        /// 60 s bound — a hand-rolled loop here polled forever on JobState
+        /// 10 in review).
         /// </summary>
-        private static async Task InvokeItemsMethodAsync(string vmName, string method, string itemXml, CancellationToken ct)
+        private async Task InvokeItemsMethodAsync(string vmName, string method, string itemXml, CancellationToken ct)
         {
+            // GUID-first: also protects against duplicate-name wrong-VM writes.
+            string? vmGuid = ResolveVmGuidAnyState(vmName)
+                ?? throw new Exception($"VM '{vmName}' not found for {method}.");
+            ct.ThrowIfCancellationRequested();
+
             ManagementScope scope = new ManagementScope(@"root\virtualization\v2");
-            ObjectQuery vmQuery = new ObjectQuery($"SELECT * FROM Msvm_ComputerSystem WHERE ElementName = '{EscapeWql(vmName)}'");
+            ObjectQuery vmQuery = new ObjectQuery($"SELECT * FROM Msvm_ComputerSystem WHERE Name = '{vmGuid}'");
             using (ManagementObjectSearcher vmSearcher = new ManagementObjectSearcher(scope, vmQuery))
             using (ManagementObjectCollection vmResults = vmSearcher.Get())
             {
                 ManagementObject? vm = vmResults.Cast<ManagementObject>().FirstOrDefault();
                 if (vm == null)
-                    throw new Exception($"VM '{vmName}' not found for {method}.");
+                    throw new Exception($"VM '{vmName}' (GUID {vmGuid}) not found for {method}.");
                 string? target = vm.Path?.Path;
                 vm.Dispose();
 
@@ -79,38 +88,23 @@ namespace CreateVM.HyperV.vmbus
                     inParams["TargetSystem"] = new ManagementPath(target);
                     inParams["DataItems"] = new string[] { itemXml };
                     ManagementBaseObject outParams = await Task.Run(() => service.InvokeMethod(method, inParams, null), ct);
-                    await AwaitJobAsync(scope, outParams, method, ct);
+
+                    uint returnValue = (uint)outParams["ReturnValue"]!;
+                    if (returnValue == 0)
+                        return;
+                    if (returnValue != 4096)
+                        throw new Exception($"{method} failed: return code {returnValue}");
+
+                    string? jobPath = (string?)outParams["Job"];
+                    if (string.IsNullOrEmpty(jobPath))
+                        throw new Exception($"{method} started a job but no job path was returned.");
+                    using (ManagementObject job = new ManagementObject(scope, new ManagementPath(jobPath), null))
+                    {
+                        await WaitForJobCompletionAsync(job, ct);
+                    }
                 }
             }
         }
-
-        private static async Task AwaitJobAsync(ManagementScope scope, ManagementBaseObject outParams, string operation, CancellationToken ct)
-        {
-            uint returnValue = (uint)outParams["ReturnValue"]!;
-            if (returnValue == 0)
-                return;
-            if (returnValue != 4096)
-                throw new Exception($"{operation} failed: return code {returnValue}");
-
-            string? jobPath = (string?)outParams["Job"];
-            if (string.IsNullOrEmpty(jobPath))
-                throw new Exception($"{operation} started a job but no job path was returned.");
-            using (ManagementObject job = new ManagementObject(scope, new ManagementPath(jobPath), null))
-            {
-                while (true)
-                {
-                    ct.ThrowIfCancellationRequested();
-                    job.Get();
-                    ushort state = (ushort)job["JobState"];
-                    if (state == 7) return;                     // completed
-                    if (state >= 11)                            // 11+ = failed/cancelled
-                        throw new Exception($"{operation} failed: JobState {state} ({job["ErrorDescription"]})");
-                    await Task.Delay(500, ct);
-                }
-            }
-        }
-
-        private static string EscapeWql(string value) => value.Replace("'", "''");
 
         /// <summary>
         /// Async method to send a KVP from host to guest, waits for VM to be in a running state
