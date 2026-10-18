@@ -48,13 +48,15 @@ namespace VMCreate.HyperV.VmCreation
             CancellationToken cancellationToken)
         {
             // Safety interlock: v2 needs a vmcreate-iso 2.x guest (vsock
-            // sshd). If the flag is on but the cached ISO predates W4's
-            // downloader switch, booting the old hyperv-convert-iso would
-            // wait 120 s for a vsock listener that never appears. The
-            // version sidecar tells us which world the cache is in.
-            if (_vsockEnabled)
+            // sshd). If the flag is on but the cached ISO predates the v2
+            // downloader, booting the old hyperv-convert-iso would wait
+            // 120 s for a vsock listener that never appears. The version
+            // sidecar tells us which world the cache is in. SKIPPED when
+            // VMCREATE_ISO_PATH is set: a dev pointing at a locally built
+            // ISO knows what they built — no sidecar exists to read.
+            if (_vsockEnabled && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("VMCREATE_ISO_PATH")))
             {
-                string? isoVersion = TryReadCachedIsoVersion(context.Plan.CloningIsoPath);
+                string? isoVersion = TryReadCachedIsoVersion(context.Plan.EffectiveCloningIsoPath);
                 if (isoVersion is null || !isoVersion.StartsWith("2.", StringComparison.Ordinal))
                 {
                     string message =

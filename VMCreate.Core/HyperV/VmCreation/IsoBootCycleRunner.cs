@@ -267,7 +267,7 @@ namespace VMCreate.HyperV.VmCreation
 
                 case IsoBootCycleState.FinalizeBoot:
                     progress?.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.Customize, VmDeploymentSubStep.CleanupIsoBoot));
-                    await _bootManager.RemoveBootDvd(context.Plan, context.Plan.CloningIsoPath, cancellationToken);
+                    await _bootManager.RemoveBootDvd(context.Plan, context.Plan.EffectiveCloningIsoPath, cancellationToken);
                     await _bootManager.SetFirstBootToHardDrive(context.Plan, cancellationToken);
                     context.Logger.Log("ISO boot-cycle: finalized boot order and removed clone DVD");
                     return (IsoBootCycleState.Done, IsoBootCycleResult.Succeeded());

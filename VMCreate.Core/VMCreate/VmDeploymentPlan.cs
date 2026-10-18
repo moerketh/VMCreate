@@ -41,6 +41,11 @@ namespace VMCreate
             SecureBootTemplate = secureBootTemplate ?? "MicrosoftUEFICertificateAuthority";
             ReplacePreviousVm = replacePreviousVm;
             CloningIsoPath = cloningIsoPath ?? DefaultCloningIsoPath;
+            // Sibling cache file in the same directory: the v2 ISO never
+            // collides with the legacy one, and each owns its sidecar.
+            CloningIsoV2Path = Path.Combine(
+                Path.GetDirectoryName(CloningIsoPath) ?? ".",
+                "vmcreate-iso-v2.iso");
         }
 
         /// <summary>
@@ -61,7 +66,10 @@ namespace VMCreate
                 settings.SecureBoot,
                 settings.SecureBootTemplate,
                 settings.ReplacePreviousVm,
-                settings.CloningIsoPath);
+                settings.CloningIsoPath)
+            {
+                IsoVsockEnabled = settings.IsoVsockEnabled,
+            };
         }
 
         /// <summary>
@@ -82,5 +90,36 @@ namespace VMCreate
         public string SecureBootTemplate { get; init; }
         public bool ReplacePreviousVm { get; init; }
         public string CloningIsoPath { get; init; }
+
+        /// <summary>
+        /// ISO vsock mode (vmcreate-iso 2.x) drives the boot-cycle over the
+        /// Hyper-V socket channel. Copied from <see cref="AppSettings"/> at
+        /// plan creation so one deployment is consistent end to end.
+        /// </summary>
+        public bool IsoVsockEnabled { get; init; }
+
+        /// <summary>
+        /// Separate cache file for the v2 ISO: the sidecar version file
+        /// pairs with its ISO, so a flag toggle never re-downloads and the
+        /// two generations never overwrite each other.
+        /// </summary>
+        public string CloningIsoV2Path { get; init; }
+
+        /// <summary>
+        /// The ISO path this deployment actually attaches/detaches/downloads:
+        /// the v2 cache when the flag is on, the legacy cache otherwise.
+        /// The <c>VMCREATE_ISO_PATH</c> environment variable overrides both
+        /// (dev lever: point a deploy at a locally built ISO — must exist).
+        /// </summary>
+        public string EffectiveCloningIsoPath
+        {
+            get
+            {
+                string? overridePath = Environment.GetEnvironmentVariable("VMCREATE_ISO_PATH");
+                if (!string.IsNullOrWhiteSpace(overridePath) && File.Exists(overridePath))
+                    return overridePath;
+                return IsoVsockEnabled ? CloningIsoV2Path : CloningIsoPath;
+            }
+        }
     }
 }

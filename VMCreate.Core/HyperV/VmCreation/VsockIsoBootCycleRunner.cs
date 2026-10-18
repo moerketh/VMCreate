@@ -194,7 +194,7 @@ namespace VMCreate.HyperV.VmCreation
                     }
                 }
 
-                await _bootManager.RemoveBootDvd(context.Plan, context.Plan.CloningIsoPath, cancellationToken);
+                await _bootManager.RemoveBootDvd(context.Plan, context.Plan.EffectiveCloningIsoPath, cancellationToken);
                 await _bootManager.SetFirstBootToHardDrive(context.Plan, cancellationToken);
                 context.Logger.Log("ISO boot-cycle v2: finalized boot order and removed clone DVD");
                 return IsoBootCycleResult.Succeeded();
