@@ -30,6 +30,10 @@ namespace VMCreate
 
         private const string AutomationUser = "vmcreate";
         private readonly string _username;
+        // Connection target in vsock mode: fixed for the shell's lifetime
+        // (the VM GUID is stable). Null in IP mode, where the target is the
+        // lazily discovered _vmIpAddress.
+        private readonly SshConnectionTarget? _fixedTarget;
         // 2026-08-29: 180s proved too tight for the FIRST boot of a freshly
         // cloned distro — a Parrot rollout took ~6.5 min from ISO-cycle
         // shutdown to sshd answering (btrfs first-boot initialization, cold
@@ -59,6 +63,32 @@ namespace VMCreate
             _privateKeyPath = privateKeyPath ?? throw new ArgumentNullException(nameof(privateKeyPath));
             _username = AutomationUser;
         }
+
+        /// <summary>
+        /// Creates a shell bound to a FIXED connection target — the vsock
+        /// mode used by the ISO boot-cycle: the host string is the VM GUID
+        /// and ssh reaches it through hvc.exe (see
+        /// <see cref="SshConnectionTarget.ForVsock"/>). No IP discovery, no
+        /// re-discovery on transport errors (the GUID cannot change), and
+        /// readiness is probed over vsock itself.
+        /// </summary>
+        public SshGuestShell(ILogger logger, string vmName, string privateKeyPath, string username, SshConnectionTarget fixedTarget)
+            : this(logger, vmName, privateKeyPath, username)
+        {
+            _fixedTarget = fixedTarget ?? throw new ArgumentNullException(nameof(fixedTarget));
+        }
+
+        /// <summary>
+        /// The target every exec connects to. In vsock mode this is the
+        /// fixed GUID target; in IP mode the discovered address (throwing
+        /// the same actionable error as before when WaitForReadyAsync hasn't
+        /// run).
+        /// </summary>
+        private SshConnectionTarget CurrentTarget =>
+            _fixedTarget
+            ?? (string.IsNullOrEmpty(_vmIpAddress)
+                ? throw new InvalidOperationException("VM IP address not discovered yet. Call WaitForReadyAsync first.")
+                : SshConnectionTarget.ForIp(_vmIpAddress!));
 
         /// <summary>
         /// Creates a shell that connects as an explicit user. Used when the guest's
@@ -114,6 +144,12 @@ namespace VMCreate
         /// </summary>
         public async Task WaitForReadyAsync(CancellationToken ct)
         {
+            if (_fixedTarget is not null)
+            {
+                await WaitForVsockReadyAsync(ct);
+                return;
+            }
+
             _logger.LogInformation("Waiting for SSH to become available on VM {VMName}...", VmName);
 
             // Per-deployment TOFU pinning arm: fresh known_hosts before the
@@ -169,6 +205,53 @@ namespace VMCreate
         }
 
         /// <summary>
+        /// Vsock readiness: probe the guest's sshd-vsock listener directly.
+        /// The ISO reaches a listening socket ~7 s after power-on and a
+        /// vsock connect to a guest without a listener fails fast, so a 2 s
+        /// cadence detects it almost immediately; 120 s covers slow boots
+        /// (squashfs-to-RAM copy) with wide margin. No IP, no NIC.
+        /// </summary>
+        private async Task WaitForVsockReadyAsync(CancellationToken ct)
+        {
+            _logger.LogInformation("Waiting for vsock SSH on VM {VMName} (GUID {Guid})...", VmName, _fixedTarget!.Host);
+
+            ResetHostKeyPinning();
+
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(120);
+            Exception? lastError = null;
+
+            while (DateTime.UtcNow < deadline)
+            {
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    string result = await SshTransport.ExecuteAsync(
+                        _logger, VmName, _privateKeyPath, _fixedTarget, _username,
+                        _hostKeyKnownHostsPath, "echo 'ssh-ready'", TimeSpan.FromSeconds(15), ct);
+                    if (result.Contains("ssh-ready"))
+                    {
+                        _logger.LogInformation("vsock SSH is ready on VM {VMName}", VmName);
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    lastError = ex;
+                    // No re-pinning dance here: the vsock target (GUID) never
+                    // changes identity mid-cycle; a failed connect is just
+                    // the listener not being up yet. Per-boot host keys mean
+                    // the FIRST successful connect pins this boot's key.
+                    _logger.LogDebug("vsock SSH not ready yet: {Message}", ex.Message);
+                }
+                await Task.Delay(TimeSpan.FromSeconds(2), ct);
+            }
+
+            throw new TimeoutException(
+                $"vsock SSH did not become available on VM '{VmName}' within 120s. " +
+                $"Last error: {lastError?.Message}");
+        }
+
+        /// <summary>
         /// Sends a shutdown command to the guest. Tolerates the expected SSH transport
         /// error that occurs when the remote OS shuts down mid-session.
         /// </summary>
@@ -195,8 +278,7 @@ namespace VMCreate
         /// </summary>
         public async Task<string> RunCommandWithStdinAsync(string command, string stdinContent, CancellationToken ct)
         {
-            if (string.IsNullOrEmpty(_vmIpAddress))
-                throw new InvalidOperationException("VM IP address not discovered yet. Call WaitForReadyAsync first.");
+            _ = CurrentTarget; // fails with the actionable not-ready error
 
             // Same no-logging invariant as RunCommandInternalAsync; log
             // length only (stdin length included — never the content).
@@ -204,7 +286,7 @@ namespace VMCreate
                 VmName, command.Length, stdinContent.Length);
 
             return await SshTransport.ExecuteAsync(
-                _logger, VmName, _privateKeyPath, _vmIpAddress!, _username,
+                _logger, VmName, _privateKeyPath, CurrentTarget, _username,
                 _hostKeyKnownHostsPath, command, CommandTimeout, ct,
                 maxArgumentLength: MaxCommandLength, stdinContent: stdinContent);
         }
@@ -328,6 +410,14 @@ namespace VMCreate
                     _logger.LogWarning("SSH transport error during copy to {GuestPath} (attempt {Attempt}/{Max}); restarting the transfer from scratch: {Message}",
                         guestPath, attempt, maxCopyAttempts, ex.Message);
 
+                    // Vsock target: GUID is stable — no re-discovery, the
+                    // whole copy simply restarts (fresh temp file = safe).
+                    if (_fixedTarget is not null)
+                    {
+                        await Task.Delay(RetryDelay, ct);
+                        continue;
+                    }
+
                     // Same changed-IP gate as RunWithRetryAsync: a copy is
                     // chunk-append idempotent only when it restarts on a NEW
                     // address; retrying the same dead session against the
@@ -392,6 +482,14 @@ namespace VMCreate
                     _logger.LogWarning("SSH transport error on attempt {Attempt}/{Max}, retrying in {Delay}s: {Message}",
                         attempt, MaxRetries, RetryDelay.TotalSeconds, ex.Message);
 
+                    // Vsock target: the host string (VM GUID) cannot change,
+                    // so there is nothing to re-discover — retry as-is.
+                    if (_fixedTarget is not null)
+                    {
+                        await Task.Delay(RetryDelay, ct);
+                        continue;
+                    }
+
                     // On a host-side command timeout the guest may simply be
                     // busy — only retry when re-discovery actually yields a
                     // DIFFERENT address (the lease changed mid-pipeline, e.g.
@@ -444,8 +542,7 @@ namespace VMCreate
 
         private async Task<string> RunCommandInternalAsync(string linuxCommand, TimeSpan timeout, CancellationToken ct)
         {
-            if (string.IsNullOrEmpty(_vmIpAddress))
-                throw new InvalidOperationException("VM IP address not discovered yet. Call WaitForReadyAsync first.");
+            _ = CurrentTarget; // fails with the actionable not-ready error
 
             // NOTE: never log the full ssh argument list. The remote command
             // can embed guest payload (CopyContentAsync chunks are base64
@@ -460,8 +557,30 @@ namespace VMCreate
             // later exec sees a different key (e.g. another VM took over
             // the IP address mid-deployment).
             return await SshTransport.ExecuteAsync(
-                _logger, VmName, _privateKeyPath, _vmIpAddress!, _username,
+                _logger, VmName, _privateKeyPath, CurrentTarget, _username,
                 _hostKeyKnownHostsPath, linuxCommand, timeout, ct, maxArgumentLength: MaxCommandLength);
+        }
+
+        /// <summary>
+        /// Streaming exec for long guest work (partclone): invokes
+        /// <paramref name="onStdoutLine"/> per stdout line as it arrives and
+        /// enforces an IDLE deadline (any line resets it) in addition to the
+        /// total timeout. Concrete-shell member by design — the generic
+        /// <c>IGuestShell</c> contract stays buffered; only the ISO-cycle
+        /// runner needs live lines.
+        /// </summary>
+        public async Task<string> RunStreamingCommandAsync(
+            string linuxCommand, TimeSpan timeout, TimeSpan idleTimeout,
+            Action<string> onStdoutLine, CancellationToken ct)
+        {
+            _ = CurrentTarget;
+            _logger.LogDebug("SSH streaming exec on VM {VMName} ({Length} chars, idle {Idle}s, total {Total}s)",
+                VmName, linuxCommand.Length, idleTimeout.TotalSeconds, timeout.TotalSeconds);
+            return await SshTransport.ExecuteAsync(
+                _logger, VmName, _privateKeyPath, CurrentTarget, _username,
+                _hostKeyKnownHostsPath, linuxCommand, timeout, ct,
+                maxArgumentLength: MaxCommandLength,
+                onStdoutLine: onStdoutLine, idleTimeout: idleTimeout);
         }
     }
 }

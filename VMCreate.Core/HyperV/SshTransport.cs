@@ -48,12 +48,21 @@ namespace VMCreate
         internal static string BuildArguments(
             string privateKeyPath, string vmIpAddress, string username,
             string? knownHostsFile, string linuxCommand)
+            => BuildArguments(privateKeyPath, SshConnectionTarget.ForIp(vmIpAddress), username, knownHostsFile, linuxCommand);
+
+        /// <summary>Target-aware overload: vsock targets carry their
+        /// ProxyCommand in the target's extra arguments.</summary>
+        internal static string BuildArguments(
+            string privateKeyPath, SshConnectionTarget target, string username,
+            string? knownHostsFile, string linuxCommand)
         {
             // Normalize Windows CRLF → LF so bash doesn't choke on \r
             linuxCommand = linuxCommand.Replace("\r\n", "\n").Replace("\r", "\n").Trim();
 
             var args = new StringBuilder();
             args.Append($"-i \"{privateKeyPath}\" ");
+            if (target.ExtraArguments is not null)
+                args.Append(target.ExtraArguments);
             if (!string.IsNullOrEmpty(knownHostsFile))
             {
                 // TOFU pinning: trust first use, record to the per-VM file,
@@ -78,7 +87,7 @@ namespace VMCreate
             // retry path (nulls the IP, re-discovers, reconnects) can run.
             args.Append("-o ServerAliveInterval=5 ");
             args.Append("-o ServerAliveCountMax=3 ");
-            args.Append($"{username}@{vmIpAddress} ");
+            args.Append($"{username}@{target.Host} ");
             args.Append($"bash -c {EscapeForSsh(linuxCommand)}");
             return args.ToString();
         }
@@ -134,8 +143,44 @@ namespace VMCreate
             int? maxArgumentLength = null,
             bool tolerateNonZeroExit = false,
             string? stdinContent = null)
+            => await ExecuteAsync(
+                logger, vmName, privateKeyPath, SshConnectionTarget.ForIp(vmIpAddress), username,
+                knownHostsFile, linuxCommand, timeout, ct,
+                maxArgumentLength, tolerateNonZeroExit, stdinContent);
+
+        /// <summary>
+        /// Target-aware execution with optional stdout line streaming and an
+        /// idle timeout. Streaming exists for long guest work (partclone):
+        /// the buffered return-at-exit semantics of the classic overload
+        /// cannot report progress while the command runs, and a single total
+        /// timeout cannot distinguish "healthy but slow" from "hung". The
+        /// idle budget bounds SILENCE: any stdout line resets it, so a
+        /// command that keeps talking stays alive as long as the total
+        /// timeout allows, while a mute one fails at the idle deadline.
+        /// </summary>
+        /// <param name="onStdoutLine">Invoked per stdout line as it arrives
+        /// (before buffering). Must be cheap; exceptions propagate and kill
+        /// the process tree.</param>
+        /// <param name="idleTimeout">When non-null, the maximum silence
+        /// between stdout lines. Distinct from <paramref name="timeout"/>,
+        /// which still bounds the whole run.</param>
+        public static async Task<string> ExecuteAsync(
+            ILogger logger,
+            string vmName,
+            string privateKeyPath,
+            SshConnectionTarget target,
+            string username,
+            string? knownHostsFile,
+            string linuxCommand,
+            TimeSpan timeout,
+            CancellationToken ct,
+            int? maxArgumentLength = null,
+            bool tolerateNonZeroExit = false,
+            string? stdinContent = null,
+            Action<string>? onStdoutLine = null,
+            TimeSpan? idleTimeout = null)
         {
-            string args = BuildArguments(privateKeyPath, vmIpAddress, username, knownHostsFile, linuxCommand);
+            string args = BuildArguments(privateKeyPath, target, username, knownHostsFile, linuxCommand);
 
             if (maxArgumentLength.HasValue && args.Length > maxArgumentLength.Value)
             {
@@ -162,9 +207,19 @@ namespace VMCreate
             using var process = new Process { StartInfo = psi };
             var stdout = new StringBuilder();
             var stderr = new StringBuilder();
+            // Idle-clock: every stdout line stamps LastStdoutAt; the wait
+            // loop below enforces the budget. Volatile so the polling loop
+            // (a different async continuation) observes line-handler writes.
+            var lastStdoutAt = DateTime.UtcNow;
 
-            process.OutputDataReceived += (_, e) => { if (e.Data != null) stdout.AppendLine(e.Data); };
-            process.ErrorDataReceived += (_, e) => { if (e.Data != null) stderr.AppendLine(e.Data); };
+            process.OutputDataReceived += (_, e) =>
+            {
+                if (e.Data == null) return;
+                lock (stdout) stdout.AppendLine(e.Data);
+                lastStdoutAt = DateTime.UtcNow;
+                onStdoutLine?.Invoke(e.Data);
+            };
+            process.ErrorDataReceived += (_, e) => { if (e.Data != null) lock (stderr) stderr.AppendLine(e.Data); };
 
             process.Start();
             process.BeginOutputReadLine();
@@ -187,7 +242,34 @@ namespace VMCreate
 
             try
             {
-                await process.WaitForExitAsync(timeoutCts.Token);
+                if (idleTimeout.HasValue)
+                {
+                    // Poll: enforce the total deadline via CancelAfter and the
+                    // idle budget by watching lastStdoutAt. 250 ms cadence is
+                    // far below any useful idle window and keeps the loop cheap.
+                    while (!process.HasExited)
+                    {
+                        var idleExceeded = DateTime.UtcNow - lastStdoutAt > idleTimeout.Value;
+                        if (idleExceeded)
+                        {
+                            try { process.Kill(entireProcessTree: true); } catch { }
+                            throw new TimeoutException(
+                                $"SSH command idle (no stdout for {idleTimeout.Value.TotalSeconds}s) after " +
+                                $"{(DateTime.UtcNow - lastStdoutAt).TotalSeconds:0}s on VM '{vmName}'");
+                        }
+                        // WaitForExitAsync with a short grace period; throws
+                        // OperationCanceledException on TOTAL timeout/cancel.
+                        using var grace = CancellationTokenSource.CreateLinkedTokenSource(timeoutCts.Token);
+                        grace.CancelAfter(TimeSpan.FromMilliseconds(250));
+                        try { await process.WaitForExitAsync(grace.Token); }
+                        catch (OperationCanceledException) when (!timeoutCts.Token.IsCancellationRequested) { /* grace tick: loop */ }
+                    }
+                    await process.WaitForExitAsync(timeoutCts.Token); // exited: drain to completion state
+                }
+                else
+                {
+                    await process.WaitForExitAsync(timeoutCts.Token);
+                }
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {

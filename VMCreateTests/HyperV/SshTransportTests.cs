@@ -46,6 +46,50 @@ namespace VMCreate.Tests.HyperV
         }
 
         [TestMethod]
+        public void BuildArguments_VsockTarget_UsesGuidHostAndAbsoluteHvcProxyCommand()
+        {
+            var target = SshConnectionTarget.ForVsock("d811e738-5c46-4f57-a171-4f822a38f22a");
+            string args = SshTransport.BuildArguments(KeyPath, target, User, null, "echo hi");
+
+            // Destination is the GUID, not an IP.
+            StringAssert.Contains(args, $"{User}@d811e738-5c46-4f57-a171-4f822a38f22a");
+            // ProxyCommand carries hvc by ABSOLUTE expanded path (anti-hijack,
+            // same posture as SshExePath) and the vsock transport flag.
+            StringAssert.Contains(args, "ProxyCommand=");
+            StringAssert.Contains(args, "nc -t vsock %h 22");
+            Assert.IsTrue(
+                args.Contains(@"\System32\hvc.exe") || args.Contains("/System32/hvc.exe"),
+                "ProxyCommand must invoke hvc.exe by absolute path");
+            Assert.IsFalse(args.Contains("%SystemRoot%"), "ssh expands %-tokens in ProxyCommand itself; the path must arrive pre-expanded");
+        }
+
+        [TestMethod]
+        public void BuildArguments_VsockTarget_NoPercentTokensExceptProxyHost()
+        {
+            // ssh performs %-token substitution inside ProxyCommand values:
+            // any other % in the argument line would be misread (e.g.
+            // %SystemRoot% as %S + "ystemRoot%"). Assert the ONLY % in the
+            // vsock argument line is the intended %h host token.
+            var target = SshConnectionTarget.ForVsock("d811e738-5c46-4f57-a171-4f822a38f22a");
+            string args = SshTransport.BuildArguments(KeyPath, target, User, null, "echo hi");
+
+            int percentCount = 0;
+            for (int i = 0; i < args.Length; i++)
+                if (args[i] == '%') percentCount++;
+            Assert.AreEqual(1, percentCount, $"exactly one % (the %h token) expected, got {percentCount}: {args}");
+            StringAssert.Contains(args, "%h");
+        }
+
+        [TestMethod]
+        public void BuildArguments_IpTarget_HasNoProxyCommand()
+        {
+            // The IP path must remain byte-identical in behavior: no vsock
+            // arguments leak into post-boot connections.
+            string args = SshTransport.BuildArguments(KeyPath, VmIp, User, null, "echo hi");
+            Assert.IsFalse(args.Contains("ProxyCommand"), "IP target must not carry a ProxyCommand");
+        }
+
+        [TestMethod]
         public void BuildArguments_AppliesCommonSshOptions()
         {
             string args = SshTransport.BuildArguments(KeyPath, VmIp, User, null, "echo hi");

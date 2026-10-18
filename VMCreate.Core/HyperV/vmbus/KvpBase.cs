@@ -92,10 +92,27 @@ namespace CreateVM.HyperV.vmbus
         /// <returns></returns>
         protected virtual string? GetVMGuid(string vmName)
         {
+            return ResolveVmGuid(vmName, runningOnly: true);
+        }
+
+        /// <summary>
+        /// Public GUID resolution for transports: the vsock SSH target host
+        /// string is the VM GUID, and callers need it before the VM is
+        /// running (e.g. to build the shell before StartVM). State-blind
+        /// unlike <see cref="GetVMGuid"/> — the GUID is immutable.
+        /// </summary>
+        public string? ResolveVmGuidAnyState(string vmName)
+        {
+            return ResolveVmGuid(vmName, runningOnly: false);
+        }
+
+        private string? ResolveVmGuid(string vmName, bool runningOnly)
+        {
             ValidateVmName(vmName);
 
             ManagementScope scope = new ManagementScope(@"root\virtualization\v2");
-            ObjectQuery query = new ObjectQuery($"SELECT * FROM Msvm_ComputerSystem WHERE ElementName = '{vmName}' AND EnabledState = 2");  // Use ElementName for friendly name; 2 = running
+            string filter = $"ElementName = '{vmName}'" + (runningOnly ? " AND EnabledState = 2" : "");
+            ObjectQuery query = new ObjectQuery($"SELECT * FROM Msvm_ComputerSystem WHERE {filter}");
             using (ManagementObjectSearcher searcher = new ManagementObjectSearcher(scope, query))
             using (ManagementObjectCollection results = searcher.Get())
             {

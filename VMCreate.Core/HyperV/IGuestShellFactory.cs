@@ -20,6 +20,13 @@ namespace VMCreate
         IGuestShell Create(string vmName, string privateKeyPath, string username);
 
         /// <summary>
+        /// Creates a shell connected over the Hyper-V socket channel (vsock):
+        /// no NIC, no IP discovery. Host string is the VM GUID, reached via
+        /// hvc.exe as an ssh ProxyCommand. Used by the ISO boot-cycle.
+        /// </summary>
+        IGuestShell CreateVsock(string vmName, string privateKeyPath, string vmGuid);
+
+        /// <summary>
         /// Creates a new guest shell connected to the specified Windows VM using
         /// PowerShell Direct (Invoke-Command over VMBus). Does not require network
         /// connectivity or SSH — only needs VM name and Windows credentials.
