@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Management;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -113,6 +114,7 @@ namespace CreateVM.HyperV.vmbus
             ManagementScope scope = new ManagementScope(@"root\virtualization\v2");
             string filter = $"ElementName = '{vmName}'" + (runningOnly ? " AND EnabledState = 2" : "");
             ObjectQuery query = new ObjectQuery($"SELECT * FROM Msvm_ComputerSystem WHERE {filter}");
+            var matches = new List<string>();
             using (ManagementObjectSearcher searcher = new ManagementObjectSearcher(scope, query))
             using (ManagementObjectCollection results = searcher.Get())
             {
@@ -120,11 +122,23 @@ namespace CreateVM.HyperV.vmbus
                 {
                     using (obj)
                     {
-                        return obj["Name"]?.ToString();  // Name is the GUID
+                        // Name is the GUID
+                        if (obj["Name"]?.ToString() is { } guid) matches.Add(guid);
                     }
                 }
             }
-            return null;
+
+            if (matches.Count > 1)
+            {
+                // Hyper-V permits duplicate VM names. The GUID is the vsock
+                // host string — silently picking the first match would SSH
+                // into the WRONG VM (per-boot host keys mean TOFU cannot
+                // catch it either). Fail loudly instead.
+                throw new InvalidOperationException(
+                    $"VM name '{vmName}' matches {matches.Count} VMs ({string.Join(", ", matches)}). " +
+                    "VMCreate requires unique VM names; rename or remove the duplicate before deploying.");
+            }
+            return matches.Count == 1 ? matches[0] : null;
         }
     }
 }

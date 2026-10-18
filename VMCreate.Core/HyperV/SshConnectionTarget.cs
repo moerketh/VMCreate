@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 
 namespace VMCreate
 {
@@ -55,8 +56,17 @@ namespace VMCreate
         /// <param name="vmGuid">VM's Hyper-V GUID — the string hvc.exe accepts
         /// (GUIDs are unique where VM names can be duplicated or contain
         /// spaces).</param>
-        public static SshConnectionTarget ForVsock(string vmGuid) =>
-            new(vmGuid, TargetKind.Vsock, BuildVsockArguments());
+        public static SshConnectionTarget ForVsock(string vmGuid)
+        {
+            if (!File.Exists(HvcExePath))
+            {
+                throw new NotSupportedException(
+                    $"The vsock SSH transport requires hvc.exe at '{HvcExePath}', which is not present on this " +
+                    "host. hvc.exe ships with Hyper-V's management tools (enable the Hyper-V PowerShell/RSAT " +
+                    "components). Without it there is no supported host-side connector to the guest's vsock listener.");
+            }
+            return new(vmGuid, TargetKind.Vsock, BuildVsockArguments());
+        }
 
         /// <summary>
         /// hvc.exe path — expanded here, once. Absolute path for the same
@@ -71,10 +81,7 @@ namespace VMCreate
         {
             // %h is ssh's own token for the destination host (the VM GUID).
             // Quoted whole so the backslashed absolute path survives argv
-            // parsing; forward slashes are avoided deliberately — the quoted
-            // backslash form is the canonical Windows layout. ConnectTimeout
-            // short: a vsock connect to a guest with no listener fails fast;
-            // the shell's probe loop owns the retry cadence.
+            // parsing (live-verified end-to-end against a booting ISO guest).
             string hvc = HvcExePath;
             return $"-o ProxyCommand=\"\\\"{hvc}\\\" nc -t vsock %h 22\" ";
         }

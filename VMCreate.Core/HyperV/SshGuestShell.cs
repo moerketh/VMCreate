@@ -211,6 +211,14 @@ namespace VMCreate
         /// cadence detects it almost immediately; 120 s covers slow boots
         /// (squashfs-to-RAM copy) with wide margin. No IP, no NIC.
         /// </summary>
+        /// <remarks>
+        /// The vsock mode runs commands WITHOUT the transport-retry loop
+        /// (see <see cref="RunWithRetryAsync"/>): the GUID cannot move, so a
+        /// transport failure means the guest itself is gone, and re-running
+        /// a merely slow command could duplicate guest-side side effects.
+        /// Readiness probes are the one safe exception — they are
+        /// side-effect-free by construction.
+        /// </remarks>
         private async Task WaitForVsockReadyAsync(CancellationToken ct)
         {
             _logger.LogInformation("Waiting for vsock SSH on VM {VMName} (GUID {Guid})...", VmName, _fixedTarget!.Host);
@@ -476,19 +484,11 @@ namespace VMCreate
                 {
                     return await RunCommandInternalAsync(linuxCommand, timeout, ct);
                 }
-                catch (Exception ex) when (attempt < MaxRetries && IsSshTransportError(ex))
+                catch (Exception ex) when (attempt < MaxRetries && _fixedTarget is null && IsSshTransportError(ex))
                 {
                     lastEx = ex;
                     _logger.LogWarning("SSH transport error on attempt {Attempt}/{Max}, retrying in {Delay}s: {Message}",
                         attempt, MaxRetries, RetryDelay.TotalSeconds, ex.Message);
-
-                    // Vsock target: the host string (VM GUID) cannot change,
-                    // so there is nothing to re-discover — retry as-is.
-                    if (_fixedTarget is not null)
-                    {
-                        await Task.Delay(RetryDelay, ct);
-                        continue;
-                    }
 
                     // On a host-side command timeout the guest may simply be
                     // busy — only retry when re-discovery actually yields a

@@ -89,6 +89,91 @@ namespace VMCreate.Tests.HyperV
             Assert.IsFalse(args.Contains("ProxyCommand"), "IP target must not carry a ProxyCommand");
         }
 
+        #endregion
+
+        #region IdleAwareWaitAsync
+
+        private static Task WaitCanceled(CancellationToken token)
+            => Task.Delay(Timeout.Infinite, token);
+
+        [TestMethod]
+        public async Task IdleWait_ThrowsTimeout_WhenOutputGoesSilent()
+        {
+            var start = DateTime.UtcNow;
+            // Fake: process never exits, last output is frozen at 'start'
+            // (idle clock runs), wait delegate parks until canceled.
+            using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(400));
+            try
+            {
+                await SshTransport.IdleAwareWaitAsync(
+                    hasExited: () => false,
+                    waitForExitAsync: WaitCanceled,
+                    lastStdoutAt: () => start,
+                    idleTimeout: TimeSpan.FromMilliseconds(100),
+                    totalTimeoutToken: cts.Token,
+                    vmName: "idle-test-vm");
+                Assert.Fail("Expected TimeoutException");
+            }
+            catch (TimeoutException tex)
+            {
+                StringAssert.Contains(tex.Message, "idle-test-vm");
+                StringAssert.Contains(tex.Message, "no stdout");
+            }
+        }
+
+        [TestMethod]
+        public async Task IdleWait_Succeeds_WhenProcessExitsBeforeIdleBudget()
+        {
+            // Fake: process exits almost immediately — the idle budget is
+            // never consulted past the first loop iteration.
+            await SshTransport.IdleAwareWaitAsync(
+                hasExited: () => true,
+                waitForExitAsync: _ => Task.CompletedTask,
+                lastStdoutAt: () => DateTime.UtcNow - TimeSpan.FromHours(1), // ancient: would trip idle
+                idleTimeout: TimeSpan.FromSeconds(1),
+                totalTimeoutToken: CancellationToken.None,
+                vmName: "idle-test-vm");
+        }
+
+        [TestMethod]
+        public async Task IdleWait_ResetsBudget_WhenOutputKeepsArriving()
+        {
+            // Fake: process exits after ~450 ms; last output tracks 'now' so
+            // the idle clock never exceeds the 1 s budget despite the wait
+            // outlasting a single budget window from loop start.
+            var exitAt = DateTime.UtcNow + TimeSpan.FromMilliseconds(450);
+            await SshTransport.IdleAwareWaitAsync(
+                hasExited: () => DateTime.UtcNow >= exitAt,
+                waitForExitAsync: _ => Task.Delay(50),
+                lastStdoutAt: () => DateTime.UtcNow,
+                idleTimeout: TimeSpan.FromSeconds(1),
+                totalTimeoutToken: CancellationToken.None,
+                vmName: "idle-test-vm");
+        }
+
+        [TestMethod]
+        public async Task IdleWait_TotalTimeoutStillBinds_WhileOutputFlows()
+        {
+            // Fake: output flows forever, process never exits; the TOTAL
+            // token fires and surfaces as OperationCanceledException — the
+            // idle budget must not mask the total deadline.
+            using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
+            try
+            {
+                await SshTransport.IdleAwareWaitAsync(
+                    hasExited: () => false,
+                    waitForExitAsync: WaitCanceled,
+                    lastStdoutAt: () => DateTime.UtcNow,
+                    idleTimeout: TimeSpan.FromSeconds(30),
+                    totalTimeoutToken: cts.Token,
+                    vmName: "idle-test-vm");
+                Assert.Fail("Expected OperationCanceledException");
+            }
+            catch (OperationCanceledException) { /* expected */ }
+        }
+
+        #endregion
+
         [TestMethod]
         public void BuildArguments_AppliesCommonSshOptions()
         {
@@ -138,10 +223,8 @@ namespace VMCreate.Tests.HyperV
             Assert.IsFalse(args.Contains("\r"), "CR must be stripped before the payload hits argv");
         }
 
-        #endregion
 
         #region Escaping helpers
-
         [TestMethod]
         public void EscapeSingleQuotes_ReplacesQuoteWithShellSafe()
         {

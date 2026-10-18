@@ -207,17 +207,33 @@ namespace VMCreate
             using var process = new Process { StartInfo = psi };
             var stdout = new StringBuilder();
             var stderr = new StringBuilder();
-            // Idle-clock: every stdout line stamps LastStdoutAt; the wait
-            // loop below enforces the budget. Volatile so the polling loop
-            // (a different async continuation) observes line-handler writes.
+            // Idle clock: every stdout line stamps lastStdoutAt; the wait
+            // loop below enforces the budget. Captured local written from
+            // the OutputDataReceived thread-pool thread and polled by the
+            // wait loop's continuation — benign staleness on the read side
+            // only delays idle detection by one 250 ms tick.
             var lastStdoutAt = DateTime.UtcNow;
+            // A throwing stdout callback must never take down the process:
+            // OutputDataReceived runs on a thread-pool thread where an
+            // unhandled exception kills VMCreate outright. Capture it, kill
+            // the ssh process tree, and rethrow from the wait below so the
+            // caller sees its own exception with the transport cleaned up.
+            Exception? callbackException = null;
 
             process.OutputDataReceived += (_, e) =>
             {
                 if (e.Data == null) return;
                 lock (stdout) stdout.AppendLine(e.Data);
                 lastStdoutAt = DateTime.UtcNow;
-                onStdoutLine?.Invoke(e.Data);
+                if (onStdoutLine != null)
+                {
+                    try { onStdoutLine(e.Data); }
+                    catch (Exception cbEx)
+                    {
+                        callbackException = cbEx;
+                        try { process.Kill(entireProcessTree: true); } catch { }
+                    }
+                }
             };
             process.ErrorDataReceived += (_, e) => { if (e.Data != null) lock (stderr) stderr.AppendLine(e.Data); };
 
@@ -244,32 +260,36 @@ namespace VMCreate
             {
                 if (idleTimeout.HasValue)
                 {
-                    // Poll: enforce the total deadline via CancelAfter and the
-                    // idle budget by watching lastStdoutAt. 250 ms cadence is
-                    // far below any useful idle window and keeps the loop cheap.
-                    while (!process.HasExited)
+                    // Delegate form: the process kill lives HERE (the helper
+                    // is transport-agnostic for tests), the timing lives there.
+                    try
                     {
-                        var idleExceeded = DateTime.UtcNow - lastStdoutAt > idleTimeout.Value;
-                        if (idleExceeded)
-                        {
-                            try { process.Kill(entireProcessTree: true); } catch { }
-                            throw new TimeoutException(
-                                $"SSH command idle (no stdout for {idleTimeout.Value.TotalSeconds}s) after " +
-                                $"{(DateTime.UtcNow - lastStdoutAt).TotalSeconds:0}s on VM '{vmName}'");
-                        }
-                        // WaitForExitAsync with a short grace period; throws
-                        // OperationCanceledException on TOTAL timeout/cancel.
-                        using var grace = CancellationTokenSource.CreateLinkedTokenSource(timeoutCts.Token);
-                        grace.CancelAfter(TimeSpan.FromMilliseconds(250));
-                        try { await process.WaitForExitAsync(grace.Token); }
-                        catch (OperationCanceledException) when (!timeoutCts.Token.IsCancellationRequested) { /* grace tick: loop */ }
+                        await IdleAwareWaitAsync(
+                            () => process.HasExited,
+                            token => process.WaitForExitAsync(token),
+                            () => lastStdoutAt,
+                            idleTimeout.Value,
+                            timeoutCts.Token,
+                            vmName);
                     }
-                    await process.WaitForExitAsync(timeoutCts.Token); // exited: drain to completion state
+                    catch (TimeoutException)
+                    {
+                        try { process.Kill(entireProcessTree: true); } catch { }
+                        throw;
+                    }
                 }
                 else
-                {
                     await process.WaitForExitAsync(timeoutCts.Token);
-                }
+            }
+            catch (TimeoutException) when (callbackException is not null)
+            {
+                // The callback's kill raced the idle deadline: the callback
+                // is the real cause; report it, not the timeout.
+                throw callbackException;
+            }
+            catch (OperationCanceledException) when (callbackException is not null)
+            {
+                throw callbackException;
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
@@ -282,6 +302,12 @@ namespace VMCreate
                 try { process.Kill(entireProcessTree: true); } catch { }
                 throw;
             }
+
+            // Normal exit with a captured callback exception (the handler's
+            // kill ended the process before any timeout): rethrow it so the
+            // caller sees its own failure.
+            if (callbackException is not null)
+                throw callbackException;
 
             string stdoutStr = stdout.ToString();
             string stderrStr = stderr.ToString();
@@ -316,11 +342,49 @@ namespace VMCreate
         }
 
         /// <summary>
+        /// The idle-aware wait, pulled out so tests can drive it with fake
+        /// delegates instead of a real ssh.exe. Semantics: the total
+        /// deadline is enforced by <paramref name="totalTimeoutToken"/>
+        /// (caller's CancelAfter — the wait delegate receives a grace token
+        /// linked to it, so total timeout/cancel surfaces as
+        /// OperationCanceledException from the delegate and propagates);
+        /// the idle budget bounds SILENCE — if the last-output timestamp
+        /// gets older than <paramref name="idleTimeout"/>, a
+        /// <see cref="TimeoutException"/> with a diagnostic message
+        /// (including the VM name) is thrown. 250 ms poll cadence: far below
+        /// any useful idle window, cheap to spin.
+        /// </summary>
+        internal static async Task IdleAwareWaitAsync(
+            Func<bool> hasExited,
+            Func<CancellationToken, Task> waitForExitAsync,
+            Func<DateTime> lastStdoutAt,
+            TimeSpan idleTimeout,
+            CancellationToken totalTimeoutToken,
+            string vmName)
+        {
+            while (!hasExited())
+            {
+                var idle = DateTime.UtcNow - lastStdoutAt();
+                if (idle > idleTimeout)
+                {
+                    throw new TimeoutException(
+                        $"SSH command idle (no stdout for {idle.TotalSeconds:0.0}s > {idleTimeout.TotalSeconds:0.0}s) on VM '{vmName}'");
+                }
+                using var grace = CancellationTokenSource.CreateLinkedTokenSource(totalTimeoutToken);
+                grace.CancelAfter(TimeSpan.FromMilliseconds(250));
+                try { await waitForExitAsync(grace.Token); }
+                catch (OperationCanceledException) when (!totalTimeoutToken.IsCancellationRequested)
+                { /* grace tick — loop and re-check the idle clock */ }
+            }
+            // Exited: drain to a completed state so ExitCode is available.
+            await waitForExitAsync(CancellationToken.None);
+        }
+
+        /// <summary>
         /// Filters stderr down to significant lines (drops blanks and the
         /// expected "Permanently added" known-hosts notice).
         /// </summary>
-        public static string FilterSignificantStderr(string? stderrStr)
-        {
+        public static string FilterSignificantStderr(string? stderrStr)        {
             var significantLines = (stderrStr ?? string.Empty)
                 .Split('\n')
                 .Where(line => !string.IsNullOrWhiteSpace(line)
