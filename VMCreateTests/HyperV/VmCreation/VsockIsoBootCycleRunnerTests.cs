@@ -135,13 +135,77 @@ namespace VMCreate.Tests.HyperV.VmCreation
         }
 
         [TestMethod]
+        public async Task PoweroffNonTransportError_FailsTheDeploy()
+        {
+            // sudo/systemctl exiting 1 is a REAL failure — swallowing it
+            // would wait out the shutdown budget, force-stop, and report a
+            // false success.
+            _shell
+                .Setup(m => m.RunCommandAsync("sudo systemctl --no-block poweroff", It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new Exception("SSH command failed (exit code 1): Failed to start poweroff.target: refused"));
+
+            try
+            {
+                await RunAsync(2);
+                Assert.Fail("Expected the poweroff failure to propagate");
+            }
+            catch (Exception ex)
+            {
+                StringAssert.Contains(ex.Message, "refused");
+            }
+            // Whole-body catch still stopped the VM.
+            _lifecycleManager.Verify(m => m.StopVMAsync("TestVM", It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [TestMethod]
+        public async Task GuidResolutionFailure_StopsTheVm()
+        {
+            _kvpMaintenance
+                .Setup(m => m.ResolveVmGuidAsync("TestVM", It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string?)null);
+
+            try
+            {
+                await RunAsync(2);
+                Assert.Fail("Expected InvalidOperationException");
+            }
+            catch (InvalidOperationException ex)
+            {
+                StringAssert.Contains(ex.Message, "GUID");
+            }
+            // Pre-shell failure: VM stopped, no shell existed for logs.
+            _lifecycleManager.Verify(m => m.StopVMAsync("TestVM", It.IsAny<CancellationToken>()), Times.Once);
+            _scriptRunner.Verify(m => m.RunAsync(It.IsAny<IGuestShell>(), It.IsAny<string>(), It.IsAny<VmCreationContext>(), It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
+
+        [TestMethod]
+        public async Task WaitForReadyThrow_StopsTheVm()
+        {
+            _shell
+                .Setup(m => m.WaitForReadyAsync(It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new TimeoutException("vsock SSH did not become available on VM 'TestVM' within 120s"));
+
+            try
+            {
+                await RunAsync(2);
+                Assert.Fail("Expected TimeoutException");
+            }
+            catch (TimeoutException) { /* expected */ }
+
+            _lifecycleManager.Verify(m => m.StopVMAsync("TestVM", It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [TestMethod]
         public async Task PoweroffTransportError_IsExpected_DeployStillSucceeds()
         {
             // The guest kills sshd while the poweroff command is in flight:
             // ssh exits 255. That transport error must NOT fail the deploy.
+            // The message carries a genuine transport-error phrase so
+            // IsSshTransportError classifies it (a bare "exit code 255"
+            // would not — by design).
             _shell
                 .Setup(m => m.RunCommandAsync("sudo systemctl --no-block poweroff", It.IsAny<CancellationToken>()))
-                .ThrowsAsync(new Exception("SSH command failed (exit code 255)"));
+                .ThrowsAsync(new Exception("SSH command failed (exit code 255): Connection closed by remote host"));
 
             var result = await RunAsync(2);
 
@@ -259,16 +323,19 @@ namespace VMCreate.Tests.HyperV.VmCreation
         }
 
         [TestMethod]
-        public async Task UnresolvableGuid_FailsWithActionableError_StillCleansKvp()
+        public async Task UnresolvableGuid_StillCleansKvp()
         {
             _kvpMaintenance
                 .Setup(m => m.ResolveVmGuidAsync("TestVM", It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string?)null);
 
-            var result = await RunAsync(2);
+            try
+            {
+                await RunAsync(2);
+                Assert.Fail("Expected InvalidOperationException");
+            }
+            catch (InvalidOperationException) { /* expected */ }
 
-            Assert.IsFalse(result.Success);
-            StringAssert.Contains(result.ErrorMessage, "GUID");
             _kvpMaintenance.Verify(m => m.RemoveKvpItemAsync("TestVM", "VMCREATE_SSH_PUBKEY", It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once);
         }
 

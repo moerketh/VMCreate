@@ -57,10 +57,14 @@ namespace VMCreate.HyperV.VmCreation
                 string? isoVersion = TryReadCachedIsoVersion(context.Plan.CloningIsoPath);
                 if (isoVersion is null || !isoVersion.StartsWith("2.", StringComparison.Ordinal))
                 {
-                    _logger.LogWarning(
-                        "IsoVsockEnabled is set but the cloning ISO is version {Version} (need 2.x); using the legacy runner. " +
-                        "The vsock runner will become usable once the downloader fetches vmcreate-iso 2.x.",
-                        isoVersion ?? "(no version sidecar)");
+                    string message =
+                        $"IsoVsockEnabled is set but the cloning ISO is version {isoVersion ?? "(no version sidecar)"} (need 2.x); " +
+                        "using the legacy KVP runner. The vsock runner becomes usable once the downloader fetches vmcreate-iso 2.x.";
+                    _logger.LogWarning("{Message}", message);
+                    // Also the deployment log: during W6 validation someone
+                    // can enable the flag, get a clean deploy and never
+                    // notice the legacy runner did the work.
+                    context.Logger?.LogWarning($"ISO boot-cycle: {message}");
                     return _legacy.RunAsync(context, detectedGeneration, mediaPath, customizations, progress, cancellationToken);
                 }
             }

@@ -88,6 +88,7 @@ namespace VMCreate.HyperV.VmCreation
 
             string vmName = context.Plan.VmName;
             string? sshPublicKey = null;
+            IGuestShell? shell = null;
 
             try
             {
@@ -113,18 +114,26 @@ namespace VMCreate.HyperV.VmCreation
                     {
                         await _kvpMaintenance.ModifyKvpItemAsync(vmName, KvpKeyName, sshPublicKey, cancellationToken);
                     }
-                    catch
+                    catch (Exception modifyEx)
                     {
-                        throw addEx;
+                        // Both failed: log WHY Modify failed (otherwise the
+                        // cause is invisible), then surface the original Add
+                        // error with its stack intact.
+                        _logger.LogWarning(modifyEx, "KVP Modify for {Key} also failed; surfacing the Add error", KvpKeyName);
+                        System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(addEx).Throw();
+                        throw; // unreachable
                     }
                 }
 
                 // GUID resolution must succeed — it is the vsock host string.
+                // Thrown (not returned) so the whole-body catch stops the VM:
+                // the smoke run hits this shape when the wrong ISO booted.
                 string? vmGuid = await _kvpMaintenance.ResolveVmGuidAsync(vmName, cancellationToken);
                 if (string.IsNullOrEmpty(vmGuid))
-                    return IsoBootCycleResult.Failed($"Could not resolve the VM GUID for '{vmName}' — required as the vsock host string.");
+                    throw new InvalidOperationException(
+                        $"Could not resolve the VM GUID for '{vmName}' — required as the vsock host string.");
 
-                IGuestShell shell = _guestShellFactory.CreateVsock(vmName, _sshKeyManager.GetPrivateKeyPath(customizations.CustomSshPublicKeyPath), vmGuid);
+                shell = _guestShellFactory.CreateVsock(vmName, _sshKeyManager.GetPrivateKeyPath(customizations.CustomSshPublicKeyPath), vmGuid);
 
                 progress?.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.Customize));
                 await shell.WaitForReadyAsync(cancellationToken);
@@ -136,25 +145,9 @@ namespace VMCreate.HyperV.VmCreation
                 // context log and the failed result (the GUI shows the
                 // result's DiagnosticsLog).
                 IsoBootCycleResult stepsResult;
-                try
-                {
-                    stepsResult = detectedGeneration == 1
-                        ? await RunCloneAsync(shell, context, mediaPath, customizations, progress, cancellationToken)
-                        : await RunCustomizeAsync(shell, context, customizations, progress, cancellationToken);
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    string logs = await CollectGuestLogsAsync(shell, context, $"exception: {ex.Message}");
-                    // The runner stops the VM itself: debug-preserved runs
-                    // (preserveInDebug) bypass the orchestrator's cleanup, so
-                    // leaving the VM running would strand it on the ISO.
-                    await StopVmQuietlyAsync(vmName, cancellationToken);
-                    throw;
-                }
+                stepsResult = detectedGeneration == 1
+                    ? await RunCloneAsync(shell, context, mediaPath, customizations, progress, cancellationToken)
+                    : await RunCustomizeAsync(shell, context, customizations, progress, cancellationToken);
 
                 if (!stepsResult.Success)
                 {
@@ -172,7 +165,11 @@ namespace VMCreate.HyperV.VmCreation
                 {
                     await shell.RunCommandAsync("sudo systemctl --no-block poweroff", cancellationToken);
                 }
-                catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+                // ONLY transport errors are expected here (the guest killing
+                // sshd mid-command). A real failure — sudo or systemctl
+                // exiting 1 — must NOT be swallowed: the run would wait out
+                // the whole shutdown budget, force-stop and report success.
+                catch (Exception ex) when (!cancellationToken.IsCancellationRequested && SshGuestShell.IsSshTransportError(ex))
                 {
                     context.Logger.Log($"ISO boot-cycle v2: poweroff transport error (expected if sshd died first): {ex.Message}");
                 }
@@ -201,6 +198,22 @@ namespace VMCreate.HyperV.VmCreation
                 await _bootManager.SetFirstBootToHardDrive(context.Plan, cancellationToken);
                 context.Logger.Log("ISO boot-cycle v2: finalized boot order and removed clone DVD");
                 return IsoBootCycleResult.Succeeded();
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException
+                                       || !cancellationToken.IsCancellationRequested)
+            {
+                // Whole-body catch: EVERY failure after the cycle began —
+                // GUID resolution, vsock readiness (120 s timeout), the
+                // steps, anything — stops the VM. The smoke run hits exactly
+                // these paths (wrong ISO booted, key not injected, hvc
+                // trouble), and debug-preserved runs bypass the
+                // orchestrator's cleanup, so the runner must be
+                // self-contained. Logs are collected only when a shell
+                // exists; earlier failures never had one.
+                if (shell is not null)
+                    await CollectGuestLogsAsync(shell, context, $"runner exception: {ex.Message}");
+                await StopVmQuietlyAsync(vmName, CancellationToken.None);
+                throw;
             }
             finally
             {
