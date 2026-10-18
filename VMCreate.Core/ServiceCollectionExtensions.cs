@@ -93,6 +93,7 @@ namespace VMCreate
             services.AddTransient<IPostBootCustomizationService, PostBootCustomizationService>();
             services.AddTransient<IsoBootCycleRunner>();
             services.AddTransient<VsockIsoBootCycleRunner>();
+            services.AddTransient<IVsockGuestScriptRunner, EmbeddedIsoScriptRunner>();
             services.AddTransient<IIsoBootCycleRunner, IsoBootCycleRunnerSelector>();
             services.AddTransient<IVmCreationStrategy, IsoVmCreationStrategy>();
             services.AddTransient<IVmCreationStrategy, NativeHyperVVmCreationStrategy>();

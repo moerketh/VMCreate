@@ -50,6 +50,7 @@
        VMCreate.Icons.*). -->
   <ItemGroup>
     <EmbeddedResource Include="HyperV\Steps\Scripts\*.sh" />
+    <EmbeddedResource Include="HyperV\Steps\Scripts\iso\*.sh" />
     <EmbeddedResource Include="Icons\*.svg" />
     <Content Include="gallery.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

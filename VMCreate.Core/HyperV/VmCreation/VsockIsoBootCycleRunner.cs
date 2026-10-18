@@ -146,8 +146,8 @@ namespace VMCreate.HyperV.VmCreation
                 // result's DiagnosticsLog).
                 IsoBootCycleResult stepsResult;
                 stepsResult = detectedGeneration == 1
-                    ? await RunCloneAsync(shell, context, mediaPath, customizations, progress, cancellationToken)
-                    : await RunCustomizeAsync(shell, context, customizations, progress, cancellationToken);
+                    ? await RunCloneAsync(shell, sshPublicKey, context, mediaPath, customizations, progress, cancellationToken)
+                    : await RunCustomizeAsync(shell, sshPublicKey, context, customizations, progress, cancellationToken);
 
                 if (!stepsResult.Success)
                 {
@@ -236,19 +236,19 @@ namespace VMCreate.HyperV.VmCreation
         }
 
         private async Task<IsoBootCycleResult> RunCloneAsync(
-            IGuestShell shell, VmCreationContext context, string mediaPath,
+            IGuestShell shell, string? sshPublicKey, VmCreationContext context, string mediaPath,
             VmCustomizations customizations, IProgress<CreateVMProgressInfo>? progress, CancellationToken ct)
         {
             context.Logger.Log("ISO boot-cycle v2: cloning source disk to UEFI layout");
-            return await _scriptRunner.RunAsync(shell, "clone", context, customizations, progress, ct);
+            return await _scriptRunner.RunAsync(shell, "clone", sshPublicKey, context, customizations, progress, ct);
         }
 
         private async Task<IsoBootCycleResult> RunCustomizeAsync(
-            IGuestShell shell, VmCreationContext context,
+            IGuestShell shell, string? sshPublicKey, VmCreationContext context,
             VmCustomizations customizations, IProgress<CreateVMProgressInfo>? progress, CancellationToken ct)
         {
             context.Logger.Log("ISO boot-cycle v2: customizing target disk in place");
-            return await _scriptRunner.RunAsync(shell, "customize", context, customizations, progress, ct);
+            return await _scriptRunner.RunAsync(shell, "customize", sshPublicKey, context, customizations, progress, ct);
         }
 
         /// <summary>
@@ -334,8 +334,11 @@ namespace VMCreate.HyperV.VmCreation
     {
         /// <param name="scenario">"clone" (MBR→UEFI, source+target attached)
         /// or "customize" (single target disk).</param>
+        /// <param name="sshPublicKey">The automation-user key the runner
+        /// already delivered via KVP — also becomes the scenario script's
+        /// pubkey argument (single source of truth).</param>
         Task<IsoBootCycleResult> RunAsync(
-            IGuestShell shell, string scenario, VmCreationContext context,
+            IGuestShell shell, string scenario, string? sshPublicKey, VmCreationContext context,
             VmCustomizations customizations, IProgress<CreateVMProgressInfo>? progress, CancellationToken ct);
     }
 }

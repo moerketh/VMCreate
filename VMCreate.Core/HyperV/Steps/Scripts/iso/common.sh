@@ -1,0 +1,1381 @@
+#!/bin/bash
+# VMCreate ISO guest scripts — shared library (v2, vsock cycle).
+# Ported 1:1 from hyperv-convert-iso lib/functions.sh; the KVP progress
+# protocol is GONE: the host drives this guest over SSH and parses the
+# stdout protocol lines below. plymouth updates are best-effort (no
+# daemon under the verbose GRUB entry).
+
+# Sourcing guard to prevent multiple inclusions
+[[ -n "${VMCREATE_COMMON_LOADED:-}" ]] && return
+VMCREATE_COMMON_LOADED=1
+
+# Print the NUL-terminated string in [offset, offset+size) of a pool file.
+# hv_kvp_daemon never zeroes the bytes behind a record's terminating NUL
+# (its buffer is malloc'd, not calloc'd), so readers must stop at the first
+# NUL instead of stripping all of them — otherwise stale heap memory gets
+# glued onto real values.  sed -n 1p (not head) keeps the producer alive:
+# head exits at the first line and dd dies with SIGPIPE, which would fail
+# the pipeline under `set -eo pipefail`.
+read_kvp_field() {
+    dd status=none if="$1" bs=1 skip="$2" count="$3" 2>/dev/null | tr '\0' '\n' | sed -n 1p
+}
+
+
+# Logging function with severity levels
+log() {
+    local level="$1"
+    local message="$2"
+    local timestamp
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    
+    case "$level" in
+        INFO|WARN|ERROR)
+            echo "[$timestamp] [$level] $message" | tee -a /var/log/hyperv-convert.log
+            ;;
+        *)
+            echo "[$timestamp] [INFO] $message" | tee -a /var/log/hyperv-convert.log
+            ;;
+    esac
+}
+
+# Progress reporting function that logs to console and sends to KVP
+
+# Host protocol (guest -> host, stdout; host parses via TryParse*):
+#   VMCREATE:PROGRESS:<pct>:<msg>   determinate bar (0-100)
+#   VMCREATE:MSG:<text>             status line
+# plymouth runs guest-side via the progress() helper below; the host never
+# round-trips for splash updates.
+report_progress() {
+    local step="$1"
+    local detail="$2"
+    if [ -n "$detail" ]; then
+        progress "" "$step: $detail"
+    else
+        progress "" "$step"
+    fi
+}
+
+progress() {
+    local pct="$1"
+    local msg="$2"
+    if [ -n "$pct" ]; then
+        echo "VMCREATE:PROGRESS:${pct}:${msg}"
+        plymouth system-update --progress="$pct" >/dev/null 2>&1 || true
+    else
+        echo "VMCREATE:MSG:${msg}"
+        plymouth display-message --text="$msg" >/dev/null 2>&1 || true
+    fi
+}
+# Retry function for transient failures
+# Usage: retry max_attempts delay command args...
+retry() {
+    local max_attempts=$1
+    local delay=$2
+    shift 2
+    local attempt=1
+    
+    while [ $attempt -le $max_attempts ]; do
+        if "$@"; then
+            return 0
+        fi
+        log "WARN" "[RETRY] Attempt $attempt/$max_attempts failed: $*"
+        ((attempt++))
+        sleep $delay
+    done
+    
+    log "ERROR" "[RETRY] All $max_attempts attempts failed: $*"
+    return 1
+}
+
+# Pre-flight checks function
+preflight_checks() {
+    local errors=0
+    local warnings=0
+    
+    echo "Running pre-flight checks..."
+    
+    # Check 1: New disk size >= old disk used space
+    echo "Checking disk sizes..."
+    if [ -z "$new_disk" ] || [ -z "$old_disk" ]; then
+        echo "ERROR: new_disk or old_disk variables not set"
+        ((errors++))
+    else
+        # Get disk sizes
+        new_size_bytes=$(blockdev --getsize64 "$new_disk" 2>/dev/null) || {
+            echo "ERROR: Failed to get size of new disk $new_disk"
+            ((errors++))
+        }
+        
+        # Get used space from old disk (sum of all partition sizes as approximation)
+        old_used_bytes=0
+        for part in $(lsblk -lpno NAME,TYPE "$old_disk" | grep ' part$' | awk '{print $1}'); do
+            part_size=$(blockdev --getsize64 "$part" 2>/dev/null) || continue
+            old_used_bytes=$((old_used_bytes + part_size))
+        done
+        
+        if [ $old_used_bytes -eq 0 ]; then
+            echo "ERROR: Failed to calculate used space on old disk $old_disk"
+            ((errors++))
+        else
+            echo "New disk size: $((new_size_bytes / 1024 / 1024)) MB"
+            echo "Old disk used space: $((old_used_bytes / 1024 / 1024)) MB"
+            
+            if [ "$new_size_bytes" -lt "$old_used_bytes" ]; then
+                echo "ERROR: New disk ($new_disk) is smaller than old disk used space"
+                progress "" "PREFLIGHT: new disk smaller than source used space"
+                ((errors++))
+            else
+                echo "Disk size check PASSED"
+            fi
+        fi
+    fi
+    
+    # Check 2: Required tools are available
+    echo "Checking required tools..."
+    local required_tools=(
+        "partclone.ext4"
+        "partclone.vfat" 
+        "sgdisk"
+        "mkfs.vfat"
+        "mkfs.ext4"
+        "mount"
+        "umount"
+        "rsync"
+        "chroot"
+        "blockdev"
+        "lsblk"
+        "blkid"
+        "partprobe"
+    )
+    
+    local missing_tools=()
+    for tool in "${required_tools[@]}"; do
+        if ! command -v "$tool" >/dev/null 2>&1; then
+            missing_tools+=("$tool")
+            ((errors++))
+        fi
+    done
+    
+    if [ ${#missing_tools[@]} -gt 0 ]; then
+        echo "ERROR: Missing required tools: ${missing_tools[*]}"
+        progress "" "PREFLIGHT: missing tools: ${missing_tools[*]}"
+    else
+        echo "Required tools check PASSED"
+    fi
+    
+    # Check 3 (v2): the KVP daemon still delivers the host-sent pubkey at
+    # boot, but guest->host KVP writes no longer exist; nothing to verify.
+    echo "KVP accessibility check skipped (v2: host-sent only)"
+
+    # Summary
+    echo "Pre-flight checks completed:"
+    echo "  Errors: $errors"
+    echo "  Warnings: $warnings"
+    
+    if [ $errors -gt 0 ]; then
+        echo "ERROR: Pre-flight checks failed with $errors error(s). Aborting."
+        exit 1
+    elif [ $warnings -gt 0 ]; then
+        echo "WARNING: Pre-flight checks completed with $warnings warning(s). Proceeding with caution."
+    else
+        echo "SUCCESS: All pre-flight checks passed."
+    fi
+}
+
+# Cleanup function to unmount bind mounts in reverse order
+cleanup_mounts() {
+    # Unmount all bind mounts in REVERSE order with checks
+    if mount | grep -q "/mnt/new/etc/resolv.conf"; then
+        umount -lf /mnt/new/etc/resolv.conf 2>/dev/null || true
+    fi
+    if mount | grep -q "/mnt/new/sys/firmware/efi/efivars"; then
+        umount -lf /mnt/new/sys/firmware/efi/efivars 2>/dev/null || true
+    fi
+    if mount | grep -q "/mnt/new/dev/pts"; then
+        umount -lf /mnt/new/dev/pts 2>/dev/null || true
+    fi
+    if mount | grep -q "/mnt/new/sys"; then
+        umount -lf /mnt/new/sys 2>/dev/null || true
+    fi
+    if mount | grep -q "/mnt/new/proc"; then
+        umount -lf /mnt/new/proc 2>/dev/null || true
+    fi
+    if mount | grep -q "/mnt/new/dev"; then
+        umount -lf /mnt/new/dev 2>/dev/null || true
+    fi
+    # Unmount any fstab-based mounts (e.g. /home) before boot/efi and root
+    for mp in $(mount | grep '/mnt/new/' | grep -v '/mnt/new/\(dev\|proc\|sys\|boot/efi\|etc/resolv\)' | awk '{print $3}' | sort -r); do
+        umount -lf "$mp" 2>/dev/null || true
+    done
+    if mount | grep -q "/mnt/new/boot/efi"; then
+        umount -lf /mnt/new/boot/efi 2>/dev/null || true
+    fi
+    if mount | grep -q "/mnt/new"; then
+        umount -lf /mnt/new 2>/dev/null || true
+    fi
+    # Create flag file for getty override
+    touch /run/autorun-done
+}
+
+# Function to read KVP values from pool (extracted from inline code)
+
+# Function to read a specific KVP value by key name
+
+# Function to detect new (empty) and old (has partitions) disks
+# Sets global variables: new_disk, old_disk, new_size, old_size
+detect_disks() {
+    local disks part_count temp
+    
+    disks=(/dev/sd[a-z])
+    new_disk=""
+    old_disk=""
+    
+    for disk in "${disks[@]}"; do
+        part_count=$(lsblk -l -o NAME -n "$disk" | wc -l)
+        if [ "$part_count" -eq 1 ]; then
+            new_disk=$disk
+        else
+            old_disk=$disk
+        fi
+    done
+
+    if [ -z "$new_disk" ] || [ -z "$old_disk" ]; then
+        echo "Could not detect new (empty) or old disk. Aborting." | tee -a /tmp/error.log
+        exit 1
+    fi
+
+    # Fallback to size if detection ambiguous
+    new_size=$(blockdev --getsz "$new_disk")
+    old_size=$(blockdev --getsz "$old_disk")
+    if (( new_size < old_size )); then
+        # Swap if sizes don't match expected
+        temp=$new_disk
+        new_disk=$old_disk
+        old_disk=$temp
+        # Also swap the sizes
+        temp=$new_size
+        new_size=$old_size
+        old_size=$temp
+    fi
+
+    export new_disk old_disk new_size old_size
+    
+    echo "New disk: $new_disk (size $new_size sectors), Old disk: $old_disk (size $old_size sectors)" | tee -a /tmp/detection.log
+}
+
+# Function to detect partitions on old disk
+# Returns global variables: root_part, esp_part, boot_part, old_esp_uuid, old_boot_uuid, old_esp_label, old_boot_label, boot_device
+detect_partitions() {
+    local old_disk="$1"
+    local partitions temp_check part fs_type esp_device boot_device
+    local uuid label part_num
+    
+    partitions=$(lsblk -lpno NAME,TYPE "$old_disk" | grep ' part$' | awk '{print $1}')
+    
+    temp_check="/tmp/check_root"
+    mkdir -p "$temp_check"
+    
+    # Initialize global variables
+    root_part=""
+    esp_part=""
+    boot_part=""
+    old_esp_uuid=""
+    old_boot_uuid=""
+    old_esp_label=""
+    old_boot_label=""
+    boot_device=""
+    local root_found=false
+    
+    for part in $partitions; do
+        fs_type=$(blkid -o value -s TYPE "$part")
+
+        if [[ ! "$fs_type" =~ ^(ext[234]|btrfs|xfs)$ ]]; then
+            continue
+        fi
+
+        # Temporarily mount to check if it's root
+        if mount -o ro "$part" "$temp_check" 2>/dev/null; then
+            if [ -f "$temp_check/etc/fstab" ] && [ -d "$temp_check/bin" ]; then
+                root_found=true
+                root_part="$part"
+                echo "Detected root partition: $root_part (fs: $fs_type)"
+
+                # Parse fstab for /boot and /boot/efi
+                esp_device=$(awk '$2 == "/boot/efi" {print $1}' "$temp_check/etc/fstab")
+                if [ ! -z "$esp_device" ]; then
+                    echo "Detected ESP mount in fstab: $esp_device"
+                fi
+
+                boot_device=$(awk '$2 == "/boot" {print $1}' "$temp_check/etc/fstab")
+                if [ ! -z "$boot_device" ]; then
+                    echo "Detected separate /boot mount in fstab: $boot_device"
+                fi
+
+                umount "$temp_check"
+                break  # Assume only one root
+            fi
+            umount "$temp_check"
+        fi
+
+        # btrfs subvolume handling: many distros (Parrot, openSUSE, Fedora)
+        # put root in a subvolume like @ or @rootfs. A plain mount shows
+        # the top-level tree which lacks /etc/fstab and /bin.
+        if [ "$fs_type" = "btrfs" ] && ! $root_found; then
+            for subvol in @ @rootfs; do
+                if mount -o ro,subvol="$subvol" "$part" "$temp_check" 2>/dev/null; then
+                    if [ -f "$temp_check/etc/fstab" ] && [ -d "$temp_check/bin" ]; then
+                        root_found=true
+                        root_part="$part"
+                        echo "Detected root partition: $root_part (fs: $fs_type, subvol: $subvol)"
+
+                        esp_device=$(awk '$2 == "/boot/efi" {print $1}' "$temp_check/etc/fstab")
+                        if [ ! -z "$esp_device" ]; then
+                            echo "Detected ESP mount in fstab: $esp_device"
+                        fi
+
+                        boot_device=$(awk '$2 == "/boot" {print $1}' "$temp_check/etc/fstab")
+                        if [ ! -z "$boot_device" ]; then
+                            echo "Detected separate /boot mount in fstab: $boot_device"
+                        fi
+
+                        umount "$temp_check"
+                        break
+                    fi
+                    umount "$temp_check"
+                fi
+            done
+            $root_found && break
+        fi
+    done
+
+    rmdir "$temp_check"
+
+    if ! $root_found; then
+        echo "Error: No valid root partition found on $old_disk."
+        exit 1
+    fi
+
+    # Resolve esp_part if esp_device present
+    if [ ! -z "$esp_device" ]; then
+        if [[ "$esp_device" == UUID=* ]]; then
+            uuid="${esp_device#UUID=}"
+            esp_part=$(blkid -U "$uuid")
+            old_esp_uuid="$uuid"
+        elif [[ "$esp_device" == LABEL=* ]]; then
+            label="${esp_device#LABEL=}"
+            esp_part=$(blkid -L "$label")
+            old_esp_label="$label"
+        elif [[ "$esp_device" == /dev/* ]]; then
+            # Remap device to current old_disk if necessary
+            if [[ "$esp_device" == ${old_disk}* ]]; then
+                esp_part="$esp_device"
+            else
+                # Original device uses different letter; remap to old_disk
+                part_num=$(echo "$esp_device" | sed 's/^\/dev\/sd[a-z]\([0-9]*\)$/\1/')
+                esp_part="${old_disk}${part_num}"
+                echo "Remapped ESP device from $esp_device to $esp_part"
+            fi
+            old_esp_uuid=$(blkid -s UUID -o value "$esp_part")
+        fi
+        if [ -z "$esp_part" ]; then
+            echo "Warning: Could not resolve ESP partition from $esp_device. Skipping clone."
+        else
+            fs_type=$(blkid -o value -s TYPE "$esp_part")
+            if [ "$fs_type" != "vfat" ]; then
+                echo "Warning: ESP partition $esp_part is not vfat. Skipping clone."
+                esp_part=""
+            fi
+        fi
+    fi
+
+    # Resolve boot_part if boot_device present
+    if [ ! -z "$boot_device" ]; then
+        if [[ "$boot_device" == UUID=* ]]; then
+            uuid="${boot_device#UUID=}"
+            boot_part=$(blkid -U "$uuid")
+            old_boot_uuid="$uuid"
+        elif [[ "$boot_device" == LABEL=* ]]; then
+            label="${boot_device#LABEL=}"
+            boot_part=$(blkid -L "$label")
+            old_boot_label="$label"
+        elif [[ "$boot_device" == /dev/* ]]; then
+            # Remap device to current old_disk if necessary
+            if [[ "$boot_device" == ${old_disk}* ]]; then
+                boot_part="$boot_device"
+            else
+                # Original device uses different letter; remap to old_disk
+                part_num=$(echo "$boot_device" | sed 's/^\/dev\/sd[a-z]\([0-9]*\)$/\1/')
+                boot_part="${old_disk}${part_num}"
+                echo "Remapped boot device from $boot_device to $boot_part"
+            fi
+            old_boot_uuid=$(blkid -s UUID -o value "$boot_part")
+        fi
+        if [ -z "$boot_part" ]; then
+            echo "Warning: Could not resolve /boot partition from $boot_device. Skipping merge."
+        else
+            fs_type=$(blkid -o value -s TYPE "$boot_part")
+            if [[ ! "$fs_type" =~ ^ext[234]$ ]]; then
+                echo "Warning: /boot partition $boot_part is not ext*. Skipping merge."
+                boot_part=""
+            fi
+        fi
+    fi
+    
+    # Export global variables for calling script
+    export root_part esp_part boot_part old_esp_uuid old_boot_uuid old_esp_label old_boot_label boot_device
+}
+
+# Verify cloned partitions are clean
+# Args: root_partition esp_partition
+verify_clone() {
+    local root_part=$1
+    local esp_part=$2
+    local errors=0
+    
+    log "INFO" "Verifying cloned filesystems..."
+    
+    # Check root partition (ext4)
+    if command -v e2fsck >/dev/null; then
+        if e2fsck -n "$root_part" >/dev/null 2>&1; then
+            log "INFO" "Root partition $root_part verification PASSED"
+        else
+            log "ERROR" "Root partition $root_part verification FAILED"
+            ((errors++))
+        fi
+    else
+        log "WARN" "e2fsck not available, skipping root verification"
+    fi
+    
+    # Check ESP (vfat)
+    if command -v fsck.vfat >/dev/null; then
+        if fsck.vfat -n "$esp_part" >/dev/null 2>&1; then
+            log "INFO" "ESP partition $esp_part verification PASSED"
+        else
+            log "ERROR" "ESP partition $esp_part verification FAILED"
+            ((errors++))
+        fi
+    else
+        log "WARN" "fsck.vfat not available, skipping ESP verification"
+    fi
+    
+    return $errors
+}
+
+# Function to update fstab with new UUIDs
+update_fstab() {
+    local fstab_path="$1"
+    local root_part="$2" new_esp_part="$3" new_root_part="$4"
+    local old_root_uuid new_esp_uuid new_root_uuid old_esp_uuid boot_device_esc
+    
+    echo "Updating fstab at $fstab_path"
+
+    old_root_uuid=$(blkid -s UUID -o value $root_part)
+    new_esp_uuid=$(blkid -s UUID -o value $new_esp_part)
+    new_root_uuid=$(blkid -s UUID -o value $new_root_part)
+
+    if [ -f "$fstab_path" ]; then
+        sed -i "s/$old_root_uuid/$new_root_uuid/g" "$fstab_path"
+        if [ ! -z "$esp_part" ]; then
+            if [ -z "$old_esp_uuid" ]; then old_esp_uuid=$(blkid -s UUID -o value $esp_part); fi
+            sed -i "s/$old_esp_uuid/$new_esp_uuid/g" "$fstab_path"
+        else
+            if ! grep -q '/boot/efi' "$fstab_path"; then
+                echo "Adding new /boot/efi entry to fstab."
+                echo "UUID=$new_esp_uuid /boot/efi vfat defaults 0 2" >> "$fstab_path"
+            else
+                echo "/boot/efi already in fstab; no addition needed."
+            fi
+        fi
+
+        # Comment out swap entries — the new GPT disk has no swap partition,
+        # so stale swap UUIDs would cause a ~90s boot delay.
+        if grep -qE '^[^#].*\bswap\b' "$fstab_path"; then
+            echo "Commenting out swap entries in fstab (no swap on new disk)."
+            sed -i '/\bswap\b/s/^/#/' "$fstab_path"
+        fi
+
+        if [ -n "$boot_part" ]; then
+            echo "Removing separate /boot entry from fstab."
+            if [ -n "$old_boot_uuid" ]; then
+              sed -i "/UUID=$old_boot_uuid/d" "$fstab_path"
+            elif [ -n "$old_boot_label" ]; then
+              sed -i "/LABEL=$old_boot_label/d" "$fstab_path"
+            elif [[ "$boot_device" == /dev/* ]]; then
+              boot_device_esc=$(echo "$boot_device" | sed 's/\//\\\//g')
+              sed -i "/^${boot_device_esc}[ \t]/d" "$fstab_path"
+            fi
+        fi
+    else
+        echo "fstab not found after cloning, creating a new one with root and ESP entries."
+        mkdir -p "$(dirname "$fstab_path")"
+        cat << EOF > "$fstab_path"
+UUID=$new_root_uuid / ext4 defaults 0 1
+UUID=$new_esp_uuid /boot/efi vfat defaults 0 2
+EOF
+    fi
+}
+
+# ── DNS resolution for chroot ────────────────────────────────────────
+# Many distros (Arch, Fedora, NixOS) use a symlink for /etc/resolv.conf
+# that points into /run/systemd/resolve/ which doesn't exist inside
+# the ISO.  A bind-mount over a dangling symlink fails silently,
+# leaving the chroot without DNS.
+#
+# The host can pass nameservers via the VMCREATE_NAMESERVERS KVP
+# (comma-separated IPs, e.g. "192.168.1.1,10.0.0.1").  When present,
+# those are written directly.  Otherwise, the running ISO's
+# resolv.conf is copied as a fallback.
+setup_chroot_dns() {
+    local target="$1/etc/resolv.conf"
+    # Remove dangling symlink so we can write a real file
+    if [ -L "$target" ]; then
+        rm -f "$target"
+        echo "Removed dangling resolv.conf symlink in chroot"
+    fi
+
+    # Host-supplied nameservers arrive as the second argument (v2; was KVP)
+    local kvp_ns="${2:-}"
+    if [ -n "$kvp_ns" ]; then
+        # Parse comma-separated IPs into individual nameserver lines
+        : > "$target"
+        IFS=',' read -ra ns_list <<< "$kvp_ns"
+        for ns in "${ns_list[@]}"; do
+            ns=$(echo "$ns" | tr -d '[:space:]')
+            [ -n "$ns" ] && printf 'nameserver %s\n' "$ns" >> "$target"
+        done
+        echo "Configured DNS in chroot from host args: $(cat "$target")"
+        return
+    fi
+
+    # Fallback: copy the running ISO's resolv.conf (which has working DNS)
+    if [ -f /etc/resolv.conf ] && [ -s /etc/resolv.conf ]; then
+        cp -L /etc/resolv.conf "$target"
+    fi
+    echo "Configured DNS in chroot: $(cat "$target")"
+}
+
+# ── Create the vmcreate automation user (distro-agnostic) ────────────
+# Works on Debian/Ubuntu (adduser), Arch (useradd), Fedora/RHEL (useradd)
+# and detects the correct admin group (sudo vs wheel).
+create_automation_user() {
+    local root="$1"       # chroot root, e.g. /mnt/new
+    local ssh_pubkey="$2"  # SSH public key string
+
+    chroot "$root" /bin/bash -c '
+        # Ensure sudo is available (Arch minimal may not ship it)
+        if ! command -v sudo >/dev/null 2>&1; then
+            if command -v pacman >/dev/null 2>&1; then
+                pacman -S --noconfirm sudo 2>&1 || true
+            fi
+        fi
+
+        # Create vmcreate user if it does not exist
+        if ! id vmcreate >/dev/null 2>&1; then
+            if command -v adduser >/dev/null 2>&1 && adduser --help 2>&1 | grep -q "\-\-gecos"; then
+                # Debian/Ubuntu style
+                adduser --disabled-password --gecos "VMCreate Automation" vmcreate
+            else
+                # Arch/Fedora/RHEL style
+                useradd -m -c "VMCreate Automation" -s /bin/bash vmcreate
+            fi
+        fi
+
+        # Detect admin group: Debian=sudo, Arch/Fedora=wheel
+        if getent group sudo >/dev/null 2>&1; then
+            usermod -aG sudo vmcreate
+        elif getent group wheel >/dev/null 2>&1; then
+            usermod -aG wheel vmcreate
+        fi
+
+        # Ensure vmcreate is in whatever group owns the sudo binary.
+        if [ -x /usr/bin/stat ]; then
+            sudo_gid=$(stat -c %g /usr/bin/sudo 2>/dev/null)
+            if [ -n "$sudo_gid" ] && [ "$sudo_gid" != "0" ]; then
+                sudo_group=$(getent group "$sudo_gid" 2>/dev/null | cut -d: -f1)
+                if [ -n "$sudo_group" ]; then
+                    usermod -aG "$sudo_group" vmcreate
+                fi
+            fi
+        fi
+
+        mkdir -p /etc/sudoers.d
+        echo "vmcreate ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/vmcreate
+        chmod 0440 /etc/sudoers.d/vmcreate
+
+        # Install SSH public key
+        mkdir -p /home/vmcreate/.ssh
+        echo "'"$ssh_pubkey"'" > /home/vmcreate/.ssh/authorized_keys
+        chown -R vmcreate:vmcreate /home/vmcreate/.ssh
+        chmod 700 /home/vmcreate/.ssh
+        chmod 600 /home/vmcreate/.ssh/authorized_keys
+
+        # Ensure pubkey auth is enabled
+        sed -i "s/^#\?PubkeyAuthentication .*/PubkeyAuthentication yes/" /etc/ssh/sshd_config
+    ' || echo "WARNING: Automation user setup failed (non-fatal)" | tee -a /tmp/error.log
+}
+
+# ── Hyper-V integration shared helpers ───────────────────────────────
+# These functions are called by both autorun.sh and customize_only.sh
+# to avoid duplicating integration logic in two places.
+
+# Capture SSH state before any chroot apt calls that might enable SSH.
+# Creates a marker file that the post-boot DisableSshStep reads.
+# Usage: capture_ssh_state /mnt/new
+capture_ssh_state() {
+    local root="$1"
+    local _wants="$root/etc/systemd/system/multi-user.target.wants"
+    mkdir -p "$_wants"
+    local _ssh_already_enabled=false
+    for _svc in ssh sshd; do
+        if [ -L "$_wants/${_svc}.service" ]; then
+            _ssh_already_enabled=true
+            break
+        fi
+    done
+    if [ "$_ssh_already_enabled" = "false" ]; then
+        mkdir -p "$root/var/lib/vmcreate"
+        touch "$root/var/lib/vmcreate/.ssh_was_disabled"
+        echo "SSH was not enabled — marked for post-boot restore"
+    fi
+}
+
+# ── Tor SOCKS proxy for apt-transport-tor ────────────────────────────
+# Some distros route all APT traffic through Tor (tor+https://
+# transport).  The chroot shares the ISO's network namespace, so if we
+# start a Tor daemon on the ISO it makes 127.0.0.1:9050 available inside
+# the chroot transparently.  These functions are no-ops when the target
+# disk has no tor+ APT sources.
+
+# Global flag so stop_tor_if_running knows whether we started it.
+_VMCREATE_TOR_STARTED=false
+
+# Check whether the target root filesystem uses tor+https:// or tor+http://
+# in any APT source file.  Returns 0 (true) if tor sources are found.
+# Usage: _has_tor_apt_sources /mnt/new
+_has_tor_apt_sources() {
+    local root="$1"
+    [ -d "$root/etc/apt" ] || return 1
+    # .list files: lines starting with deb or deb-src
+    if grep -rqs 'tor+https\?://' "$root/etc/apt/sources.list" "$root/etc/apt/sources.list.d/"*.list 2>/dev/null; then
+        return 0
+    fi
+    # DEB822 .sources files: URIs: field
+    if grep -rqs 'tor+https\?://' "$root/etc/apt/sources.list.d/"*.sources 2>/dev/null; then
+        return 0
+    fi
+    return 1
+}
+
+# Start Tor on the live ISO if the target disk uses tor+ APT sources.
+# Waits for the SOCKS proxy to accept connections (up to 60s for circuit build).
+# Usage: start_tor_if_needed /mnt/new
+start_tor_if_needed() {
+    local root="$1"
+    if ! _has_tor_apt_sources "$root"; then
+        return 0
+    fi
+    echo "Detected tor+https APT sources — starting Tor daemon on ISO"
+    # Start tor in the background (ISO's own tor binary, not the chroot's)
+    tor --runasdaemon 1 --SocksPort 9050 --DataDirectory /tmp/tor-data --Log "notice stdout" 2>&1 | head -5 &
+    # Wait for the SOCKS port to accept connections
+    local elapsed=0
+    while [ $elapsed -lt 60 ]; do
+        if (echo > /dev/tcp/127.0.0.1/9050) 2>/dev/null; then
+            echo "Tor SOCKS proxy ready after ${elapsed}s"
+            _VMCREATE_TOR_STARTED=true
+            return 0
+        fi
+        sleep 2
+        elapsed=$((elapsed + 2))
+        if (( elapsed % 10 == 0 )); then
+            echo "Waiting for Tor to bootstrap... ${elapsed}s"
+        fi
+    done
+    echo "WARNING: Tor did not bootstrap within 60s — apt-transport-tor may fail"
+    _VMCREATE_TOR_STARTED=true
+    return 0
+}
+
+# Stop the Tor daemon if we started it.
+# Usage: stop_tor_if_running
+stop_tor_if_running() {
+    if [ "$_VMCREATE_TOR_STARTED" = "true" ]; then
+        echo "Stopping Tor daemon"
+        pkill -x tor 2>/dev/null || true
+        _VMCREATE_TOR_STARTED=false
+    fi
+}
+
+# ── Configure temporary second NIC for post-boot SSH ─────────────────
+# When a guest uses ifupdown with only static interface configs and no
+# higher-level network manager (netplan / NetworkManager / systemd-networkd),
+# a hot-added Hyper-V NIC won't get an IP automatically.  Additionally,
+# guests with restrictive firewalls may block DHCP and SSH traffic.
+#
+# VMCreate adds a temporary second NIC ("VMCreate Temp") on the Default
+# Switch for post-boot SSH.  This function:
+#   1. Writes DHCP config for eth1 via interfaces.d (belt-and-suspenders)
+#   2. Installs a systemd oneshot service that:
+#      a. Opens firewall rules on eth1 only (nft/iptables if present)
+#      b. Brings up eth1 and obtains a DHCP lease
+#   3. Writes a self-contained cleanup script that the C# post-boot step
+#      executes — no hardcoded paths in C#.
+# Usage: configure_temp_nic /mnt/new
+
+# Returns 0 if the guest needs explicit DHCP config for new NICs.
+_needs_temp_nic() {
+    local root="$1"
+    local ifaces="$root/etc/network/interfaces"
+    local ifaces_d="$root/etc/network/interfaces.d"
+
+    # Must use ifupdown
+    [ -f "$ifaces" ] || return 1
+
+    # Must have at least one static interface (check main file + interfaces.d/)
+    # Anchor to 'iface' keyword to skip commented-out lines (e.g. #iface eth0 inet dhcp)
+    grep -rqE '^\s*iface\s+\S+\s+inet\s+static' "$ifaces" "$ifaces_d" 2>/dev/null || return 1
+
+    # If any interface already uses DHCP, the stack can handle new NICs
+    grep -rqE '^\s*iface\s+\S+\s+inet\s+dhcp' "$ifaces" "$ifaces_d" 2>/dev/null && return 1
+
+    # Skip if a higher-level network manager is present
+    ls "$root/etc/netplan/"*.yaml >/dev/null 2>&1 && return 1
+    [ -d "$root/etc/NetworkManager/system-connections" ] && \
+        [ "$(ls -A "$root/etc/NetworkManager/system-connections/" 2>/dev/null)" ] && return 1
+    ls "$root/etc/systemd/network/"*.network >/dev/null 2>&1 && return 1
+
+    return 0
+}
+
+configure_temp_nic() {
+    local root="$1"
+    _needs_temp_nic "$root" || return 0
+    echo "Static-only ifupdown networking detected — configuring temporary NIC (eth1)"
+
+    # ── 1. interfaces.d fallback (works if no firewall blocks DHCP) ──
+    local ifaces="$root/etc/network/interfaces"
+    if [ -f "$ifaces" ]; then
+        if ! grep -q 'source /etc/network/interfaces.d/' "$ifaces" && \
+           ! grep -q 'source-directory /etc/network/interfaces.d' "$ifaces"; then
+            echo "" >> "$ifaces"
+            echo "source /etc/network/interfaces.d/*" >> "$ifaces"
+            echo "Added interfaces.d source line to $ifaces"
+        fi
+    fi
+
+    mkdir -p "$root/etc/network/interfaces.d"
+    cat > "$root/etc/network/interfaces.d/vmcreate-temp-dhcp" <<'EOF'
+# Temporary VMCreate override — DHCP on the second Hyper-V NIC for post-boot SSH.
+# Removed automatically after post-boot completes.
+auto eth1
+iface eth1 inet dhcp
+EOF
+    echo "Created /etc/network/interfaces.d/vmcreate-temp-dhcp"
+
+    # ── 1b. Ensure a DHCP client is available ────────────────────────
+    if ! chroot "$root" sh -c 'command -v dhclient >/dev/null 2>&1 || command -v dhcpcd >/dev/null 2>&1 || command -v udhcpc >/dev/null 2>&1'; then
+        echo "No DHCP client found — installing isc-dhcp-client"
+        chroot "$root" apt-get update -qq 2>&1 || true
+        chroot "$root" apt-get install -y -qq isc-dhcp-client 2>&1 || echo "WARNING: failed to install isc-dhcp-client"
+    fi
+
+    # ── 2. systemd oneshot: open firewall for eth1 + DHCP ──────────
+    mkdir -p "$root/usr/local/bin"
+    cat > "$root/usr/local/bin/vmcreate-temp-net.sh" <<'SCRIPT'
+#!/bin/bash
+# VMCreate: open firewall for eth1 and obtain DHCP lease.
+# Runs AFTER the distro firewall has finished loading (After=network.target),
+# so nft/iptables insert puts our rules at the top of the already-populated
+# chains.  Rules are scoped to eth1 only — other interfaces are untouched.
+#
+# Both nft and iptables sections run unconditionally (not elif) because
+# Debian systems often ship both binaries.  nft tries both the native
+# "inet filter" table and the iptables-nft translated "ip filter" table.
+set -e
+
+# Kill any stale DHCP client from a previous failed attempt (e.g. ifupdown)
+pkill -f 'dhclient.*eth1' || true
+pkill -f 'dhcpcd.*eth1' || true
+sleep 1
+
+ip link show eth1 || true
+
+# ── nft rules (try both table families) ──────────────────────────────
+if command -v nft >/dev/null 2>&1; then
+    # Native nftables table (inet family)
+    nft insert rule inet filter input  iifname "eth1" counter accept 2>/dev/null || true
+    nft insert rule inet filter output oifname "eth1" counter accept 2>/dev/null || true
+    # iptables-nft translated table (ip family)
+    nft insert rule ip filter INPUT  iifname "eth1" counter accept 2>/dev/null || true
+    nft insert rule ip filter OUTPUT oifname "eth1" counter accept 2>/dev/null || true
+fi
+
+# ── iptables rules (always, not elif) ────────────────────────────────
+if command -v iptables >/dev/null 2>&1; then
+    iptables -I INPUT  -i eth1 -j ACCEPT || true
+    iptables -I OUTPUT -o eth1 -j ACCEPT || true
+fi
+
+ip link set eth1 up || true
+if command -v dhclient >/dev/null 2>&1; then
+    dhclient -1 eth1 || true
+elif command -v dhcpcd >/dev/null 2>&1; then
+    dhcpcd -1 eth1 || true
+elif command -v udhcpc >/dev/null 2>&1; then
+    udhcpc -i eth1 -n -q || true
+else
+    ifup eth1 2>/dev/null || true
+fi
+SCRIPT
+    chmod 755 "$root/usr/local/bin/vmcreate-temp-net.sh"
+    echo "Created /usr/local/bin/vmcreate-temp-net.sh"
+
+    mkdir -p "$root/etc/systemd/system"
+    cat > "$root/etc/systemd/system/vmcreate-temp-net.service" <<'UNIT'
+[Unit]
+Description=VMCreate temporary NIC setup (firewall + DHCP on eth1)
+After=network.target
+Before=ssh.service sshd.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/vmcreate-temp-net.sh
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+    echo "Created /etc/systemd/system/vmcreate-temp-net.service"
+
+    # Enable via symlink (we're in a chroot, can't run systemctl)
+    mkdir -p "$root/etc/systemd/system/multi-user.target.wants"
+    ln -sf /etc/systemd/system/vmcreate-temp-net.service \
+        "$root/etc/systemd/system/multi-user.target.wants/vmcreate-temp-net.service"
+    echo "Enabled vmcreate-temp-net.service"
+
+    # ── 3. Self-contained cleanup script ─────────────────────────────
+    mkdir -p "$root/var/lib/vmcreate"
+    cat > "$root/var/lib/vmcreate/restore_net.sh" <<'CLEANUP'
+#!/bin/bash
+# VMCreate: undo temporary NIC configuration.
+# Executed by CleanupTemporaryNicStep over SSH, then self-deletes.
+set -e
+
+# Disable and remove the systemd service
+systemctl disable vmcreate-temp-net.service 2>/dev/null || true
+rm -f /etc/systemd/system/vmcreate-temp-net.service
+rm -f /etc/systemd/system/multi-user.target.wants/vmcreate-temp-net.service
+rm -f /usr/local/bin/vmcreate-temp-net.sh
+
+# Remove interfaces.d DHCP config
+rm -f /etc/network/interfaces.d/vmcreate-temp-dhcp
+
+# Remove firewall rules for eth1 (try both nft families + iptables)
+if command -v nft >/dev/null 2>&1; then
+    for family_table in "inet filter" "ip filter"; do
+        for chain in input output INPUT OUTPUT; do
+            iface_key="eth1"
+            case "$chain" in input|INPUT) field="iifname" ;; *) field="oifname" ;; esac
+            handle=$(nft -a list chain $family_table "$chain" 2>/dev/null \
+                | grep "$field \"$iface_key\"" \
+                | grep -oP 'handle \K[0-9]+' | head -1) || true
+            [ -n "$handle" ] && nft delete rule $family_table "$chain" handle "$handle" 2>/dev/null || true
+        done
+    done
+fi
+if command -v iptables >/dev/null 2>&1; then
+    iptables -D INPUT -i eth1 -j ACCEPT 2>/dev/null || true
+    iptables -D OUTPUT -o eth1 -j ACCEPT 2>/dev/null || true
+fi
+
+# Bring down eth1
+ip link set eth1 down 2>/dev/null || true
+
+# Self-delete
+rm -f /var/lib/vmcreate/restore_net.sh
+echo 'Temporary NIC configuration removed'
+CLEANUP
+    chmod 755 "$root/var/lib/vmcreate/restore_net.sh"
+    echo "Created cleanup script /var/lib/vmcreate/restore_net.sh"
+}
+
+# Remove conflicting apt sources that prevent apt-get update from working.
+# E.g. REMnux ships both .list and .sources for Microsoft repos with
+# different Signed-By values.
+# Usage: fix_apt_repo_conflicts /mnt/new
+fix_apt_repo_conflicts() {
+    local root="$1"
+    if [ -f "$root/etc/apt/sources.list.d/microsoft-prod.list" ] && \
+       [ -f "$root/etc/apt/sources.list.d/microsoft.sources" ]; then
+        rm -f "$root/etc/apt/sources.list.d/microsoft-prod.list"
+        echo "Removed duplicate Microsoft repo file to fix apt conflict"
+    fi
+}
+
+# Install Hyper-V guest integration packages.
+# Package names differ across distros: Ubuntu uses linux-cloud-tools-*,
+# Fedora/RHEL uses hyperv-daemons, Arch uses hyperv.
+# Usage: install_hyperv_packages /mnt/new
+install_hyperv_packages() {
+    local root="$1"
+    local _kver
+    _kver=$(ls "$root/lib/modules/" 2>/dev/null | sort -V | tail -1)
+
+    echo "Installing Hyper-V guest optimizations..."
+
+    if chroot "$root" /bin/bash -c "
+        export DEBIAN_FRONTEND=noninteractive
+        if command -v apt-get >/dev/null 2>&1; then
+            apt-get update -y -qq
+            KVER=\"${_kver}\"
+            # Try Ubuntu packages first, fall back to Debian's hyperv-daemons
+            if apt-get install -y -qq linux-cloud-tools-common 2>&1; then
+                echo 'Installed linux-cloud-tools-common (Ubuntu)'
+                if [ -n \"\$KVER\" ]; then
+                    apt-get install -y -qq \"linux-cloud-tools-\${KVER}\" 2>&1 || true
+                fi
+            elif apt-get install -y -qq hyperv-daemons 2>&1; then
+                echo 'Installed hyperv-daemons (Debian/Parrot)'
+            else
+                echo 'WARNING: Could not install Hyper-V integration packages'
+            fi
+            apt-get install -y -qq openssh-server 2>&1
+        elif command -v dnf >/dev/null 2>&1; then
+            dnf install -y -q hyperv-daemons openssh-server 2>&1
+        elif command -v yum >/dev/null 2>&1; then
+            yum install -y -q hyperv-daemons openssh-server 2>&1
+        elif command -v pacman >/dev/null 2>&1; then
+            pacman-key --init 2>&1 && pacman-key --populate archlinux 2>&1 || true
+            pacman -Sy --noconfirm hyperv openssh sudo 2>&1
+        else
+            echo 'Unknown package manager — skipping Hyper-V optimization'
+            exit 1
+        fi
+        # Try enabling services in chroot (unreliable but harmless)
+        for svc in hv-kvp-daemon hv_kvp_daemon hv-vss-daemon hv_vss_daemon hv-fcopy-daemon hv_fcopy_daemon; do
+            systemctl enable \"\${svc}.service\" 2>/dev/null || true
+        done
+        systemctl enable ssh.service 2>/dev/null || systemctl enable sshd.service 2>/dev/null || true
+    "; then
+        echo "Hyper-V guest optimization completed successfully"
+    else
+        report_progress "HYPERV_OPTIMIZE_WARNING" "Hyper-V optimization partially failed (non-fatal)"
+        echo "WARNING: Some Hyper-V optimizations could not be installed (non-fatal)" | tee -a /tmp/error.log
+    fi
+}
+
+# Enable critical services via direct symlinks from the host side.
+# systemctl enable is unreliable in chroot (policy-rc.d, presets, missing D-Bus).
+# Both hyphenated (Ubuntu) and underscored (Fedora/Arch) service names are tried.
+# Usage: enable_services_via_symlinks /mnt/new
+enable_services_via_symlinks() {
+    local root="$1"
+    local _wants="$root/etc/systemd/system/multi-user.target.wants"
+    mkdir -p "$_wants"
+    for _svc in ssh sshd hv-kvp-daemon hv_kvp_daemon hv-vss-daemon hv_vss_daemon hv-fcopy-daemon hv_fcopy_daemon; do
+        for _prefix in /usr/lib/systemd/system /lib/systemd/system; do
+            if [ -f "$root${_prefix}/${_svc}.service" ]; then
+                ln -sf "${_prefix}/${_svc}.service" "$_wants/${_svc}.service"
+                echo "Enabled ${_svc}.service via direct symlink"
+                break
+            fi
+        done
+        # Unmask if the distro ships it masked (symlink to /dev/null)
+        local _mask="$root/etc/systemd/system/${_svc}.service"
+        if [ -L "$_mask" ] && [ "$(readlink "$_mask")" = "/dev/null" ]; then
+            rm -f "$_mask"
+            echo "Unmasked ${_svc}.service"
+        fi
+    done
+}
+
+# Generate SSH host keys if none exist (distros with SSH disabled often
+# ship without them, causing connection failures).
+# Usage: generate_ssh_host_keys /mnt/new
+generate_ssh_host_keys() {
+    local root="$1"
+    if ! ls "$root/etc/ssh/ssh_host_"*"_key" >/dev/null 2>&1; then
+        echo "No SSH host keys found — generating"
+        if ! chroot "$root" ssh-keygen -A 2>&1; then
+            echo "WARNING: ssh-keygen not available in chroot — skipping host key generation"
+        fi
+    fi
+}
+
+# Replace hardcoded interface names in netplan configs with a Hyper-V
+# match-all pattern so DHCP works regardless of hypervisor.
+# VirtualBox uses ens33/enp0s3, Hyper-V uses eth0.
+# Usage: fix_netplan_for_hyperv /mnt/new
+fix_netplan_for_hyperv() {
+    local root="$1"
+    if ls "$root/etc/netplan/"*.yaml >/dev/null 2>&1; then
+        for _np in "$root/etc/netplan/"*.yaml; do
+            if grep -qE '^\s+(ens[0-9]|enp[0-9]|enx[0-9a-f]|eth[0-9])[a-z0-9]*:' "$_np"; then
+                local _renderer=""
+                if grep -q 'renderer:' "$_np"; then
+                    _renderer=$(grep 'renderer:' "$_np" | head -1 | sed 's/.*renderer:\s*//')
+                fi
+                echo "Replacing hardcoded interface in $_np with match-all DHCP config"
+                cat > "$_np" <<'NETPLAN'
+network:
+  version: 2
+  ethernets:
+    all-en:
+      match:
+        driver: hv_netvsc
+      dhcp4: true
+      dhcp6: true
+NETPLAN
+                if [ -n "$_renderer" ]; then
+                    sed -i "s/^  ethernets:/  renderer: $_renderer\n  ethernets:/" "$_np"
+                fi
+            fi
+        done
+    fi
+}
+
+# Fix NetworkManager connections that reference VirtualBox interface names.
+# Creates a generic DHCP connection for the Hyper-V netvsc adapter.
+# Usage: fix_networkmanager_for_hyperv /mnt/new
+fix_networkmanager_for_hyperv() {
+    local root="$1"
+    local nm_sys="$root/etc/NetworkManager/system-connections"
+    [ -d "$nm_sys" ] || return 0
+
+    local found=0
+    for f in "$nm_sys"/*.nmconnection; do
+        [ -f "$f" ] || continue
+        if grep -qE 'interface-name=(enp[0-9]|ens[0-9]|eth[0-9]|enx[0-9a-f])' "$f"; then
+            echo "Removing NM connection with hardcoded interface: $f"
+            rm -f "$f"
+            found=1
+        fi
+    done
+
+    if [ "$found" -eq 1 ] || ! ls "$nm_sys"/*.nmconnection >/dev/null 2>&1; then
+        echo "Creating generic DHCP connection for Hyper-V"
+        cat > "$nm_sys/hyperv-dhcp.nmconnection" <<'NMCON'
+[connection]
+id=hyperv-dhcp
+type=ethernet
+autoconnect=true
+# multi-connect=3 ("connected-multi", NM >= 1.16): this profile
+# auto-activates on EVERY matching ethernet device, INDEPENDENTLY.
+# The default (single-connect) profile can only be active on one device
+# at a time: with the deploy-time temp NIC attached (eth0 + eth1 both
+# present at the post-boot boot), NM auto-activates the profile on
+# whichever device it sees first and CANCELS the other's activation
+# ("disconnected -> deactivating, reason 'new-activation'") — the loser
+# is never retried, and after the temp NIC is torn down at deploy end the
+# VM is left with NO IP on its primary interface. Observed on Kali weekly
+# (NM 1.58) and Parrot 7.3: both needed a manual `dhcpcd eth0` to get
+# networking back. multi-connect=3 gives eth0 its own activation from
+# boot, unaffected by eth1's lifecycle. Older NM (< 1.16) ignores the
+# unknown key and degrades to the old behavior (no worse than before).
+multi-connect=3
+# Retry forever (NM's default autoconnect-retries is 4 attempts): a slow
+# DHCP server at boot must not permanently block the connection.
+autoconnect-retries=0
+
+[ipv4]
+method=auto
+
+[ipv6]
+method=auto
+NMCON
+        chmod 600 "$nm_sys/hyperv-dhcp.nmconnection"
+    fi
+}
+
+# Fix /etc/network/interfaces that reference VirtualBox interface names.
+# Replaces hardcoded interface names with a wildcard-friendly 'eth0' and
+# ensures DHCP is configured.
+# Usage: fix_interfaces_for_hyperv /mnt/new
+fix_interfaces_for_hyperv() {
+    local root="$1"
+    local ifaces="$root/etc/network/interfaces"
+    [ -f "$ifaces" ] || return 0
+
+    if grep -qE '^(auto|allow-hotplug|iface)\s+(enp[0-9]|ens[0-9]|enx[0-9a-f])' "$ifaces"; then
+        echo "Replacing hardcoded interface names in $ifaces"
+        sed -i -E 's/^(auto|allow-hotplug|iface)(\s+)(enp[0-9][a-z0-9]*|ens[0-9][a-z0-9]*|enx[0-9a-f]+)/\1\2eth0/g' "$ifaces"
+    fi
+}
+
+# Disable cloud-init network config override if cloud-init is installed.
+# Without this, cloud-init may regenerate the old netplan on first boot,
+# undoing the fix_netplan_for_hyperv changes.
+# Usage: disable_cloud_init_network /mnt/new
+disable_cloud_init_network() {
+    local root="$1"
+    if [ -d "$root/etc/cloud" ]; then
+        mkdir -p "$root/etc/cloud/cloud.cfg.d"
+        echo "network: {config: disabled}" > "$root/etc/cloud/cloud.cfg.d/99-disable-network.cfg"
+        echo "Disabled cloud-init network config override"
+    fi
+}
+
+# ── Install kernel postinst hook for ESP redirect ────────────────────
+# Kernel and GRUB package updates can overwrite the ESP redirect grub.cfg.
+# This hook re-generates the redirect after every kernel install, ensuring
+# the boot chain survives future apt/dnf/pacman upgrades.
+# Usage: install_grub_postinst_hook /mnt/new
+install_grub_postinst_hook() {
+    local root="$1"
+
+    # Determine GRUB directory
+    local grub_dir
+    if [ -d "$root/boot/grub2" ]; then
+        grub_dir="/boot/grub2"
+    else
+        grub_dir="/boot/grub"
+    fi
+
+    # Install the hook script
+    mkdir -p "$root/etc/kernel/postinst.d"
+    cat > "$root/etc/kernel/postinst.d/zz-vmcreate-grub-redirect" <<HOOK
+#!/bin/bash
+# VMCreate: re-apply the ESP redirect grub.cfg after kernel/GRUB updates.
+# Installed by hyperv-convert-iso; safe to remove if no longer needed.
+ROOT_UUID=\$(findmnt -n -o UUID / 2>/dev/null || blkid -s UUID -o value \$(findmnt -n -o SOURCE / 2>/dev/null) 2>/dev/null)
+[ -z "\$ROOT_UUID" ] && exit 0
+GRUB_DIR="$grub_dir"
+for dir in /boot/efi/EFI/BOOT "/boot/efi\${GRUB_DIR}"; do
+    mkdir -p "\$dir"
+    cat > "\$dir/grub.cfg" <<EOF
+search.fs_uuid \${ROOT_UUID} root
+set prefix=(\\\$root)\${GRUB_DIR}
+configfile \\\$prefix/grub.cfg
+EOF
+done
+HOOK
+    chmod 755 "$root/etc/kernel/postinst.d/zz-vmcreate-grub-redirect"
+    echo "Installed kernel postinst hook: zz-vmcreate-grub-redirect"
+
+    # Also install for dracut/mkinitcpio-based distros that use kernel-install
+    if [ -d "$root/etc/kernel/install.d" ] || [ -d "$root/usr/lib/kernel/install.d" ]; then
+        local install_d="$root/etc/kernel/install.d"
+        mkdir -p "$install_d"
+        cp "$root/etc/kernel/postinst.d/zz-vmcreate-grub-redirect" \
+            "$install_d/99-vmcreate-grub-redirect.install"
+        chmod 755 "$install_d/99-vmcreate-grub-redirect.install"
+        echo "Installed kernel-install hook: 99-vmcreate-grub-redirect.install"
+    fi
+}
+
+# ── Create a swap file on the target root ────────────────────────────
+# Many Linux gallery images ship without swap. Running containers or
+# security tooling can exhaust RAM and hang the VM, so we create a swap
+# file by default. The size can be overridden via the VMCREATE_SWAP_MB
+# KVP key; if omitted, 8192 MB is used.
+#
+# Btrfs requires the swap file to be created with copy-on-write disabled
+# *before* any data is written; otherwise swapon fails with EINVAL and
+# the kernel logs "swapfile must not be copy-on-write".
+# Usage: create_swap_file /mnt/new [size_in_mb]
+create_swap_file() {
+    local root="${1:-/mnt/new}"
+    local swap_size_mb="${2:-8192}"
+    local swapfile="$root/swapfile"
+
+    if [ -f "$swapfile" ]; then
+        echo "Swap file already exists at $swapfile — skipping"
+        return 0
+    fi
+
+    # Ensure enough free space on the root filesystem (swap + 1 GB headroom)
+    local available_mb required_mb
+    available_mb=$(df -BM --output=avail "$root" 2>/dev/null | tail -n 1 | tr -d 'M')
+    required_mb=$((swap_size_mb + 1024))
+
+    if [ -z "$available_mb" ] || [ "$available_mb" -lt "$required_mb" ]; then
+        echo "WARNING: Not enough free space for ${swap_size_mb}MB swap file ($available_mb MB available, $required_mb MB required). Skipping." | tee -a /tmp/error.log
+        return 0
+    fi
+
+    # Detect Btrfs and disable COW before allocating the file
+    local fs_type
+    fs_type=$(findmnt -n -o FSTYPE "$root" 2>/dev/null || df -T "$root" 2>/dev/null | tail -n 1 | awk '{print $2}')
+
+    echo "Creating ${swap_size_mb}MB swap file on ${fs_type:-unknown} filesystem..."
+
+    if [ "$fs_type" = "btrfs" ]; then
+        # COW must be disabled on an empty file before any write happens.
+        if ! touch "$swapfile"; then
+            echo "WARNING: Failed to create empty swap file on Btrfs" | tee -a /tmp/error.log
+            return 0
+        fi
+        if ! chattr +C "$swapfile" 2>/dev/null; then
+            rm -f "$swapfile"
+            echo "WARNING: Failed to disable Btrfs copy-on-write for swap file" | tee -a /tmp/error.log
+            return 0
+        fi
+        echo "Disabled Btrfs copy-on-write for swap file"
+    fi
+
+    if fallocate -l "${swap_size_mb}M" "$swapfile" 2>/dev/null; then
+        echo "Allocated ${swap_size_mb}MB swap file with fallocate"
+    else
+        echo "fallocate failed; falling back to dd..."
+        if ! dd if=/dev/zero of="$swapfile" bs=1M count="$swap_size_mb" status=progress 2>&1; then
+            rm -f "$swapfile"
+            echo "WARNING: Failed to create swap file (non-fatal)" | tee -a /tmp/error.log
+            return 0
+        fi
+    fi
+
+    chmod 600 "$swapfile"
+    mkswap "$swapfile" 2>&1
+    echo "Created ${swap_size_mb}MB swap file"
+
+    # Add to fstab if not already present
+    local fstab="$root/etc/fstab"
+    if [ -f "$fstab" ] && ! grep -q '/swapfile' "$fstab"; then
+        echo "/swapfile none swap sw 0 0" >> "$fstab"
+        echo "Added swap file entry to fstab"
+    fi
+
+    # Activate swap immediately if possible (catches Btrfs COW and other
+    # filesystem issues while the ISO environment still has a chance to
+    # report them, rather than silently failing on first boot).
+    if swapon "$swapfile" 2>/dev/null; then
+        echo "Activated swap file"
+    else
+        echo "WARNING: Swap file created but could not be activated in the live environment; it should activate from fstab on next boot" | tee -a /tmp/error.log
+    fi
+}
+
+# ── Select the correct partclone tool for the detected filesystem ────
+# Returns the partclone binary name for the given filesystem type.
+# Usage: tool=$(select_partclone_tool "ext4")
+select_partclone_tool() {
+    local fs_type="$1"
+    case "$fs_type" in
+        ext2)           echo "partclone.ext2" ;;
+        ext3)           echo "partclone.ext3" ;;
+        ext4)           echo "partclone.ext4" ;;
+        btrfs)          echo "partclone.btrfs" ;;
+        xfs)            echo "partclone.xfs" ;;
+        *)
+            echo ""
+            return 1
+            ;;
+    esac
+}
+
+# ── Resize filesystem to fill partition after clone ──────────────────
+# partclone creates a bit-for-bit copy, so if the new partition is larger
+# than the old one, the extra space is unused.  This function expands the
+# filesystem to fill the entire partition.
+# Usage: resize_cloned_filesystem /dev/sda2 ext4
+resize_cloned_filesystem() {
+    local partition="$1"
+    local fs_type="$2"
+
+    echo "Resizing $fs_type filesystem on $partition to fill partition..."
+    case "$fs_type" in
+        ext2|ext3|ext4)
+            e2fsck -f -y "$partition" 2>&1 || true
+            resize2fs "$partition" 2>&1
+            echo "ext filesystem resized successfully"
+            ;;
+        xfs)
+            # XFS can only be resized while mounted
+            local tmp_mount="/tmp/xfs_resize_$$"
+            mkdir -p "$tmp_mount"
+            mount "$partition" "$tmp_mount"
+            xfs_growfs "$tmp_mount" 2>&1
+            umount "$tmp_mount"
+            rmdir "$tmp_mount"
+            echo "XFS filesystem resized successfully"
+            ;;
+        btrfs)
+            # btrfs can only be resized while mounted
+            local tmp_mount="/tmp/btrfs_resize_$$"
+            mkdir -p "$tmp_mount"
+            mount "$partition" "$tmp_mount"
+            btrfs filesystem resize max "$tmp_mount" 2>&1
+            umount "$tmp_mount"
+            rmdir "$tmp_mount"
+            echo "btrfs filesystem resized successfully"
+            ;;
+        *)
+            echo "WARNING: Don't know how to resize $fs_type — skipping"
+            ;;
+    esac
+}
+
+# ── Validate fstab for stale references ──────────────────────────────
+# After update_fstab, check that no entries still reference the old disk's
+# UUIDs.  This catches entries for partitions that weren't explicitly
+# rewritten (e.g. data partitions, LVM, extra mounts).
+# Usage: validate_fstab /mnt/new/etc/fstab /dev/sdb
+validate_fstab() {
+    local fstab_path="$1"
+    local old_disk="$2"
+    local warnings=0
+
+    [ -f "$fstab_path" ] || return 0
+
+    # Collect all UUIDs from the old disk's partitions
+    local old_uuids
+    old_uuids=$(blkid -o value -s UUID "$old_disk"* 2>/dev/null | sort -u)
+
+    for uuid in $old_uuids; do
+        if grep -q "$uuid" "$fstab_path"; then
+            echo "WARNING: fstab still references old disk UUID $uuid"
+            progress "" "fstab: stale UUID: $uuid"
+            warnings=$((warnings + 1))
+        fi
+    done
+
+    # Check for device-path references to common old disk patterns
+    if grep -qE "^/dev/sd[a-z][0-9]" "$fstab_path"; then
+        echo "WARNING: fstab contains device-path entries that may not survive disk reordering"
+        warnings=$((warnings + 1))
+    fi
+
+    if [ "$warnings" -eq 0 ]; then
+        echo "fstab validation PASSED — no stale references found"
+    else
+        echo "fstab validation completed with $warnings warning(s)"
+    fi
+
+    return 0
+}
+
+# ── Force Hyper-V modules into initramfs ─────────────────────────────
+# Ensures hv_vmbus, hv_storvsc, hv_netvsc, and hv_utils are included in
+# the initramfs regardless of the distro's module auto-detection.  Without
+# these, the VM may fail to find the root disk after a kernel upgrade.
+# Usage: ensure_hyperv_initramfs_modules /mnt/new
+ensure_hyperv_initramfs_modules() {
+    local root="$1"
+    local modules="hv_vmbus hv_storvsc hv_netvsc hv_utils"
+
+    echo "Ensuring Hyper-V modules are included in initramfs..."
+
+    # initramfs-tools (Debian/Ubuntu)
+    if [ -f "$root/etc/initramfs-tools/modules" ]; then
+        for mod in $modules; do
+            if ! grep -q "^${mod}$" "$root/etc/initramfs-tools/modules"; then
+                echo "$mod" >> "$root/etc/initramfs-tools/modules"
+                echo "Added $mod to initramfs-tools modules"
+            fi
+        done
+    fi
+
+    # dracut (Fedora/RHEL/SUSE)
+    if [ -d "$root/etc/dracut.conf.d" ]; then
+        echo "add_drivers+=\" $modules \"" \
+            > "$root/etc/dracut.conf.d/hyperv.conf"
+        echo "Created dracut hyperv.conf with modules: $modules"
+    fi
+
+    # mkinitcpio (Arch)
+    if [ -d "$root/etc/mkinitcpio.conf.d" ]; then
+        echo "MODULES=($modules)" \
+            > "$root/etc/mkinitcpio.conf.d/hyperv.conf"
+        echo "Created mkinitcpio hyperv.conf with modules: $modules"
+    fi
+}

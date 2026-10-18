@@ -67,7 +67,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
                 .Setup(m => m.CreateVsock("TestVM", It.IsAny<string>(), It.IsAny<string>()))
                 .Returns(_shell.Object);
             _scriptRunner
-                .Setup(m => m.RunAsync(It.IsAny<IGuestShell>(), It.IsAny<string>(), It.IsAny<VmCreationContext>(),
+                .Setup(m => m.RunAsync(It.IsAny<IGuestShell>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<VmCreationContext>(),
                     It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(IsoBootCycleResult.Succeeded());
             _shutdownWatcher
@@ -114,7 +114,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
             _guestShellFactory.Verify(m => m.CreateVsock("TestVM", @"C:\tmp\test-key", "d811e738-5c46-4f57-a171-4f822a38f22a"), Times.Once);
             _shell.Verify(m => m.WaitForReadyAsync(It.IsAny<CancellationToken>()), Times.Once);
             // Customize scenario for generation 2.
-            _scriptRunner.Verify(m => m.RunAsync(It.IsAny<IGuestShell>(), "customize", It.IsAny<VmCreationContext>(), It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(), It.IsAny<CancellationToken>()), Times.Once);
+            _scriptRunner.Verify(m => m.RunAsync(It.IsAny<IGuestShell>(), "customize", It.IsAny<string?>(), It.IsAny<VmCreationContext>(), It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(), It.IsAny<CancellationToken>()), Times.Once);
             // Poweroff + shutdown confirm + boot finalized.
             _shell.Verify(m => m.RunCommandAsync("sudo systemctl --no-block poweroff", It.IsAny<CancellationToken>()), Times.Once);
             _bootManager.Verify(m => m.RemoveBootDvd(It.IsAny<VmDeploymentPlan>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
@@ -129,7 +129,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
             var result = await RunAsync(1);
 
             Assert.IsTrue(result.Success, result.ErrorMessage);
-            _scriptRunner.Verify(m => m.RunAsync(It.IsAny<IGuestShell>(), "clone", It.IsAny<VmCreationContext>(), It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(), It.IsAny<CancellationToken>()), Times.Once);
+            _scriptRunner.Verify(m => m.RunAsync(It.IsAny<IGuestShell>(), "clone", It.IsAny<string?>(), It.IsAny<VmCreationContext>(), It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(), It.IsAny<CancellationToken>()), Times.Once);
             // MBR source detached at the shared SCSI location.
             _diskManager.Verify(m => m.RemoveHardDrive(It.IsAny<VmDeploymentPlan>(), IsoBootCycleRunner.MbrSourceDiskScsiControllerLocation, It.IsAny<CancellationToken>()), Times.Once);
         }
@@ -175,7 +175,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
             }
             // Pre-shell failure: VM stopped, no shell existed for logs.
             _lifecycleManager.Verify(m => m.StopVMAsync("TestVM", It.IsAny<CancellationToken>()), Times.Once);
-            _scriptRunner.Verify(m => m.RunAsync(It.IsAny<IGuestShell>(), It.IsAny<string>(), It.IsAny<VmCreationContext>(), It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(), It.IsAny<CancellationToken>()), Times.Never);
+            _scriptRunner.Verify(m => m.RunAsync(It.IsAny<IGuestShell>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<VmCreationContext>(), It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(), It.IsAny<CancellationToken>()), Times.Never);
         }
 
         [TestMethod]
@@ -216,7 +216,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
         public async Task ScriptFailure_StopsTheVm_DiagnosticsReachTheResult()
         {
             _scriptRunner
-                .Setup(m => m.RunAsync(It.IsAny<IGuestShell>(), It.IsAny<string>(), It.IsAny<VmCreationContext>(),
+                .Setup(m => m.RunAsync(It.IsAny<IGuestShell>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<VmCreationContext>(),
                     It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(IsoBootCycleResult.Failed("partclone failed"));
             // The live shell returns journal text; the mock must too.
@@ -266,7 +266,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
         public async Task ScriptFailure_StillRemovesKvp_AndDoesNotFinalizeBoot()
         {
             _scriptRunner
-                .Setup(m => m.RunAsync(It.IsAny<IGuestShell>(), It.IsAny<string>(), It.IsAny<VmCreationContext>(),
+                .Setup(m => m.RunAsync(It.IsAny<IGuestShell>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<VmCreationContext>(),
                     It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(IsoBootCycleResult.Failed("partclone failed"));
 
@@ -282,7 +282,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
         public async Task ThrownException_StillRemovesKvp()
         {
             _scriptRunner
-                .Setup(m => m.RunAsync(It.IsAny<IGuestShell>(), It.IsAny<string>(), It.IsAny<VmCreationContext>(),
+                .Setup(m => m.RunAsync(It.IsAny<IGuestShell>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<VmCreationContext>(),
                     It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(), It.IsAny<CancellationToken>()))
                 .ThrowsAsync(new InvalidOperationException("guest exploded"));
 
