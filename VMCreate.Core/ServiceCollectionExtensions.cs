@@ -49,20 +49,7 @@ namespace VMCreate
             if (services == null) throw new ArgumentNullException(nameof(services));
 
             // ── Configuration ───────────────────────────────────────────────
-            services.AddSingleton(sp =>
-            {
-                var s = new AppSettings();
-                // Dev lever for the ISO boot-cycle channel: VMCREATE_ISO_VSOCK
-                // forces the flag for one process run (1/true/yes = v2,
-                // 0/false/no = legacy A/B). With the default flipped to v2,
-                // the force-off spelling is the escape hatch.
-                switch (Environment.GetEnvironmentVariable("VMCREATE_ISO_VSOCK")?.Trim().ToLowerInvariant())
-                {
-                    case "1" or "true" or "yes": s.IsoVsockEnabled = true; break;
-                    case "0" or "false" or "no": s.IsoVsockEnabled = false; break;
-                }
-                return Microsoft.Extensions.Options.Options.Create(s);
-            });
+            services.AddSingleton(_ => Microsoft.Extensions.Options.Options.Create(new AppSettings()));
 
             // ── Infrastructure / low-level services ─────────────────────────
             services.AddTransient<IFileStreamProvider, FileStreamProvider>();
@@ -105,15 +92,9 @@ namespace VMCreate
             services.AddSingleton<IVmPathService, VmPathService>();
             services.AddSingleton<IHostNetworkService, HostNetworkService>();
             services.AddTransient<IPostBootCustomizationService, PostBootCustomizationService>();
-            services.AddTransient<IsoBootCycleRunner>();
             services.AddTransient<VsockIsoBootCycleRunner>();
             services.AddTransient<IVsockGuestScriptRunner, EmbeddedIsoScriptRunner>();
-            // Marker interfaces let the selector depend on the two runners
-            // (for Moq in tests) without a circular IIsoBootCycleRunner
-            // resolution.
-            services.AddTransient<ILegacyIsoBootCycleRunner>(sp => sp.GetRequiredService<IsoBootCycleRunner>());
-            services.AddTransient<IVsockIsoBootCycleRunner>(sp => sp.GetRequiredService<VsockIsoBootCycleRunner>());
-            services.AddTransient<IIsoBootCycleRunner, IsoBootCycleRunnerSelector>();
+            services.AddTransient<IIsoBootCycleRunner, VsockIsoBootCycleRunner>();
             services.AddTransient<IVmCreationStrategy, IsoVmCreationStrategy>();
             services.AddTransient<IVmCreationStrategy, NativeHyperVVmCreationStrategy>();
             services.AddTransient<IVmCreationStrategy, DiskImageVmCreationStrategy>();

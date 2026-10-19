@@ -132,7 +132,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
             Assert.IsTrue(result.Success, result.ErrorMessage);
             _scriptRunner.Verify(m => m.RunAsync(It.IsAny<IGuestShell>(), "clone", It.IsAny<string?>(), It.IsAny<VmCreationContext>(), It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(), It.IsAny<CancellationToken>()), Times.Once);
             // MBR source detached at the shared SCSI location.
-            _diskManager.Verify(m => m.RemoveHardDrive(It.IsAny<VmDeploymentPlan>(), IsoBootCycleRunner.MbrSourceDiskScsiControllerLocation, It.IsAny<CancellationToken>()), Times.Once);
+            _diskManager.Verify(m => m.RemoveHardDrive(It.IsAny<VmDeploymentPlan>(), VsockIsoBootCycleRunner.MbrSourceDiskScsiControllerLocation, It.IsAny<CancellationToken>()), Times.Once);
         }
 
         [TestMethod]
@@ -175,7 +175,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
 
                 Assert.IsTrue(result.Success,
                     "A failed source-file delete must not fail the cycle: " + result.ErrorMessage);
-                _diskManager.Verify(m => m.RemoveHardDrive(It.IsAny<VmDeploymentPlan>(), IsoBootCycleRunner.MbrSourceDiskScsiControllerLocation, It.IsAny<CancellationToken>()), Times.Once);
+                _diskManager.Verify(m => m.RemoveHardDrive(It.IsAny<VmDeploymentPlan>(), VsockIsoBootCycleRunner.MbrSourceDiskScsiControllerLocation, It.IsAny<CancellationToken>()), Times.Once);
             }
             finally
             {

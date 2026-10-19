@@ -12,7 +12,7 @@ namespace VMCreate
     {
         private static readonly string DefaultCloningIsoPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "VMCreate", "hyperv-convert.iso");
+            "VMCreate", "vmcreate-iso.iso");
 
         public VmDeploymentPlan(
             string vmName,
@@ -40,16 +40,14 @@ namespace VMCreate
             SecureBoot = secureBoot;
             SecureBootTemplate = secureBootTemplate ?? "MicrosoftUEFICertificateAuthority";
             ReplacePreviousVm = replacePreviousVm;
+            // Cache path: the vmcreate-iso (v2) file. Kept as a parameter-
+            // derived property so existing callers (and tests) that pass a
+            // custom CloningIsoPath keep working.
             CloningIsoPath = cloningIsoPath ?? DefaultCloningIsoPath;
-            // Sibling cache file in the same directory: the v2 ISO never
-            // collides with the legacy one, and each owns its sidecar.
-            CloningIsoV2Path = Path.Combine(
-                Path.GetDirectoryName(CloningIsoPath) ?? ".",
-                "vmcreate-iso-v2.iso");
             // Resolve the VMCREATE_ISO_PATH dev override ONCE, at plan
-            // creation: every consumer (downloader, attach/detach, the
-            // selector's interlock) then sees the same path for the whole
-            // deployment instead of re-reading the environment.
+            // creation: every consumer (downloader, attach/detach) then
+            // sees the same path for the whole deployment instead of
+            // re-reading the environment.
             IsoPathOverride = ResolveIsoPathOverride();
         }
 
@@ -102,30 +100,14 @@ namespace VMCreate
         public string CloningIsoPath { get; init; }
 
         /// <summary>
-        /// ISO vsock mode (vmcreate-iso 2.x) drives the boot-cycle over the
-        /// Hyper-V socket channel. Stamped from <see cref="AppSettings"/> by
-        /// <see cref="CreateVM.BuildPlan"/> when the plan is built — the
-        /// one source of truth per deployment; VmSettings deliberately has
-        /// no copy so it can never claim to work and be ignored.
-        /// </summary>
-        public bool IsoVsockEnabled { get; init; }
-
-        /// <summary>
-        /// Separate cache file for the v2 ISO: the sidecar version file
-        /// pairs with its ISO, so a flag toggle never re-downloads and the
-        /// two generations never overwrite each other.
-        /// </summary>
-        public string CloningIsoV2Path { get; init; }
-
-        /// <summary>
-        /// The ISO path this deployment actually attaches/detaches/downloads:
-        /// the v2 cache when the flag is on, the legacy cache otherwise.
-        /// The <c>VMCREATE_ISO_PATH</c> environment variable overrides both
-        /// (dev lever: point a deploy at a locally built ISO — must exist).
-        /// Resolved once at plan creation; see <see cref="IsoPathOverride"/>.
+        /// The ISO path this deployment actually attaches/detaches/downloads
+        /// (the vmcreate-iso cache). The <c>VMCREATE_ISO_PATH</c> environment
+        /// variable overrides it (dev lever: point a deploy at a locally
+        /// built ISO — must exist). Resolved once at plan creation; see
+        /// <see cref="IsoPathOverride"/>.
         /// </summary>
         public string EffectiveCloningIsoPath
-            => IsoPathOverride ?? (IsoVsockEnabled ? CloningIsoV2Path : CloningIsoPath);
+            => IsoPathOverride ?? CloningIsoPath;
 
         /// <summary>
         /// The resolved <c>VMCREATE_ISO_PATH</c> override, or null when the

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 
 namespace VMCreate
@@ -7,7 +7,7 @@ namespace VMCreate
     {
         private static readonly string DefaultCloningIsoPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "VMCreate", "hyperv-convert.iso");
+            "VMCreate", "vmcreate-iso.iso");
 
         public string VMName { get; set; } = "";
         public int MemoryInMB { get; set; } = 4096;

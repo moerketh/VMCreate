@@ -84,22 +84,10 @@ namespace VMCreate.Tests.Downloaders
 
         #endregion
 
-        #region Plan-level cache separation
+        #region Plan-level ISO path resolution
 
         [TestMethod]
-        public void V2CachesAtItsOwnPath_SidecarPairsWithIt()
-        {
-            // The flag enters via the plan (BuildPlan stamps it from
-            // AppSettings); VmSettings no longer carries it.
-            var plan = VmDeploymentPlan.FromSettings(new VmSettings { VMName = "t" }) with { IsoVsockEnabled = true };
-
-            Assert.AreNotEqual(plan.CloningIsoPath, plan.CloningIsoV2Path, "v2 must not share the legacy cache file");
-            Assert.AreEqual(Path.GetDirectoryName(plan.CloningIsoPath), Path.GetDirectoryName(plan.CloningIsoV2Path), "same directory");
-            Assert.AreEqual(plan.CloningIsoV2Path, plan.EffectiveCloningIsoPath, "flag on → v2 path effective");
-        }
-
-        [TestMethod]
-        public void FlagOff_UsesLegacyPath()
+        public void EffectiveIsoPath_IsTheCachePath()
         {
             var plan = VmDeploymentPlan.FromSettings(new VmSettings { VMName = "t" });
             Assert.AreEqual(plan.CloningIsoPath, plan.EffectiveCloningIsoPath);
@@ -113,8 +101,8 @@ namespace VMCreate.Tests.Downloaders
             try
             {
                 Environment.SetEnvironmentVariable("VMCREATE_ISO_PATH", overridePath);
-                var plan = VmDeploymentPlan.FromSettings(new VmSettings { VMName = "t" }) with { IsoVsockEnabled = true };
-                Assert.AreEqual(overridePath, plan.EffectiveCloningIsoPath, "dev override must win over both caches");
+                var plan = VmDeploymentPlan.FromSettings(new VmSettings { VMName = "t" });
+                Assert.AreEqual(overridePath, plan.EffectiveCloningIsoPath, "dev override must win over the cache path");
             }
             finally
             {
@@ -129,8 +117,8 @@ namespace VMCreate.Tests.Downloaders
             Environment.SetEnvironmentVariable("VMCREATE_ISO_PATH", @"C:\definitely\not\here.iso");
             try
             {
-                var plan = VmDeploymentPlan.FromSettings(new VmSettings { VMName = "t" }) with { IsoVsockEnabled = true };
-                Assert.AreEqual(plan.CloningIsoV2Path, plan.EffectiveCloningIsoPath, "a stale override must not break deploys");
+                var plan = VmDeploymentPlan.FromSettings(new VmSettings { VMName = "t" });
+                Assert.AreEqual(plan.CloningIsoPath, plan.EffectiveCloningIsoPath, "a stale override must not break deploys");
             }
             finally
             {

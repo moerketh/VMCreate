@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System;
 using System.IO;
@@ -14,7 +14,6 @@ namespace VMCreate
     {
         private readonly string _qemuFileLocation;
         private readonly string _extractPath;
-        private readonly bool _isoVsockEnabled;
         private readonly IDownloader _downloader;
         private readonly IChecksumVerifier _checksumVerifier;
         private readonly IExtractor _extractor;
@@ -44,20 +43,17 @@ namespace VMCreate
             var settings = options?.Value ?? new AppSettings();
             _qemuFileLocation = settings.QemuImgPath;
             _extractPath = settings.ExtractPath;
-            _isoVsockEnabled = settings.IsoVsockEnabled;
         }
 
         /// <summary>
-        /// The single place the deployment-wide IsoVsockEnabled flag (from
-        /// <see cref="AppSettings"/>) enters a plan. Both front ends (GUI
-        /// DeployPage, CLI create) call <see cref="StartCreateVMAsync"/> with
-        /// user-built VmSettings that never carry the flag — stamping it here
-        /// means one source of truth per deployment and no per-front-end
-        /// drift. Internal for the flag-carry-through unit test.
+        /// Builds the immutable, timestamped plan from the wizard's settings.
+        /// Both front ends (GUI DeployPage, CLI create) call
+        /// <see cref="StartCreateVMAsync"/> — this is the single plan
+        /// construction point. Internal for the plan unit tests.
         /// </summary>
-        internal static VmDeploymentPlan BuildPlan(VmSettings vmSettings, bool isoVsockEnabled, string effectiveVmName)
+        internal static VmDeploymentPlan BuildPlan(VmSettings vmSettings, string effectiveVmName)
             => VmDeploymentPlan.FromSettings(vmSettings)
-                .WithVmName(effectiveVmName) with { IsoVsockEnabled = isoVsockEnabled };
+                .WithVmName(effectiveVmName);
 
         public async Task<string> StartCreateVMAsync(
             VmSettings vmSettings,
@@ -83,7 +79,7 @@ namespace VMCreate
                 // immutable plan. The wizard's VmSettings are never mutated.
                 string baseName = vmSettings.VMName;
                 string effectiveVmName = $"{baseName}_{DateTime.Now:yyyyMMddHHmmss}";
-                VmDeploymentPlan plan = BuildPlan(vmSettings, _isoVsockEnabled, effectiveVmName);
+                VmDeploymentPlan plan = BuildPlan(vmSettings, effectiveVmName);
 
                 createVmProgressInfo?.Report(CreateVMProgressInfo.ForPhase(
                     VmDeploymentPhase.None,

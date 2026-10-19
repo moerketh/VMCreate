@@ -24,7 +24,7 @@ namespace VMCreate.HyperV.VmCreation
     /// guest work runs with per-line stdout streaming plus an idle timeout —
     /// see <see cref="SshGuestShell.RunStreamingCommandAsync"/>.
     /// </remarks>
-    public sealed class VsockIsoBootCycleRunner : IVsockIsoBootCycleRunner
+    public sealed class VsockIsoBootCycleRunner : IIsoBootCycleRunner
     {
         private const string KvpKeyName = "VMCREATE_SSH_PUBKEY";
 
@@ -45,6 +45,10 @@ namespace VMCreate.HyperV.VmCreation
         private readonly IVmBootManager _bootManager;
         private readonly IVsockGuestScriptRunner _scriptRunner;
         private readonly ILogger<VsockIsoBootCycleRunner> _logger;
+
+        /// <summary>The SCSI location the MBR source disk is attached at;
+        /// the clone scenario's cleanup detaches (and deletes) it there.</summary>
+        public const int MbrSourceDiskScsiControllerLocation = 1;
 
         public VsockIsoBootCycleRunner(
             IKvpSender kvpSender,
@@ -192,7 +196,7 @@ namespace VMCreate.HyperV.VmCreation
                 {
                     // The MBR source disk was attached only for the clone;
                     // delete it exactly like v1's CleanupMbrDisk state.
-                    await _diskManager.RemoveHardDrive(context.Plan, IsoBootCycleRunner.MbrSourceDiskScsiControllerLocation, cancellationToken);
+                    await _diskManager.RemoveHardDrive(context.Plan, MbrSourceDiskScsiControllerLocation, cancellationToken);
                     if (System.IO.File.Exists(mediaPath))
                     {
                         // The clone is DONE — a locked file here (e.g. a

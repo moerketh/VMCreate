@@ -80,7 +80,7 @@ namespace VMCreate.Tests.VMCreate
             var plan = VmDeploymentPlan.FromSettings(new VmSettings { VMName = "TestVM" });
 
             Assert.IsFalse(string.IsNullOrEmpty(plan.CloningIsoPath));
-            StringAssert.Contains(plan.CloningIsoPath, "hyperv-convert.iso");
+            StringAssert.Contains(plan.CloningIsoPath, "vmcreate-iso.iso");
         }
 
         [TestMethod]

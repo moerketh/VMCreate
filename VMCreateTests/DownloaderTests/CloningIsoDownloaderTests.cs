@@ -22,7 +22,7 @@ namespace VMCreate.Tests
 
         // Per-test knobs controlling the stubbed GitHub API response and the
         // bytes the downloader mock "downloads".
-        private string _latestTag = "v1.1.4";
+        private string _latestTag = "v2.0.0-alpha.1";
         private bool _githubFails;
         private string _downloadContent = "downloaded iso bytes";
 
@@ -71,7 +71,7 @@ namespace VMCreate.Tests
         [TestMethod]
         public async Task EnsureIsoAsync_MissingIso_DownloadsLatestAndWritesVersionFile()
         {
-            // Arrange: no cached ISO, GitHub reports v1.1.4.
+            // Arrange: no cached ISO, GitHub reports v2.0.0-alpha.1.
             var downloader = CreateDownloader();
 
             // Act
@@ -80,7 +80,7 @@ namespace VMCreate.Tests
             // Assert
             Assert.IsTrue(File.Exists(_isoPath));
             Assert.AreEqual("downloaded iso bytes", File.ReadAllText(_isoPath));
-            Assert.AreEqual("1.1.4", File.ReadAllText(_versionPath),
+            Assert.AreEqual("2.0.0-alpha.1", File.ReadAllText(_versionPath),
                 "The version file must hold the release tag without its v prefix.");
             VerifyDownloaded(Times.Once());
             _checksumVerifier.Verify(v => v.VerifyAsync(
@@ -95,7 +95,7 @@ namespace VMCreate.Tests
             // Arrange: a cached ISO whose recorded version equals the live tag.
             // The version file carries a stray newline to prove it is trimmed.
             File.WriteAllText(_isoPath, "cached iso bytes");
-            File.WriteAllText(_versionPath, "1.1.4\n");
+            File.WriteAllText(_versionPath, "2.0.0-alpha.1\n");
             var downloader = CreateDownloader();
 
             // Act
@@ -118,7 +118,7 @@ namespace VMCreate.Tests
 
             // Assert
             Assert.AreEqual("downloaded iso bytes", File.ReadAllText(_isoPath));
-            Assert.AreEqual("1.1.4", File.ReadAllText(_versionPath));
+            Assert.AreEqual("2.0.0-alpha.1", File.ReadAllText(_versionPath));
             VerifyDownloaded(Times.Once());
         }
 
@@ -158,10 +158,10 @@ namespace VMCreate.Tests
         [TestMethod]
         public async Task EnsureIsoAsync_OutdatedCachedVersion_DownloadsUpdate()
         {
-            // Arrange: cached 1.1.4, GitHub reports v1.1.5.
+            // Arrange: cached 2.0.0-alpha.1, GitHub reports v2.0.0-alpha.2.
             File.WriteAllText(_isoPath, "old iso bytes");
-            File.WriteAllText(_versionPath, "1.1.4");
-            _latestTag = "v1.1.5";
+            File.WriteAllText(_versionPath, "2.0.0-alpha.1");
+            _latestTag = "v2.0.0-alpha.2";
             _downloadContent = "updated iso bytes";
             var downloader = CreateDownloader();
 
@@ -171,7 +171,7 @@ namespace VMCreate.Tests
             // Assert
             Assert.AreEqual("updated iso bytes", File.ReadAllText(_isoPath),
                 "The outdated ISO must be replaced by the newer release.");
-            Assert.AreEqual("1.1.5", File.ReadAllText(_versionPath));
+            Assert.AreEqual("2.0.0-alpha.2", File.ReadAllText(_versionPath));
             VerifyDownloaded(Times.Once());
         }
 
@@ -180,7 +180,7 @@ namespace VMCreate.Tests
         {
             // Arrange: the API fails all retries, but a versioned ISO is cached.
             File.WriteAllText(_isoPath, "cached iso bytes");
-            File.WriteAllText(_versionPath, "1.1.4");
+            File.WriteAllText(_versionPath, "2.0.0-alpha.1");
             _githubFails = true;
             var downloader = CreateDownloader();
 
@@ -231,19 +231,22 @@ namespace VMCreate.Tests
         {
             string version = tag.TrimStart('v');
             return $$"""
-                {
-                  "tag_name": "{{tag}}",
-                  "assets": [
-                    {
-                      "name": "hyperv-convert-{{version}}.iso",
-                      "browser_download_url": "https://github.com/moerketh/hyperv-convert-iso/releases/download/{{tag}}/hyperv-convert-{{version}}.iso"
-                    },
-                    {
-                      "name": "hyperv-convert-{{version}}.iso.sha256",
-                      "browser_download_url": "https://github.com/moerketh/hyperv-convert-iso/releases/download/{{tag}}/hyperv-convert-{{version}}.iso.sha256"
-                    }
-                  ]
-                }
+                [
+                  {
+                    "tag_name": "{{tag}}",
+                    "prerelease": false,
+                    "assets": [
+                      {
+                        "name": "vmcreate-iso-{{version}}.iso",
+                        "browser_download_url": "https://github.com/moerketh/vmcreate-iso/releases/download/{{tag}}/vmcreate-iso-{{version}}.iso"
+                      },
+                      {
+                        "name": "vmcreate-iso-{{version}}.iso.sha256",
+                        "browser_download_url": "https://github.com/moerketh/vmcreate-iso/releases/download/{{tag}}/vmcreate-iso-{{version}}.iso.sha256"
+                      }
+                    ]
+                  }
+                ]
                 """;
         }
 
