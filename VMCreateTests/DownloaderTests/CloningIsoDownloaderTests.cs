@@ -29,6 +29,8 @@ namespace VMCreate.Tests
         [TestInitialize]
         public void Setup()
         {
+            // Private-repo API needs a token present; the stubbed HTTP handler never validates it.
+            Environment.SetEnvironmentVariable("VMCREATE_GITHUB_TOKEN", "test-token");
             _tempDir = Path.Combine(Path.GetTempPath(), "vmcreate-isodl-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(_tempDir);
             _isoPath = Path.Combine(_tempDir, "hyperv-convert.iso");
@@ -63,6 +65,7 @@ namespace VMCreate.Tests
         [TestCleanup]
         public void Cleanup()
         {
+            Environment.SetEnvironmentVariable("VMCREATE_GITHUB_TOKEN", null);
             try { Directory.Delete(_tempDir, recursive: true); }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
@@ -238,11 +241,11 @@ namespace VMCreate.Tests
                     "assets": [
                       {
                         "name": "vmcreate-iso-{{version}}.iso",
-                        "browser_download_url": "https://github.com/moerketh/vmcreate-iso/releases/download/{{tag}}/vmcreate-iso-{{version}}.iso"
+                        "url": "https://api.github.com/repos/moerketh/vmcreate-iso/releases/assets/111"
                       },
                       {
                         "name": "vmcreate-iso-{{version}}.iso.sha256",
-                        "browser_download_url": "https://github.com/moerketh/vmcreate-iso/releases/download/{{tag}}/vmcreate-iso-{{version}}.iso.sha256"
+                        "url": "https://api.github.com/repos/moerketh/vmcreate-iso/releases/assets/222"
                       }
                     ]
                   }
