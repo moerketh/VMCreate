@@ -78,12 +78,13 @@ namespace VMCreate
             string isoUrl;
             string? checksumUrl;
             string version;
+            string isoName = "";
 
             if (cachedVersion != null)
             {
                 try
                 {
-                    (isoUrl, checksumUrl, version) = await GetLatestV2ReleaseAsync(cancellationToken);
+                    (isoUrl, checksumUrl, version, isoName) = await GetLatestV2ReleaseAsync(cancellationToken);
                 }
                 catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
                 {
@@ -112,7 +113,7 @@ namespace VMCreate
                 else
                     _logger.LogInformation("Cloning ISO not found at {IsoPath}. Fetching latest release from GitHub.", isoPath);
 
-                (isoUrl, checksumUrl, version) = await GetLatestV2ReleaseAsync(cancellationToken);
+                (isoUrl, checksumUrl, version, isoName) = await GetLatestV2ReleaseAsync(cancellationToken);
             }
 
             progress?.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.DownloadCloningIso));
@@ -123,7 +124,11 @@ namespace VMCreate
             {
                 if (checksumUrl != null)
                 {
-                    string isoFileName = Path.GetFileName(new Uri(isoUrl).LocalPath);
+                    // Asset-API URLs end in an id — use the asset NAME the
+                    // selection captured (what the .sha256 file references).
+                    string isoFileName = GitHubAssetAuth.IsReleaseAssetApiUrl(new Uri(isoUrl))
+                        ? isoName
+                        : Path.GetFileName(new Uri(isoUrl).LocalPath);
                     await _checksumVerifier.VerifyAsync(tempPath, checksumUrl, "sha256",
                         cancellationToken, progress, expectedFileName: isoFileName);
                 }
@@ -175,10 +180,19 @@ namespace VMCreate
         /// the NEWEST STABLE release wins; a prerelease is only picked when
         /// no stable release exists yet (the alpha period). Array order is
         /// never trusted: candidates sort by semver with published_at as
-        /// the tiebreak.
+        /// the tiebreak. The repo is private: unauthenticated API calls 404,
+        /// so VMCREATE_GITHUB_TOKEN (PAT with repo read access) is REQUIRED
+        /// — it authenticates both the releases API and the asset downloads
+        /// (private-repo browser_download_urls need the header too).
         /// </summary>
-        private async Task<(string IsoUrl, string? ChecksumUrl, string Version)> GetLatestV2ReleaseAsync(CancellationToken cancellationToken)
+        private async Task<(string IsoUrl, string? ChecksumUrl, string Version, string IsoName)> GetLatestV2ReleaseAsync(CancellationToken cancellationToken)
         {
+            string? token = Environment.GetEnvironmentVariable("VMCREATE_GITHUB_TOKEN");
+            if (string.IsNullOrWhiteSpace(token))
+                throw new InvalidOperationException(
+                    "VMCREATE_GITHUB_TOKEN is not set. The vmcreate-iso repository is private, so both the " +
+                    "releases API and the asset downloads need a PAT (repo read access) in that variable.");
+
             HttpRequestException? lastError = null;
 
             for (int attempt = 0; attempt < MaxRetries; attempt++)
@@ -190,11 +204,12 @@ namespace VMCreate
                     using var client = _clientFactory.CreateClient();
                     client.Timeout = HttpTimeout;
                     client.DefaultRequestHeaders.Add("User-Agent", ProductInfo.UserAgent);
+                    GitHubAssetAuth.ApplyIfGithub(client, new Uri(GitHubReleasesListUrl));
 
                     string json = await client.GetStringAsync(GitHubReleasesListUrl, cancellationToken);
                     using var doc = JsonDocument.Parse(json);
 
-                    (string Tag, bool Prerelease, string PublishedAt, string? IsoUrl, string? ChecksumUrl) best =
+                    (string Tag, bool Prerelease, string PublishedAt, string? IsoUrl, string? ChecksumUrl, string IsoName) best =
                         default;
                     bool haveBest = false;
                     bool bestIsStable = false;
@@ -211,23 +226,29 @@ namespace VMCreate
                         string published = release.TryGetProperty("published_at", out var pubEl)
                             ? pubEl.GetString() ?? "" : "";
 
-                        string? isoUrl = null, checksumUrl = null;
+                        string? isoUrl = null, checksumUrl = null, isoName = null;
                         if (release.TryGetProperty("assets", out var assetsEl))
                         {
                             foreach (var asset in assetsEl.EnumerateArray())
                             {
                                 string? name = asset.TryGetProperty("name", out var nameEl) ? nameEl.GetString() : null;
-                                string? url = asset.TryGetProperty("browser_download_url", out var urlEl) ? urlEl.GetString() : null;
+                                // Private repo: browser_download_url rejects
+                                // PATs — the asset API URL + octet-stream is
+                                // the authenticated download path.
+                                string? url = asset.TryGetProperty("url", out var urlEl) ? urlEl.GetString() : null;
                                 if (name == null || url == null) continue;
                                 if (name.StartsWith("vmcreate-", StringComparison.OrdinalIgnoreCase)
                                     && name.EndsWith(".iso", StringComparison.OrdinalIgnoreCase))
+                                {
                                     isoUrl = url;
+                                    isoName = name;
+                                }
                                 else if (name.StartsWith("vmcreate-", StringComparison.OrdinalIgnoreCase)
                                          && name.EndsWith(".sha256", StringComparison.OrdinalIgnoreCase))
                                     checksumUrl = url;
                             }
                         }
-                        if (isoUrl == null) continue; // no matching asset (e.g. draft)
+                        if (isoUrl == null || isoName == null) continue; // no matching asset (e.g. draft)
 
                         // Policy: stable beats prerelease at equal-or-any rank;
                         // within the same class, newest semver (published_at
@@ -243,7 +264,7 @@ namespace VMCreate
 
                         if (take)
                         {
-                            best = (tag, prerelease, published, isoUrl, checksumUrl);
+                            best = (tag, prerelease, published, isoUrl, checksumUrl, isoName);
                             haveBest = true;
                             bestIsStable = candidateIsStable;
                         }
@@ -257,7 +278,7 @@ namespace VMCreate
                     string version = best.Tag.StartsWith("v", StringComparison.OrdinalIgnoreCase) ? best.Tag[1..] : best.Tag;
                     _logger.LogInformation("Selected vmcreate-iso release {Version} (stable={Stable}): {IsoUrl}",
                         version, bestIsStable, best.IsoUrl);
-                    return (best.IsoUrl, best.ChecksumUrl, version);
+                    return (best.IsoUrl, best.ChecksumUrl, version, best.IsoName);
                 }
                 catch (HttpRequestException ex)
                 {

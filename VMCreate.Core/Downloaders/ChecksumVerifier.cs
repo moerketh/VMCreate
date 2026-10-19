@@ -64,6 +64,11 @@ namespace VMCreate
             _logger.LogInformation("Downloading checksum file from {ChecksumUri}", checksumUri);
 
             var client = _clientFactory.CreateClient();
+            var checksumRequestUri = new Uri(checksumUri);
+            GitHubAssetAuth.ApplyIfGithub(client, checksumRequestUri);
+            if (GitHubAssetAuth.IsReleaseAssetApiUrl(checksumRequestUri))
+                client.DefaultRequestHeaders.Accept.Add(
+                    new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/octet-stream"));
             client.DefaultRequestHeaders.Add("User-Agent", ProductInfo.UserAgent);
 
             var response = await client.GetAsync(checksumUri, cancellationToken);
