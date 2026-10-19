@@ -133,5 +133,31 @@ namespace VMCreate.Tests.HyperV.Steps
             Assert.IsNotNull(copiedContent, "script content must reach the guest");
             StringAssert.Contains(copiedContent, "XRDP_POSTBOOT_RESULT=", "script carries the result-line contract");
         }
+
+        [TestMethod]
+        public async Task ExecuteAsync_ShipsScriptWithVsockEnhancedSessionConfig()
+        {
+            // The PwnCloudOS lesson: stock xrdp listens on TCP 3389 only, so
+            // vmconnect silently falls back to the basic console and the
+            // Enhanced Session popup never appears. The post-boot backfill
+            // runs on every path (installed OR already) and MUST carry the
+            // same vsock/security seds as the ISO chroot installer.
+            string? copiedContent = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, path, _) => copiedContent = content)
+                  .Returns(Task.CompletedTask);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+                  .ReturnsAsync("XRDP_POSTBOOT_RESULT=already");
+
+            await _step.ExecuteAsync(_shell.Object, _item, _xrdpCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(copiedContent);
+            StringAssert.Contains(copiedContent, "port=vsock://-1:3389",
+                "the HvSocket listener config is what makes the Enhanced Session popup appear");
+            StringAssert.Contains(copiedContent, "security_layer=rdp", StringComparison.Ordinal);
+            StringAssert.Contains(copiedContent, "crypt_level=none", StringComparison.Ordinal);
+            StringAssert.Contains(copiedContent, "systemctl restart xrdp",
+                "a pre-existing xrdp (RESULT=already) still needs a restart to pick up the listener config");
+        }
     }
 }

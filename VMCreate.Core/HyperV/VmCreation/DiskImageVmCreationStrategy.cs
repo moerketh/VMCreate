@@ -379,9 +379,9 @@ namespace VMCreate.HyperV.VmCreation
                             string gateState =
                                 _kvpHeartbeatGate.LastDiagnostics?.ToString()
                                 ?? "no gate diagnostics available";
-                            bool daemonRunningInGuest = await TryConfirmGuestKvpDaemonAsync(
+                            KvpWitnessResult witness = await TryConfirmGuestKvpDaemonAsync(
                                 shell, cancellationToken);
-                            if (daemonRunningInGuest)
+                            if (witness == KvpWitnessResult.Confirmed)
                             {
                                 _logger.LogWarning(
                                     "KVP pools stayed empty for {VMName} ({GateState}) even after post-boot, but " +
@@ -390,6 +390,27 @@ namespace VMCreate.HyperV.VmCreation
                                     "Host↔guest KVP exchange may take a few more minutes to become usable in " +
                                     "this VM. (The gate timeout is a caller-visible default; the witness " +
                                     "prevents failing a verifiably healthy deployment.)",
+                                    plan.VmName, gateState);
+                            }
+                            else if (witness == KvpWitnessResult.Unreachable)
+                            {
+                                // The probe could not reach the guest at all.
+                                // Every post-boot step already succeeded over
+                                // this same SSH path, and the SSH-restore step
+                                // (which puts ssh-disabled images such as
+                                // PwnCloudOS back into their shipped state)
+                                // ran moments before the gate — an unreachable
+                                // witness here is that restore, not a dead
+                                // guest. Proceed with a warning; a genuinely
+                                // dead daemon is only ever reported as Absent
+                                // (SSH reachable, daemon not found).
+                                _logger.LogWarning(
+                                    "KVP pools stayed empty for {VMName} ({GateState}) and the witness probe " +
+                                    "could not reach the guest over SSH — most likely the SSH-restore step just " +
+                                    "re-disabled sshd (images that ship it disabled). All post-boot steps " +
+                                    "succeeded moments earlier over the same connection, so the deployment is " +
+                                    "treated as healthy and proceeds. Host↔guest KVP exchange may take a few " +
+                                    "more minutes to become usable in this VM.",
                                     plan.VmName, gateState);
                             }
                             else
@@ -473,13 +494,15 @@ namespace VMCreate.HyperV.VmCreation
         /// <summary>
         /// Witness probe for a KVP gate timeout: asks the guest itself, over the
         /// already-open shell, whether the KVP daemon runs. This distinguishes
-        /// the two timeout classes — daemon absent in the guest (a real image
-        /// defect) vs daemon alive while the host-side pools lag (a host
-        /// artifact on first boot). Returns <c>false</c> whenever the probe
-        /// cannot confirm, so an uncertain witness fails the deployment rather
-        /// than falsely rescuing it.
+        /// the timeout classes — daemon absent in the guest (a real image
+        /// defect), daemon alive while the host-side pools lag (a host
+        /// artifact on first boot), or the witness itself unreachable (SSH was
+        /// just restored to the image's original disabled state, so the probe
+        /// cannot see the guest at all).
         /// </summary>
-        private async Task<bool> TryConfirmGuestKvpDaemonAsync(IGuestShell shell, CancellationToken cancellationToken)
+        private enum KvpWitnessResult { Confirmed, Absent, Unreachable }
+
+        private async Task<KvpWitnessResult> TryConfirmGuestKvpDaemonAsync(IGuestShell shell, CancellationToken cancellationToken)
         {
             const string runningToken = "VMCREATE_KVP_DAEMON_RUNNING";
             try
@@ -496,14 +519,22 @@ namespace VMCreate.HyperV.VmCreation
                     $"; then echo {runningToken}; else echo VMCREATE_KVP_DAEMON_ABSENT; fi",
                     cancellationToken);
                 return !string.IsNullOrEmpty(stdout) &&
-                       stdout.Contains(runningToken, StringComparison.Ordinal);
+                       stdout.Contains(runningToken, StringComparison.Ordinal)
+                    ? KvpWitnessResult.Confirmed
+                    : KvpWitnessResult.Absent;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                // Transport failure, command timeout or a non-zero exit code:
-                // unconfirmed — the caller must treat this as "not running".
-                _logger.LogWarning(ex, "KVP daemon witness probe over SSH failed — treating the guest daemon as unconfirmed");
-                return false;
+                // Transport failure: the probe could not reach the guest. By
+                // this point every post-boot step has ALREADY succeeded over
+                // this same SSH path, so an unreachable witness means the
+                // restore step closed it (sshd-disabled images such as
+                // PwnCloudOS), not that the guest died. Reported as
+                // Unreachable so the caller proceeds with a warning instead
+                // of falsely failing a healthy deployment; Absent still fails
+                // the deployment.
+                _logger.LogWarning(ex, "KVP daemon witness probe over SSH could not reach the guest — treating as unreachable (SSH likely restored to the image's disabled state)");
+                return KvpWitnessResult.Unreachable;
             }
         }
     }

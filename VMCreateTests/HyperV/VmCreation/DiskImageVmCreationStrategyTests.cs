@@ -459,11 +459,16 @@ namespace VMCreate.Tests.HyperV.VmCreation
         }
 
         [TestMethod]
-        public async Task CreateVMAsync_KvpHeartbeatNotConfirmed_WitnessProbeFails_Throws()
+        public async Task CreateVMAsync_KvpHeartbeatNotConfirmed_WitnessProbeUnreachable_ProceedsWithWarning()
         {
-            // The witness probe itself failing (transport error, non-zero
-            // exit) must never rescue the deployment — unconfirmed means
-            // fail, so a broken probe degrades to the strict gate behavior.
+            // The PwnCloudOS lesson: images that ship sshd disabled get their
+            // SSH state restored by the post-boot pipeline (DisableSshStep's
+            // restore) BEFORE the gate runs, so the witness probe gets
+            // connection-refused on a perfectly healthy guest. A transport
+            // failure is therefore NOT evidence of a dead daemon — every
+            // post-boot step just succeeded over the same connection — and
+            // must not fail the deployment. Only a REACHED witness reporting
+            // the daemon absent may fail (previous test).
             _postBootService.Setup(s => s.HasLinuxPostBootSteps(_item, _customizations)).Returns(true);
             _kvpHeartbeatGate.Setup(g => g.WaitForGuestKvpAsync(
                 It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<int>(), It.IsAny<int>()))
@@ -472,19 +477,17 @@ namespace VMCreate.Tests.HyperV.VmCreation
                 It.Is<string>(cmd => cmd.Contains("pgrep", StringComparison.Ordinal)),
                 It.IsAny<CancellationToken>()))
                 .ThrowsAsync(new TimeoutException("connection reset by peer"));
-            _diagnosticsCollector.Setup(d => d.CollectAsync(
-                It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()))
-                .ReturnsAsync(new GuestDiagnostics { RawOutput = "[no output]" });
 
-            var ex = await Assert.ThrowsAsync<InvalidOperationException>(
-                () => ExecuteAsync(generation: 2));
+            await ExecuteAsync(generation: 2);
 
-            StringAssert.Contains(ex.Message, "hypervkvpd", StringComparison.Ordinal);
             _postBootService.Verify(p => p.RunLinuxPostBootAsync(
                 It.IsAny<IGuestShell>(), It.IsAny<VmDeploymentPlan>(), It.IsAny<GalleryItem>(),
                 It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(),
                 It.IsAny<CancellationToken>()), Times.Once,
-                "post-boot runs before the hard gate in the two-phase design — a broken witness probe degrades to the strict gate, it cannot skip post-boot");
+                "post-boot runs before the hard gate in the two-phase design");
+            _diagnosticsCollector.Verify(d => d.CollectAsync(
+                It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()), Times.Never,
+                "an unreachable witness is a warning, not a failure — no diagnostics collection");
         }
 
         [TestMethod]
