@@ -52,12 +52,15 @@ namespace VMCreate
             services.AddSingleton(sp =>
             {
                 var s = new AppSettings();
-                // Dev lever for the v2 boot-cycle channel: no config file is
-                // bound anywhere, so this is how a flip-gate deploy turns the
-                // flag on for one process run (VMCREATE_ISO_VSOCK=1).
-                string? env = Environment.GetEnvironmentVariable("VMCREATE_ISO_VSOCK");
-                if (env is "1" or "true" or "yes")
-                    s.IsoVsockEnabled = true;
+                // Dev lever for the ISO boot-cycle channel: VMCREATE_ISO_VSOCK
+                // forces the flag for one process run (1/true/yes = v2,
+                // 0/false/no = legacy A/B). With the default flipped to v2,
+                // the force-off spelling is the escape hatch.
+                switch (Environment.GetEnvironmentVariable("VMCREATE_ISO_VSOCK")?.Trim().ToLowerInvariant())
+                {
+                    case "1" or "true" or "yes": s.IsoVsockEnabled = true; break;
+                    case "0" or "false" or "no": s.IsoVsockEnabled = false; break;
+                }
                 return Microsoft.Extensions.Options.Options.Create(s);
             });
 

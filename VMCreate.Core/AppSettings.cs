@@ -45,10 +45,12 @@ namespace VMCreate
         /// <summary>
         /// Drive the ISO boot-cycle over the Hyper-V socket channel
         /// (vmcreate-iso 2.x) instead of the legacy KVP progress protocol
-        /// (hyperv-convert-iso 1.x). Default off until the v2 cycle
-        /// validates on both deploy paths (BIOS clone + customize); flips to
-        /// default-on with the old path's removal.
+        /// (hyperv-convert-iso 1.x). Default ON since 2026-10-19: both
+        /// deploy shapes (GPT customize + MBR BIOS-clone) passed the
+        /// flip-gate through the real CLI pipeline. The legacy path dies
+        /// with its removal commit; until then VMCREATE_ISO_VSOCK=0 forces
+        /// it for A/B testing.
         /// </summary>
-        public bool IsoVsockEnabled { get; set; } = false;
+        public bool IsoVsockEnabled { get; set; } = true;
     }
 }
