@@ -1,6 +1,11 @@
 #!/bin/bash
 set -o pipefail
 
+# Failures surface on stderr: SshTransport keeps stderr for the error
+# detail and discards stdout, so the trap is the only place the failing
+# line number reaches the host's deployment log.
+trap 'echo "install_xrdp_postboot: failed at line $LINENO (exit $?)" >&2' ERR
+
 # Post-boot xrdp install.
 #
 # Normally xrdp is pre-installed by the cloning-ISO chroot (VMCREATE_XRDP
