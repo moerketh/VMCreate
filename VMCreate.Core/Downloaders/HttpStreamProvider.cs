@@ -27,14 +27,6 @@ namespace VMCreate
         {
             HttpClient client = _clientFactory.CreateClient();
             client.DefaultRequestHeaders.Add("User-Agent", ProductInfo.UserAgent);
-            // Private-repo GitHub assets need the PAT; scoped to GitHub
-            // hosts only (third-party mirrors must never see it). Asset
-            // API URLs serve the bytes only under an octet-stream Accept.
-            var requestUri = new Uri(uri);
-            GitHubAssetAuth.ApplyIfGithub(client, requestUri);
-            if (GitHubAssetAuth.IsReleaseAssetApiUrl(requestUri))
-                client.DefaultRequestHeaders.Accept.Add(
-                    new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/octet-stream"));
 
             var response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             response.EnsureSuccessStatusCode();
