@@ -326,6 +326,30 @@ namespace VMCreate.Tests.GalleryTests
                 Assert.Inconclusive("wsl.exe not present — bash syntax check skipped");
             }
 
+            // wsl.exe SHIPS with Windows, so existence proves nothing about a
+            // usable WSL: GitHub's windows runners have the binary but no
+            // distro, and `wsl -e …` exits non-zero with empty command
+            // stderr — indistinguishable from a bash -n rejection without a
+            // preflight. Probe WSL itself; unusable means skip, not fail.
+            var probe = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = wslPath,
+                Arguments = "-e echo ok",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            using (var probeProcess = System.Diagnostics.Process.Start(probe)!)
+            {
+                probeProcess.StandardOutput.ReadToEnd();
+                probeProcess.WaitForExit(15000);
+                if (probeProcess.ExitCode != 0)
+                {
+                    Assert.Inconclusive($"WSL present but unusable (probe exit {probeProcess.ExitCode}) — bash syntax check skipped");
+                }
+            }
+
             var script = ElasticStackInstaller.BuildScriptForTest(true, true, "https://llm/v1/chat/completions", "key", "model");
             var temp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"elastic-setup-{Guid.NewGuid():N}.sh");
             // No CRLF normalization here — the temp file must be byte-identical
