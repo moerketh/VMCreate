@@ -13,11 +13,15 @@ namespace VMCreate
         None,
 
         /// <summary>
-        /// The classic xrdp server, installed via the external cloning ISO
-        /// (<c>install_xrdp.sh</c> in the hyperv-convert-iso repo) and fixed up
-        /// post-boot. Disables Wayland and forces X11 because <c>hyperv_drm</c>
-        /// has incomplete atomic modesetting support. Default for maximum
-        /// compatibility across Linux distributions.
+        /// The classic xrdp server. Pre-installed by the cloning ISO's chroot
+        /// (<c>install_xrdp.sh</c>, built from source with
+        /// <c>--enable-vsock</c>) when xrdp is chosen up front, or backfilled
+        /// post-boot over SSH (<c>install_xrdp_postboot.sh</c>, distro
+        /// packages + a vsock listener appended to <c>xrdp.ini</c>) when the
+        /// backend resolves to xrdp late. Disables Wayland and forces X11
+        /// because <c>hyperv_drm</c> has incomplete atomic modesetting
+        /// support. Default for maximum compatibility across Linux
+        /// distributions.
         /// </summary>
         Xrdp,
 
@@ -76,12 +80,12 @@ namespace VMCreate
         /// Debian-family distro) or <see cref="Xrdp"/> (everything else).
         /// <para>
         /// While in this state the deployment pipeline behaves conservatively:
-        /// pre-boot customization is skipped (no <c>VMCREATE_XRDP</c> KVP, so
-        /// the cloning-ISO chroot never pre-installs xrdp — xrdp and Lamco
-        /// conflict on port 3389), and the backend-dependent post-boot steps
-        /// re-evaluate their applicability just-in-time as the resolver runs.
-        /// When the resolution lands on Xrdp, a post-boot xrdp install step
-        /// backfills the install that the skipped chroot would have done.
+        /// pre-boot customization is skipped (no <c>VMCREATE_XRDP</c> flag to
+        /// the ISO cycle, so the chroot never pre-installs xrdp — xrdp and
+        /// Lamco conflict on port 3389), and the backend-dependent post-boot
+        /// steps re-evaluate their applicability just-in-time as the resolver
+        /// runs. When the resolution lands on Xrdp, a post-boot xrdp install
+        /// step backfills the install that the skipped chroot would have done.
         /// </para>
         /// <para>
         /// Defaults to Xrdp when detection cannot produce a verdict (SSH

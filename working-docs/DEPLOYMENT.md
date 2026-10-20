@@ -1,6 +1,6 @@
 # Deployment Pipeline
 
-This document covers the VMCreate GUI's deployment architecture: the phase card system, progress reporting, VM creation orchestration, and how the WPF frontend communicates with the hyperv-convert-iso customization layer.
+This document covers the VMCreate GUI's deployment architecture: the phase card system, progress reporting, VM creation orchestration, and how the WPF frontend drives the vmcreate-iso 2.x customization layer (a logic-free live ISO whose guest is orchestrated over SSH via Hyper-V vsock — all deployment logic lives host-side).
 
 ## Table of Contents
 
@@ -10,7 +10,7 @@ This document covers the VMCreate GUI's deployment architecture: the phase card 
 - [VM Creation Orchestrator](#vm-creation-orchestrator)
 - [Post-Boot Customization Pipeline](#post-boot-customization-pipeline)
 - [Shipping Custom Steps with Gallery Items](#shipping-custom-steps-with-gallery-items)
-- [KVP Delivery & Corruption Mitigation](#kvp-delivery--corruption-mitigation)
+- [KVP Today: Heartbeat Gate Only](#kvp-today-heartbeat-gate-only)
 - [Error Monitoring via PowerShell Direct](#error-monitoring-via-powershell-direct)
 - [Technologies](#technologies)
 
@@ -163,19 +163,20 @@ return phase switch
 
 ### ISO Guest → Host → GUI Flow
 
-During the ISO boot cycle, progress flows from the guest through KVP to the UI:
+During the ISO boot cycle, progress flows from the guest over vsock SSH to the UI (no KVP progress protocol — the legacy `.kvp_pool_1` polling was removed with the hyperv-convert-iso path):
 
 ```
 ISO guest                          Hyper-V Host                    WPF GUI
 ─────────                          ───────────                     ───────
-report_progress("CLONE_ROOT",...)
-  └─ send_kvp("WorkflowProgress",...)
-     └─ .kvp_pool_1 ──────────►  HyperVKVPPoller reads pool
+echo "VMCREATE:PROGRESS:..."
+  └─ sshd-vsock socket ──────►  VsockIsoBootCycleRunner /
+                                 EmbeddedIsoScriptRunner parse
+                                    VMCREATE:* protocol lines
                                     └─ IProgress<T>.Report() ──►  OnProgressReport()
                                                                     └─ Update phase card
 ```
 
-`HyperVKVPPoller` reads `.kvp_pool_1` from the guest (via WMI) and translates `WorkflowProgress` / `PartcloneProgress` KVP entries into `CreateVMProgressInfo` reports.
+The ISO guest boots to a socket-activated sshd on AF_VSOCK port 22 (~7 s after power-on). The host connects with `ssh -o ProxyCommand="hvc.exe nc -t vsock <guid> 22"`, streams the scenario scripts (`clone_disk.sh`, `customize_target.sh`, …), and the scripts report progress with `VMCREATE:PROGRESS:` / `VMCREATE:MSG:` lines the runner translates into `CreateVMProgressInfo` reports.
 
 ---
 
@@ -190,14 +191,19 @@ report_progress("CLONE_ROOT",...)
    - **Gen 2 (GPT):** Attach VHDX as primary. Optionally attach the customization ISO.
    - **Gen 1 (MBR):** Create a new empty VHDX + attach the original as secondary + attach ISO.
 5. Starts the VM.
-6. If an ISO boot cycle is needed (`Gen 1` or `Gen 2 + xRDP`):
-   - Sends KVP configuration flags (with corruption mitigation padding).
-   - Polls guest KVP for progress.
-   - Waits for the VM to shut down.
-   - Removes the original MBR disk (Gen 1 only) and the ISO.
-   - Sets first boot to hard drive.
+6. If an ISO boot cycle is needed (`Gen 1` or `Gen 2 + post-boot/customization`):
+   - Boots the vmcreate-iso live environment; the guest brings up a
+     socket-activated sshd on vsock (no IP or temp NIC needed for the cycle).
+   - The host drives every scenario over that SSH channel (`VsockIsoBootCycleRunner`
+     → `EmbeddedIsoScriptRunner`), streaming scripts and parsing `VMCREATE:*`
+     progress lines.
+   - Removes the original MBR disk (Gen 1 only) and the ISO; sets first boot
+     to hard drive.
 7. Enables Enhanced Session Mode.
-8. Runs the **post-boot customization pipeline** (see below).
+8. Runs the **post-boot customization pipeline** (see below), split around the
+   hard KVP heartbeat gate: the main steps run first, then the gate (with its
+   SSH witness probe — it must run while SSH is still up), then the SSH-restore
+   tail (`DisableSshStep`, Order 900).
 
 ### Workflow Decision
 
@@ -504,36 +510,40 @@ VMCreate.Gallery.Security/     ← Plugin assembly (scanned for steps too)
 
 ---
 
-## KVP Delivery & Corruption Mitigation
+## KVP Today: Heartbeat Gate Only
 
-### The Problem
+The legacy host→guest KVP delivery (configuration flags, corruption-mitigation
+padding, `.kvp_pool_1` progress polling via `HyperVKVPPoller`) was **removed**
+together with the hyperv-convert-iso path — the v2 ISO is configured and
+monitored entirely over vsock SSH.
 
-When a Gen 2 VM boots, Hyper-V pushes network configuration (IPv6 multicast prefixes, DNS) through the same VMBus KVP channel that `AddKvpItems` uses. The first two records in `.kvp_pool_0` are consistently corrupted by this overlap — e.g., key `DUMMY` becomes `DUMMYcastprefix` with `ff02::` multicast data.
+What remains of KVP:
 
-This is **not** a timing issue — even with a 10 s delay, the first two slots are corrupted.
+### KvpHeartbeatGate
 
-### The Fix
+After post-boot, the strategy polls the HOST-side
+`Msvm_KvpExchangeComponent` pools via WMI (`KvpHeartbeatGate`) to prove the
+guest's `hv_kvp_daemon` is answering. On timeout, an SSH witness probe asks
+the guest directly (`pgrep hv_kvp_daemon`) before failing:
 
-```csharp
-// HyperVVmCreator.cs
-await Task.Delay(TimeSpan.FromSeconds(10), ct);
+- daemon answering, pools empty → known first-boot pool materialization lag —
+  proceed with a warning;
+- daemon absent (SSH reachable) → hard failure with diagnostics;
+- SSH transport error during the probe → hard failure with a distinct
+  "could not reach the guest" message.
 
-// Throwaway padding — absorbs corruption in slots 1–2
-await kvp.SendKVPToGuestAsync(vmName, "PADDING_1", "true", ct);
-await kvp.SendKVPToGuestAsync(vmName, "PADDING_2", "true", ct);
+The gate runs BEFORE `DisableSshStep` (Order 900) so the witness probe always
+has a live SSH session.
 
-// Real configuration lands in slot 3+ (clean)
-await kvp.SendKVPToGuestAsync(vmName, "VMCREATE_MODE", "customize", ct);
-await kvp.SendKVPToGuestAsync(vmName, "VMCREATE_XRDP", "true", ct);
-```
+### KvpBase (IVmShutdownWatcher)
 
-### KvpHostToGuest
+WMI helpers shared by the gate: VM-GUID resolution and running-state polling.
+The old progress-oriented poller (`IKvpPoller` / `HyperVKVPPoller`) is gone.
 
-Uses WMI `Msvm_VirtualSystemManagementService.AddKvpItems` with retry logic (5 attempts, 5 s delay) and WMI job completion waiting.
+### Old cached ISO files
 
-### HyperVKVPPoller
-
-Reads guest-to-host KVP (`.kvp_pool_1`) via WMI `Msvm_KvpExchangeComponent.GuestExchangeItems`. Translates `WorkflowProgress` and `PartcloneProgress` entries into `CreateVMProgressInfo` reports for the UI.
+`hyperv-convert.iso*` left in the cache by pre-2.0 installs is orphaned — the
+v2 downloader only manages `vmcreate-iso.iso` — and can be deleted manually.
 
 ---
 
