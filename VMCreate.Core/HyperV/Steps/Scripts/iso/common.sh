@@ -49,7 +49,7 @@ report_progress() {
     local step="$1"
     local detail="$2"
     if [ -n "$detail" ]; then
-        progress "" "$step: $detail"
+        progress "" "$detail"
     else
         progress "" "$step"
     fi
