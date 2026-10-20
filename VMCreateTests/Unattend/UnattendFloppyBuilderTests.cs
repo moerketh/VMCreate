@@ -497,6 +497,34 @@ namespace VMCreate.Tests.Unattend
 
         #region IMAPI2 typed interop tests (Windows-only)
 
+        /// <summary>
+        /// IMAPI2 is an optional Windows feature; GitHub runner images ship
+        /// without a usable IMAPI2FS COM server (CreateInstance fails with a
+        /// COMException). Tests that pin interop behavior treat that as an
+        /// environment gap (Inconclusive), not a regression. Probed once and
+        /// cached: concurrent IMAPI2 COM activation from parallel tests can
+        /// transiently fail, and the answer does not change within a run.
+        /// </summary>
+        private static readonly Lazy<bool> _imap2Unavailable = new(() =>
+        {
+            if (!OperatingSystem.IsWindows())
+                return true;
+            try
+            {
+                var imageType = Type.GetTypeFromProgID("IMAPI2FS.MsftFileSystemImage", throwOnError: false);
+                if (imageType is null)
+                    return true;
+                _ = (IFileSystemImage)Activator.CreateInstance(imageType)!;
+                return false;
+            }
+            catch (System.Runtime.InteropServices.COMException)
+            {
+                return true;
+            }
+        });
+
+        private static bool IMAPI2Unavailable() => _imap2Unavailable.Value;
+
         [TestMethod]
         public void IMAPI2_AddTree_ImportsDirectoryIntoIso()
         {
@@ -506,9 +534,9 @@ namespace VMCreate.Tests.Unattend
             // exactly two parameters; this round-trip guards against both signature
             // drift and vtable mis-declaration in Imapi2Interop.
             // See: https://learn.microsoft.com/en-us/windows/win32/api/imapi2fs/nf-imapi2fs-ifsidirectoryitem-addtree
-            if (!OperatingSystem.IsWindows())
+            if (IMAPI2Unavailable())
             {
-                Assert.Inconclusive("IMAPI2 is only available on Windows");
+                Assert.Inconclusive("IMAPI2FS COM server unavailable (optional Windows feature) — skipping");
                 return;
             }
 
@@ -561,40 +589,15 @@ namespace VMCreate.Tests.Unattend
             const FsiFileSystems ExpectedFileSystemFlags =
                 FsiFileSystems.ISO9660 | FsiFileSystems.Joliet | FsiFileSystems.UDF;
 
-            if (!OperatingSystem.IsWindows())
+            if (IMAPI2Unavailable())
             {
-                Assert.Inconclusive("IMAPI2 is only available on Windows");
+                Assert.Inconclusive("IMAPI2FS COM server unavailable (optional Windows feature) — skipping");
                 return;
             }
 
-            // IMAPI2 is an optional Windows feature: ProgID resolution throws
-            // where the component is not registered (GitHub runner images).
-            // This test pins the interop VALUES on machines that have it —
-            // an absent COM server is an environment gap, not a regression.
-            Type? imageType;
-            try
-            {
-                imageType = Type.GetTypeFromProgID("IMAPI2FS.MsftFileSystemImage", throwOnError: false);
-            }
-            catch (System.Runtime.InteropServices.COMException)
-            {
-                imageType = null;
-            }
-            if (imageType is null)
-            {
-                Assert.Inconclusive("IMAPI2FS.MsftFileSystemImage ProgID not registered (optional Windows feature) — skipping");
-            }
+            Type? imageType = Type.GetTypeFromProgID("IMAPI2FS.MsftFileSystemImage", throwOnError: true);
             Assert.IsNotNull(imageType, "IMAPI2FS.MsftFileSystemImage ProgID must resolve where registered");
-            IFileSystemImage image;
-            try
-            {
-                image = (IFileSystemImage)Activator.CreateInstance(imageType)!;
-            }
-            catch (System.Runtime.InteropServices.COMException)
-            {
-                Assert.Inconclusive("IMAPI2FS COM class not registered (optional Windows feature) — skipping");
-                return;
-            }
+            var image = (IFileSystemImage)Activator.CreateInstance(imageType)!;
             image.FileSystemsToCreate = ExpectedFileSystemFlags;
 
             Assert.AreEqual(ExpectedFileSystemFlags, (FsiFileSystems)image.FileSystemsToCreate,
