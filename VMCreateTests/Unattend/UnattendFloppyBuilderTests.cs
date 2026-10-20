@@ -567,9 +567,34 @@ namespace VMCreate.Tests.Unattend
                 return;
             }
 
-            Type? imageType = Type.GetTypeFromProgID("IMAPI2FS.MsftFileSystemImage", throwOnError: true);
-            Assert.IsNotNull(imageType, "IMAPI2FS.MsftFileSystemImage ProgID must resolve on Windows");
-            var image = (IFileSystemImage)Activator.CreateInstance(imageType)!;
+            // IMAPI2 is an optional Windows feature: ProgID resolution throws
+            // where the component is not registered (GitHub runner images).
+            // This test pins the interop VALUES on machines that have it —
+            // an absent COM server is an environment gap, not a regression.
+            Type? imageType;
+            try
+            {
+                imageType = Type.GetTypeFromProgID("IMAPI2FS.MsftFileSystemImage", throwOnError: false);
+            }
+            catch (System.Runtime.InteropServices.COMException)
+            {
+                imageType = null;
+            }
+            if (imageType is null)
+            {
+                Assert.Inconclusive("IMAPI2FS.MsftFileSystemImage ProgID not registered (optional Windows feature) — skipping");
+            }
+            Assert.IsNotNull(imageType, "IMAPI2FS.MsftFileSystemImage ProgID must resolve where registered");
+            IFileSystemImage image;
+            try
+            {
+                image = (IFileSystemImage)Activator.CreateInstance(imageType)!;
+            }
+            catch (System.Runtime.InteropServices.COMException)
+            {
+                Assert.Inconclusive("IMAPI2FS COM class not registered (optional Windows feature) — skipping");
+                return;
+            }
             image.FileSystemsToCreate = ExpectedFileSystemFlags;
 
             Assert.AreEqual(ExpectedFileSystemFlags, (FsiFileSystems)image.FileSystemsToCreate,
