@@ -90,6 +90,7 @@ namespace VMCreate
             // ── VM creation services ────────────────────────────────────────
             services.AddSingleton<IVmPathService, VmPathService>();
             services.AddSingleton<IHostNetworkService, HostNetworkService>();
+            services.AddSingleton<IPostBootStepPlanner, PostBootStepPlanner>();
             services.AddTransient<IPostBootCustomizationService, PostBootCustomizationService>();
             services.AddTransient<VsockIsoBootCycleRunner>();
             services.AddTransient<IVsockGuestScriptRunner, EmbeddedIsoScriptRunner>();

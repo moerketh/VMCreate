@@ -436,8 +436,7 @@ namespace VMCreate.CLI.Commands
                     Name = key,
                     IsEnabled = val.Equals("true", StringComparison.OrdinalIgnoreCase)
                                 || val.Equals("1", StringComparison.OrdinalIgnoreCase)
-                                || val.Equals("yes", StringComparison.OrdinalIgnoreCase),
-                    Order = 0
+                                || val.Equals("yes", StringComparison.OrdinalIgnoreCase)
                 });
             }
 
@@ -559,14 +558,14 @@ namespace VMCreate.CLI.Commands
             if (distributionOptions.Count == 0 &&
                 string.Equals(galleryItem.Name, "FLARE VM", StringComparison.OrdinalIgnoreCase))
             {
-                vmCustomizations.DistributionOptions.Add(new DistributionOptionSelection { Name = "Install FLARE VM", IsEnabled = true, Order = 200 });
+                vmCustomizations.DistributionOptions.Add(new DistributionOptionSelection { Name = "Install FLARE VM", IsEnabled = true });
             }
 
             // Auto-populate PwnCloudOS optional option if none were explicitly provided
             if (distributionOptions.Count == 0 &&
                 string.Equals(galleryItem.Name, "PwnCloudOS", StringComparison.OrdinalIgnoreCase))
             {
-                vmCustomizations.DistributionOptions.Add(new DistributionOptionSelection { Name = "PwnCloudOS Sync", IsEnabled = true, Order = 100 });
+                vmCustomizations.DistributionOptions.Add(new DistributionOptionSelection { Name = "PwnCloudOS Sync", IsEnabled = true });
             }
 
             // ── Download HTB VPN keys if token is provided ───────────────────

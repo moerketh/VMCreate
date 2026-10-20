@@ -88,7 +88,6 @@ namespace VMCreate
         public string DeployDescription => "Adding security tools and web apps to the Omarchy launcher";
         public string DeployPhaseId => "Sub_OmarchyRegisterApps";
         public string DeployIconName => "Apps24";
-        public int DeployOrder => 236;
         public string? DeployCompletionInfo => null;
 
         public bool IsVisibleFor(GalleryItem? item) => item.HasTag("omarchy");

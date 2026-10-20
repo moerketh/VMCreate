@@ -10,13 +10,17 @@ namespace VMCreate
     /// into NetworkManager so they appear in the system tray VPN menu.
     /// Runs after <see cref="InstallOpenVpnStep"/> (Order 300 > 200).
     /// </summary>
-    public class DeployVpnConfigsStep : ICustomizationStep
+    public class DeployVpnConfigsStep : ICustomizationStep, IStepDisplayInfo
     {
         public string Name => "Deploy VPN Configs";
         public CustomizationPhase Phase => CustomizationPhase.PostBoot;
         public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 300;
         public string? ProgressPhaseId => "Sub_ConfigureVpn";
+
+        public string DeployTitle => "Configure VPN";
+        public string DeployDescription => "Deploying VPN configs";
+        public string DeployIconName => "Globe24";
 
         public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
             => customizations?.ConfigureHtbVpn == true;

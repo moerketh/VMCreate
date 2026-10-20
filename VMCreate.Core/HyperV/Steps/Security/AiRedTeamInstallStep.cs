@@ -86,7 +86,6 @@ namespace VMCreate
         public string DeployDescription => "Installing garak, PyRIT and promptmap2 via pipx";
         public string DeployPhaseId => "Sub_AiRedTeamInstall";
         public string DeployIconName => "Beaker24";
-        public int DeployOrder => 234;
         public string? DeployCompletionInfo => null;
 
         public bool IsVisibleFor(GalleryItem? item) => item.HasTag("omarchy");

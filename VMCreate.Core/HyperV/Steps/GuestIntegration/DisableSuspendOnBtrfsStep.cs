@@ -25,13 +25,17 @@ namespace VMCreate
     /// steps such as <see cref="SyncTimezoneStep"/> (100).
     /// </para>
     /// </summary>
-    public class DisableSuspendOnBtrfsStep : ICustomizationStep
+    public class DisableSuspendOnBtrfsStep : ICustomizationStep, IStepDisplayInfo
     {
         public string Name => "Disable Suspend on btrfs";
         public CustomizationPhase Phase => CustomizationPhase.PostBoot;
         public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 200;
         public string? ProgressPhaseId => "Sub_DisableSuspendOnBtrfs";
+
+        public string DeployTitle => "Disable Suspend on btrfs";
+        public string DeployDescription => "Disabling suspend on btrfs root filesystems to avoid hangs";
+        public string DeployIconName => "PauseCircle24";
 
         public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations) => true;
 

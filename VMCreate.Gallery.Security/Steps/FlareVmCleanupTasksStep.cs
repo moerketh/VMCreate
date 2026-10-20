@@ -100,7 +100,6 @@ namespace VMCreate.Gallery
         public string DeployDescription => "Disabling noisy scheduled tasks (Edge, Windows Update)";
         public string DeployPhaseId => "Sub_CleanupTasks";
         public string DeployIconName => "TimerOff24";
-        public int DeployOrder => 35;
         public string? DeployCompletionInfo => null;
 
         public bool IsVisibleFor(GalleryItem? item)

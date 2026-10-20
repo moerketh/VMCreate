@@ -24,13 +24,6 @@ namespace VMCreate
 
         /// <summary>Whether the user enabled this option.</summary>
         public bool IsEnabled { get; set; }
-
-        /// <summary>
-        /// Display/execution order within the post-boot phase. Provided by the step's
-        /// <see cref="IDistributionOptionMetadata.DeployOrder"/> so the GUI doesn't need
-        /// a hard-coded ordering list.
-        /// </summary>
-        public int Order { get; set; }
     }
 
     /// <summary>

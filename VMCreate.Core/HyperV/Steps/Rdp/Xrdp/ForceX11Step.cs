@@ -41,13 +41,17 @@ namespace VMCreate
     /// and before <see cref="FixXrdpStep"/> (245).
     /// </para>
     /// </summary>
-    public class ForceX11Step : ICustomizationStep
+    public class ForceX11Step : ICustomizationStep, IStepDisplayInfo
     {
         public string Name => "Force X11 Display Server";
         public CustomizationPhase Phase => CustomizationPhase.PostBoot;
         public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 240;
         public string? ProgressPhaseId => "Sub_ForceX11";
+
+        public string DeployTitle => "Force X11 Display Server";
+        public string DeployDescription => "Setting the default display server to X11 for xrdp compatibility";
+        public string DeployIconName => "Desktop24";
 
         // Note the gate: != Lamco means BOTH Xrdp and None force X11/wayland-off.
         // That is deliberate but worth stating: "no RDP" is NOT "no desktop

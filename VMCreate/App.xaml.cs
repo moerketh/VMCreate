@@ -12,6 +12,7 @@ using System.Windows;
 using VMCreate;
 using VMCreate.Gallery;
 using VMCreate.HyperV.Unattend;
+using VMCreate.HyperV.VmCreation;
 
 namespace VMCreate
 {
@@ -164,6 +165,7 @@ namespace VMCreate
                     sp.GetRequiredService<ILoggerFactory>(),
                     steps,
                     allSteps,
+                    sp.GetRequiredService<IPostBootStepPlanner>(),
                     sp.GetRequiredService<IUserPreferencesStore>());
             }));
             services.AddSingleton<MainWindow>();

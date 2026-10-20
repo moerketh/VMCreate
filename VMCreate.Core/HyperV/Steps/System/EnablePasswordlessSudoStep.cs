@@ -127,7 +127,6 @@ namespace VMCreate
         public string DeployPhaseId => "Sub_PasswordlessSudoBootstrap";
         public string DeployIconName => "Key24";
         public string? DeployCompletionInfo => null;
-        public int DeployOrder => 45;
 
         public bool IsVisibleFor(GalleryItem? item)
             => item != null && item.HasTag(OmarchyTag);

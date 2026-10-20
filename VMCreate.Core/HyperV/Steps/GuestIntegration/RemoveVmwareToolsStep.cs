@@ -18,13 +18,17 @@ namespace VMCreate
     /// and before <see cref="ForceX11Step"/> (240).
     /// </para>
     /// </summary>
-    public class RemoveVmwareToolsStep : ICustomizationStep
+    public class RemoveVmwareToolsStep : ICustomizationStep, IStepDisplayInfo
     {
         public string Name => "Remove VMware Tools";
         public CustomizationPhase Phase => CustomizationPhase.PostBoot;
         public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 230;
         public string? ProgressPhaseId => "Sub_RemoveVmwareTools";
+
+        public string DeployTitle => "Remove VMware Tools";
+        public string DeployDescription => "Removing VMware tools and blacklisting VMware drivers";
+        public string DeployIconName => "Delete24";
 
         public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations) => true;
 

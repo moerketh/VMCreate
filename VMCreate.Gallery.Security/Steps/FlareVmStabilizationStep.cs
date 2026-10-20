@@ -112,7 +112,6 @@ namespace VMCreate.Gallery
         public string DeployDescription => "Waiting for Windows services to fully initialize";
         public string DeployPhaseId => "Sub_StabilizeVm";
         public string DeployIconName => "Hourglass24";
-        public int DeployOrder => 25;
         public string? DeployCompletionInfo => null;
 
         public bool IsVisibleFor(GalleryItem? item)

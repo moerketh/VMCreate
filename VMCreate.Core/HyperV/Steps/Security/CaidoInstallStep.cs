@@ -86,7 +86,6 @@ namespace VMCreate
         public string DeployDescription => "Installing the Caido web security proxy";
         public string DeployPhaseId => "Sub_CaidoInstall";
         public string DeployIconName => "GlobeSearch24";
-        public int DeployOrder => 235;
         public string? DeployCompletionInfo => null;
 
         public bool IsVisibleFor(GalleryItem? item) => item.HasTag("omarchy");

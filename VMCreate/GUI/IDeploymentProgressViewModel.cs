@@ -16,14 +16,14 @@ namespace VMCreate
         void InsertMbrPhases();
         void InsertDiskSubSteps(int detectedGeneration, bool needsIsoBoot);
         void InsertCustomizePhase();
-        void InsertCleanupIsoBootPhase();
 
         /// <summary>
-        /// Ensures the resolved RDP backend's install cards exist (Auto deployments
-        /// only). Safe to call on every post-boot step report — see
-        /// <see cref="DeployPageViewModel.EnsureResolvedRdpBackendPhases"/>.
+        /// Reconciles the post-boot card list with the planner's current plan —
+        /// inserts cards for newly applicable steps, removes pending cards whose
+        /// step became inapplicable. Safe to call on every post-boot step report;
+        /// see <see cref="DeployPageViewModel.ReconcilePostBootSteps"/>.
         /// </summary>
-        void EnsureResolvedRdpBackendPhases();
+        void ReconcilePostBootSteps();
 
         void ActivatePhase(string id);
         void CompletePhase(string id);

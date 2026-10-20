@@ -135,7 +135,7 @@ namespace VMCreate.Tests.GalleryTests
             var enabled = new VmCustomizations();
             enabled.DistributionOptions.Add(new DistributionOptionSelection
             {
-                Name = step.Name, IsEnabled = true, Order = 150,
+                Name = step.Name, IsEnabled = true,
             });
             Assert.IsTrue(step.IsApplicable(UbuntuDesktopItem(), enabled));
         }

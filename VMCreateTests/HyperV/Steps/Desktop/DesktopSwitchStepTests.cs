@@ -65,7 +65,7 @@ namespace VMCreate.Tests.HyperV.Steps
             Assert.AreEqual("Switch desktop environment", _step.Label);
             Assert.AreEqual("Switch Desktop Environment", _step.DeployTitle);
             Assert.AreEqual("Desktop24", _step.DeployIconName);
-            Assert.AreEqual(231, _step.DeployOrder);
+            Assert.AreEqual(231, _step.Order);
             Assert.IsFalse(_step.IsOptional, "required steps render deploy cards that cannot be user-disabled");
             Assert.IsFalse(_step.DefaultEnabled, "no desktop is switched unless the user picks one");
             Assert.IsNull(_step.DeployCompletionInfo);

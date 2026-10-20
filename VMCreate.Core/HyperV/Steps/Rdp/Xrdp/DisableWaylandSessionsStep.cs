@@ -27,13 +27,17 @@ namespace VMCreate
     /// and before <see cref="InstallHypervDaemonsStep"/> (280).
     /// </para>
     /// </summary>
-    public class DisableWaylandSessionsStep : ICustomizationStep
+    public class DisableWaylandSessionsStep : ICustomizationStep, IStepDisplayInfo
     {
         public string Name => "Disable Wayland Sessions";
         public CustomizationPhase Phase => CustomizationPhase.PostBoot;
         public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 270;
         public string? ProgressPhaseId => "Sub_DisableWaylandSessions";
+
+        public string DeployTitle => "Disable Wayland Sessions";
+        public string DeployDescription => "Hiding Wayland sessions for xrdp compatibility";
+        public string DeployIconName => "Prohibited24";
 
         // xrdp/X11-path only: hiding the Wayland .desktop files breaks
         // Wayland-native backends — for wayrdp (Hyprland), uwsm resolves its

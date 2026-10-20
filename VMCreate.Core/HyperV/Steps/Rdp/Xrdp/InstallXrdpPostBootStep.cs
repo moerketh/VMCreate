@@ -50,13 +50,17 @@ namespace VMCreate
     /// is the safety net for a user explicitly forcing xrdp on Nix.
     /// </para>
     /// </summary>
-    public class InstallXrdpPostBootStep : ICustomizationStep
+    public class InstallXrdpPostBootStep : ICustomizationStep, IStepDisplayInfo
     {
         public string Name => "Install xrdp (post-boot)";
         public CustomizationPhase Phase => CustomizationPhase.PostBoot;
         public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 236;
         public string? ProgressPhaseId => "Sub_InstallXrdpPostBoot";
+
+        public string DeployTitle => "Install xrdp (post-boot)";
+        public string DeployDescription => "Verifying or backfilling the xrdp install";
+        public string DeployIconName => "Desktop24";
 
         public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
             => !item.HasTag("headless")

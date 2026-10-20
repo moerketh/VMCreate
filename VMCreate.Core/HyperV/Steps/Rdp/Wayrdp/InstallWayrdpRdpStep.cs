@@ -46,13 +46,17 @@ namespace VMCreate
     /// that line is treated as failure.
     /// </para>
     /// </summary>
-    public class InstallWayrdpRdpStep : ICustomizationStep
+    public class InstallWayrdpRdpStep : ICustomizationStep, IStepDisplayInfo
     {
         public string Name => "Install wayrdp RDP Server";
         public CustomizationPhase Phase => CustomizationPhase.PostBoot;
         public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 237;
         public string? ProgressPhaseId => "Sub_InstallWayrdpRdp";
+
+        public string DeployTitle => "Install wayrdp RDP Server";
+        public string DeployDescription => "Installing the Wayland-native RDP server (pinned release download, FreeRDP 3 libs, systemd user unit)";
+        public string DeployIconName => "Desktop24";
 
         public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
             => customizations?.RdpBackend == RdpBackend.Wayrdp && item.SupportsWayrdp();

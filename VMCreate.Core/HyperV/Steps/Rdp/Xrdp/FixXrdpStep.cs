@@ -22,13 +22,17 @@ namespace VMCreate
     /// <see cref="DisableKwinCompositingStep"/> (250).
     /// </para>
     /// </summary>
-    public class FixXrdpStep : ICustomizationStep
+    public class FixXrdpStep : ICustomizationStep, IStepDisplayInfo
     {
         public string Name => "Fix xrdp for Hyper-V";
         public CustomizationPhase Phase => CustomizationPhase.PostBoot;
         public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 245;
         public string? ProgressPhaseId => "Sub_FixXrdp";
+
+        public string DeployTitle => "Fix xrdp for Hyper-V";
+        public string DeployDescription => "Applying xrdp configuration fixes for Hyper-V";
+        public string DeployIconName => "Wrench24";
 
         public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
             // xrdp/X11 path only — gating on "not Lamco" leaks xrdp fixups

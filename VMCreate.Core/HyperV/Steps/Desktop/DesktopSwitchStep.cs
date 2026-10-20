@@ -136,7 +136,6 @@ namespace VMCreate
         public string DeployDescription => "Installing the selected desktop environment and making it the default session";
         public string DeployPhaseId => "Sub_DesktopSwitch";
         public string DeployIconName => "Desktop24";
-        public int DeployOrder => 231;
         public string? DeployCompletionInfo => null;
 
         public bool IsVisibleFor(GalleryItem? item)

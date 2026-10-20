@@ -229,15 +229,17 @@ After the VM is created and (optionally) customized via the ISO, VMCreate runs a
 ┌─────────────────────────────────────────────────────────────────────────┐
 │  HyperVVmCreator                                                        │
 │       │                                                                 │
-│       ├─ IEnumerable<ICustomizationStep>  (injected via DI)             │
-│       │     ├─ SyncTimezoneStep      (Order 100)                        │
+│       ├─ IEnumerable<ICustomizationStep>  (injected via DI)            │
+│       │     ├─ SyncTimezoneStep      (Order 100)                       │
 │       │     ├─ InstallOpenVpnStep    (Order 200)                        │
 │       │     └─ DeployVpnConfigsStep  (Order 300)                        │
 │       │                                                                 │
-│       ├─ Filter: Phase == PostBoot && IsApplicable(item, customizations)│
-│       ├─ Order by: Order ascending                                      │
+│       ├─ PostBootStepPlanner (shared: execution + deploy page)          │
+│       │     ├─ Filter: Phase == PostBoot && Platform matches            │
+│       │     ├─ Order by: Order ascending, then Name (ordinal)           │
+│       │     └─ GetPlannedSteps(): candidates where IsApplicable(...)     │
 │       │                                                                 │
-│       └─ For each applicable step:                                      │
+│       └─ For each applicable step (IsApplicable re-checked live):        │
 │             ├─ Report progress (step name + percentage)                  │
 │             ├─ step.ExecuteAsync(shell, item, customizations, logger, ct)│
 │             └─ Log completion                                           │
@@ -250,6 +252,19 @@ After the VM is created and (optionally) customized via the ISO, VMCreate runs a
 │       └─ CopyFileAsync()     — transfers host files to guest            │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
+
+Both the backend executor (`PostBootCustomizationService`) and the deploy
+page's post-boot card list come from the same planner
+(`IPostBootStepPlanner` in `VMCreate.Core/HyperV/VmCreation/PostBootStepPlanner.cs`),
+so the cards always match the execution order: candidates sorted by `Order`,
+then `Name` (ordinal) as a deterministic tie-break for steps that share an
+`Order`. The `CardId(step)` helper maps every step to a card ID
+(`ProgressPhaseId` when set, `Sub_Step_<Name>` otherwise), and
+`SshRestoreOrder` (900) is the boundary both the strategy (KVP gate split) and
+the card list (restore tail) split at. The deploy page re-reconciles its card
+list on every post-boot step report, so steps whose applicability changes
+mid-run (the Auto RDP resolver rewriting `RdpBackend`) get their cards
+inserted or removed while a deployment is in progress.
 
 ### Contracts (in `VMCreate.Gallery.Contracts`)
 
@@ -481,6 +496,7 @@ var scannableAssemblies = new[]
 | Steps must be **stateless** | A new instance is created per DI resolution; don't store VM-specific state in fields |
 | Use `IsApplicable()` for gating | Don't throw from `ExecuteAsync` to skip; return `false` from `IsApplicable` instead |
 | Keep `Order` ranges consistent | 100s = generic, 200s = packages, 300s = configs, 400+ = distro-specific, 900 = cleanup |
+| Implement `IStepDisplayInfo` | Gives the step a deploy-page card (title/description/icon); without it the card falls back to `Name` with a generic description |
 | Use `IGuestShell` for all guest ops | Never spawn `ssh.exe` directly — the shell handles retries, error detection, and transport |
 | Log via the provided `ILogger` | Don't create your own — the logger is scoped and tied to the step pipeline |
 | Check `item.Name`/`item.Publisher` for distro targeting | Steps can be universal or distro-specific based on `IsApplicable` logic |

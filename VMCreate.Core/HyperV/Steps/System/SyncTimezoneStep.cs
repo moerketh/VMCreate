@@ -9,13 +9,17 @@ namespace VMCreate
     /// Syncs the host's timezone to the guest via timedatectl.
     /// Works on any Linux guest with systemd. Maps Windows timezone IDs to IANA format.
     /// </summary>
-    public class SyncTimezoneStep : ICustomizationStep
+    public class SyncTimezoneStep : ICustomizationStep, IStepDisplayInfo
     {
         public string Name => "Sync Timezone";
         public CustomizationPhase Phase => CustomizationPhase.PostBoot;
         public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 100;
         public string? ProgressPhaseId => "Sub_SyncTimezone";
+
+        public string DeployTitle => "Sync Timezone";
+        public string DeployDescription => "Setting guest timezone to match host";
+        public string DeployIconName => "Clock24";
 
         public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
             => customizations?.SyncTimezone == true;
