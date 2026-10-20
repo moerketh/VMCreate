@@ -10,8 +10,8 @@ namespace VMCreate
     /// pre-installed via the cloning-ISO chroot.
     /// <para>
     /// Under <see cref="RdpBackend.Auto"/> the chroot xrdp install is
-    /// skipped entirely (no <c>VMCREATE_XRDP</c> KVP — see
-    /// <see cref="IsoBootCycleRunner.SendCustomizationFlags"/>), because
+    /// skipped entirely (no <c>VMCREATE_XRDP</c> flag to the ISO cycle),
+    /// because
     /// pre-boot nobody knows whether xrdp or the Lamco RDP Server is the
     /// right backend, and pre-installing xrdp unconditionally would collide
     /// with Lamco on port 3389. When
@@ -28,10 +28,13 @@ namespace VMCreate
     /// </para>
     /// <para>
     /// Output contract of <c>install_xrdp_postboot.sh</c>: the terminal
-    /// line <c>XRDP_POSTBOOT_RESULT=installed|already</c>. Hard failures
-    /// exit non-zero before the line appears (RunCommandAsync throws on
-    /// the host — never fabricated success); a missing line on a zero-exit
-    /// run fails loudly here.
+    /// lines <c>XRDP_POSTBOOT_RESULT=installed|already</c> and
+    /// <c>XRDP_POSTBOOT_TRANSPORT=vsock|tcp|unverified</c>. Hard failures
+    /// exit non-zero before the lines appear (RunCommandAsync throws on
+    /// the host — never fabricated success); a missing RESULT line on a
+    /// zero-exit run fails loudly here. A <c>tcp</c> TRANSPORT (distro
+    /// xrdp built without vsock — rolled back by the script) is a loud
+    /// warning, not a failure: the image keeps network RDP.
     /// </para>
     /// <para>
     /// Gating: only runs when <see cref="VmCustomizations.RdpBackend"/> is
@@ -93,6 +96,29 @@ namespace VMCreate
                         $"xrdp post-boot install on VM {shell.VmName} reported no XRDP_POSTBOOT_RESULT line. " +
                         "The script exited zero but did not confirm success — treating as failure.");
             }
+
+            string? transport = ParseResultLine(result, "XRDP_POSTBOOT_TRANSPORT=", new[] { "vsock", "tcp", "unverified" });
+            switch (transport)
+            {
+                case "vsock":
+                    logger.LogInformation(
+                        "xrdp on VM {VMName} listens on vsock — Hyper-V Enhanced Session is available.",
+                        shell.VmName);
+                    break;
+                case "tcp":
+                    logger.LogWarning(
+                        "xrdp on VM {VMName} could not start with the vsock listener (distro package likely built " +
+                        "without vsock support) and was rolled back to its TCP config. Network RDP works; Hyper-V " +
+                        "Enhanced Session (the vmconnect popup) will NOT appear for this VM.",
+                        shell.VmName);
+                    break;
+                default:
+                    logger.LogWarning(
+                        "xrdp on VM {VMName} reported no XRDP_POSTBOOT_TRANSPORT line — the Enhanced Session " +
+                        "listener could not be verified (no systemctl?). vmconnect may fall back to the basic console.",
+                        shell.VmName);
+                    break;
+            }
         }
 
         /// <summary>
@@ -100,16 +126,23 @@ namespace VMCreate
         /// line (last occurrence). Null when the line is absent.
         /// </summary>
         private static string? ParseResultLine(string output)
+            => ParseResultLine(output, "XRDP_POSTBOOT_RESULT=", new[] { "installed", "already" });
+
+        /// <summary>
+        /// Parses a terminal <c>PREFIX=one-of-allowed</c> line (last
+        /// occurrence). Null when the line is absent or the value is not
+        /// one of the allowed tokens.
+        /// </summary>
+        private static string? ParseResultLine(string output, string prefix, string[] allowed)
         {
             string? last = null;
             foreach (var line in output.Split('\n'))
             {
                 var trimmed = line.Trim();
-                if (trimmed.StartsWith("XRDP_POSTBOOT_RESULT=", StringComparison.Ordinal))
+                if (trimmed.StartsWith(prefix, StringComparison.Ordinal))
                 {
-                    var value = trimmed["XRDP_POSTBOOT_RESULT=".Length..];
-                    if (value.Equals("installed", StringComparison.Ordinal)
-                        || value.Equals("already", StringComparison.Ordinal))
+                    var value = trimmed[prefix.Length..];
+                    if (Array.IndexOf(allowed, value) >= 0)
                     {
                         last = value;
                     }

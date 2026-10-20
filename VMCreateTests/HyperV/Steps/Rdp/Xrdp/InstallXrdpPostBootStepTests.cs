@@ -112,6 +112,20 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
+        [DataRow("tcp")]
+        [DataRow("unverified")]
+        public async Task ExecuteAsync_TransportFallbackOrUnverified_Succeeds(string transport)
+        {
+            // A TCP fallback (vsock-less distro build, rolled back by the
+            // script) and an unverified transport (no systemctl) are loud
+            // warnings, not failures — the image still has network RDP.
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+                  .ReturnsAsync($"XRDP_POSTBOOT_RESULT=installed\nXRDP_POSTBOOT_TRANSPORT={transport}");
+
+            await _step.ExecuteAsync(_shell.Object, _item, _xrdpCustomizations, _logger.Object, CancellationToken.None);
+        }
+
+        [TestMethod]
         public async Task ExecuteAsync_ShipsScriptWithUniformGuestHardening()
         {
             // Same guest-script contract as every shipped step: GUID path in
@@ -140,24 +154,36 @@ namespace VMCreate.Tests.HyperV.Steps
             // The PwnCloudOS lesson: stock xrdp listens on TCP 3389 only, so
             // vmconnect silently falls back to the basic console and the
             // Enhanced Session popup never appears. The post-boot backfill
-            // runs on every path (installed OR already) and MUST carry the
-            // same vsock/security seds as the ISO chroot installer.
+            // runs on every path (installed OR already) and MUST append the
+            // vsock listener (keeping TCP) plus the security pins — and it
+            // must report the transport outcome and roll back on failure,
+            // so a vsock-less distro build degrades loudly, not silently.
             string? copiedContent = null;
             _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                   .Callback<string, string, CancellationToken>((content, path, _) => copiedContent = content)
                   .Returns(Task.CompletedTask);
             _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
-                  .ReturnsAsync("XRDP_POSTBOOT_RESULT=already");
+                  .ReturnsAsync("XRDP_POSTBOOT_RESULT=already\nXRDP_POSTBOOT_TRANSPORT=vsock");
 
             await _step.ExecuteAsync(_shell.Object, _item, _xrdpCustomizations, _logger.Object, CancellationToken.None);
 
             Assert.IsNotNull(copiedContent);
-            StringAssert.Contains(copiedContent, "port=vsock://-1:3389",
+            // The append form carries the URL unescaped; the old sed-replace
+            // form carried it as port=vsock:\/\/-1:3389. Accept either so a
+            // future rework of the insertion line cannot silently drop the
+            // listener config again.
+            Assert.IsTrue(
+                copiedContent.Contains("port=vsock://-1:3389", StringComparison.Ordinal)
+                || copiedContent.Contains("port=vsock:\\/\\/-1:3389", StringComparison.Ordinal),
                 "the HvSocket listener config is what makes the Enhanced Session popup appear");
             StringAssert.Contains(copiedContent, "security_layer=rdp", StringComparison.Ordinal);
             StringAssert.Contains(copiedContent, "crypt_level=none", StringComparison.Ordinal);
             StringAssert.Contains(copiedContent, "systemctl restart xrdp",
                 "a pre-existing xrdp (RESULT=already) still needs a restart to pick up the listener config");
+            StringAssert.Contains(copiedContent, "XRDP_POSTBOOT_TRANSPORT=",
+                "the transport outcome must be machine-readable so the host can warn on the TCP fallback");
+            StringAssert.Contains(copiedContent, "vmcreate-bak",
+                "a vsock-less distro build must be rolled back instead of left without RDP");
         }
     }
 }
