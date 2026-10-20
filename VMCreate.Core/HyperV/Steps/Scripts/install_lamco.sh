@@ -747,6 +747,18 @@ if [ -n "$AUTOLOGIN_USER" ]; then
     mkdir -p "$USER_HOME/.local/share/lamco-rdp-server"
     mkdir -p "$USER_HOME/Downloads"
     chown -R "$AUTOLOGIN_USER" "$USER_HOME/.config/lamco-rdp-server" "$USER_HOME/.local/share/lamco-rdp-server" "$USER_HOME/Downloads"
+    # lamco-grant.service runs `--grant-permission`, which loads TLS
+    # material from Config::default_config() — the hardcoded
+    # ~/.config/lamco-rdp-server cert/key paths (a --config flag is not
+    # honored on that code path) — and hard-fails on ENOENT before the
+    # portal consent dialog can render, leaving no restore_token. Point the
+    # user config dir at the /etc certs created above. The symlinks go in
+    # AFTER the chown -R above, so the recursive chown never dereferences
+    # into /etc. The grant unit runs unsandboxed, cert.pem is 644 and
+    # key.pem is 640 root:<user> — both readable through the links by the
+    # autologin user.
+    ln -sf /etc/lamco-rdp-server/cert.pem "$USER_HOME/.config/lamco-rdp-server/cert.pem"
+    ln -sf /etc/lamco-rdp-server/key.pem "$USER_HOME/.config/lamco-rdp-server/key.pem"
     cat > "$USER_HOME/.config/systemd/user/lamco-rdp-server.service" << 'UNIT_EOF'
 [Unit]
 Description=Lamco RDP Server
@@ -855,7 +867,7 @@ GRANT_EOF
         #    graphical-session.target NEVER activates on Omarchy — its
         #    compiled start-hyprland runs Hyprland outside the uwsm session
         #    chain, so nothing pulls the target and the units bound to it
-        #    (lamco-rdp-server, lamco-grant, lamco-idle-inhibit) never fire.
+        #    (lamco-rdp-server, lamco-grant) never fire.
         #    o.exec_on_start runs at hyprland.start with the session env:
         #    import WAYLAND_DISPLAY into the systemd user manager first (the
         #    units' ConditionEnvironment), then start the services directly
@@ -898,7 +910,7 @@ MON_LUA_EOF
 -- so import the Wayland env into the systemd user manager and start the
 -- lamco units directly at hyprland.start.
 o.exec_on_start("dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP HYPRLAND_INSTANCE_SIGNATURE")
-o.exec_on_start("systemctl --user start lamco-grant.service lamco-rdp-server.service lamco-idle-inhibit.service")
+o.exec_on_start("systemctl --user start lamco-grant.service lamco-rdp-server.service")
 AUTO_LUA_EOF
             echo "Wrote lamco autostart hooks to autostart.lua."
         fi
@@ -962,7 +974,7 @@ MONITORS_EOF
     # surfaces the one-time consent dialog (lamco-grant.service) if it has
     # not been answered yet. (No AUTOLOGIN_USER re-test here: this whole
     # block is already inside `if [ -n "$AUTOLOGIN_USER" ]`.)
-    loginctl enable-linger "$AUTOLOGIN_USER" 2>/dev/null || true
+    loginctl enable-linger "$AUTOLOGIN_USER" 2>/dev/null || { echo "DEGRADED: enable-linger failed for $AUTOLOGIN_USER — user units will not start at boot"; DEGRADED=1; }
     sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
         systemctl --user daemon-reload 2>/dev/null || true
     sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
@@ -1088,6 +1100,12 @@ MONITORS_EOF
     #      inhibitor cookie — a dbus-send one-shot dies with its connection
     #      and releases the cookie; a holder process keeps it for the
     #      session lifetime (the validated pattern from the E2E).
+    # Non-Arch only: under Omarchy's Hyprland, graphical-session.target
+    # never activates and there is no KDE screen locker to inhibit — the
+    # unit would exit 1 and restart-loop forever (the Omarchy E2E hit
+    # NRestarts≈4000). kwriteconfig6 exists on Arch too, so only the
+    # distro check keeps this provision on KDE where it belongs.
+    if ! is_arch_family; then
     if [ -n "$AUTOLOGIN_USER" ] && command -v kwriteconfig6 >/dev/null 2>&1; then
         sudo -u "$AUTOLOGIN_USER" kwriteconfig6 --file kscreenlockerrc --group Daemon --key Autolock false 2>/dev/null || true
         sudo -u "$AUTOLOGIN_USER" kwriteconfig6 --file kscreenlockerrc --group Daemon --key LockOnResume false 2>/dev/null || true
@@ -1149,18 +1167,19 @@ WantedBy=graphical-session.target
 UNITEOF
             chown "$AUTOLOGIN_USER": "$IDLE_HOME"/.config/systemd/user/lamco-idle-inhibit.service 2>/dev/null || true
             sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
-                systemctl --user daemon-reload 2>/dev/null || true
+                systemctl --user daemon-reload 2>/dev/null || { echo "DEGRADED: systemctl --user daemon-reload failed — lamco-idle-inhibit.service may stay unregistered"; DEGRADED=1; }
             sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
                 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u "$AUTOLOGIN_USER")/bus \
-                systemctl --user enable lamco-idle-inhibit.service 2>/dev/null || true
+                systemctl --user enable lamco-idle-inhibit.service 2>/dev/null || { echo "DEGRADED: systemctl --user enable lamco-idle-inhibit.service failed"; DEGRADED=1; }
             sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
                 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u "$AUTOLOGIN_USER")/bus \
-                systemctl --user start lamco-idle-inhibit.service 2>/dev/null || true
+                systemctl --user start lamco-idle-inhibit.service 2>/dev/null || { echo "DEGRADED: systemctl --user start lamco-idle-inhibit.service failed"; DEGRADED=1; }
             echo "Idle-lock suppression: Autolock=false + lamco-idle-inhibit.service (Hyper-V lock-greeter wedge prevention)."
         else
             echo "WARNING: no home dir for $AUTOLOGIN_USER — idle-lock suppression unit not installed."
             DEGRADED=1
         fi
+    fi
     fi
 
     # -- KWin private-interface grant (zkde-screencast) ----------------------
@@ -1196,13 +1215,13 @@ DESKTOPEOF
     fi
 
     # linger + enable (the service starts on next graphical-session target)
-    loginctl enable-linger "$AUTOLOGIN_USER" 2>/dev/null || true
+    loginctl enable-linger "$AUTOLOGIN_USER" 2>/dev/null || { echo "DEGRADED: enable-linger failed for $AUTOLOGIN_USER — user units will not start at boot"; DEGRADED=1; }
     sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
-        systemctl --user daemon-reload 2>/dev/null || true
+        systemctl --user daemon-reload 2>/dev/null || { echo "DEGRADED: systemctl --user daemon-reload failed for $AUTOLOGIN_USER"; DEGRADED=1; }
     sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
-        systemctl --user enable lamco-rdp-server.service 2>/dev/null || true
+        systemctl --user enable lamco-rdp-server.service 2>/dev/null || { echo "DEGRADED: systemctl --user enable lamco-rdp-server.service failed"; DEGRADED=1; }
     sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
-        systemctl --user enable lamco-grant.service 2>/dev/null || true
+        systemctl --user enable lamco-grant.service 2>/dev/null || { echo "DEGRADED: systemctl --user enable lamco-grant.service failed"; DEGRADED=1; }
     echo "Installed systemd user unit for $AUTOLOGIN_USER and enabled linger."
 else
     # Unreachable by construction: both no-user paths above hard-fail
@@ -1268,12 +1287,15 @@ rm -f /etc/systemd/journald.conf.d/99-lamco-ratelimit.conf
 #
 # Fix: a root-run early listener that binds vsock:3389 at multi-user.target
 # (well before the boot probe window) and answers availability probes by
-# accepting-and-closing. It exits the moment lamco-rdp-server starts (unit
-# conflict) — or when lamco binds: the holder re-binds in a 1s loop while
-# the port is taken, so after lamco's user service takes the listener the
-# holder simply parks and never steals the port back. If lamco later stops
-# (logout), the holder re-acquires the port so the NEXT boot probe or
-# vmconnect attempt still finds a listener.
+# accepting-and-closing. Hand-off is poll-based: the holder polls
+# `systemctl --user -M <user>@ is-active lamco-rdp-server.service` and, as
+# soon as the user unit is active/activating, closes the socket and exits
+# 0 (Restart=on-failure leaves an exit-0 unit stopped); lamco re-binds
+# within seconds. If the port is already taken when the holder starts
+# (lamco running — e.g. a redeploy into a live session), bind fails and
+# the holder is a no-op for that boot. On the next cold boot the holder
+# runs first again, so the boot probe still finds a listener even after
+# lamco was stopped (logout).
 python3 - << 'PYUNIT'
 import os
 unit = """[Unit]
@@ -1283,8 +1305,11 @@ Description=Lamco early vsock hold (vmms Enhanced Session availability probe)
 After=network.target
 Before=display-manager.service sddm.service lightdm.service gdm.service
 # Yield to the real server: as soon as lamco's user unit starts, this
-# holder must not compete for the port.
-Conflicts=user@1000.service lamco-hold-stop.service
+# holder must not compete for the port. Hand-off is done by the script
+# (poll the user manager, then exit) — deliberately NO Conflicts= here:
+# enable-linger pulls user@1000.service into the cold-boot transaction,
+# and a Conflicts= against it makes systemd cancel this hold's start job
+# before it ever binds (vmms's probe then finds no listener: no pop-up).
 
 [Service]
 Type=simple
@@ -1361,9 +1386,9 @@ PYUNIT
 # (empty AUTLOGIN_USER degrades to 'omarchy' — the holder then exits early
 # on a port-conflict no-op, harmless).
 sed -i "s/^USER = .*/USER = \"${AUTOLOGIN_USER:-omarchy}\"/" /usr/local/bin/lamco-vsock-hold.py
-systemctl daemon-reload 2>/dev/null || true
-systemctl enable lamco-vsock-hold.service >/dev/null 2>&1 || true
-systemctl start lamco-vsock-hold.service 2>/dev/null || true
+systemctl daemon-reload 2>/dev/null || { echo "DEGRADED: systemctl daemon-reload failed — lamco-vsock-hold.service not registered"; DEGRADED=1; }
+systemctl enable lamco-vsock-hold.service >/dev/null 2>&1 || { echo "DEGRADED: systemctl enable lamco-vsock-hold.service failed — no early listener for the next boot's probe"; DEGRADED=1; }
+systemctl start lamco-vsock-hold.service 2>/dev/null || { echo "DEGRADED: systemctl start lamco-vsock-hold.service failed — no listener for this boot's probe"; DEGRADED=1; }
 sleep 1
 if ss -l 2>/dev/null | grep -q 'v_str.*3389'; then
     echo "Early vsock hold active: vmms boot probe will find the listener (Enhanced Session pop-up available from first connect)."

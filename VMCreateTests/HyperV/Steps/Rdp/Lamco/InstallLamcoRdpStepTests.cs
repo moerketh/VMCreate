@@ -885,5 +885,149 @@ namespace VMCreate.Tests.HyperV.Steps
             StringAssert.Contains(captured, "readiness gate timed out (120s)",
                 "the timeout reason text is present (host logs it with the DEGRADED warning)");
         }
+
+        [TestMethod]
+        public async Task ExecuteAsync_VsockHoldUnit_DropsConflictsAndFailsLoudly()
+        {
+            // The early vsock hold unit once carried
+            // Conflicts=lamco-rdp-server.service: whenever the lamco user unit
+            // was already started (a redeploy into a live session), systemd
+            // stopped the exact service this step exists to install. The hold
+            // must hand off by polling, never by conflict, and its own
+            // bootstrap failures must be loud DEGRADED lines on stdout (the
+            // host log only sees stdout on zero-exit SSH runs).
+            string? captured = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("LAMCO_RESULT=ok");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(captured);
+            // No Conflicts= wiring in the hold unit body (mentions survive only
+            // inside # comments, which the line-anchored regex excludes).
+            Assert.IsFalse(System.Text.RegularExpressions.Regex.IsMatch(
+                    captured,
+                    @"^Conflicts=.*$",
+                    System.Text.RegularExpressions.RegexOptions.Multiline),
+                "the hold unit must not carry Conflicts= against the lamco user unit -- it hands off by polling");
+            // Hand-off mechanism: the holder polls the lamco user unit over the
+            // machine scope and exits as soon as it is active or activating.
+            StringAssert.Contains(captured, "[\"systemctl\", \"--user\", \"-M\", f\"{USER}@\", \"is-active\",",
+                "the holder polls the lamco user unit to time its hand-off");
+            StringAssert.Contains(captured,
+                "systemctl daemon-reload 2>/dev/null || { echo \"DEGRADED: systemctl daemon-reload failed — lamco-vsock-hold.service not registered\"; DEGRADED=1; }",
+                "a daemon-reload failure for the hold unit is reported as DEGRADED");
+            StringAssert.Contains(captured,
+                "systemctl enable lamco-vsock-hold.service >/dev/null 2>&1 || { echo \"DEGRADED: systemctl enable lamco-vsock-hold.service failed — no early listener for the next boot's probe\"; DEGRADED=1; }",
+                "an enable failure for the hold unit is reported as DEGRADED");
+            StringAssert.Contains(captured,
+                "systemctl start lamco-vsock-hold.service 2>/dev/null || { echo \"DEGRADED: systemctl start lamco-vsock-hold.service failed — no listener for this boot's probe\"; DEGRADED=1; }",
+                "a start failure for the hold unit is reported as DEGRADED");
+            Assert.IsFalse(captured.Contains("systemctl enable lamco-vsock-hold.service >/dev/null 2>&1 || true"),
+                "the hold-unit enable must not be a swallowed failure");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_GrantPermissionTls_SymlinksUserConfigDirAfterChown()
+        {
+            // lamco-grant.service runs --grant-permission, which loads TLS
+            // material from the hardcoded ~/.config/lamco-rdp-server cert/key
+            // paths and hard-fails on ENOENT before the portal consent dialog
+            // can render -- leaving no restore token behind. The /etc certs
+            // must be symlinked into the user config dir AFTER the recursive
+            // chown: a chown running after the links would follow them and hand
+            // root's key.pem to the autologin user.
+            string? captured = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("LAMCO_RESULT=ok");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(captured);
+            var mkdirIdx = captured.IndexOf("mkdir -p \"$USER_HOME/.config/lamco-rdp-server", StringComparison.Ordinal);
+            var chownIdx = captured.IndexOf("chown -R \"$AUTOLOGIN_USER\" \"$USER_HOME/.config/lamco-rdp-server\"", StringComparison.Ordinal);
+            var certIdx = captured.IndexOf("ln -sf /etc/lamco-rdp-server/cert.pem \"$USER_HOME/.config/lamco-rdp-server/cert.pem\"", StringComparison.Ordinal);
+            var keyIdx = captured.IndexOf("ln -sf /etc/lamco-rdp-server/key.pem \"$USER_HOME/.config/lamco-rdp-server/key.pem\"", StringComparison.Ordinal);
+            var unitIdx = captured.IndexOf("cat > \"$USER_HOME/.config/systemd/user/lamco-rdp-server.service\" << 'UNIT_EOF'", StringComparison.Ordinal);
+            Assert.IsTrue(mkdirIdx >= 0, "the user config dir is created");
+            Assert.IsTrue(chownIdx >= 0, "the user config dir is chowned to the autologin user");
+            Assert.IsTrue(certIdx >= 0, "the /etc cert is symlinked where --grant-permission reads it");
+            Assert.IsTrue(keyIdx >= 0, "the /etc key is symlinked where --grant-permission reads it");
+            Assert.IsTrue(unitIdx >= 0, "the RDP user unit is written in the same block");
+            Assert.IsTrue(mkdirIdx < chownIdx && chownIdx < certIdx && certIdx < keyIdx && keyIdx < unitIdx,
+                "mkdir -> chown -R -> cert/key symlinks -> unit heredoc: the recursive chown must never see the symlinks, and both links must be in place before the unit that needs them is written");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_IdleInhibitProvision_GatedOffArch()
+        {
+            // The idle-lock provision (kscreenlockerrc Autolock=false plus a
+            // durable inhibitor holder unit) exists to keep the KDE screen
+            // locker from wedging the VM behind a lock screen. Under Omarchy's
+            // Hyprland it is meaningless: graphical-session.target never
+            // activates and there is no KDE locker, so the holder unit only
+            // restart-loops (the Omarchy E2E hit NRestarts of thousands). The
+            // provision must sit inside the negative is_arch_family gate while
+            // the shared grant/RDP bootstrap stays distro-independent.
+            string? captured = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("LAMCO_RESULT=ok");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(captured);
+            var archGateIdx = captured.IndexOf("if ! is_arch_family; then", StringComparison.Ordinal);
+            var idleIdx = captured.IndexOf("lamco-idle-inhibit.py", StringComparison.Ordinal);
+            Assert.IsTrue(archGateIdx >= 0, "a negative Arch-family gate exists");
+            Assert.IsTrue(idleIdx >= 0, "the idle-inhibit holder stays provisioned for KDE-family distros");
+            Assert.IsTrue(archGateIdx < idleIdx,
+                "the idle-inhibit provision must skip the Arch family -- under Hyprland it can only restart-loop");
+            StringAssert.Contains(captured, "NRestarts≈4000",
+                "the script documents the restart-loop evidence behind the Arch exclusion");
+            StringAssert.Contains(captured,
+                "o.exec_on_start(\"systemctl --user start lamco-grant.service lamco-rdp-server.service\")",
+                "the session-start hook starts exactly the grant and RDP units");
+            Assert.IsFalse(captured.Contains("systemctl --user start lamco-grant.service lamco-rdp-server.service lamco-idle-inhibit.service"),
+                "the session-start hook must not force-start the idle unit -- it belongs to the KDE session target, not to every boot");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_EnableBlockFailures_ReportDegradedNotSwallowed()
+        {
+            // The linger + user-unit enable chain decides whether lamco ever
+            // starts. Every command ended in `|| true`: a broken enable-linger
+            // or enable looked like success while nothing would ever start --
+            // exactly the deployed-but-silent condition behind the missing
+            // pop-up. Each chain link must fall through to a stdout DEGRADED
+            // line (the host log never sees stderr on zero-exit runs).
+            string? captured = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("LAMCO_RESULT=ok");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(captured);
+            Assert.IsFalse(captured.Contains("loginctl enable-linger \"$AUTOLOGIN_USER\" 2>/dev/null || true"),
+                "enable-linger failures must not be swallowed with `|| true`");
+            StringAssert.Contains(captured,
+                "loginctl enable-linger \"$AUTOLOGIN_USER\" 2>/dev/null || { echo \"DEGRADED: enable-linger failed for $AUTOLOGIN_USER — user units will not start at boot\"; DEGRADED=1; }",
+                "an enable-linger failure reports DEGRADED on stdout");
+            StringAssert.Contains(captured,
+                "systemctl --user daemon-reload 2>/dev/null || { echo \"DEGRADED: systemctl --user daemon-reload failed for $AUTOLOGIN_USER\"; DEGRADED=1; }",
+                "an enable-block daemon-reload failure reports DEGRADED on stdout");
+            StringAssert.Contains(captured,
+                "systemctl --user enable lamco-rdp-server.service 2>/dev/null || { echo \"DEGRADED: systemctl --user enable lamco-rdp-server.service failed\"; DEGRADED=1; }",
+                "an RDP enable failure reports DEGRADED on stdout");
+            StringAssert.Contains(captured,
+                "systemctl --user enable lamco-grant.service 2>/dev/null || { echo \"DEGRADED: systemctl --user enable lamco-grant.service failed\"; DEGRADED=1; }",
+                "a grant enable failure reports DEGRADED on stdout");
+            StringAssert.Contains(captured,
+                "systemctl --user enable lamco-idle-inhibit.service 2>/dev/null || { echo \"DEGRADED: systemctl --user enable lamco-idle-inhibit.service failed\"; DEGRADED=1; }",
+                "an idle-inhibit enable failure (KDE path) reports DEGRADED on stdout");
+        }
     }
 }
