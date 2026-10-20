@@ -92,7 +92,11 @@ namespace VMCreate.Tests.GUI
             Assert.IsNotNull(vm.FindPhase(PostBootStepPlanner.CardId(Steps.First(s => s.Name == "Force X11 Display Server"))),
                 "under Auto (unresolved) the xrdp block is applicable (gate: != Lamco) — its cards are present");
 
-            // The resolver ran: Auto → Lamco.
+            // The resolver ran: Auto → Lamco. Mirror the real protocol: the
+            // presenter ACTIVATED the resolver's card when it reported, so at
+            // reconcile time the card is Active (kept); only Pending cards
+            // whose step turned inapplicable are removed.
+            vm.ActivatePhase(DeployPageViewModel.SubAutoRdpResolve);
             wizard.Customizations.RdpBackend = RdpBackend.Lamco;
             vm.ReconcilePostBootSteps();
 
@@ -102,6 +106,30 @@ namespace VMCreate.Tests.GUI
             Assert.IsNotNull(vm.FindPhase(DeployPageViewModel.SubStartGraphicalSession));
             Assert.IsNull(vm.FindPhase(PostBootStepPlanner.CardId(Steps.First(s => s.Name == "Force X11 Display Server"))),
                 "the pending xrdp-block cards must be removed once the backend resolves to Lamco");
+
+            // POSITION, not just presence: the backfilled Lamco cards sit in
+            // plan order — directly after the resolver card (the last still-
+            // applicable card before them) — and every remaining post-boot
+            // card keeps its planner order around the KVP gate.
+            var cardIds = vm.Phases
+                .SkipWhile(p => p.Id != DeployPageViewModel.PhasePostBoot)
+                .Skip(1)
+                .TakeWhile(p => p.IndentLevel > 0)
+                .Select(p => p.Id)
+                .ToList();
+
+            Assert.IsTrue(cardIds.IndexOf(DeployPageViewModel.SubAutoRdpResolve) >= 0, "resolver card still present");
+            Assert.AreEqual(
+                cardIds.IndexOf(DeployPageViewModel.SubAutoRdpResolve) + 1,
+                cardIds.IndexOf(DeployPageViewModel.SubInstallLamcoRdp),
+                "the backfilled Lamco install card must sit directly after the resolver card");
+            Assert.IsTrue(
+                cardIds.IndexOf(DeployPageViewModel.SubInstallLamcoRdp) < cardIds.IndexOf(DeployPageViewModel.SubEnableAutologin)
+                && cardIds.IndexOf(DeployPageViewModel.SubEnableAutologin) < cardIds.IndexOf(DeployPageViewModel.SubStartGraphicalSession),
+                "the Lamco branch cards must keep their plan order (install → autologin → session)");
+            Assert.IsTrue(
+                cardIds.IndexOf(DeployPageViewModel.SubStartGraphicalSession) < cardIds.IndexOf(DeployPageViewModel.SubWaitForKvpHeartbeat),
+                "the Lamco branch cards must stay below the KVP gate card");
         }
 
         [TestMethod]
@@ -162,6 +190,118 @@ namespace VMCreate.Tests.GUI
             SelectedItem = item,
             Customizations = customizations,
         };
+
+        [TestMethod]
+        public void Present_RealisticAutoReportSequence_ActivatesCardsStrictlyDownward()
+        {
+            // The plan's regression guard against the reported bug: feeding the
+            // presenter the exact report sequence the service emits must (a)
+            // activate each card strictly further down the list than the one
+            // before it and (b) never map a report to a missing card.
+            //
+            // The sequence is synthesized by walking the planner exactly as
+            // PostBootCustomizationService does — live IsApplicable, the
+            // resolver's in-place Auto→Lamco flip applied at its position in
+            // the sequence — so the GUI sees precisely what a real
+            // Auto-resolution deployment reports.
+            var customizations = new VmCustomizations
+            {
+                RdpBackend = RdpBackend.Auto,
+                SyncTimezone = true,
+                EnableIntegrationServices = true,
+            };
+            var wizard = NewWizard(KaliDisk(), customizations);
+            var vm = new DeployPageViewModel(wizard, NullLogger.Instance, configurableSteps: null, Planner);
+            var presenter = new DeploymentProgressPresenter(
+                new DeploymentProgressViewModelAdapter(vm),
+                new SynchronousDispatcher(),
+                wizard.SelectedItem!,
+                customizations,
+                Steps.ToDictionary(s => s.Name, s => s, StringComparer.OrdinalIgnoreCase),
+                NullLogger.Instance);
+
+            presenter.Present(new CreateVMProgressInfo { Phase = VmDeploymentPhase.PostBoot });
+
+            int lastIndex = -1;
+            void ReportAndCheck(CreateVMProgressInfo info)
+            {
+                presenter.Present(info);
+
+                if (info.StepName == null) return;
+
+                // No report may ever map to a missing card.
+                var activeCard = vm.FindPhase(presenter.ActiveSubStepId!);
+                Assert.IsNotNull(activeCard,
+                    $"report '{info.StepName}' activated '{presenter.ActiveSubStepId}', which has no card");
+                Assert.AreEqual(DeploymentPhaseStatus.Active, activeCard!.Status,
+                    $"the card activated by '{info.StepName}' must actually be active");
+
+                int index = vm.Phases.IndexOf(activeCard);
+                Assert.IsTrue(index > lastIndex,
+                    $"card '{presenter.ActiveSubStepId}' (from '{info.StepName}') must move strictly down the list; " +
+                    $"previous index {lastIndex}, this index {index}");
+                lastIndex = index;
+            }
+
+            // Prelude, exactly as the strategy reports it.
+            ReportAndCheck(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.PostBoot, VmDeploymentSubStep.AddTempNic));
+            ReportAndCheck(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.PostBoot, VmDeploymentSubStep.WaitForSsh));
+
+            // Step reports in service order. The resolver flips Auto→Lamco mid
+            // sequence (mirroring AutoRdpBackendResolveStep's in-place
+            // mutation) so the live re-plan is exercised end to end.
+            foreach (var step in Planner.GetOrderedCandidates(StepPlatform.Linux))
+            {
+                if (step.Order >= PostBootStepPlanner.SshRestoreOrder) break;
+
+                if (!step.IsApplicable(wizard.SelectedItem, customizations)) continue;
+                if (step.Name == "Auto-select RDP backend")
+                {
+                    ReportAndCheck(new CreateVMProgressInfo
+                    {
+                        Phase = VmDeploymentPhase.PostBoot,
+                        StepName = step.Name
+                    });
+                    customizations.RdpBackend = RdpBackend.Lamco; // resolver's in-place mutation
+                    continue;
+                }
+
+                ReportAndCheck(new CreateVMProgressInfo
+                {
+                    Phase = VmDeploymentPhase.PostBoot,
+                    StepName = step.Name
+                });
+            }
+
+            // The KVP gate sits between the two halves, exactly as the strategy reports it.
+            ReportAndCheck(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.PostBoot, VmDeploymentSubStep.WaitForKvpHeartbeat));
+
+            // The restore tail.
+            foreach (var step in Planner.GetOrderedCandidates(StepPlatform.Linux))
+            {
+                if (step.Order < PostBootStepPlanner.SshRestoreOrder) continue;
+                if (!step.IsApplicable(wizard.SelectedItem, customizations)) continue;
+
+                ReportAndCheck(new CreateVMProgressInfo
+                {
+                    Phase = VmDeploymentPhase.PostBoot,
+                    StepName = step.Name
+                });
+            }
+
+            presenter.CompleteActive();
+        }
+
+        private sealed class SynchronousDispatcher : IDispatcher
+        {
+            public void Invoke(Action action) => action();
+
+            public Task InvokeAsync(Action action)
+            {
+                action();
+                return Task.CompletedTask;
+            }
+        }
 
         private static List<ICustomizationStep> DiscoverSteps()
         {

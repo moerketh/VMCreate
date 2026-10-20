@@ -10,7 +10,7 @@ namespace VMCreate
         /// <summary>
         /// Optional fixed card ID used for both the deployment page phase list and
         /// runtime progress reporting. When null/empty, the deployment page falls back
-        /// to <c>DistOptionSubId(Name)</c>.
+        /// to <c>PostBootStepPlanner.CardId(Name)</c>.
         /// </summary>
         string DeployPhaseId { get; }
 

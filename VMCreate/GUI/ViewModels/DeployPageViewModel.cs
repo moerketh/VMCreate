@@ -92,26 +92,11 @@ namespace VMCreate
         public const string SubAutoRdpResolve      = "Sub_AutoRdpResolve";
         public const string SubInstallXrdpPostBoot = "Sub_InstallXrdpPostBoot";
 
-        /// <summary>Generates a sub-card phase ID for a distribution-specific option step.</summary>
-        public static string DistOptionSubId(string stepName) => $"Sub_Dist_{stepName}";
-
         /// <summary>Resolves a string icon name from distribution metadata to a WPF UI SymbolRegular.</summary>
         public static SymbolRegular ResolveIconName(string? iconName)
         {
             if (string.IsNullOrWhiteSpace(iconName)) return SymbolRegular.ArrowSync24;
             return Enum.TryParse<SymbolRegular>(iconName, out var icon) ? icon : SymbolRegular.ArrowSync24;
-        }
-
-        /// <summary>Looks up a step by name and returns its deployment metadata, if available.</summary>
-        private IDistributionOptionMetadata? GetStepMetadata(string name)
-        {
-            if (_configurableSteps != null
-                && _configurableSteps.TryGetValue(name, out var step)
-                && step is IDistributionOptionMetadata metadata)
-            {
-                return metadata;
-            }
-            return null;
         }
 
         /// <summary>
@@ -605,11 +590,19 @@ namespace VMCreate
             string[] plannedIds = planned.Select(PostBootStepPlanner.CardId).ToArray();
 
             // Insert any newly applicable step's card at its position among the
-            // planner-ordered cards. The existing list is already in plan
-            // order, so each new card goes directly before the first card whose
-            // planned position is later than its own (or at the end of the
-            // region when none is). Infrastructure cards (planned position -1)
-            // never anchor an insertion.
+            // planner-ordered cards. The existing list is already in plan order,
+            // so each new card goes directly before the first card whose planned
+            // position is later than its own; when no such card exists it goes
+            // at the end of its half of the region. The KVP gate card splits the
+            // region exactly like the builder: a step below SshRestoreOrder
+            // belongs before it, a step at or above it belongs after it — the
+            // anchor search must never cross the gate.
+            int kvpIndex = -1;
+            for (int i = listStart; i < listEnd; i++)
+            {
+                if (Phases[i].Id == SubWaitForKvpHeartbeat) { kvpIndex = i; break; }
+            }
+
             for (int p = 0; p < planned.Count; p++)
             {
                 string id = plannedIds[p];
@@ -620,8 +613,17 @@ namespace VMCreate
                 }
                 if (exists) continue;
 
-                int insertAt = listEnd;
-                for (int i = listStart; i < listEnd; i++)
+                bool inTail = planned[p].Order >= PostBootStepPlanner.SshRestoreOrder;
+                int searchStart = listStart;
+                int searchEnd = listEnd;
+                if (kvpIndex >= 0)
+                {
+                    if (inTail) searchStart = kvpIndex + 1;
+                    else searchEnd = kvpIndex;   // never anchor at/after the gate
+                }
+
+                int insertAt = searchEnd;
+                for (int i = searchStart; i < searchEnd; i++)
                 {
                     if (IndexOfStepId(Phases[i].Id, plannedIds) > p)
                     {
@@ -633,6 +635,7 @@ namespace VMCreate
                 var step = planned[p];
                 Phases.Insert(insertAt, BuildCardForStep(step));
                 listEnd++;
+                if (insertAt <= kvpIndex) kvpIndex++;
             }
 
             // Remove pending cards whose step is no longer applicable. Iterate
@@ -877,7 +880,9 @@ namespace VMCreate
                 if (string.IsNullOrWhiteSpace(metadata.DeployCompletionInfo))
                     continue;
 
-                string id = (metadata.DeployPhaseId ?? DistOptionSubId(step.Name)) + "_Info";
+                // Derived from the step's own card ID (CardId) so the info card
+                // stays in lockstep with its step card's identity.
+                string id = PostBootStepPlanner.CardId(step) + "_Info";
                 if (Phases.Any(p => p.Id == id)) continue;
                 Phases.Insert(index++, new DeploymentPhase(id, $"{metadata.DeployTitle} Background Setup",
                     metadata.DeployCompletionInfo, SymbolRegular.Info24)

@@ -78,7 +78,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
             // The strategy splits the pipeline at this boundary and the GUI
             // splits the card list at the same one — pin it to the actual
             // DisableSshStep value so the two can never diverge silently.
-            Assert.AreEqual(new DisableSshStep().Order, PostBootStepPlanner.SshRestoreOrder);
+            Assert.AreEqual(PostBootStepPlanner.SshRestoreOrder, new DisableSshStep().Order);
         }
 
         [TestMethod]
