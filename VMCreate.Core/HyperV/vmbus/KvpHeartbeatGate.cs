@@ -9,7 +9,7 @@ namespace CreateVM.HyperV.vmbus
 {
     /// <summary>
     /// <see cref="IKvpHeartbeatGate"/> implementation over the same WMI
-    /// machinery as <see cref="HyperVKVPPoller"/>. A running hv_kvp_daemon
+    /// machinery as <see cref="KvpBase"/>. A running hv_kvp_daemon
     /// (Linux) or integration services (Windows) publishes guest-written
     /// entries into <c>Msvm_KvpExchangeComponent.GuestExchangeItems</c> /
     /// <c>GuestIntrinsicItems</c>; an empty pair of pools after boot means the
@@ -104,7 +104,7 @@ namespace CreateVM.HyperV.vmbus
             return false;
         }
 
-        /// <summary>Parses the XML-wrapped KVP entries the same way as <see cref="HyperVKVPPoller"/>.</summary>
+        /// <summary>Parses the XML-wrapped KVP entries the same way as <see cref="KvpBase"/>.</summary>
         private static void AppendItems(Dictionary<string, string?> target, string[]? items)
         {
             if (items == null)

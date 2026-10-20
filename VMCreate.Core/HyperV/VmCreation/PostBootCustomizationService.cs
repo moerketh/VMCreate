@@ -25,13 +25,25 @@ namespace VMCreate.HyperV.VmCreation
         /// <summary>
         /// Runs Linux post-boot steps over SSH in order and reports progress.
         /// </summary>
+        /// <param name="upToOrderExclusive">
+        /// When set, only steps with <c>Order &lt; upToOrderExclusive</c> run.
+        /// Used by the disk-image strategy to split the pipeline around the
+        /// hard KVP gate: the gate's SSH witness probe must run while SSH is
+        /// still up, i.e. before <c>DisableSshStep</c> (Order 900) restores
+        /// sshd-disabled images to their shipped state.
+        /// </param>
+        /// <param name="fromOrderInclusive">
+        /// When set, only steps with <c>Order &gt;= fromOrderInclusive</c> run.
+        /// </param>
         Task RunLinuxPostBootAsync(
             IGuestShell shell,
             VmDeploymentPlan plan,
             GalleryItem item,
             VmCustomizations customizations,
             IProgress<CreateVMProgressInfo> progress,
-            CancellationToken cancellationToken);
+            CancellationToken cancellationToken,
+            int upToOrderExclusive = int.MaxValue,
+            int fromOrderInclusive = 0);
 
         /// <summary>
         /// Runs Windows post-boot steps over PowerShell Direct in order and reports progress.
@@ -70,7 +82,9 @@ namespace VMCreate.HyperV.VmCreation
             GalleryItem item,
             VmCustomizations customizations,
             IProgress<CreateVMProgressInfo> progress,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            int upToOrderExclusive = int.MaxValue,
+            int fromOrderInclusive = 0)
         {
             // Phase/platform filtering is a static property of each step, but
             // IsApplicable is deliberately evaluated LIVE inside the loop:
@@ -87,6 +101,7 @@ namespace VMCreate.HyperV.VmCreation
             // is always applicable under Auto.
             var steps = _customizationSteps
                 .Where(s => s.Phase == CustomizationPhase.PostBoot && s.Platform == StepPlatform.Linux)
+                .Where(s => s.Order < upToOrderExclusive && s.Order >= fromOrderInclusive)
                 .OrderBy(s => s.Order)
                 .ToList();
 

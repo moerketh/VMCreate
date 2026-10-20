@@ -81,9 +81,8 @@ namespace VMCreate
             services.AddSingleton<ISshKeyManager, SshKeyManager>();
             services.AddTransient<IKvpSender, KvpHostToGuest>();
             services.AddTransient<IKvpMaintenance, KvpHostToGuest>();
-            services.AddTransient<IKvpPoller, HyperVKVPPoller>();
             services.AddTransient<IKvpHeartbeatGate, KvpHeartbeatGate>();
-            services.AddTransient<IVmShutdownWatcher, HyperVKVPPoller>();
+            services.AddTransient<IVmShutdownWatcher, KvpBase>();
             services.AddTransient<IGuestDiagnosticsCollector, GuestDiagnosticsCollector>();
             services.AddTransient<IGuestShellFactory, GuestShellFactory>();
             services.AddTransient<PowerShellDirectGuestShellFactory>();

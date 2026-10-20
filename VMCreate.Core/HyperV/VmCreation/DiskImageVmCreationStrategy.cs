@@ -25,10 +25,7 @@ namespace VMCreate.HyperV.VmCreation
         private readonly IVmConfigManager _configManager;
         private readonly IGuestShellFactory _guestShellFactory;
         private readonly ISshKeyManager _sshKeyManager;
-        private readonly IKvpSender _kvpSender;
-        private readonly IKvpPoller _kvpPoller;
         private readonly IKvpHeartbeatGate _kvpHeartbeatGate;
-        private readonly IVmShutdownWatcher _shutdownWatcher;
         private readonly IGuestDiagnosticsCollector _diagnosticsCollector;
         private readonly IPostBootCustomizationService _postBootService;
         private readonly IHostNetworkService _hostNetworkService;
@@ -45,10 +42,7 @@ namespace VMCreate.HyperV.VmCreation
             IVmConfigManager configManager,
             IGuestShellFactory guestShellFactory,
             ISshKeyManager sshKeyManager,
-            IKvpSender kvpSender,
-            IKvpPoller kvpPoller,
             IKvpHeartbeatGate kvpHeartbeatGate,
-            IVmShutdownWatcher shutdownWatcher,
             IGuestDiagnosticsCollector diagnosticsCollector,
             IPostBootCustomizationService postBootService,
             IHostNetworkService hostNetworkService,
@@ -63,10 +57,7 @@ namespace VMCreate.HyperV.VmCreation
             _configManager = configManager ?? throw new ArgumentNullException(nameof(configManager));
             _guestShellFactory = guestShellFactory ?? throw new ArgumentNullException(nameof(guestShellFactory));
             _sshKeyManager = sshKeyManager ?? throw new ArgumentNullException(nameof(sshKeyManager));
-            _kvpSender = kvpSender ?? throw new ArgumentNullException(nameof(kvpSender));
-            _kvpPoller = kvpPoller ?? throw new ArgumentNullException(nameof(kvpPoller));
             _kvpHeartbeatGate = kvpHeartbeatGate ?? throw new ArgumentNullException(nameof(kvpHeartbeatGate));
-            _shutdownWatcher = shutdownWatcher ?? throw new ArgumentNullException(nameof(shutdownWatcher));
             _diagnosticsCollector = diagnosticsCollector ?? throw new ArgumentNullException(nameof(diagnosticsCollector));
             _postBootService = postBootService ?? throw new ArgumentNullException(nameof(postBootService));
             _hostNetworkService = hostNetworkService ?? throw new ArgumentNullException(nameof(hostNetworkService));
@@ -305,21 +296,6 @@ namespace VMCreate.HyperV.VmCreation
                         }
                     }
 
-                    if (needsIsoBootCycle)
-                    {
-                        try
-                        {
-                            string autorunLog = await shell.RunCommandAsync(
-                                "sudo cat /var/log/vmcreate-autorun.log 2>/dev/null || echo '[no autorun log found]'",
-                                cancellationToken);
-                            _logger.LogInformation("Autorun log for {VMName}:\n{Log}", plan.VmName, autorunLog);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex, "Failed to collect autorun log (non-fatal)");
-                        }
-                    }
-
                     if (isCloudInit)
                     {
                         // Confirm the seed ran so failures surface in the
@@ -339,26 +315,36 @@ namespace VMCreate.HyperV.VmCreation
 
                     if (postBootSteps.Count > 0)
                     {
+                        // Split the post-boot pipeline around the hard KVP
+                        // gate: everything up to (but excluding)
+                        // DisableSshStep (Order 900) runs first, then the
+                        // gate, then the restore tail. The gate's SSH
+                        // witness probe needs a live SSH session — running
+                        // it after the restore made the witness impossible
+                        // on sshd-disabled images (PwnCloudOS: the probe
+                        // got connection-refused from a healthy guest and
+                        // the deploy falsely failed).
                         await _postBootService.RunLinuxPostBootAsync(
-                            shell, plan, item, vmCustomizations, progress, cancellationToken);
+                            shell, plan, item, vmCustomizations, progress, cancellationToken,
+                            upToOrderExclusive: 900);
                     }
 
-                    // Hard KVP gate — AFTER post-boot. RunLinuxPostBootAsync
-                    // runs InstallHypervDaemonsStep (Order 280), which
-                    // installs and enables hv_kvp_daemon on guests that
-                    // ship it disabled (the Arch family ships all three
-                    // Hyper-V daemons disabled), so waiting for post-boot to
-                    // settle first is what lets such images pass instead of
-                    // failing after the heartbeat timeout. If the daemon is
-                    // still not answering even then, fail loudly with
-                    // diagnostics instead of proceeding into a dead
-                    // integration stack (the quickspawn lesson). Before
-                    // failing, witness the daemon over the still-open SSH
-                    // session: an answering daemon with empty HOST-side pools
-                    // is a known first-boot artifact, not a dead pipeline.
-                    // Still inside the try: the witness probe and
-                    // diagnostics collection need the SSH shell and the temp
-                    // NIC the finally removes.
+                    // Hard KVP gate — after post-boot proper, before the SSH
+                    // restore tail. RunLinuxPostBootAsync (first phase) runs
+                    // InstallHypervDaemonsStep (Order 280), which installs
+                    // and enables hv_kvp_daemon on guests that ship it
+                    // disabled (the Arch family ships all three Hyper-V
+                    // daemons disabled), so waiting for post-boot to settle
+                    // first is what lets such images pass instead of failing
+                    // after the heartbeat timeout. If the daemon is still
+                    // not answering even then, fail loudly with diagnostics
+                    // instead of proceeding into a dead integration stack
+                    // (the quickspawn lesson). Before failing, witness the
+                    // daemon over the still-open SSH session: an answering
+                    // daemon with empty HOST-side pools is a known first-
+                    // boot artifact, not a dead pipeline. Still inside the
+                    // try: the witness probe and diagnostics collection need
+                    // the SSH shell and the temp NIC the finally removes.
                     if (vmCustomizations.EnableIntegrationServices)
                     {
                         progress.Report(CreateVMProgressInfo.ForPhase(
@@ -372,7 +358,7 @@ namespace VMCreate.HyperV.VmCreation
                             // boot (observed live: guest answering ~4 s after
                             // SSH, pools still empty after 120 s, filled
                             // ~19 min after boot). "Unconfirmed" is therefore
-                            // not "dead": witness the daemon over the already-
+                            // not "dead": witness the daemon over the still-
                             // open SSH session before failing — an answering
                             // daemon means the pipeline is healthy and the
                             // empty pools are a host artifact.
@@ -392,27 +378,6 @@ namespace VMCreate.HyperV.VmCreation
                                     "prevents failing a verifiably healthy deployment.)",
                                     plan.VmName, gateState);
                             }
-                            else if (witness == KvpWitnessResult.Unreachable)
-                            {
-                                // The probe could not reach the guest at all.
-                                // Every post-boot step already succeeded over
-                                // this same SSH path, and the SSH-restore step
-                                // (which puts ssh-disabled images such as
-                                // PwnCloudOS back into their shipped state)
-                                // ran moments before the gate — an unreachable
-                                // witness here is that restore, not a dead
-                                // guest. Proceed with a warning; a genuinely
-                                // dead daemon is only ever reported as Absent
-                                // (SSH reachable, daemon not found).
-                                _logger.LogWarning(
-                                    "KVP pools stayed empty for {VMName} ({GateState}) and the witness probe " +
-                                    "could not reach the guest over SSH — most likely the SSH-restore step just " +
-                                    "re-disabled sshd (images that ship it disabled). All post-boot steps " +
-                                    "succeeded moments earlier over the same connection, so the deployment is " +
-                                    "treated as healthy and proceeds. Host↔guest KVP exchange may take a few " +
-                                    "more minutes to become usable in this VM.",
-                                    plan.VmName, gateState);
-                            }
                             else
                             {
                                 var diagnostics = await _diagnosticsCollector.CollectAsync(
@@ -425,21 +390,37 @@ namespace VMCreate.HyperV.VmCreation
                                     "hv-kvp-daemon (Debian). Guest diagnostics:\n{Diagnostics}",
                                     plan.VmName, gateState, diagnostics.RawOutput);
                                 throw new InvalidOperationException(
-                                    $"The Hyper-V KVP heartbeat for VM '{plan.VmName}' was not confirmed " +
-                                    $"({gateState}) and the guest's KVP integration daemon (binary " +
-                                    $"hv_kvp_daemon, unit hypervkvpd on RHEL-class — hv-kvp-daemon on Debian) " +
-                                    $"is not running. The image may ship it unstarted: on Debian-class " +
-                                    $"guests start it with 'systemctl enable --now hv-kvp-daemon'; on " +
-                                    $"RHEL-class guests the unit is static by design — check it with " +
-                                    $"'systemctl status hypervkvpd'. If it is active, the HOST-side KVP pool " +
-                                    $"may simply lag on first boot — wait a few minutes and retry the " +
-                                    $"deployment, or disable integration services for this VM.");
+                                    witness == KvpWitnessResult.Unreachable
+                                        ? $"The Hyper-V KVP heartbeat for VM '{plan.VmName}' was not confirmed " +
+                                          $"({gateState}) and the witness probe could not reach the guest over " +
+                                          $"SSH (transport error). The guest may have rebooted or lost its " +
+                                          $"network mid-deployment. Guest diagnostics:\n{diagnostics.RawOutput}"
+                                        : $"The Hyper-V KVP heartbeat for VM '{plan.VmName}' was not confirmed " +
+                                          $"({gateState}) and the guest's KVP integration daemon (binary " +
+                                          $"hv_kvp_daemon, unit hypervkvpd on RHEL-class — hv-kvp-daemon on Debian) " +
+                                          $"is not running. The image may ship it unstarted: on Debian-class " +
+                                          $"guests start it with 'systemctl enable --now hv-kvp-daemon'; on " +
+                                          $"RHEL-class guests the unit is static by design — check it with " +
+                                          $"'systemctl status hypervkvpd'. If it is active, the HOST-side KVP pool " +
+                                          $"may simply lag on first boot — wait a few minutes and retry the " +
+                                          $"deployment, or disable integration services for this VM.");
                             }
                         }
                         else
                         {
                             _logger.LogInformation("KVP heartbeat confirmed for {VMName} — guest integration daemon is answering.", plan.VmName);
                         }
+                    }
+
+                    // SSH-restore tail (DisableSshStep, Order 900): put
+                    // sshd-disabled images back into their shipped state.
+                    // Runs AFTER the gate so the witness probe above still
+                    // has a live session to ask.
+                    if (postBootSteps.Count > 0)
+                    {
+                        await _postBootService.RunLinuxPostBootAsync(
+                            shell, plan, item, vmCustomizations, progress, cancellationToken,
+                            fromOrderInclusive: 900);
                     }
                 }
                 finally
@@ -495,10 +476,13 @@ namespace VMCreate.HyperV.VmCreation
         /// Witness probe for a KVP gate timeout: asks the guest itself, over the
         /// already-open shell, whether the KVP daemon runs. This distinguishes
         /// the timeout classes — daemon absent in the guest (a real image
-        /// defect), daemon alive while the host-side pools lag (a host
-        /// artifact on first boot), or the witness itself unreachable (SSH was
-        /// just restored to the image's original disabled state, so the probe
-        /// cannot see the guest at all).
+        /// defect, <see cref="KvpWitnessResult.Absent"/>), daemon alive while
+        /// the host-side pools lag (a host artifact on first boot,
+        /// <see cref="KvpWitnessResult.Confirmed"/>), or the SSH session itself
+        /// broken (<see cref="KvpWitnessResult.Unreachable"/>). The probe runs
+        /// BEFORE DisableSshStep (Order 900) restores sshd-disabled images, so
+        /// a closed SSH path here is a real transport failure, not the
+        /// restore — every outcome other than Confirmed fails the deployment.
         /// </summary>
         private enum KvpWitnessResult { Confirmed, Absent, Unreachable }
 
@@ -523,17 +507,15 @@ namespace VMCreate.HyperV.VmCreation
                     ? KvpWitnessResult.Confirmed
                     : KvpWitnessResult.Absent;
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (ex is not OperationCanceledException
+                                       && SshGuestShell.IsSshTransportError(ex))
             {
-                // Transport failure: the probe could not reach the guest. By
-                // this point every post-boot step has ALREADY succeeded over
-                // this same SSH path, so an unreachable witness means the
-                // restore step closed it (sshd-disabled images such as
-                // PwnCloudOS), not that the guest died. Reported as
-                // Unreachable so the caller proceeds with a warning instead
-                // of falsely failing a healthy deployment; Absent still fails
-                // the deployment.
-                _logger.LogWarning(ex, "KVP daemon witness probe over SSH could not reach the guest — treating as unreachable (SSH likely restored to the image's disabled state)");
+                // Transport failure only (connection refused/reset, broken
+                // pipe, session ended — the classes IsSshTransportError
+                // knows): the SSH session itself is gone. A command timeout
+                // or non-zero exit does NOT match the filter and rethrows —
+                // those are fail-safe, exactly like the old contract.
+                _logger.LogWarning(ex, "KVP daemon witness probe over SSH hit a transport error — the session broke before the guest could answer");
                 return KvpWitnessResult.Unreachable;
             }
         }

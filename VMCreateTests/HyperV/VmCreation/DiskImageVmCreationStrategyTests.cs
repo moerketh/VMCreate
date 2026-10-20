@@ -23,10 +23,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
         private Mock<IVmConfigManager> _configManager = null!;
         private Mock<IGuestShellFactory> _guestShellFactory = null!;
         private Mock<ISshKeyManager> _sshKeyManager = null!;
-        private Mock<IKvpSender> _kvpSender = null!;
-        private Mock<IKvpPoller> _kvpPoller = null!;
         private Mock<IKvpHeartbeatGate> _kvpHeartbeatGate = null!;
-        private Mock<IVmShutdownWatcher> _shutdownWatcher = null!;
         private Mock<IGuestDiagnosticsCollector> _diagnosticsCollector = null!;
         private Mock<IPostBootCustomizationService> _postBootService = null!;
         private Mock<IHostNetworkService> _hostNetworkService = null!;
@@ -50,10 +47,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
             _configManager = new Mock<IVmConfigManager>();
             _guestShellFactory = new Mock<IGuestShellFactory>();
             _sshKeyManager = new Mock<ISshKeyManager>();
-            _kvpSender = new Mock<IKvpSender>();
-            _kvpPoller = new Mock<IKvpPoller>();
             _kvpHeartbeatGate = new Mock<IKvpHeartbeatGate>();
-            _shutdownWatcher = new Mock<IVmShutdownWatcher>();
             _diagnosticsCollector = new Mock<IGuestDiagnosticsCollector>();
             _postBootService = new Mock<IPostBootCustomizationService>();
             _hostNetworkService = new Mock<IHostNetworkService>();
@@ -108,10 +102,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
                 _configManager.Object,
                 _guestShellFactory.Object,
                 _sshKeyManager.Object,
-                _kvpSender.Object,
-                _kvpPoller.Object,
                 _kvpHeartbeatGate.Object,
-                _shutdownWatcher.Object,
                 _diagnosticsCollector.Object,
                 _postBootService.Object,
                 _hostNetworkService.Object,
@@ -262,10 +253,12 @@ namespace VMCreate.Tests.HyperV.VmCreation
             await ExecuteAsync(generation: 2);
 
             // Post-boot ran (seed path), no temp-NIC dance (that belongs to the
-            // clone cycle), and the seed was detached afterwards.
+            // clone cycle), and the seed was detached afterwards. Two calls:
+            // the split around the KVP gate (main phase + SSH-restore tail).
             _postBootService.Verify(p => p.RunLinuxPostBootAsync(
                 It.IsAny<IGuestShell>(), _plan, _item, _customizations,
-                It.IsAny<IProgress<CreateVMProgressInfo>>(), It.IsAny<CancellationToken>()), Times.Once);
+                It.IsAny<IProgress<CreateVMProgressInfo>>(), It.IsAny<CancellationToken>(),
+                It.IsAny<int>(), It.IsAny<int>()), Times.Exactly(2));
             _networkManager.Verify(n => n.AddTemporaryNetworkAdapter(_plan, It.IsAny<CancellationToken>()), Times.Never);
             _bootManager.Verify(h => h.RemoveBootDvd(_plan, It.Is<string>(p => p.EndsWith("_cidata.iso", StringComparison.OrdinalIgnoreCase)), It.IsAny<CancellationToken>()), Times.Once);
         }
@@ -383,8 +376,13 @@ namespace VMCreate.Tests.HyperV.VmCreation
             _postBootService.Verify(p => p.RunLinuxPostBootAsync(
                 It.IsAny<IGuestShell>(), It.IsAny<VmDeploymentPlan>(), It.IsAny<GalleryItem>(),
                 It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(),
-                It.IsAny<CancellationToken>()), Times.Once,
-                "post-boot must run before the gate fails — it is what enables the daemon the gate checks for");
+                It.IsAny<CancellationToken>(), It.IsAny<int>(), It.IsAny<int>()), Times.Once,
+                "post-boot's main phase must run before the gate fails — it is what enables the daemon the gate checks for");
+            _postBootService.Verify(p => p.RunLinuxPostBootAsync(
+                It.IsAny<IGuestShell>(), It.IsAny<VmDeploymentPlan>(), It.IsAny<GalleryItem>(),
+                It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(),
+                It.IsAny<CancellationToken>(), It.IsAny<int>(), 900), Times.Never,
+                "the SSH-restore tail must not run when the gate fails");
             _diagnosticsCollector.Verify(d => d.CollectAsync(
                 It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()), Times.Once,
                 "failure path must collect guest diagnostics for the log");
@@ -408,13 +406,37 @@ namespace VMCreate.Tests.HyperV.VmCreation
                 It.IsAny<string>(), It.IsAny<CancellationToken>(), 420, 2000))
                 .ReturnsAsync(true);
 
+            // Ordering pin: the gate sits BETWEEN the two post-boot phases —
+            // the witness probe needs a live SSH session, so DisableSshStep
+            // (Order 900, the tail) must run after the gate. Cross-mock
+            // invocation indices cannot be compared directly, so both mocks
+            // append to one shared timeline.
+            var timeline = new List<string>();
+            _postBootService.Setup(s => s.RunLinuxPostBootAsync(
+                It.IsAny<IGuestShell>(), It.IsAny<VmDeploymentPlan>(), It.IsAny<GalleryItem>(),
+                It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(),
+                It.IsAny<CancellationToken>(), 900, It.IsAny<int>()))
+                .Callback(() => timeline.Add("postboot-main"));
+            _postBootService.Setup(s => s.RunLinuxPostBootAsync(
+                It.IsAny<IGuestShell>(), It.IsAny<VmDeploymentPlan>(), It.IsAny<GalleryItem>(),
+                It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(),
+                It.IsAny<CancellationToken>(), It.IsAny<int>(), 900))
+                .Callback(() => timeline.Add("postboot-restore-tail"));
+            _kvpHeartbeatGate.Setup(g => g.WaitForGuestKvpAsync(
+                It.IsAny<string>(), It.IsAny<CancellationToken>(), 420, 2000))
+                .ReturnsAsync(true)
+                .Callback(() => timeline.Add("gate"));
+
             await ExecuteAsync(generation: 2);
 
             _postBootService.Verify(p => p.RunLinuxPostBootAsync(
                 It.IsAny<IGuestShell>(), It.IsAny<VmDeploymentPlan>(), It.IsAny<GalleryItem>(),
                 It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(),
-                It.IsAny<CancellationToken>()), Times.Once,
+                It.IsAny<CancellationToken>(), It.IsAny<int>(), It.IsAny<int>()), Times.Exactly(2),
                 "post-boot must run — InstallHypervDaemonsStep is what turns the heartbeat on for such images");
+            CollectionAssert.AreEqual(
+                new[] { "postboot-main", "gate", "postboot-restore-tail" }, timeline,
+                "the KVP gate (and its SSH witness) must run after post-boot's main phase and before the SSH-restore tail");
             _diagnosticsCollector.Verify(d => d.CollectAsync(
                 It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()), Times.Never,
                 "a heartbeat that arrives after post-boot must not be treated as a failure");
@@ -448,8 +470,8 @@ namespace VMCreate.Tests.HyperV.VmCreation
             _postBootService.Verify(p => p.RunLinuxPostBootAsync(
                 It.IsAny<IGuestShell>(), It.IsAny<VmDeploymentPlan>(), It.IsAny<GalleryItem>(),
                 It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(),
-                It.IsAny<CancellationToken>()), Times.Once,
-                "a verifiably healthy guest must proceed through post boot");
+                It.IsAny<CancellationToken>(), It.IsAny<int>(), It.IsAny<int>()), Times.Exactly(2),
+                "a verifiably healthy guest must proceed through post boot, including the SSH-restore tail");
             _diagnosticsCollector.Verify(d => d.CollectAsync(
                 It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()), Times.Never,
                 "the rescue path is a warning, not a failure — no diagnostics collection");
@@ -459,16 +481,14 @@ namespace VMCreate.Tests.HyperV.VmCreation
         }
 
         [TestMethod]
-        public async Task CreateVMAsync_KvpHeartbeatNotConfirmed_WitnessProbeUnreachable_ProceedsWithWarning()
+        public async Task CreateVMAsync_KvpHeartbeatNotConfirmed_WitnessTransportError_FailsWithDistinctMessage()
         {
-            // The PwnCloudOS lesson: images that ship sshd disabled get their
-            // SSH state restored by the post-boot pipeline (DisableSshStep's
-            // restore) BEFORE the gate runs, so the witness probe gets
-            // connection-refused on a perfectly healthy guest. A transport
-            // failure is therefore NOT evidence of a dead daemon — every
-            // post-boot step just succeeded over the same connection — and
-            // must not fail the deployment. Only a REACHED witness reporting
-            // the daemon absent may fail (previous test).
+            // The witness now runs BEFORE DisableSshStep restores sshd, so a
+            // transport failure is no longer the expected "SSH was just
+            // restored" case — it means the session genuinely broke and the
+            // deployment must fail (fail-safe contract restored). The error
+            // must say the probe could not REACH the guest, distinct from
+            // the daemon-absent message.
             _postBootService.Setup(s => s.HasLinuxPostBootSteps(_item, _customizations)).Returns(true);
             _kvpHeartbeatGate.Setup(g => g.WaitForGuestKvpAsync(
                 It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<int>(), It.IsAny<int>()))
@@ -476,18 +496,21 @@ namespace VMCreate.Tests.HyperV.VmCreation
             _shell.Setup(s => s.RunCommandAsync(
                 It.Is<string>(cmd => cmd.Contains("pgrep", StringComparison.Ordinal)),
                 It.IsAny<CancellationToken>()))
-                .ThrowsAsync(new TimeoutException("connection reset by peer"));
+                .ThrowsAsync(new InvalidOperationException("SSH command failed (exit code 255): Connection refused"));
+            _diagnosticsCollector.Setup(d => d.CollectAsync(
+                It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()))
+                .ReturnsAsync(new GuestDiagnostics { RawOutput = "[unreachable]" });
 
-            await ExecuteAsync(generation: 2);
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => ExecuteAsync(generation: 2));
 
+            StringAssert.Contains(ex.Message, "could not reach the guest", StringComparison.Ordinal,
+                "transport failure must be reported as unreachable, not as daemon-absent");
             _postBootService.Verify(p => p.RunLinuxPostBootAsync(
                 It.IsAny<IGuestShell>(), It.IsAny<VmDeploymentPlan>(), It.IsAny<GalleryItem>(),
                 It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(),
-                It.IsAny<CancellationToken>()), Times.Once,
-                "post-boot runs before the hard gate in the two-phase design");
-            _diagnosticsCollector.Verify(d => d.CollectAsync(
-                It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()), Times.Never,
-                "an unreachable witness is a warning, not a failure — no diagnostics collection");
+                It.IsAny<CancellationToken>(), It.IsAny<int>(), It.IsAny<int>()), Times.Once,
+                "only the main phase runs — the SSH-restore tail must not run after a gate failure");
         }
 
         [TestMethod]
