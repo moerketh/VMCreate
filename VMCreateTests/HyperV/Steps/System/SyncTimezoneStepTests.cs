@@ -30,6 +30,7 @@ namespace VMCreate.Tests.HyperV.Steps
             Assert.AreEqual(StepPlatform.Linux, _step.Platform);
             Assert.AreEqual(100, _step.Order);
             Assert.AreEqual("Sub_SyncTimezone", _step.ProgressPhaseId);
+            Assert.IsTrue(_step.SupportsChroot, "timezone is a file change — chroot-capable");
         }
 
         [TestMethod]
@@ -69,6 +70,55 @@ namespace VMCreate.Tests.HyperV.Steps
 
             VerifyLoggerLogged(LogLevel.Information, "Syncing timezone");
             VerifyLoggerLogged(LogLevel.Information, "Timezone synced to host");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_InChroot_UsesZoneinfoSymlink_NotTimedatectl()
+        {
+            var chroot = new Mock<IGuestShell>();
+            chroot.Setup(s => s.Context).Returns(GuestExecutionContext.Chroot);
+            chroot.Setup(s => s.VmName).Returns("TestVM");
+            chroot
+                .Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync("TIMEZONE_FILE_OK");
+
+            await _step.ExecuteAsync(
+                chroot.Object,
+                new GalleryItem(),
+                new VmCustomizations { SyncTimezone = true },
+                _loggerMock.Object,
+                CancellationToken.None);
+
+            chroot.Verify(s => s.RunCommandAsync(
+                It.Is<string>(cmd =>
+                    cmd.Contains("ln -sf '/usr/share/zoneinfo/") &&
+                    cmd.Contains("/etc/localtime") &&
+                    cmd.Contains("/etc/timezone")),
+                It.IsAny<CancellationToken>()), Times.Once,
+                "the chroot branch must set the timezone via files");
+            chroot.Verify(s => s.RunCommandAsync(
+                It.Is<string>(cmd => cmd.Contains("timedatectl")),
+                It.IsAny<CancellationToken>()), Times.Never,
+                "timedatectl cannot work in a chroot (no systemd manager)");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_InChroot_MissingConfirmationMarker_Fails()
+        {
+            var chroot = new Mock<IGuestShell>();
+            chroot.Setup(s => s.Context).Returns(GuestExecutionContext.Chroot);
+            chroot.Setup(s => s.VmName).Returns("TestVM");
+            chroot
+                .Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync("");
+
+            await Assert.ThrowsAsync<InvalidOperationException>(
+                () => _step.ExecuteAsync(
+                    chroot.Object,
+                    new GalleryItem(),
+                    new VmCustomizations { SyncTimezone = true },
+                    _loggerMock.Object,
+                    CancellationToken.None));
         }
 
         private void VerifyLoggerLogged(LogLevel level, string partialMessage)

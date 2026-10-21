@@ -277,6 +277,18 @@ fi
 # customization runs over SSH with bash scripts; pwsh/PS-remoting was never
 # consumed by the host.
 
+# ── Guard the host's chroot steps against service starts ─────────────
+# Between prepare and finalize the host runs chroot-capable customization
+# steps; their package installs (apt/dnf) must not try to start services
+# (no systemd in the chroot — a starting postinst fails dpkg). policy-rc.d
+# exit 101 denies every service action on Debian-family. Created HERE (not
+# earlier): install_xrdp.sh removes the file at its end, and this step must
+# come out ahead of that removal. finalize AND cleanup remove it — a
+# leftover would keep denying service starts on the failed target's next
+# boot too.
+printf '#!/bin/sh\nexit 101\n' > /mnt/new/usr/sbin/policy-rc.d
+chmod +x /mnt/new/usr/sbin/policy-rc.d
+
 echo "customize_target.sh prepare completed (mounts held for chroot steps)"
 
 fi # ── end prepare ────────────────────────────────────────────────────
@@ -288,6 +300,12 @@ if [ "$SUBCOMMAND" = "finalize" ]; then
 # Tor serves the chroot's apt; it must survive the host's chroot steps
 # (they may run apt too) and stops only now.
 stop_tor_if_running
+
+# ── Remove the chroot's policy-rc.d guard ────────────────────────────
+# From here on the target must behave like itself again (services start
+# at first boot). cleanup_mounts powers the target off via the host, so
+# this is the LAST chroot filesystem write.
+rm -f /mnt/new/usr/sbin/policy-rc.d
 
 # ── Create automation user and inject SSH key on target VM ───────────
 # The public key arrives as an argument (header).

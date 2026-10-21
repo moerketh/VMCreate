@@ -11,8 +11,16 @@ namespace VMCreate
     /// repositories (e.g. RHEL-family EL10 needs EPEL), the deployment
     /// continues and a warning is logged rather than the whole run failing
     /// - mirroring DeployVpnConfigsStep, a convenience install must never
-    /// kill a deployment. After install, restarts NetworkManager so the
-    /// VPN plugin is loaded.
+    /// kill a deployment. After install on a live system, restarts
+    /// NetworkManager so the VPN plugin is loaded.
+    /// <para>
+    /// Chroot-capable: package installation is pure filesystem work (the
+    /// ISO stage's policy-rc.d keeps Debian postinsts from starting
+    /// services). The NetworkManager restart is live-only and skipped in
+    /// the chroot — nothing loads a plugin into a daemon that is not
+    /// running, and first boot starts NetworkManager with the plugin
+    /// already installed.
+    /// </para>
     /// </summary>
     public class InstallOpenVpnStep : ICustomizationStep, IStepDisplayInfo
     {
@@ -21,6 +29,7 @@ namespace VMCreate
         public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 200;
         public string ProgressPhaseId => "Sub_InstallOpenVpn";
+        public bool SupportsChroot => true;
 
         public string DeployTitle => "Install OpenVPN";
         public string DeployDescription => "Installing OpenVPN and NetworkManager plugin";
@@ -62,8 +71,13 @@ namespace VMCreate
             string result = await shell.RunCommandAsync(installCmd, ct);
             logger.LogDebug("OpenVPN install output: {Output}", result);
 
-            // Restart NetworkManager to pick up the new OpenVPN plugin
-            await shell.RunCommandAsync("sudo systemctl restart NetworkManager 2>&1 || true", ct);
+            // Restart NetworkManager to pick up the new OpenVPN plugin —
+            // live only: the chroot has no running daemon to reload, and
+            // first boot starts NetworkManager with the plugin present.
+            if (shell.Context != GuestExecutionContext.Chroot)
+            {
+                await shell.RunCommandAsync("sudo systemctl restart NetworkManager 2>&1 || true", ct);
+            }
 
             // Verify (also neutralised: the transport throws on non-zero exits)
             string verify = await shell.RunCommandAsync(@"

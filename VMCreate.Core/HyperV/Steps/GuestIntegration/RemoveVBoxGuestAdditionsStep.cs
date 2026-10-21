@@ -5,12 +5,19 @@ using System.Threading.Tasks;
 namespace VMCreate
 {
     /// <summary>
-    /// Removes VirtualBox Guest Additions from the guest VM post-boot.
+    /// Removes VirtualBox Guest Additions from the guest VM.
     /// Handles three installation methods:
     ///   1. ISO-based: /opt/VBoxGuestAdditions-*/uninstall.sh
     ///   2. Package-based: virtualbox-guest-* deb/rpm packages
     ///   3. Leftover cleanup: kernel modules, mount points, services
     /// Safe no-op when VBox was never installed.
+    /// <para>
+    /// Chroot-capable: the script's only live-system actions (rmmod,
+    /// systemctl disable/stop) are best-effort with swallowed failures —
+    /// in the chroot they are no-ops (modules aren't loaded, no systemd),
+    /// and first boot finds nothing left to remove or stop. Package
+    /// removal and file cleanup work identically against the target tree.
+    /// </para>
     /// </summary>
     public class RemoveVBoxGuestAdditionsStep : ICustomizationStep, IStepDisplayInfo
     {
@@ -19,6 +26,7 @@ namespace VMCreate
         public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 50; // Run early, before timezone/package steps
         public string? ProgressPhaseId => "Sub_RemoveVBox";
+        public bool SupportsChroot => true;
 
         public string DeployTitle => "Remove VBox Guest Additions";
         public string DeployDescription => "Cleaning up VirtualBox artifacts";

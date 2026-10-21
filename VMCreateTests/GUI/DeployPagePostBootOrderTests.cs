@@ -153,7 +153,9 @@ namespace VMCreate.Tests.GUI
         /// <summary>
         /// The core invariant: the post-boot card IDs, in list order, equal
         /// [prelude] + planner.CardId sequence (split around the KVP gate) —
-        /// nothing more, nothing less, in no other order.
+        /// nothing more, nothing less, in no other order. On the ISO-cycle
+        /// flow the chroot-planned steps are excluded (they run pre-boot, in
+        /// the ISO stage, and their cards live in the Customize phase).
         /// </summary>
         private static void AssertCardOrderMatchesPlanner(
             DeployPageViewModel vm,
@@ -170,6 +172,16 @@ namespace VMCreate.Tests.GUI
                 .ToList();
 
             var planned = Planner.GetPlannedSteps(platform, wizard.SelectedItem, wizard.Customizations);
+            if (expectTempNic && platform == StepPlatform.Linux)
+            {
+                // ISO-cycle flow: chroot-capable steps moved to the Customize
+                // phase (the backend's chroot executor runs them there).
+                var chrootNames = new HashSet<string>(
+                    Planner.GetPlannedChrootSteps(wizard.SelectedItem, wizard.Customizations).Select(s => s.Name),
+                    StringComparer.Ordinal);
+                planned = planned.Where(s => !chrootNames.Contains(s.Name)).ToList();
+            }
+
             var expected = new List<string>();
             if (expectTempNic) expected.Add(DeployPageViewModel.SubAddTempNic);
             expected.Add(DeployPageViewModel.SubWaitForSsh);
@@ -247,6 +259,13 @@ namespace VMCreate.Tests.GUI
             ReportAndCheck(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.PostBoot, VmDeploymentSubStep.AddTempNic));
             ReportAndCheck(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.PostBoot, VmDeploymentSubStep.WaitForSsh));
 
+            // Chroot-capable steps already ran inside the ISO stage on this
+            // flow (their cards are in the Customize phase); the ledger skips
+            // them post-boot, so the report sequence must skip them too.
+            var chrootNames = new HashSet<string>(
+                Planner.GetPlannedChrootSteps(wizard.SelectedItem, customizations).Select(s => s.Name),
+                StringComparer.Ordinal);
+
             // Step reports in service order. The resolver flips Auto→Lamco mid
             // sequence (mirroring AutoRdpBackendResolveStep's in-place
             // mutation) so the live re-plan is exercised end to end.
@@ -254,6 +273,7 @@ namespace VMCreate.Tests.GUI
             {
                 if (step.Order >= PostBootStepPlanner.SshRestoreOrder) break;
 
+                if (chrootNames.Contains(step.Name)) continue;
                 if (!step.IsApplicable(wizard.SelectedItem, customizations)) continue;
                 if (step.Name == "Auto-select RDP backend")
                 {
@@ -280,6 +300,7 @@ namespace VMCreate.Tests.GUI
             foreach (var step in Planner.GetOrderedCandidates(StepPlatform.Linux))
             {
                 if (step.Order < PostBootStepPlanner.SshRestoreOrder) continue;
+                if (chrootNames.Contains(step.Name)) continue;
                 if (!step.IsApplicable(wizard.SelectedItem, customizations)) continue;
 
                 ReportAndCheck(new CreateVMProgressInfo

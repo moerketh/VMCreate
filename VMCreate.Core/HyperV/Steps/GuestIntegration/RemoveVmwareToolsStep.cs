@@ -6,12 +6,19 @@ namespace VMCreate
 {
     /// <summary>
     /// Removes VMware open-vm-tools and blacklists VMware kernel modules from the
-    /// guest VM post-boot.  VMware drivers conflict with Hyper-V's synthetic devices
+    /// guest VM.  VMware drivers conflict with Hyper-V's synthetic devices
     /// and can cause instability or crashes.  Safe no-op when VMware tools were never
     /// installed.
     /// <para>
     /// Handles: package removal (apt/dnf/pacman/zypper), kernel module blacklist,
     /// leftover config cleanup, initramfs regeneration, and GRUB update.
+    /// </para>
+    /// <para>
+    /// Chroot-capable: the blacklist is a file write, package removal and
+    /// update-grub/mkinitcpio run against the target tree (initramfs tools
+    /// operate on files, not the running kernel), and the script's rmmod is
+    /// best-effort — a no-op in the chroot, where the VMware modules aren't
+    /// loaded to begin with.
     /// </para>
     /// <para>
     /// Runs at Order 230, right after <see cref="RemoveVBoxGuestAdditionsStep"/> (220)
@@ -25,6 +32,7 @@ namespace VMCreate
         public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 230;
         public string? ProgressPhaseId => "Sub_RemoveVmwareTools";
+        public bool SupportsChroot => true;
 
         public string DeployTitle => "Remove VMware Tools";
         public string DeployDescription => "Removing VMware tools and blacklisting VMware drivers";

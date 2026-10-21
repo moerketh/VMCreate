@@ -134,8 +134,9 @@ namespace VMCreate.HyperV.VmCreation
             // sudo() shim: in-chroot commands already run as root, so plain
             // sudo passthrough; -u maps to runuser (util-linux, present on
             // every supported target); -S/-n/-E/-- are root-meaningless and
-            // dropped. 'env' absorbs VAR=val prefixes some steps pass after
-            // the user ("sudo -u u VAR=1 cmd").
+            // dropped. 'env' absorbs both VAR=val prefixes ("sudo VAR=1
+            // cmd") and plain commands — "$@" alone would try to exec a
+            // binary literally named "VAR=1".
             const string shim = @"sudo() {
   local user=''
   while [ ""$#"" -gt 0 ]; do
@@ -148,7 +149,7 @@ namespace VMCreate.HyperV.VmCreation
   if [ -n ""$user"" ]; then
     runuser -u ""$user"" -- env ""$@""
   else
-    ""$@""
+    env ""$@""
   fi
 }";
 

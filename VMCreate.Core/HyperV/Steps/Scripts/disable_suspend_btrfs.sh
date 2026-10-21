@@ -8,7 +8,12 @@ set -o pipefail
 # its watchdog. This breaks the RDP transport and leaves sessions stale.
 # ext4, xfs, and other filesystems handle post-resume I/O stalls gracefully,
 # so disabling suspend is only needed on btrfs.
-root_fs=$(findmnt -n -o FSTYPE / 2>/dev/null)
+#
+# stat -f (not findmnt): the kernel resolves the filesystem behind "/" even
+# inside a chroot of the target (findmnt reads /proc/self/mountinfo, which
+# inside the ISO-stage chroot is the LIVE ISO's mount table — the target
+# root would be misdetected as the ISO's squashfs/overlay).
+root_fs=$(stat -f -c %T / 2>/dev/null)
 
 if [ "$root_fs" != "btrfs" ]; then
     echo "Root filesystem is ${root_fs:-unknown} (not btrfs) -- suspend is safe, skipping"

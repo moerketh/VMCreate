@@ -75,8 +75,8 @@ namespace VMCreate.Tests.HyperV.Steps
 
             _shellMock.Verify(s => s.CopyContentAsync(
                 It.Is<string>(content =>
-                    content.Contains("findmnt") &&
-                    content.Contains("FSTYPE") &&
+                    content.Contains("stat -f") &&
+                    content.Contains("%T") &&
                     content.Contains("btrfs")),
                 "/tmp/disable_suspend_btrfs.sh",
                 It.IsAny<CancellationToken>()), Times.Once);

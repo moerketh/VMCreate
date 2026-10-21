@@ -11,7 +11,7 @@ namespace VMCreate
     /// When a Hyper-V VM is suspended (e.g. overnight) and then resumed, the
     /// btrfs filesystem can stall while recovering from the freeze/thaw cycle.
     /// This causes <c>systemd-journald</c> worker threads to block in
-    /// <c>fsync()</c>, triggering the watchdog to kill journald. The RDP
+    /// <c>fssync()</c>, triggering the watchdog to kill journald. The RDP
     /// transport (usock) then breaks, leaving active RDP sessions stale/dead
     /// even though the KDE desktop session is still running.
     /// </para>
@@ -19,6 +19,10 @@ namespace VMCreate
     /// Disabling suspend eliminates the root cause. On non-btrfs root
     /// filesystems (ext4, xfs, etc.) this step is a safe no-op — those
     /// filesystems handle post-resume I/O stalls gracefully.
+    /// </para>
+    /// <para>
+    /// Chroot-capable: the script only probes the root filesystem type and
+    /// writes config files — no service or session interaction.
     /// </para>
     /// <para>
     /// Runs at Order 200, after package install steps and before configuration
@@ -32,6 +36,7 @@ namespace VMCreate
         public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 200;
         public string? ProgressPhaseId => "Sub_DisableSuspendOnBtrfs";
+        public bool SupportsChroot => true;
 
         public string DeployTitle => "Disable Suspend on btrfs";
         public string DeployDescription => "Disabling suspend on btrfs root filesystems to avoid hangs";

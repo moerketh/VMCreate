@@ -87,9 +87,25 @@ namespace VMCreate.Tests.HyperV.VmCreation
             string inner = ExtractInnerScript(shell.BuildChrootCommand("sudo -u alice VAR=1 kwriteconfig6 --file x"));
 
             StringAssert.Contains(inner, "runuser -u \"$user\" -- env \"$@\"");
+            StringAssert.Contains(inner, "env \"$@\"");
             // -u consumes its argument; unknown/password flags shift away.
             StringAssert.Contains(inner, "-u) user=\"$2\"; shift 2 ;;");
             StringAssert.Contains(inner, "-*) shift ;;");
+        }
+
+        [TestMethod]
+        public void InnerScript_SudoShim_EnvAbsorbsVarAssignments()
+        {
+            // Steps use "sudo DEBIAN_FRONTEND=noninteractive apt-get …";
+            // "$@" would exec a binary literally named "DEBIAN_FRONTEND=…",
+            // so the no-user branch must route through env too.
+            var shell = Create(out _);
+            string inner = ExtractInnerScript(shell.BuildChrootCommand("sudo DEBIAN_FRONTEND=noninteractive apt-get install -y x"));
+
+            StringAssert.Contains(inner, "env \"$@\"");
+            // The bare passthrough branch must be gone.
+            Assert.IsFalse(inner.Contains("else\n    \"$@\"\n  fi", StringComparison.Ordinal),
+                "the no-user branch must invoke env, not a bare \"$@\"");
         }
 
         [TestMethod]
