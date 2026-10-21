@@ -70,6 +70,10 @@
     <Compile Include="GUI\DeploymentProgressPresenter.cs" />
   </ItemGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="VMCreate.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Include="app.manifest" />
   </ItemGroup>
 

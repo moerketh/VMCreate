@@ -35,6 +35,19 @@ namespace VMCreate.HyperV.VmCreation
         private readonly ILogger<DiskImageVmCreationStrategy> _logger;
         private const int OriginalDiskScsiControllerLocation = 1;
 
+        /// <summary>
+        /// Free-space probe seam for tests: (path) → (free bytes, drive
+        /// name). Null in production — the guard uses the real
+        /// <see cref="System.IO.DriveInfo"/>.
+        /// </summary>
+        internal Func<string, (long FreeBytes, string DriveName)>? FreeSpaceProbe
+        {
+            get => _freeSpaceProbe;
+            set => _freeSpaceProbe = value;
+        }
+
+        private Func<string, (long FreeBytes, string DriveName)>? _freeSpaceProbe;
+
         public DiskImageVmCreationStrategy(
             IVmLifecycleManager lifecycleManager,
             IVmDiskManager diskManager,
@@ -104,6 +117,19 @@ namespace VMCreate.HyperV.VmCreation
             ctx.Logger.Log($"Detected generation {detectedGeneration}, targeting Gen {targetGen} (cloud-init: {isCloudInit})");
 
             progress.Report(new CreateVMProgressInfo { Phase = VmDeploymentPhase.CreateVM, DetectedGeneration = detectedGeneration });
+
+            // Free-space pre-flight on the VM-disk drive, BEFORE any disk is
+            // created: the MBR-clone flow writes a second full disk next to
+            // the source, and running out mid-write makes Hyper-V PAUSE the
+            // VM ("Disk Full", event 12635) — the deploy then fails as an
+            // SSH timeout instead of a full-disk error. Fail fast here with
+            // the real numbers instead.
+            VmDiskSpaceGuard.EnsureAvailable(
+                _pathService.DefaultVhdxPath,
+                VmDiskSpaceGuard.RequiredBytes(mediaPath, cloneWritesSecondDisk: detectedGeneration == 1),
+                _freeSpaceProbe);            _logger.LogInformation(
+                "Free-space pre-flight passed for {VhdxPath} (generation {Gen}, media {Media})",
+                _pathService.DefaultVhdxPath, detectedGeneration, mediaPath);
 
             progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.CreateVMSkeleton));
             await _lifecycleManager.CreateVMAsync(plan, _pathService.DefaultVmPath, targetGen, cancellationToken);

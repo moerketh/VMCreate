@@ -310,11 +310,11 @@ namespace VMCreate
         {
             try
             {
-                Process.Start(new ProcessStartInfo(App.LogFilePath) { UseShellExecute = true });
+                Process.Start(new ProcessStartInfo(App.CurrentLogFilePath) { UseShellExecute = true });
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to open log file {Path}", App.LogFilePath);
+                _logger.LogError(ex, "Failed to open log file {Path}", App.CurrentLogFilePath);
             }
         }
 

@@ -545,6 +545,46 @@ namespace VMCreate.Tests.HyperV.VmCreation
                 "the witness probe must not run when integration services are disabled");
         }
 
+        [TestMethod]
+        public async Task CreateVMAsync_FullDisk_FailsFastBeforeAnyVmCreation()
+        {
+            // The shipped failure: the clone filled the VM-disk drive mid-
+            // write; Hyper-V paused the VM (Disk Full) and the deploy died
+            // as an SSH timeout. The pre-flight must reject a full drive
+            // BEFORE the VM skeleton or any disk is created, with an error
+            // naming the drive.
+            _strategy.FreeSpaceProbe = _ => (4L * 1024 * 1024 * 1024, "D:\\");
+
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => ExecuteAsync(generation: 1));
+
+            StringAssert.Contains(ex.Message, "D:\\");
+            StringAssert.Contains(ex.Message, "Not enough free space", StringComparison.Ordinal);
+            _lifecycleManager.Verify(m => m.CreateVMAsync(
+                It.IsAny<VmDeploymentPlan>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<CancellationToken>()), Times.Never,
+                "a disk-full rejection must not leave a half-created VM behind");
+            _diskManager.Verify(m => m.AddNewHardDrive(
+                It.IsAny<VmDeploymentPlan>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
+
+        [TestMethod]
+        public async Task CreateVMAsync_EnoughDisk_ProceedsToVmCreation()
+        {
+            // The guard passes silently and does not disturb the normal flow.
+            _strategy.FreeSpaceProbe = _ => (2L * 1024 * 1024 * 1024 * 1024, "D:\\");
+            _stepPlanner
+                .Setup(p => p.NeedsIsoBootCycle(It.IsAny<GalleryItem?>(), It.IsAny<VmCustomizations?>()))
+                .Returns(false);
+
+            await ExecuteAsync(generation: 2);
+
+            _lifecycleManager.Verify(m => m.CreateVMAsync(
+                It.IsAny<VmDeploymentPlan>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<CancellationToken>()), Times.Once,
+                "a passing pre-flight must not block the deployment");
+        }
+
         private async Task ExecuteAsync(int generation)
         {
             var context = new VmCreationContext(

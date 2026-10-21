@@ -30,6 +30,26 @@ namespace VMCreate
         /// <summary>Path of the rolling plaintext log written by the main Serilog sink.</summary>
         internal static readonly string LogFilePath = Path.Combine(Path.GetTempPath(), "VMCreate.log");
 
+        /// <summary>
+        /// The path OpenLog offers to the shell. Serilog's RollingInterval.Day
+        /// renders the file sink's template as "VMCreateYYYYMMDD.log" — the
+        /// template path itself (%TEMP%\VMCreate.log) NEVER exists on disk,
+        /// so launching it failed with "file not found". This resolves to
+        /// today's actual log file, falling back to the template when
+        /// today's file has not been written yet (the sink creates it on
+        /// first write, so the fallback is short-lived at worst).
+        /// </summary>
+        internal static string CurrentLogFilePath
+        {
+            get
+            {
+                string dir = Path.GetDirectoryName(LogFilePath) ?? "";
+                string today = $"{Path.GetFileNameWithoutExtension(LogFilePath)}{DateTime.Now:yyyyMMdd}{Path.GetExtension(LogFilePath)}";
+                string todayFull = Path.Combine(dir, today);
+                return File.Exists(todayFull) ? todayFull : LogFilePath;
+            }
+        }
+
         // ── Startup timing (permanent, always-on) ─────────────────────────
         // Started before any DI construction; milestones are logged at
         // Information so a normal run's log answers "what took so long"
