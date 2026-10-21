@@ -17,7 +17,10 @@ namespace VMCreate.Tests.GUI
     ///
     /// These tests require an interactive desktop session (real window,
     /// not a service) and are therefore tagged Category=Integration so
-    /// CI can skip them alongside the other integration tests.
+    /// CI can skip them alongside the other integration tests. Locally
+    /// they are opt-in as well — a bare <c>dotnet test</c> must not throw
+    /// GUI windows onto the developer's desktop: set
+    /// <c>VMCREATE_GUI_TESTS=1</c> to run them.
     /// </summary>
     [TestClass]
     [TestCategory("Integration")]
@@ -35,6 +38,10 @@ namespace VMCreate.Tests.GUI
         [TestInitialize]
         public void LaunchApp()
         {
+            if (Environment.GetEnvironmentVariable("VMCREATE_GUI_TESTS") != "1")
+                Assert.Inconclusive(
+                    "GUI smoke tests are opt-in — they launch real windows on the interactive desktop. " +
+                    "Set VMCREATE_GUI_TESTS=1 to run them.");
             if (!File.Exists(ExePath))
                 Assert.Inconclusive($"Built exe not found at {ExePath}. Build VMCreate first.");
 
