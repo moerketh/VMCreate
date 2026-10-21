@@ -53,13 +53,17 @@ namespace VMCreate
     /// and before the xrdp block (240-270, skipped for Lamco).
     /// </para>
     /// </summary>
-    public class InstallLamcoRdpStep : ICustomizationStep
+    public class InstallLamcoRdpStep : ICustomizationStep, IStepDisplayInfo
     {
         public string Name => "Install Lamco RDP Server";
         public CustomizationPhase Phase => CustomizationPhase.PostBoot;
         public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 235;
         public string? ProgressPhaseId => "Sub_InstallLamcoRdp";
+
+        public string DeployTitle => "Install Lamco RDP Server";
+        public string DeployDescription => "Installing the Wayland-native RDP server (packages, TLS, fork build)";
+        public string DeployIconName => "Desktop24";
 
         public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
             => !item.HasTag("headless")

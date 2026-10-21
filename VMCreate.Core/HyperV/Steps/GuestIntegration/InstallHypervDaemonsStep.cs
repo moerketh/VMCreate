@@ -20,13 +20,17 @@ namespace VMCreate
     /// and before <see cref="SyncTimezoneStep"/> (100).
     /// </para>
     /// </summary>
-    public class InstallHypervDaemonsStep : ICustomizationStep
+    public class InstallHypervDaemonsStep : ICustomizationStep, IStepDisplayInfo
     {
         public string Name => "Install Hyper-V Daemons";
         public CustomizationPhase Phase => CustomizationPhase.PostBoot;
         public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 280;
         public string? ProgressPhaseId => "Sub_InstallHypervDaemons";
+
+        public string DeployTitle => "Install Hyper-V Daemons";
+        public string DeployDescription => "Installing and enabling the Hyper-V guest integration daemons";
+        public string DeployIconName => "Box24";
 
         public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations) => true;
 

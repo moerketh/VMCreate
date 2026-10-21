@@ -92,7 +92,6 @@ namespace VMCreate
         public string DeployDescription => "Cloning and installing the VulnHunter agentic AI scanner";
         public string DeployPhaseId => "Sub_VulnHunterInstall";
         public string DeployIconName => "Shield24";
-        public int DeployOrder => 233;
         public string? DeployCompletionInfo => null;
 
         public bool IsVisibleFor(GalleryItem? item) => item.HasTag("omarchy");

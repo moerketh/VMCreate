@@ -195,7 +195,6 @@ namespace VMCreate.Gallery
         public string DeployDescription => "Installing the FLARE VM malware analysis toolkit";
         public string DeployPhaseId => "Sub_InstallFlareVm";
         public string DeployIconName => "Toolbox24";
-        public int DeployOrder => 200;
         public string? DeployCompletionInfo => "Please allow at least one hour for the FLARE VM scripts to finish configuring the machine";
 
         public bool IsVisibleFor(GalleryItem? item)

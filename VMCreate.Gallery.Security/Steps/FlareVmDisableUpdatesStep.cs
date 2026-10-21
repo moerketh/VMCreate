@@ -128,7 +128,6 @@ namespace VMCreate.Gallery
         public string DeployDescription => "Disabling automatic Windows updates";
         public string DeployPhaseId => "Sub_DisableUpdates";
         public string DeployIconName => "LockClosed24";
-        public int DeployOrder => 40;
         public string? DeployCompletionInfo => null;
 
         public bool IsVisibleFor(GalleryItem? item)

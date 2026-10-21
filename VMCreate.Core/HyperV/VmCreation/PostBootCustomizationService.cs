@@ -59,22 +59,34 @@ namespace VMCreate.HyperV.VmCreation
 
     public class PostBootCustomizationService : IPostBootCustomizationService
     {
-        private readonly IEnumerable<ICustomizationStep> _customizationSteps;
+        private readonly IPostBootStepPlanner _planner;
         private readonly ILogger<PostBootCustomizationService> _logger;
 
         public PostBootCustomizationService(
-            IEnumerable<ICustomizationStep> customizationSteps,
+            IPostBootStepPlanner planner,
             ILogger<PostBootCustomizationService> logger)
         {
-            _customizationSteps = customizationSteps ?? Array.Empty<ICustomizationStep>();
+            _planner = planner ?? throw new ArgumentNullException(nameof(planner));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
+        /// <summary>
+        /// Convenience overload for direct construction (tests, hosts that build
+        /// the service by hand): wraps the step set in the shared planner so
+        /// both always order identically.
+        /// </summary>
+        public PostBootCustomizationService(
+            IEnumerable<ICustomizationStep> customizationSteps,
+            ILogger<PostBootCustomizationService> logger)
+            : this(new PostBootStepPlanner(customizationSteps ?? throw new ArgumentNullException(nameof(customizationSteps))), logger)
+        {
+        }
+
         public bool HasLinuxPostBootSteps(GalleryItem item, VmCustomizations customizations)
-            => _customizationSteps.Any(s => s.Phase == CustomizationPhase.PostBoot && s.Platform == StepPlatform.Linux && s.IsApplicable(item, customizations));
+            => _planner.GetPlannedSteps(StepPlatform.Linux, item, customizations).Any();
 
         public bool HasWindowsPostBootSteps(GalleryItem item, VmCustomizations customizations)
-            => _customizationSteps.Any(s => s.Phase == CustomizationPhase.PostBoot && s.Platform == StepPlatform.Windows && s.IsApplicable(item, customizations));
+            => _planner.GetPlannedSteps(StepPlatform.Windows, item, customizations).Any();
 
         public async Task RunLinuxPostBootAsync(
             IGuestShell shell,
@@ -99,10 +111,8 @@ namespace VMCreate.HyperV.VmCreation
             // (called before SSH exists) still uses the same IsApplicable,
             // where Auto counts as "has steps" because the resolver itself
             // is always applicable under Auto.
-            var steps = _customizationSteps
-                .Where(s => s.Phase == CustomizationPhase.PostBoot && s.Platform == StepPlatform.Linux)
+            var steps = _planner.GetOrderedCandidates(StepPlatform.Linux)
                 .Where(s => s.Order < upToOrderExclusive && s.Order >= fromOrderInclusive)
-                .OrderBy(s => s.Order)
                 .ToList();
 
             if (!steps.Any(s => s.IsApplicable(item, customizations)))
@@ -158,10 +168,7 @@ namespace VMCreate.HyperV.VmCreation
             // Same live-IsApplicable semantics as RunLinuxPostBootAsync: no
             // Windows step mutates customizations today, but the service must
             // not carry two different applicability models.
-            var steps = _customizationSteps
-                .Where(s => s.Phase == CustomizationPhase.PostBoot && s.Platform == StepPlatform.Windows)
-                .OrderBy(s => s.Order)
-                .ToList();
+            var steps = _planner.GetOrderedCandidates(StepPlatform.Windows).ToList();
 
             if (!steps.Any(s => s.IsApplicable(item, customizations)))
                 return;

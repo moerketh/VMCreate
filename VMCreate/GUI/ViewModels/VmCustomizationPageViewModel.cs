@@ -474,8 +474,7 @@ namespace VMCreate
                 _wizardData.Customizations.DistributionOptions.Add(new DistributionOptionSelection
                 {
                     Name = opt.Name,
-                    IsEnabled = true,
-                    Order = 0
+                    IsEnabled = true
                 });
             }
 

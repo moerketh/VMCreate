@@ -136,7 +136,6 @@ namespace VMCreate.Gallery
         public string DeployDescription => "Rearming the Windows evaluation license";
         public string DeployPhaseId => "Sub_LicenseRearm";
         public string DeployIconName => "Key24";
-        public int DeployOrder => 50;
         public string? DeployCompletionInfo => null;
 
         public bool IsVisibleFor(GalleryItem? item)

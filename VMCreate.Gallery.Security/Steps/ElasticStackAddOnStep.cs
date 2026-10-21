@@ -58,7 +58,6 @@ namespace VMCreate.Gallery
         public string DeployDescription => "Installing Elasticsearch, Kibana and a Fleet server";
         public string DeployPhaseId => "Sub_ElasticStackAddOn";
         public string DeployIconName => "ShieldTask24";
-        public int DeployOrder => 150;
         public string? DeployCompletionInfo =>
             "Elastic SIEM ready — Kibana listens on http://<vm-ip>:5601; credentials are on the guest at /opt/vmcreate-elastic/credentials.txt";
     }

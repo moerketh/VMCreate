@@ -34,7 +34,6 @@
         AttachBootDvd,
         SetBootOrder,
         EnableNestedVirt,
-        CleanupIsoBoot,
         AddTempNic,
         WaitForSsh,
         WaitForKvpHeartbeat

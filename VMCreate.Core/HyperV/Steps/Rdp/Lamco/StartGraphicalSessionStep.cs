@@ -48,13 +48,17 @@ namespace VMCreate
     /// must never report success.
     /// </para>
     /// </summary>
-    public class StartGraphicalSessionStep : ICustomizationStep
+    public class StartGraphicalSessionStep : ICustomizationStep, IStepDisplayInfo
     {
         public string Name => "Start Graphical Session";
         public CustomizationPhase Phase => CustomizationPhase.PostBoot;
         public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 239;
         public string? ProgressPhaseId => "Sub_StartGraphicalSession";
+
+        public string DeployTitle => "Start Graphical Session";
+        public string DeployDescription => "Restarting the display manager to log in the desktop session";
+        public string DeployIconName => "Play24";
 
         public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
             => (customizations?.RdpBackend == RdpBackend.Lamco && item.SupportsLamco())

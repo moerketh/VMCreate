@@ -88,7 +88,6 @@ namespace VMCreate.Gallery.distributions
         public string DeployDescription => "Updating PwnCloudOS tools via pwncloudos-sync";
         public string DeployPhaseId => "Sub_PwnCloudOsSync";
         public string DeployIconName => "CloudSync24";
-        public int DeployOrder => 100;
         public string? DeployCompletionInfo => null;
 
         public bool IsVisibleFor(GalleryItem? item)

@@ -8,6 +8,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
 using VMCreate.HyperV;
+using VMCreate.HyperV.VmCreation;
 
 namespace VMCreate
 {
@@ -26,7 +27,7 @@ namespace VMCreate
         private bool _isScrollingProgrammatically;
         private string _effectiveVmName = "";
 
-        public DeployPage(WizardData wizardData, CreateVM createVM, ILoggerFactory loggerFactory, IEnumerable<IConfigurableCustomizationStep> configurableSteps, IReadOnlyDictionary<string, ICustomizationStep> allSteps, IUserPreferencesStore? preferencesStore = null)
+        public DeployPage(WizardData wizardData, CreateVM createVM, ILoggerFactory loggerFactory, IEnumerable<IConfigurableCustomizationStep> configurableSteps, IReadOnlyDictionary<string, ICustomizationStep> allSteps, IPostBootStepPlanner stepPlanner, IUserPreferencesStore? preferencesStore = null)
         {
             _wizardData = wizardData ?? throw new ArgumentNullException(nameof(wizardData));
             _createVM = createVM ?? throw new ArgumentNullException(nameof(createVM));
@@ -34,7 +35,7 @@ namespace VMCreate
             _preferencesStore = preferencesStore;
 
             _logger = loggerFactory.CreateLogger<DeployPage>();
-            _viewModel = new DeployPageViewModel(wizardData, _logger, configurableSteps);
+            _viewModel = new DeployPageViewModel(wizardData, _logger, configurableSteps, stepPlanner);
             _presenter = new DeploymentProgressPresenter(
                 new DeploymentProgressViewModelAdapter(_viewModel),
                 new WpfDispatcher(),

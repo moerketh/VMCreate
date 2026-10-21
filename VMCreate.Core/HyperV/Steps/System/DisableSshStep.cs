@@ -10,13 +10,17 @@ namespace VMCreate
     /// the distro originally had SSH disabled (e.g. REMnux).
     /// Distros that ship with SSH enabled are left unchanged.
     /// </summary>
-    public class DisableSshStep : ICustomizationStep
+    public class DisableSshStep : ICustomizationStep, IStepDisplayInfo
     {
         public string Name => "Restore SSH State";
         public CustomizationPhase Phase => CustomizationPhase.PostBoot;
         public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 900;
         public string? ProgressPhaseId => "Sub_RestoreSsh";
+
+        public string DeployTitle => "Restore SSH State";
+        public string DeployDescription => "Restoring the original SSH configuration";
+        public string DeployIconName => "ShieldKeyhole24";
 
         /// <summary>
         /// Skips headless appliances (tag "headless", e.g. Elastic SIEM):

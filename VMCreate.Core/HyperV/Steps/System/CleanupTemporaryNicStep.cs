@@ -13,13 +13,17 @@ namespace VMCreate
     /// host-side temporary NIC is removed by the orchestrator in
     /// <see cref="HyperVVmCreator"/> after all post-boot steps complete.
     /// </summary>
-    public class CleanupTemporaryNicStep : ICustomizationStep
+    public class CleanupTemporaryNicStep : ICustomizationStep, IStepDisplayInfo
     {
         public string Name => "Cleanup Temporary NIC";
         public CustomizationPhase Phase => CustomizationPhase.PostBoot;
         public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 830;
         public string? ProgressPhaseId => null;
+
+        public string DeployTitle => "Remove Temporary NIC";
+        public string DeployDescription => "Removing the temporary network adapter configuration used for SSH access";
+        public string DeployIconName => "PlugDisconnected24";
 
         public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations) => true;
 

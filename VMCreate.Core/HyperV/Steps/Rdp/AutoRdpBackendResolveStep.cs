@@ -50,13 +50,17 @@ namespace VMCreate
     /// evaluates IsApplicable just-in-time per step).
     /// </para>
     /// </summary>
-    public class AutoRdpBackendResolveStep : ICustomizationStep
+    public class AutoRdpBackendResolveStep : ICustomizationStep, IStepDisplayInfo
     {
         public string Name => "Auto-select RDP backend";
         public CustomizationPhase Phase => CustomizationPhase.PostBoot;
         public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 232;
         public string? ProgressPhaseId => "Sub_AutoRdpResolve";
+
+        public string DeployTitle => "Auto-select RDP backend";
+        public string DeployDescription => "Detecting Wayland vs X11 in the guest to choose the RDP backend";
+        public string DeployIconName => "ArrowSync24";
 
         public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
             // Headless appliances (tag "headless", e.g. Elastic SIEM) have no

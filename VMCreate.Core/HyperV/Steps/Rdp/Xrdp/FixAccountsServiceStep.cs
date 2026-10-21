@@ -32,13 +32,17 @@ namespace VMCreate
     /// and before <see cref="DisableWaylandSessionsStep"/> (270).
     /// </para>
     /// </summary>
-    public class FixAccountsServiceStep : ICustomizationStep
+    public class FixAccountsServiceStep : ICustomizationStep, IStepDisplayInfo
     {
         public string Name => "Fix AccountsService Sessions";
         public CustomizationPhase Phase => CustomizationPhase.PostBoot;
         public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 255;
         public string? ProgressPhaseId => "Sub_FixAccountsService";
+
+        public string DeployTitle => "Fix AccountsService Sessions";
+        public string DeployDescription => "Fixing AccountsService session overrides";
+        public string DeployIconName => "Person24";
 
         public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
             // xrdp/X11 path only — gating on "not Lamco" leaks xrdp fixups

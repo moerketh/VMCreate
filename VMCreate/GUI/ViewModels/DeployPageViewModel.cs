@@ -5,6 +5,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Linq;
 using System.Windows.Input;
+using VMCreate.HyperV.VmCreation;
 using VMCreate.MediaHandlers;
 using Wpf.Ui.Controls;
 
@@ -52,12 +53,10 @@ namespace VMCreate
         public const string SubSetBootOrder      = "Sub_SetBootOrder";
         public const string SubEnableNestedVirt  = "Sub_EnableNestedVirt";
 
-        // Post-ISO-cycle cleanup sub-step ID
-        public const string SubCleanupIsoBoot = "Sub_CleanupIsoBoot";
-
         // Post-boot infrastructure sub-step IDs
         public const string SubAddTempNic   = "Sub_AddTempNic";
         public const string SubWaitForSsh   = "Sub_WaitForSsh";
+        public const string SubWaitForKvpHeartbeat = "Sub_WaitForKvpHeartbeat";
 
         // Windows-only post-boot sub-step IDs
         public const string SubStabilizeVm     = "Sub_StabilizeVm";
@@ -88,31 +87,16 @@ namespace VMCreate
 
         // Auto RDP backend: detection + the possible backfilled installs.
         // Sub_AutoRdpResolve is matched by AutoRdpBackendResolveStep.
-        // ProgressPhaseId; the branch cards are inserted at runtime by
-        // EnsureResolvedRdpBackendPhases once the resolver picks a backend.
+        // ProgressPhaseId; the branch cards are reconciled at runtime by
+        // ReconcilePostBootSteps once the resolver picks a backend.
         public const string SubAutoRdpResolve      = "Sub_AutoRdpResolve";
         public const string SubInstallXrdpPostBoot = "Sub_InstallXrdpPostBoot";
-
-        /// <summary>Generates a sub-card phase ID for a distribution-specific option step.</summary>
-        public static string DistOptionSubId(string stepName) => $"Sub_Dist_{stepName}";
 
         /// <summary>Resolves a string icon name from distribution metadata to a WPF UI SymbolRegular.</summary>
         public static SymbolRegular ResolveIconName(string? iconName)
         {
             if (string.IsNullOrWhiteSpace(iconName)) return SymbolRegular.ArrowSync24;
             return Enum.TryParse<SymbolRegular>(iconName, out var icon) ? icon : SymbolRegular.ArrowSync24;
-        }
-
-        /// <summary>Looks up a step by name and returns its deployment metadata, if available.</summary>
-        private IDistributionOptionMetadata? GetStepMetadata(string name)
-        {
-            if (_configurableSteps != null
-                && _configurableSteps.TryGetValue(name, out var step)
-                && step is IDistributionOptionMetadata metadata)
-            {
-                return metadata;
-            }
-            return null;
         }
 
         /// <summary>
@@ -135,22 +119,12 @@ namespace VMCreate
                     if (s.IsOptional) return c?.DistributionOptions?.Any(o => string.Equals(o.Name, s.Name, StringComparison.OrdinalIgnoreCase) && o.IsEnabled) == true;
                     return s.IsApplicable(SelectedItem, c);
                 })
-                .OrderBy(s => (s as IDistributionOptionMetadata)?.DeployOrder ?? int.MaxValue)
-                .ThenBy(s => s.Name, StringComparer.OrdinalIgnoreCase);
-        }
-
-        /// <summary>Returns enabled distribution options sorted by their deployment order.</summary>
-        private IEnumerable<DistributionOptionSelection> GetEnabledDistributionOptions(VmCustomizations? c)
-        {
-            if (c?.DistributionOptions == null) return Enumerable.Empty<DistributionOptionSelection>();
-            return c.DistributionOptions
-                .Where(o => o?.IsEnabled == true)
-                .OrderBy(o => GetStepMetadata(o.Name)?.DeployOrder ?? o.Order)
-                .ThenBy(o => o.Name, StringComparer.OrdinalIgnoreCase);
+                .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase);
         }
 
         private readonly ILogger _logger;
         private readonly IReadOnlyDictionary<string, IConfigurableCustomizationStep>? _configurableSteps;
+        private readonly IPostBootStepPlanner _planner;
         private bool _isDeploying;
         private bool _isComplete;
         private bool _hasFailed;
@@ -166,12 +140,17 @@ namespace VMCreate
         /// <summary>Raised when the user asks to go back and change settings.</summary>
         public event Action? RequestNavigateBack;
 
-        public DeployPageViewModel(WizardData wizardData, ILogger logger, IEnumerable<IConfigurableCustomizationStep>? configurableSteps = null)
+        public DeployPageViewModel(
+            WizardData wizardData,
+            ILogger logger,
+            IEnumerable<IConfigurableCustomizationStep>? configurableSteps = null,
+            IPostBootStepPlanner? planner = null)
         {
             if (wizardData == null) throw new ArgumentNullException(nameof(wizardData));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _configurableSteps = (configurableSteps ?? Enumerable.Empty<IConfigurableCustomizationStep>())
                 .ToDictionary(s => s.Name, StringComparer.OrdinalIgnoreCase);
+            _planner = planner ?? new PostBootStepPlanner(Enumerable.Empty<ICustomizationStep>());
 
             VmName = wizardData.Settings?.VMName ?? "VM";
             SelectedItem = wizardData.SelectedItem;
@@ -413,20 +392,25 @@ namespace VMCreate
                         ? BuildPostBootDescription(wizardData.Customizations)
                         : "Applying post-boot customizations via SSH",
                     SymbolRegular.Settings24));
-                AddPostBootSubSteps(wizardData.Customizations);
+                InsertPostBootSubStepsAt(
+                    Phases.Count,
+                    wizardData.Customizations,
+                    wizardData.SelectedItem?.HasTag("cloud-init") == true
+                        ? PostBootFlow.DiskImageCloudInit
+                        : PostBootFlow.DiskImageIsoCycle);
             }
             else if (wizardData.SelectedItem?.IsWindows == true)
             {
                 // Windows images are configured post-boot via PowerShell Direct.
                 // Only the distribution option steps apply — no Linux infra steps.
                 var c = wizardData.Customizations;
-                bool hasWindowsPostBoot = GetApplicableDistributionSteps(c).Any();
+                bool hasWindowsPostBoot = _planner.GetPlannedSteps(StepPlatform.Windows, wizardData.SelectedItem, c).Any();
                 if (hasWindowsPostBoot)
                 {
                     Phases.Add(new DeploymentPhase(PhasePostBoot, "Post-Boot Config",
                         "Configuring the VM via PowerShell Direct",
                         SymbolRegular.Settings24));
-                    AddWindowsPostBootSubSteps(c);
+                    InsertPostBootSubStepsAt(Phases.Count, c, PostBootFlow.Direct);
                 }
             }
 
@@ -565,64 +549,133 @@ namespace VMCreate
             Phases.Insert(doneIndex, new DeploymentPhase(PhasePostBoot, "Post-Boot Config",
                 "Applying post-boot customizations via SSH",
                 SymbolRegular.Settings24));
-            InsertPostBootSubStepsAt(doneIndex + 1, _lastCustomizations);
+            InsertPostBootSubStepsAt(doneIndex + 1, _lastCustomizations, PostBootFlow.Direct);
         }
 
         /// <summary>
-        /// Called at runtime after <c>AutoRdpBackendResolveStep</c> has resolved
-        /// the <see cref="RdpBackend.Auto"/> selection to a concrete backend (it
-        /// mutates the shared <see cref="VmCustomizations"/> instance in place).
-        /// Inserts the chosen branch's install cards after the resolver card so
-        /// the deploy log shows every step that will actually run.
-        /// <para>
-        /// Idempotent and safe to call on EVERY post-boot step report: it is a
-        /// no-op when the deployment is not Auto (no resolver card), when the
-        /// resolver has not run yet (backend still Auto), and when the branch
-        /// cards were already inserted. The presenter does NOT know which
-        /// post-boot step report follows the resolver — it simply calls this
-        /// before completing each post-boot step card.
-        /// </para>
-        /// <para>
-        /// Note the timing: the service reports a step BEFORE executing it,
-        /// so on the resolver's own report the backend is still Auto (no-op);
-        /// the branch cards appear on the report of the next applicable step
-        /// (InstallLamcoRdpStep 235 / InstallXrdpPostBootStep 236 — under
-        /// Auto at least one of them is always applicable once resolved).
-        /// </para>
+        /// Reconciles the post-boot card list against the planner's current plan.
+        /// Recomputed on every post-boot step report because step applicability
+        /// changes mid-run: <c>AutoRdpBackendResolveStep</c> (order 232) rewrites
+        /// <see cref="VmCustomizations.RdpBackend"/> in place, which makes the
+        /// chosen branch's steps newly applicable and the losing branch's steps
+        /// newly inapplicable. Newly applicable steps get a card inserted at
+        /// their Order position; pending cards whose step is no longer applicable
+        /// are removed. Completed and active cards are never touched — they
+        /// already ran and their status is history, not plan.
         /// </summary>
-        public void EnsureResolvedRdpBackendPhases()
+        public void ReconcilePostBootSteps()
         {
-            int resolverIndex = -1;
+            if (_lastCustomizations == null || SelectedItem == null) return;
+
+            int postBootIndex = -1;
             for (int i = 0; i < Phases.Count; i++)
             {
-                if (Phases[i].Id == SubAutoRdpResolve) { resolverIndex = i; break; }
+                if (Phases[i].Id == PhasePostBoot) { postBootIndex = i; break; }
             }
-            // Not an Auto deployment (no resolver card) — nothing to do.
-            if (resolverIndex < 0) return;
+            if (postBootIndex < 0) return;
 
-            var backend = _lastCustomizations?.RdpBackend ?? RdpBackend.Auto;
-            // Resolver has not run yet — nothing to insert yet.
-            if (backend == RdpBackend.Auto) return;
+            // The range of post-boot cards (sub-steps between PostBoot and the
+            // next top-level phase, plus completion-info cards — but those have
+            // IndentLevel 0 and are appended after, so limit to the contiguous
+            // indent-1 run directly following the PostBoot parent).
+            int listStart = postBootIndex + 1;
+            int listEnd = listStart;
+            while (listEnd < Phases.Count && Phases[listEnd].IndentLevel > 0)
+                listEnd++;
 
-            // Already backfilled — idempotent.
-            if (Phases.Any(p => p.Id == SubInstallLamcoRdp || p.Id == SubInstallXrdpPostBoot))
-                return;
+            var planned = _planner.GetPlannedSteps(
+                SelectedItem.IsWindows ? StepPlatform.Windows : StepPlatform.Linux,
+                SelectedItem, _lastCustomizations);
 
-            int insertAt = resolverIndex + 1;
-            if (backend == RdpBackend.Lamco)
+            string[] plannedIds = planned.Select(PostBootStepPlanner.CardId).ToArray();
+
+            // Insert any newly applicable step's card at its position among the
+            // planner-ordered cards. The existing list is already in plan order,
+            // so each new card goes directly before the first card whose planned
+            // position is later than its own; when no such card exists it goes
+            // at the end of its half of the region. The KVP gate card splits the
+            // region exactly like the builder: a step below SshRestoreOrder
+            // belongs before it, a step at or above it belongs after it — the
+            // anchor search must never cross the gate.
+            int kvpIndex = -1;
+            for (int i = listStart; i < listEnd; i++)
             {
-                Phases.Insert(insertAt++, NewPostBootSubStep(SubInstallLamcoRdp, "Install Lamco RDP Server",
-                    "Installing the Wayland-native RDP server (packages, TLS, fork build)", SymbolRegular.Desktop24));
-                Phases.Insert(insertAt++, NewPostBootSubStep(SubEnableAutologin, "Enable Graphical Autologin",
-                    "Configuring automatic desktop login for the RDP session", SymbolRegular.Person24));
-                Phases.Insert(insertAt++, NewPostBootSubStep(SubStartGraphicalSession, "Start Graphical Session",
-                    "Restarting the display manager to log in the desktop session", SymbolRegular.Play24));
+                if (Phases[i].Id == SubWaitForKvpHeartbeat) { kvpIndex = i; break; }
             }
-            else // Xrdp (None can never be reached from Auto — the resolver only picks Lamco or Xrdp).
+
+            for (int p = 0; p < planned.Count; p++)
             {
-                Phases.Insert(insertAt++, NewPostBootSubStep(SubInstallXrdpPostBoot, "Install xrdp (post-boot)",
-                    "Verifying or backfilling the xrdp install", SymbolRegular.Desktop24));
+                string id = plannedIds[p];
+                bool exists = false;
+                for (int i = listStart; i < listEnd; i++)
+                {
+                    if (string.Equals(Phases[i].Id, id, StringComparison.Ordinal)) { exists = true; break; }
+                }
+                if (exists) continue;
+
+                bool inTail = planned[p].Order >= PostBootStepPlanner.SshRestoreOrder;
+                int searchStart = listStart;
+                int searchEnd = listEnd;
+                if (kvpIndex >= 0)
+                {
+                    if (inTail) searchStart = kvpIndex + 1;
+                    else searchEnd = kvpIndex;   // never anchor at/after the gate
+                }
+
+                int insertAt = searchEnd;
+                for (int i = searchStart; i < searchEnd; i++)
+                {
+                    if (IndexOfStepId(Phases[i].Id, plannedIds) > p)
+                    {
+                        insertAt = i;
+                        break;
+                    }
+                }
+
+                var step = planned[p];
+                Phases.Insert(insertAt, BuildCardForStep(step));
+                listEnd++;
+                if (insertAt <= kvpIndex) kvpIndex++;
             }
+
+            // Remove pending cards whose step is no longer applicable. Iterate
+            // backwards so removals don't shift the pending range.
+            for (int i = listEnd - 1; i >= listStart; i--)
+            {
+                string id = Phases[i].Id;
+                int pos = IndexOfStepId(id, plannedIds);
+                if (pos >= 0) continue;
+                if (Phases[i].Status != DeploymentPhaseStatus.Pending) continue;
+                // Infrastructure cards (temp NIC, SSH wait, KVP gate) are not
+                // planner cards; keep them.
+                if (IsInfrastructureCard(id)) continue;
+                Phases.RemoveAt(i);
+                listEnd--;
+            }
+        }
+
+        private static int IndexOfStepId(string id, string[] plannedIds)
+        {
+            for (int i = 0; i < plannedIds.Length; i++)
+            {
+                if (string.Equals(plannedIds[i], id, StringComparison.Ordinal)) return i;
+            }
+            return -1;
+        }
+
+        private static bool IsInfrastructureCard(string id) => id is SubAddTempNic or SubWaitForSsh or SubWaitForKvpHeartbeat;
+
+        /// <summary>Creates the post-boot card for a planned step, from its display info.</summary>
+        private static DeploymentPhase BuildCardForStep(ICustomizationStep step)
+        {
+            string id = PostBootStepPlanner.CardId(step);
+            var display = step as IStepDisplayInfo;
+            string title = !string.IsNullOrWhiteSpace(display?.DeployTitle) ? display.DeployTitle : step.Name;
+            string description = !string.IsNullOrWhiteSpace(display?.DeployDescription)
+                ? display.DeployDescription
+                : "Running " + step.Name;
+            SymbolRegular icon = ResolveIconName(display?.DeployIconName);
+            return NewPostBootSubStep(id, title, description, icon);
         }
 
         /// <summary>Builds a descriptive string for the post-boot card based on what's enabled.</summary>
@@ -707,22 +760,6 @@ namespace VMCreate
             }
         }
 
-        /// <summary>
-        /// Dynamically inserts a cleanup card between Pre-Boot Customizations and PostBoot/Done.
-        /// Called after the ISO boot cycle completes.
-        /// </summary>
-        public void InsertCleanupIsoBootPhase()
-        {
-            if (Phases.Any(p => p.Id == SubCleanupIsoBoot)) return;
-
-            int insertIndex = FindInsertIndexBeforePostBootOrDone();
-            if (insertIndex < 0) return;
-
-            Phases.Insert(insertIndex, new DeploymentPhase(SubCleanupIsoBoot, "Cleanup Boot Media",
-                "Removing ISO and source disk, setting boot to hard drive",
-                SymbolRegular.Broom24) { IndentLevel = 0 });
-        }
-
         /// <summary>Appends pre-boot sub-step cards (IndentLevel=1, hidden) to the end of Phases.</summary>
         private void AddPreBootSubSteps(VmCustomizations? c)
         {
@@ -756,180 +793,103 @@ namespace VMCreate
             return index;
         }
 
-        /// <summary>Appends post-boot sub-step cards (IndentLevel=1, hidden) to the end of Phases.</summary>
-        private void AddPostBootSubSteps(VmCustomizations? c)
+        /// <summary>
+        /// Builds the post-boot sub-step cards (IndentLevel=1, hidden) in the
+        /// exact order the backend runs them: infrastructure prelude, planned
+        /// steps below the SSH-restore boundary, the KVP heartbeat gate (when
+        /// enabled), then the SSH-restore tail. The step cards come from
+        /// <see cref="IPostBootStepPlanner"/> — the same ordering the backend
+        /// executes with — so the card list can never drift from execution.
+        /// </summary>
+        /// <param name="index">Index in <see cref="Phases"/> to insert at; returns the next free index.</param>
+        /// <param name="c">Customizations the plan is computed against.</param>
+        /// <param name="flow">Which infrastructure prelude and gates the creation strategy performs.</param>
+        private int InsertPostBootSubStepsAt(int index, VmCustomizations? c, PostBootFlow flow)
         {
-            Phases.Add(NewPostBootSubStep(SubAddTempNic, "Add Temporary NIC",
-                "Adding temporary network adapter for SSH access", SymbolRegular.PlugConnected24));
-            Phases.Add(NewPostBootSubStep(SubWaitForSsh, "Waiting for VM",
+            StepPlatform platform = SelectedItem?.IsWindows == true
+                ? StepPlatform.Windows
+                : StepPlatform.Linux;
+
+            // Infrastructure prelude — mirrors what each creation strategy reports.
+            if (flow == PostBootFlow.DiskImageIsoCycle)
+            {
+                Phases.Insert(index++, NewPostBootSubStep(SubAddTempNic, "Add Temporary NIC",
+                    "Adding temporary network adapter for SSH access", SymbolRegular.PlugConnected24));
+            }
+            Phases.Insert(index++, NewPostBootSubStep(SubWaitForSsh, "Waiting for VM",
                 "Waiting for the VM to accept remote management connections", SymbolRegular.PlugConnected24));
-            Phases.Add(NewPostBootSubStep(SubRemoveVBox, "Remove VBox Guest Additions",
-                "Cleaning up VirtualBox artifacts", SymbolRegular.Delete24));
-            if (c?.SyncTimezone == true)
+
+            var planned = _planner.GetPlannedSteps(platform, SelectedItem, c);
+
+            // Steps before the KVP gate: everything below the SSH-restore boundary.
+            foreach (var step in planned.Where(s => s.Order < PostBootStepPlanner.SshRestoreOrder))
+                Phases.Insert(index++, BuildCardForStep(step));
+
+            // The KVP heartbeat gate: the disk-image strategy reports it between
+            // the two post-boot halves, when integration services are enabled.
+            if (platform == StepPlatform.Linux
+                && flow is PostBootFlow.DiskImageIsoCycle or PostBootFlow.DiskImageCloudInit
+                && c?.EnableIntegrationServices == true)
             {
-                Phases.Add(NewPostBootSubStep(SubSyncTimezone, "Sync Timezone",
-                    "Setting guest timezone to match host", SymbolRegular.Clock24));
+                Phases.Insert(index++, NewPostBootSubStep(SubWaitForKvpHeartbeat, "Wait for KVP Heartbeat",
+                    "Waiting for the Hyper-V key-value exchange to come up", SymbolRegular.Heart24));
             }
-            if (c?.InstallOpenVpn == true)
-            {
-                Phases.Add(NewPostBootSubStep(SubInstallOpenVpn, "Install OpenVPN",
-                    "Installing OpenVPN and NetworkManager plugin", SymbolRegular.Globe24));
-            }
-            if (c?.ConfigureHtbVpn == true)
-            {
-                Phases.Add(NewPostBootSubStep(SubConfigureVpn, "Configure VPN",
-                    "Deploying VPN configs", SymbolRegular.Globe24));
-            }
-            if (c?.RdpBackend == RdpBackend.Lamco)
-            {
-                Phases.Add(NewPostBootSubStep(SubInstallLamcoRdp, "Install Lamco RDP Server",
-                    "Installing the Wayland-native RDP server (packages, TLS, fork build)", SymbolRegular.Desktop24));
-                Phases.Add(NewPostBootSubStep(SubEnableAutologin, "Enable Graphical Autologin",
-                    "Configuring automatic desktop login for the RDP session", SymbolRegular.Person24));
-                Phases.Add(NewPostBootSubStep(SubStartGraphicalSession, "Start Graphical Session",
-                    "Restarting the display manager to log in the desktop session", SymbolRegular.Play24));
-            }
-            if (c?.RdpBackend == RdpBackend.Wayrdp)
-            {
-                Phases.Add(NewPostBootSubStep(SubInstallWayrdpRdp, "Install wayrdp RDP Server",
-                    "Installing the Wayland-native RDP server (pinned release download, FreeRDP 3 libs, systemd user unit)", SymbolRegular.Desktop24));
-                Phases.Add(NewPostBootSubStep(SubEnableAutologin, "Enable Graphical Autologin",
-                    "Configuring automatic desktop login for the RDP session", SymbolRegular.Person24));
-                Phases.Add(NewPostBootSubStep(SubStartGraphicalSession, "Start Graphical Session",
-                    "Restarting the display manager to log in the desktop session", SymbolRegular.Play24));
-            }
-            if (c?.RdpBackend == RdpBackend.Auto)
-            {
-                Phases.Add(NewPostBootSubStep(SubAutoRdpResolve, "Auto-select RDP backend",
-                    "Detecting Wayland vs X11 in the guest to choose the RDP backend", SymbolRegular.ArrowSync24));
-            }
-            if (c?.RdpBackend == RdpBackend.Xrdp)
-            {
-                Phases.Add(NewPostBootSubStep(SubInstallXrdpPostBoot, "Install xrdp (post-boot)",
-                    "Verifying or backfilling the xrdp install", SymbolRegular.Desktop24));
-            }
-            AddDistributionOptionSubSteps(c);
-            Phases.Add(NewPostBootSubStep(SubRestoreSsh, "Restore SSH State",
-                "Restoring the original SSH configuration", SymbolRegular.ShieldKeyhole24));
+
+            // The SSH-restore tail (Order >= 900).
+            foreach (var step in planned.Where(s => s.Order >= PostBootStepPlanner.SshRestoreOrder))
+                Phases.Insert(index++, BuildCardForStep(step));
+
+            // Visible completion-info cards declared by enabled optional steps.
+            index = InsertCompletionInfoCardsAt(index, c);
+
+            return index;
         }
 
-        /// <summary>Appends Windows post-boot sub-step cards (IndentLevel=1, hidden): a connect
-        /// step plus one per enabled distribution option. No Linux infra steps (NIC/SSH/VBox).</summary>
-        private void AddWindowsPostBootSubSteps(VmCustomizations? c)
+        /// <summary>
+        /// Which infrastructure prelude and gates the deployment's creation strategy performs.
+        /// </summary>
+        private enum PostBootFlow
         {
-            Phases.Add(NewPostBootSubStep(SubWaitForSsh, "Waiting for VM",
-                "Waiting for the VM to accept remote management connections", SymbolRegular.PlugConnected24));
-            AddDistributionOptionSubSteps(c);
-            AddCompletionInfoCards(c);
+            /// <summary>
+            /// The disk-image ISO-cycle flow (<c>DiskImageVmCreationStrategy</c>,
+            /// non-cloud-init): adds a temporary NIC for SSH, waits for SSH, runs
+            /// steps, waits for the KVP heartbeat, runs the restore tail.
+            /// </summary>
+            DiskImageIsoCycle,
+
+            /// <summary>
+            /// The disk-image cloud-init flow (same strategy, items tagged
+            /// "cloud-init"): no temp NIC — cloud-init provisions the SSH user —
+            /// but the KVP heartbeat gate still runs.
+            /// </summary>
+            DiskImageCloudInit,
+
+            /// <summary>
+            /// Every other flow (ISO installer, native Hyper-V Windows): only the
+            /// SSH/PowerShell-Direct wait plus the steps — no temp NIC, no KVP gate.
+            /// </summary>
+            Direct,
         }
 
         /// <summary>Adds visible top-level completion/info cards (IndentLevel=0) declared by enabled optional steps.</summary>
-        private void AddCompletionInfoCards(VmCustomizations? c)
+        private int InsertCompletionInfoCardsAt(int index, VmCustomizations? c)
         {
             foreach (var step in GetApplicableDistributionSteps(c).Where(s => s.IsOptional))
             {
-                var metadata = step as IDistributionOptionMetadata;
-                if (string.IsNullOrWhiteSpace(metadata?.DeployCompletionInfo))
+                if (step is not IDistributionOptionMetadata metadata) continue;
+                if (string.IsNullOrWhiteSpace(metadata.DeployCompletionInfo))
                     continue;
 
-                string id = (metadata.DeployPhaseId ?? DistOptionSubId(step.Name)) + "_Info";
+                // Derived from the step's own card ID (CardId) so the info card
+                // stays in lockstep with its step card's identity.
+                string id = PostBootStepPlanner.CardId(step) + "_Info";
                 if (Phases.Any(p => p.Id == id)) continue;
-                Phases.Add(new DeploymentPhase(id, $"{metadata.DeployTitle} Background Setup",
+                Phases.Insert(index++, new DeploymentPhase(id, $"{metadata.DeployTitle} Background Setup",
                     metadata.DeployCompletionInfo, SymbolRegular.Info24)
                 {
                     IndentLevel = 0,
                     Status = DeploymentPhaseStatus.Information
                 });
-            }
-        }
-
-        /// <summary>Inserts post-boot sub-step cards at a given index (hidden). Returns the next free index.</summary>
-        private int InsertPostBootSubStepsAt(int index, VmCustomizations? c)
-        {
-            Phases.Insert(index++, NewPostBootSubStep(SubAddTempNic, "Add Temporary NIC",
-                "Adding temporary network adapter for SSH access", SymbolRegular.PlugConnected24));
-            Phases.Insert(index++, NewPostBootSubStep(SubWaitForSsh, "Waiting for VM",
-                "Waiting for the VM to accept remote management connections", SymbolRegular.PlugConnected24));
-            Phases.Insert(index++, NewPostBootSubStep(SubRemoveVBox, "Remove VBox Guest Additions",
-                "Cleaning up VirtualBox artifacts", SymbolRegular.Delete24));
-            if (c?.SyncTimezone == true)
-            {
-                Phases.Insert(index++, NewPostBootSubStep(SubSyncTimezone, "Sync Timezone",
-                    "Setting guest timezone to match host", SymbolRegular.Clock24));
-            }
-            if (c?.InstallOpenVpn == true)
-            {
-                Phases.Insert(index++, NewPostBootSubStep(SubInstallOpenVpn, "Install OpenVPN",
-                    "Installing OpenVPN and NetworkManager plugin", SymbolRegular.Globe24));
-            }
-            if (c?.ConfigureHtbVpn == true)
-            {
-                Phases.Insert(index++, NewPostBootSubStep(SubConfigureVpn, "Configure VPN",
-                    "Deploying VPN configs", SymbolRegular.Globe24));
-            }
-            if (c?.RdpBackend == RdpBackend.Lamco)
-            {
-                Phases.Insert(index++, NewPostBootSubStep(SubInstallLamcoRdp, "Install Lamco RDP Server",
-                    "Installing the Wayland-native RDP server (packages, TLS, fork build)", SymbolRegular.Desktop24));
-                Phases.Insert(index++, NewPostBootSubStep(SubEnableAutologin, "Enable Graphical Autologin",
-                    "Configuring automatic desktop login for the RDP session", SymbolRegular.Person24));
-                Phases.Insert(index++, NewPostBootSubStep(SubStartGraphicalSession, "Start Graphical Session",
-                    "Restarting the display manager to log in the desktop session", SymbolRegular.Play24));
-            }
-            if (c?.RdpBackend == RdpBackend.Wayrdp)
-            {
-                Phases.Insert(index++, NewPostBootSubStep(SubInstallWayrdpRdp, "Install wayrdp RDP Server",
-                    "Installing the Wayland-native RDP server (pinned release download, FreeRDP 3 libs, systemd user unit)", SymbolRegular.Desktop24));
-                Phases.Insert(index++, NewPostBootSubStep(SubEnableAutologin, "Enable Graphical Autologin",
-                    "Configuring automatic desktop login for the RDP session", SymbolRegular.Person24));
-                Phases.Insert(index++, NewPostBootSubStep(SubStartGraphicalSession, "Start Graphical Session",
-                    "Restarting the display manager to log in the desktop session", SymbolRegular.Play24));
-            }
-            if (c?.RdpBackend == RdpBackend.Auto)
-            {
-                Phases.Insert(index++, NewPostBootSubStep(SubAutoRdpResolve, "Auto-select RDP backend",
-                    "Detecting Wayland vs X11 in the guest to choose the RDP backend", SymbolRegular.ArrowSync24));
-            }
-            if (c?.RdpBackend == RdpBackend.Xrdp)
-            {
-                Phases.Insert(index++, NewPostBootSubStep(SubInstallXrdpPostBoot, "Install xrdp (post-boot)",
-                    "Verifying or backfilling the xrdp install", SymbolRegular.Desktop24));
-            }
-            index = InsertDistributionOptionSubStepsAt(index, c);
-            Phases.Insert(index++, NewPostBootSubStep(SubRestoreSsh, "Restore SSH State",
-                "Restoring the original SSH configuration", SymbolRegular.ShieldKeyhole24));
-            return index;
-        }
-
-        /// <summary>Appends distribution-option sub-steps in deployment order from step metadata.</summary>
-        private void AddDistributionOptionSubSteps(VmCustomizations? c)
-        {
-            foreach (var step in GetApplicableDistributionSteps(c))
-            {
-                var metadata = step as IDistributionOptionMetadata;
-                string id = metadata?.DeployPhaseId ?? DistOptionSubId(step.Name);
-                string title = metadata?.DeployTitle ?? step.Name;
-                string description = metadata?.DeployDescription ?? "Running distribution-specific tool";
-                SymbolRegular icon = ResolveIconName(metadata?.DeployIconName);
-
-                if (Phases.Any(p => p.Id == id)) continue;
-                Phases.Add(NewPostBootSubStep(id, title, description, icon));
-            }
-        }
-
-        /// <summary>Inserts distribution-option sub-steps at a given index. Returns the next free index.</summary>
-        private int InsertDistributionOptionSubStepsAt(int index, VmCustomizations? c)
-        {
-            foreach (var step in GetApplicableDistributionSteps(c))
-            {
-                var metadata = step as IDistributionOptionMetadata;
-                string id = metadata?.DeployPhaseId ?? DistOptionSubId(step.Name);
-                string title = metadata?.DeployTitle ?? step.Name;
-                string description = metadata?.DeployDescription ?? "Running distribution-specific tool";
-                SymbolRegular icon = ResolveIconName(metadata?.DeployIconName);
-
-                if (Phases.Any(p => p.Id == id)) continue;
-                Phases.Insert(index++, NewPostBootSubStep(id, title, description, icon));
             }
             return index;
         }

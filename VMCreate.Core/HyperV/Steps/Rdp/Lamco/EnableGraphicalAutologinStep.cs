@@ -39,13 +39,17 @@ namespace VMCreate
     /// Wayland and share a ready graphical session through PipeWire capture.
     /// </para>
     /// </summary>
-    public class EnableGraphicalAutologinStep : ICustomizationStep
+    public class EnableGraphicalAutologinStep : ICustomizationStep, IStepDisplayInfo
     {
         public string Name => "Enable Graphical Autologin (Wayland)";
         public CustomizationPhase Phase => CustomizationPhase.PostBoot;
         public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 238;
         public string? ProgressPhaseId => "Sub_EnableAutologin";
+
+        public string DeployTitle => "Enable Graphical Autologin";
+        public string DeployDescription => "Configuring automatic desktop login for the RDP session";
+        public string DeployIconName => "Person24";
 
         public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
             => (customizations?.RdpBackend == RdpBackend.Lamco && item.SupportsLamco())

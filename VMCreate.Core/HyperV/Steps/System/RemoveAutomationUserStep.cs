@@ -14,13 +14,17 @@ namespace VMCreate
     /// Runs at Order 850, after <see cref="CleanupTemporaryNicStep"/> (830)
     /// and before <see cref="DisableSshStep"/> (900).
     /// </summary>
-    public class RemoveAutomationUserStep : ICustomizationStep
+    public class RemoveAutomationUserStep : ICustomizationStep, IStepDisplayInfo
     {
         public string Name => "Remove Automation User";
         public CustomizationPhase Phase => CustomizationPhase.PostBoot;
         public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 850;
         public string? ProgressPhaseId => null;
+
+        public string DeployTitle => "Remove Automation User";
+        public string DeployDescription => "Scheduling removal of the temporary deployment user on next boot";
+        public string DeployIconName => "PersonDelete24";
 
         /// <summary>
         /// Skips headless appliances (tag "headless", e.g. Elastic SIEM):

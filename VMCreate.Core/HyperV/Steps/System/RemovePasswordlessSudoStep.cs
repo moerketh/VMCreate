@@ -12,13 +12,17 @@ namespace VMCreate
     /// automation-user teardown (850), while still running inside the SSH
     /// window before DisableSshStep (900).
     /// </summary>
-    public class RemovePasswordlessSudoStep : ICustomizationStep
+    public class RemovePasswordlessSudoStep : ICustomizationStep, IStepDisplayInfo
     {
         public string Name => "Remove passwordless sudo drop-in";
         public CustomizationPhase Phase => CustomizationPhase.PostBoot;
         public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 880;
         public string? ProgressPhaseId => null;
+
+        public string DeployTitle => "Remove Passwordless Sudo";
+        public string DeployDescription => "Removing the temporary NOPASSWD sudo drop-in";
+        public string DeployIconName => "Key24";
 
         public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
             => item != null && item.HasTag(EnablePasswordlessSudoStep.OmarchyTag);

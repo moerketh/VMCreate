@@ -326,7 +326,7 @@ namespace VMCreate.HyperV.VmCreation
                         // the deploy falsely failed).
                         await _postBootService.RunLinuxPostBootAsync(
                             shell, plan, item, vmCustomizations, progress, cancellationToken,
-                            upToOrderExclusive: 900);
+                            upToOrderExclusive: PostBootStepPlanner.SshRestoreOrder);
                     }
 
                     // Hard KVP gate — after post-boot proper, before the SSH
@@ -420,7 +420,7 @@ namespace VMCreate.HyperV.VmCreation
                     {
                         await _postBootService.RunLinuxPostBootAsync(
                             shell, plan, item, vmCustomizations, progress, cancellationToken,
-                            fromOrderInclusive: 900);
+                            fromOrderInclusive: PostBootStepPlanner.SshRestoreOrder);
                     }
                 }
                 finally

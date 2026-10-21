@@ -209,7 +209,6 @@ namespace VMCreate.Gallery
         public string DeployDescription => "Removing Windows Defender and related security components";
         public string DeployPhaseId => "Sub_RemoveDefender";
         public string DeployIconName => "Shield24";
-        public int DeployOrder => 100;
         public string? DeployCompletionInfo => null;
 
         public bool IsVisibleFor(GalleryItem? item)

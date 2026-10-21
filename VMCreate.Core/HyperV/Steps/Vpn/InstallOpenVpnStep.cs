@@ -14,13 +14,17 @@ namespace VMCreate
     /// kill a deployment. After install, restarts NetworkManager so the
     /// VPN plugin is loaded.
     /// </summary>
-    public class InstallOpenVpnStep : ICustomizationStep
+    public class InstallOpenVpnStep : ICustomizationStep, IStepDisplayInfo
     {
         public string Name => "Install OpenVPN";
         public CustomizationPhase Phase => CustomizationPhase.PostBoot;
         public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 200;
         public string ProgressPhaseId => "Sub_InstallOpenVpn";
+
+        public string DeployTitle => "Install OpenVPN";
+        public string DeployDescription => "Installing OpenVPN and NetworkManager plugin";
+        public string DeployIconName => "Globe24";
 
         public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
             => customizations?.InstallOpenVpn == true;

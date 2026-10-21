@@ -12,13 +12,17 @@ namespace VMCreate
     ///   3. Leftover cleanup: kernel modules, mount points, services
     /// Safe no-op when VBox was never installed.
     /// </summary>
-    public class RemoveVBoxGuestAdditionsStep : ICustomizationStep
+    public class RemoveVBoxGuestAdditionsStep : ICustomizationStep, IStepDisplayInfo
     {
         public string Name => "Remove VirtualBox Guest Additions";
         public CustomizationPhase Phase => CustomizationPhase.PostBoot;
         public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 50; // Run early, before timezone/package steps
         public string? ProgressPhaseId => "Sub_RemoveVBox";
+
+        public string DeployTitle => "Remove VBox Guest Additions";
+        public string DeployDescription => "Cleaning up VirtualBox artifacts";
+        public string DeployIconName => "Delete24";
 
         public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations) => true;
 

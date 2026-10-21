@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using VMCreate.HyperV.VmCreation;
 using VMCreate.MediaHandlers;
 
 namespace VMCreate
@@ -143,15 +144,16 @@ namespace VMCreate
             // Post-boot sub-step by step name
             if (ActivePhaseId == DeployPageViewModel.PhasePostBoot && !string.IsNullOrEmpty(info.StepName))
             {
-                // Auto RDP backend: the resolver (order 232) mutates the
-                // shared customizations in place. The branch install cards
-                // (Lamco pair / xrdp post-boot) are inserted lazily here —
-                // on every post-boot step report — because this handler
-                // fires BEFORE the reported step's cards are completed. On
-                // the resolver's OWN report the backend is still Auto
-                // (no-op); it resolves on the NEXT applicable step's
-                // report, just in time for its card to activate.
-                _dispatcher.Invoke(() => _viewModel.EnsureResolvedRdpBackendPhases());
+                // Reconcile the card list against the planner's current plan
+                // BEFORE mapping this report: the Auto RDP resolver (order
+                // 232) mutates the shared customizations in place, so steps
+                // become applicable/inapplicable mid-run (the chosen branch's
+                // installs appear; the losing branch's pending cards are
+                // removed). The service reports a step BEFORE executing it,
+                // so on the resolver's own report the backend is still Auto
+                // and reconciliation is a no-op; it takes effect on the next
+                // applicable step's report, in time for its card to activate.
+                _dispatcher.Invoke(() => _viewModel.ReconcilePostBootSteps());
 
                 string? subId = MapPostBootStepName(info.StepName);
                 if (!string.IsNullOrEmpty(subId) && subId != ActiveSubStepId)
@@ -188,9 +190,6 @@ namespace VMCreate
                 {
                     _dispatcher.Invoke(() =>
                     {
-                        if (info.SubStep == VmDeploymentSubStep.CleanupIsoBoot)
-                            _viewModel.InsertCleanupIsoBootPhase();
-
                         CompleteActiveSubStep();
                         ActivateSubStep(subStepId);
                     });
@@ -335,22 +334,24 @@ namespace VMCreate
                 VmDeploymentSubStep.AttachBootDvd => DeployPageViewModel.SubAttachBootDvd,
                 VmDeploymentSubStep.SetBootOrder => DeployPageViewModel.SubSetBootOrder,
                 VmDeploymentSubStep.EnableNestedVirt => DeployPageViewModel.SubEnableNestedVirt,
-                VmDeploymentSubStep.CleanupIsoBoot => DeployPageViewModel.SubCleanupIsoBoot,
                 VmDeploymentSubStep.AddTempNic => DeployPageViewModel.SubAddTempNic,
                 VmDeploymentSubStep.WaitForSsh => DeployPageViewModel.SubWaitForSsh,
+                VmDeploymentSubStep.WaitForKvpHeartbeat => DeployPageViewModel.SubWaitForKvpHeartbeat,
                 _ => null
             };
         }
 
         private string? MapPostBootStepName(string stepName)
         {
-            if (_allSteps.TryGetValue(stepName, out var step)
-                && !string.IsNullOrWhiteSpace(step?.ProgressPhaseId))
+            if (_allSteps.TryGetValue(stepName, out var step) && step != null)
             {
-                return step.ProgressPhaseId;
+                return PostBootStepPlanner.CardId(step);
             }
 
-            return DeployPageViewModel.DistOptionSubId(stepName);
+            // Unknown step name (not in the DI step set): produce the same
+            // name-derived ID the planner would, so a report from a step the
+            // front end did not register still maps consistently.
+            return "Sub_Step_" + stepName;
         }
 
         private static string? MapPreBootProgress(string progress)

@@ -240,17 +240,17 @@ namespace VMCreate.Tests.GUI
         }
 
         [TestMethod]
-        public void Present_PostBootStep_CallsEnsureResolvedRdpBackendPhases()
+        public void Present_PostBootStep_CallsReconcilePostBootSteps()
         {
-            // The presenter must call EnsureResolvedRdpBackendPhases on EVERY
-            // post-boot step report — the lazy insertion seam that backfills
-            // the chosen backend's install cards after the in-guest resolver
-            // mutated the backend in place.
+            // The presenter must call ReconcilePostBootSteps on EVERY
+            // post-boot step report — the reconciliation seam that inserts
+            // newly applicable cards and removes newly inapplicable ones
+            // after the in-guest resolver mutated the backend in place.
             _presenter.Present(new CreateVMProgressInfo { Phase = VmDeploymentPhase.PostBoot });
             _presenter.Present(new CreateVMProgressInfo { Phase = VmDeploymentPhase.PostBoot, StepName = "some-step" });
 
-            Assert.IsTrue(_viewModel.EnsureResolvedRdpBackendPhasesCallCount >= 1,
-                "the presenter must invoke EnsureResolvedRdpBackendPhases on post-boot step reports");
+            Assert.IsTrue(_viewModel.ReconcilePostBootStepsCallCount >= 1,
+                "the presenter must invoke ReconcilePostBootSteps on post-boot step reports");
         }
 
         private sealed class FakeViewModel : IDeploymentProgressViewModel
@@ -265,10 +265,9 @@ namespace VMCreate.Tests.GUI
             public bool PostBootPhaseInserted { get; set; }
             public bool MbrPhasesInserted { get; set; }
             public bool CustomizePhaseInserted { get; set; }
-            public bool CleanupIsoBootPhaseInserted { get; set; }
             public int LastDiskSubStepsGeneration { get; set; }
             public bool LastDiskSubStepsNeedsIsoBoot { get; set; }
-            public int EnsureResolvedRdpBackendPhasesCallCount { get; set; }
+            public int ReconcilePostBootStepsCallCount { get; set; }
 
             public void InsertDownloadCloningIsoPhase() => DownloadCloningIsoPhaseInserted = true;
             public void InsertPostBootPhase() => PostBootPhaseInserted = true;
@@ -279,8 +278,7 @@ namespace VMCreate.Tests.GUI
                 LastDiskSubStepsNeedsIsoBoot = needsIsoBoot;
             }
             public void InsertCustomizePhase() => CustomizePhaseInserted = true;
-            public void InsertCleanupIsoBootPhase() => CleanupIsoBootPhaseInserted = true;
-            public void EnsureResolvedRdpBackendPhases() => EnsureResolvedRdpBackendPhasesCallCount++;
+            public void ReconcilePostBootSteps() => ReconcilePostBootStepsCallCount++;
 
             public void ActivatePhase(string id)
             {

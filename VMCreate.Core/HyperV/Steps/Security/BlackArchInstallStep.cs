@@ -104,7 +104,6 @@ namespace VMCreate
         public string DeployDescription => "Adding the BlackArch repositories and installing a curated subset of pentesting tools";
         public string DeployPhaseId => "Sub_BlackArchInstall";
         public string DeployIconName => "Shield24";
-        public int DeployOrder => 230;
         public string? DeployCompletionInfo => null;
 
         public bool IsVisibleFor(GalleryItem? item)
