@@ -122,9 +122,100 @@ namespace VMCreate.Tests.HyperV.VmCreation
 
             StringAssert.Contains(inner, "runuser -u \"$user\" -- env \"$@\"");
             StringAssert.Contains(inner, "env \"$@\"");
-            // -u consumes its argument; unknown/password flags shift away.
-            StringAssert.Contains(inner, "-u) user=\"$2\"; shift 2 ;;");
+            // Unknown/password flags shift away.
             StringAssert.Contains(inner, "-*) shift ;;");
+        }
+
+        [TestMethod]
+        public void SudoShim_ParsesSudoFlagRules_BashVerified()
+        {
+            // Executes the REAL generated shim in bash and checks flag
+            // parsing through behavior, not string shapes — the production
+            // bug ("runuser: user -- does not exist", VirtualBox's
+            // uninstall.sh tree calling sudo -u --) lived exactly here and
+            // a string-only pin missed it. 'id -u' reports the resolved uid:
+            // a parse that misreads the username exits non-zero (runuser)
+            // or prints garbage.
+            string runner = BuildShimOnlyScript();
+            // The production killer: '--' as the -u value.
+            AssertShimOk(runner, new[] { "-u", "--", "id", "-u" }, "0",
+                "sudo -u -- cmd must treat -- as end-of-options, not a username");
+            // Empty -u value.
+            AssertShimOk(runner, new[] { "-u", "", "--", "id", "-u" }, "0",
+                "an empty -u value must be dropped, not passed through");
+            // Option-shaped -u value (a following flag, not a username).
+            AssertShimOk(runner, new[] { "-u", "-n", "id", "-u" }, "0",
+                "an option-shaped -u value must be dropped");
+            // Lone '--' terminator.
+            AssertShimOk(runner, new[] { "--", "id", "-u" }, "0",
+                "bare -- must end option parsing and be consumed");
+            // The correct forms keep working.
+            AssertShimOk(runner, new[] { "-u", "root", "id", "-u" }, "0",
+                "sudo -u root cmd maps to runuser");
+            AssertShimOk(runner, new[] { "--user=root", "id", "-u" }, "0",
+                "--user=NAME is honored like -u NAME");
+            AssertShimOk(runner, new[] { "-u", "root", "--", "id", "-u" }, "0",
+                "-u root -- cmd keeps runuser semantics");
+        }
+
+        [TestMethod]
+        public void SudoShim_VarPrefixes_StillRouteThroughEnv()
+        {
+            string runner = BuildShimOnlyScript();
+            AssertShimOk(runner, new[] { "FOO=bar", "printenv", "FOO" }, "bar",
+                "sudo VAR=val cmd must exec via env, not a binary named VAR=…");
+            AssertShimOk(runner, new[] { "-n", "FOO=bar", "printenv", "FOO" }, "bar",
+                "dropped flags must not disturb the env prefix");
+        }
+
+        /// <summary>
+        /// Extracts the sudo() shim from the real wrapper. The appended
+        /// <c>sudo "$@"</c> makes the file a runner: piping argv through
+        /// the GENERATED shim exercises the production code path verbatim,
+        /// not a reimplementation that could drift from it.
+        /// </summary>
+        private static string BuildShimOnlyScript()
+        {
+            var shell = Create(out _, label: null);
+            string inner = ExtractInnerScript(shell.BuildChrootCommand("true"));
+            // The shim is everything up to the subshell-wrapped command
+            // (which the newline fix guarantees starts on its own line).
+            int tail = inner.LastIndexOf("\n( true )", StringComparison.Ordinal);
+            Assert.IsTrue(tail > 0, "wrapper must carry the shim on its own lines before the subshell");
+            return inner[..tail] + "\nsudo \"$@\"\n";
+        }
+
+        /// <summary>Runs one shim invocation in WSL Ubuntu and asserts the
+        /// exit code is 0 and the trimmed stdout equals
+        /// <paramref name="expected"/>.</summary>
+        private static void AssertShimOk(string script, string[] args, string expected, string because)
+        {
+            string result = RunBash(script, args);
+            Assert.AreEqual(expected, result.Trim(), $"[{string.Join(" ", args)}] {because}");
+        }
+
+        private static string RunBash(string script, string[] args)
+        {
+            // Script rides stdin (bash -s): no Windows→WSL path translation.
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "wsl",
+                Arguments = $"-d Ubuntu -u root bash -s -- {string.Join(' ', args.Select(a => $"'{a.Replace("'", "'\\''")}'"))}",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                RedirectStandardInput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            using var p = System.Diagnostics.Process.Start(psi)!;
+            p.StandardInput.Write(script.Replace("\r\n", "\n"));
+            p.StandardInput.Close();
+            string stdout = p.StandardOutput.ReadToEnd();
+            string stderr = p.StandardError.ReadToEnd();
+            p.WaitForExit(20000);
+            if (p.ExitCode != 0)
+                Assert.Fail($"bash exited {p.ExitCode}: {stderr.Trim()}");
+            return stdout;
         }
 
         [TestMethod]
@@ -175,9 +266,23 @@ namespace VMCreate.Tests.HyperV.VmCreation
             var shell = Create(out _, label: null);
             string inner = ExtractInnerScript(shell.BuildChrootCommand("sudo bash /tmp/tool.sh"));
 
-            StringAssert.Contains(inner, "( sudo bash /tmp/tool.sh )");
+            StringAssert.Contains(inner, "\n( sudo bash /tmp/tool.sh )");
             Assert.IsTrue(inner.TrimEnd().EndsWith(")", StringComparison.Ordinal),
                 "the subshell must be the last construct — nothing may run after it");
+        }
+
+        [TestMethod]
+        public void InnerScript_NoLabel_WrapperIsParseableBash()
+        {
+            // Regression: the no-label path once emitted 'sudo(){…}( cmd )'
+            // — no newline between the shim's closing brace and the
+            // subshell — which is a bash syntax error, so every chroot
+            // command without a step label failed to parse at all. Running
+            // the extracted shim end-to-end in real bash proves the
+            // generated code parses AND executes.
+            string script = BuildShimOnlyScript();
+            AssertShimOk(script, new[] { "true" }, string.Empty,
+                "the no-label wrapper must execute (an unparseable wrapper fails here)");
         }
 
         [TestMethod]

@@ -165,15 +165,35 @@ namespace VMCreate.HyperV.VmCreation
         {
             // sudo() shim: in-chroot commands already run as root, so plain
             // sudo passthrough; -u maps to runuser (util-linux, present on
-            // every supported target); -S/-n/-E/-- are root-meaningless and
-            // dropped. 'env' absorbs both VAR=val prefixes ("sudo VAR=1
-            // cmd") and plain commands — "$@" alone would try to exec a
-            // binary literally named "VAR=1".
+            // every supported target); -S/-n/-E and other root-meaningless
+            // flags are dropped. 'env' absorbs both VAR=val prefixes ("sudo
+            // VAR=1 cmd") and plain commands — "$@" alone would try to exec
+            // a binary literally named "VAR=1".
+            // Flag parsing mirrors sudo's own rules, because step command
+            // trees include third-party scripts whose sudo forms we don't
+            // control (VirtualBox's uninstall.sh in particular):
+            //   - '--' ends option parsing and is consumed — 'sudo -u --
+            //     cmd' once became 'runuser -u "--"' and killed deployments
+            //     with "runuser: user -- does not exist".
+            //   - -u only takes a value that is non-empty and not
+            //     option-shaped; a following '--' or flag means the switch
+            //     itself was malformed and is skipped (root context needs
+            //     no user switch).
+            //   - --user=NAME is honored like -u NAME.
             const string shim = @"sudo() {
   local user=''
   while [ ""$#"" -gt 0 ]; do
     case ""$1"" in
-      -u) user=""$2""; shift 2 ;;
+      --user=*) user=""${1#--user=}""; shift ;;
+      -u)
+        if [ ""$#"" -ge 2 ] && [ -n ""$2"" ] && [ ""${2#-}"" = ""$2"" ]; then
+          user=""$2""
+        fi
+        # Always consume the (possibly malformed/empty) value with the
+        # flag — a leaked empty argument once made env exec ''.
+        if [ ""$#"" -ge 2 ]; then shift 2; else shift; fi
+        ;;
+      --) shift; break ;;
       -*) shift ;;
       *)  break ;;
     esac
@@ -205,11 +225,15 @@ namespace VMCreate.HyperV.VmCreation
                           + $"echo VMCREATE:MSG:'{label}'; done ) &\n_hb=$!\ntrap 'kill $_hb 2>/dev/null' EXIT\n";
             }
 
-            // The step command runs in a SUBSHELL: its exit status
-            // propagates ($?), but any trap it installs (or resets) stays
-            // inside the subshell and cannot clobber the wrapper's EXIT
-            // trap — the heartbeat kill survives hostile commands.
-            return shim + heartbeat + "( " + command + " )";
+            // The step command runs in a SUBSHELL on its own line: its exit
+            // status propagates ($?), but any trap it installs (or resets)
+            // stays inside the subshell and cannot clobber the wrapper's EXIT
+            // trap — the heartbeat kill survives hostile commands. The
+            // newline is load-bearing: 'fn(){…}( cmd )' with nothing between
+            // the closing brace and the parenthesis is a bash syntax error,
+            // and the no-label path (no heartbeat text) once generated
+            // exactly that.
+            return shim + heartbeat + "\n( " + command + " )";
         }
 
         // ── Streaming execution ──────────────────────────────────────────
