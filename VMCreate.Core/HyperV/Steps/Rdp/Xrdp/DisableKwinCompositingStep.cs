@@ -35,6 +35,7 @@ namespace VMCreate
         public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 250;
         public string? ProgressPhaseId => "Sub_DisableKwinCompositing";
+        public bool SupportsChroot => true;
 
         public string DeployTitle => "Disable KWin Compositing";
         public string DeployDescription => "Turning off desktop compositing for smoother RDP";

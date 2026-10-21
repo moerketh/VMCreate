@@ -43,6 +43,39 @@ namespace VMCreate.Tests.HyperV.Steps
             Assert.AreEqual(StepPlatform.Linux, _step.Platform);
             Assert.AreEqual(236, _step.Order);
             Assert.AreEqual("Sub_InstallXrdpPostBoot", _step.ProgressPhaseId);
+            Assert.IsTrue(_step.SupportsChroot, "the offline install half runs in the chroot");
+            Assert.IsTrue(_step.RunsAfterChroot, "the verify half re-runs post-boot");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_InChroot_PassesChrootFlag_AndTreatsUnverifiedAsExpected()
+        {
+            var chroot = new Mock<IGuestShell>();
+            chroot.Setup(s => s.Context).Returns(GuestExecutionContext.Chroot);
+            chroot.Setup(s => s.VmName).Returns("TestVM");
+            chroot.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync("XRDP_POSTBOOT_RESULT=already\nXRDP_POSTBOOT_TRANSPORT=unverified\nCHROOT: offline half complete");
+
+            await _step.ExecuteAsync(chroot.Object, _item, _xrdpCustomizations, _logger.Object, CancellationToken.None);
+
+            chroot.Verify(s => s.RunCommandAsync(
+                It.Is<string>(cmd => cmd.Contains("sudo bash /tmp/install_xrdp_postboot_") && cmd.Contains(" --chroot")),
+                It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()), Times.Once,
+                "the chroot half must invoke the script with --chroot");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_Live_PassesNoChrootFlag()
+        {
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync("XRDP_POSTBOOT_RESULT=already\nXRDP_POSTBOOT_TRANSPORT=vsock\n");
+
+            await _step.ExecuteAsync(_shell.Object, _item, _xrdpCustomizations, _logger.Object, CancellationToken.None);
+
+            _shell.Verify(s => s.RunCommandAsync(
+                It.Is<string>(cmd => cmd.Contains("sudo bash /tmp/install_xrdp_postboot_") && !cmd.Contains(" --chroot")),
+                It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()), Times.Once,
+                "the live verify half must NOT pass --chroot");
         }
 
         [TestMethod]

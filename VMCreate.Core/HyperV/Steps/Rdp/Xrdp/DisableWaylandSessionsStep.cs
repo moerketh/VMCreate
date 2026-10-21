@@ -34,6 +34,7 @@ namespace VMCreate
         public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 270;
         public string? ProgressPhaseId => "Sub_DisableWaylandSessions";
+        public bool SupportsChroot => true;
 
         public string DeployTitle => "Disable Wayland Sessions";
         public string DeployDescription => "Hiding Wayland sessions for xrdp compatibility";

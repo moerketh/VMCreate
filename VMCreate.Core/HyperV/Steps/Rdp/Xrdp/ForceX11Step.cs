@@ -48,6 +48,7 @@ namespace VMCreate
         public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 240;
         public string? ProgressPhaseId => "Sub_ForceX11";
+        public bool SupportsChroot => true;
 
         public string DeployTitle => "Force X11 Display Server";
         public string DeployDescription => "Setting the default display server to X11 for xrdp compatibility";

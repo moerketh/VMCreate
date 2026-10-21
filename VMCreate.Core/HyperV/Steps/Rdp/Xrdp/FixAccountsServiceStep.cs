@@ -39,6 +39,7 @@ namespace VMCreate
         public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 255;
         public string? ProgressPhaseId => "Sub_FixAccountsService";
+        public bool SupportsChroot => true;
 
         public string DeployTitle => "Fix AccountsService Sessions";
         public string DeployDescription => "Fixing AccountsService session overrides";

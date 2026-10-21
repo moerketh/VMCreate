@@ -565,39 +565,51 @@ namespace VMCreate
         }
 
         /// <summary>
-        /// Reconciles the post-boot card list against the planner's current plan.
-        /// Recomputed on every post-boot step report because step applicability
-        /// changes mid-run: <c>AutoRdpBackendResolveStep</c> (order 232) rewrites
-        /// <see cref="VmCustomizations.RdpBackend"/> in place, which makes the
-        /// chosen branch's steps newly applicable and the losing branch's steps
-        /// newly inapplicable. Newly applicable steps get a card inserted at
-        /// their Order position; pending cards whose step is no longer applicable
-        /// are removed. Completed and active cards are never touched — they
+        /// Recomputes BOTH dynamic card regions — the Customize (chroot) list
+        /// and the PostBoot list — against the planner's current plan.
+        /// Called on every step report (chroot and post-boot) because step
+        /// applicability changes mid-run: <c>AutoRdpBackendResolveStep</c>
+        /// (order 232, chroot-capable) rewrites
+        /// <see cref="VmCustomizations.RdpBackend"/> in place, which makes
+        /// the chosen branch's steps newly applicable and the losing
+        /// branch's steps newly inapplicable — in whichever region they
+        /// live. Newly applicable steps get a card inserted at their Order
+        /// position; pending cards whose step is no longer applicable are
+        /// removed. Completed and active cards are never touched — they
         /// already ran and their status is history, not plan.
         /// </summary>
         public void ReconcilePostBootSteps()
         {
             if (_lastCustomizations == null || SelectedItem == null) return;
 
-            int postBootIndex = -1;
+            ReconcileRegion(PhaseCustomize, _planner.GetPlannedChrootSteps(SelectedItem, _lastCustomizations), allowGateSplit: false);
+            ReconcileRegion(PhasePostBoot, GetPlannedPostBootSteps(
+                SelectedItem.IsWindows ? StepPlatform.Windows : StepPlatform.Linux,
+                SelectedItem, _lastCustomizations, _lastPostBootFlow), allowGateSplit: true);
+        }
+
+        /// <summary>
+        /// One region pass: [parent] then its contiguous indent-1 cards.
+        /// Newly applicable planned steps get a card at their plan position
+        /// (split around the KVP gate card when the region has one);
+        /// pending cards not in the plan are removed; completed/active cards
+        /// and infrastructure cards are never touched.
+        /// </summary>
+        private void ReconcileRegion(string parentId, IReadOnlyList<ICustomizationStep> planned, bool allowGateSplit)
+        {
+            int parentIndex = -1;
             for (int i = 0; i < Phases.Count; i++)
             {
-                if (Phases[i].Id == PhasePostBoot) { postBootIndex = i; break; }
+                if (Phases[i].Id == parentId) { parentIndex = i; break; }
             }
-            if (postBootIndex < 0) return;
+            if (parentIndex < 0) return;
 
-            // The range of post-boot cards (sub-steps between PostBoot and the
-            // next top-level phase, plus completion-info cards — but those have
-            // IndentLevel 0 and are appended after, so limit to the contiguous
-            // indent-1 run directly following the PostBoot parent).
-            int listStart = postBootIndex + 1;
+            // The contiguous indent-1 run directly following the parent
+            // (completion-info cards have IndentLevel 0 and live after it).
+            int listStart = parentIndex + 1;
             int listEnd = listStart;
             while (listEnd < Phases.Count && Phases[listEnd].IndentLevel > 0)
                 listEnd++;
-
-            var planned = GetPlannedPostBootSteps(
-                SelectedItem.IsWindows ? StepPlatform.Windows : StepPlatform.Linux,
-                SelectedItem, _lastCustomizations, _lastPostBootFlow);
 
             string[] plannedIds = planned.Select(PostBootStepPlanner.CardId).ToArray();
 
@@ -608,11 +620,15 @@ namespace VMCreate
             // at the end of its half of the region. The KVP gate card splits the
             // region exactly like the builder: a step below SshRestoreOrder
             // belongs before it, a step at or above it belongs after it — the
-            // anchor search must never cross the gate.
+            // anchor search must never cross the gate. (The Customize region
+            // has no gate card — allowGateSplit is false there.)
             int kvpIndex = -1;
-            for (int i = listStart; i < listEnd; i++)
+            if (allowGateSplit)
             {
-                if (Phases[i].Id == SubWaitForKvpHeartbeat) { kvpIndex = i; break; }
+                for (int i = listStart; i < listEnd; i++)
+                {
+                    if (Phases[i].Id == SubWaitForKvpHeartbeat) { kvpIndex = i; break; }
+                }
             }
 
             for (int p = 0; p < planned.Count; p++)
@@ -675,7 +691,17 @@ namespace VMCreate
             return -1;
         }
 
-        private static bool IsInfrastructureCard(string id) => id is SubAddTempNic or SubWaitForSsh or SubWaitForKvpHeartbeat;
+        /// <summary>
+        /// Cards that are NOT planner step cards: infrastructure prelude/gate
+        /// cards in the PostBoot region and the scenario scripts' built-in
+        /// sub-steps in the Customize region. Reconcile keeps them — they
+        /// represent work the creation strategy/scenario runs regardless of
+        /// the planned step list.
+        /// </summary>
+        private static bool IsInfrastructureCard(string id)
+            => id is SubAddTempNic or SubWaitForSsh or SubWaitForKvpHeartbeat
+               or SubInstallHyperV or SubInstallXrdp or SubSshSetup or SubReboot
+               or SubInstallGrub or PhaseCloneDisk;
 
         /// <summary>Creates the post-boot card for a planned step, from its display info.</summary>
         private static DeploymentPhase BuildCardForStep(ICustomizationStep step)
@@ -823,7 +849,11 @@ namespace VMCreate
         /// </summary>
         private int InsertChrootStepCards(int index, VmCustomizations? c)
         {
-            foreach (var step in _planner.GetPlannedChrootSteps(SelectedItem, c))
+            // Chroot-ONLY steps get their card in the Customize phase;
+            // verify-semantics steps (RunsAfterChroot) run both halves, so
+            // their card stays with the post-boot list (the live verify is
+            // the user-visible completion).
+            foreach (var step in _planner.GetChrootOnlySteps(SelectedItem, c))
             {
                 string id = PostBootStepPlanner.CardId(step);
                 if (Phases.Any(p => p.Id == id)) continue;
@@ -899,10 +929,14 @@ namespace VMCreate
             if (flow != PostBootFlow.DiskImageIsoCycle || platform != StepPlatform.Linux)
                 return planned;
 
-            var chrootNames = new HashSet<string>(
-                _planner.GetPlannedChrootSteps(item, c).Select(s => s.Name),
+            // Chroot-ONLY steps run in the ISO stage and are skipped
+            // post-boot by the ledger; verify-semantics steps
+            // (RunsAfterChroot) run in BOTH halves and keep their post-boot
+            // card for the live verification pass.
+            var chrootOnlyNames = new HashSet<string>(
+                _planner.GetChrootOnlySteps(item, c).Select(s => s.Name),
                 StringComparer.Ordinal);
-            return planned.Where(s => !chrootNames.Contains(s.Name)).ToList();
+            return planned.Where(s => !chrootOnlyNames.Contains(s.Name)).ToList();
         }
 
         /// <summary>

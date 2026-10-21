@@ -167,6 +167,15 @@ namespace VMCreate
                 }
             }
 
+            // Chroot (Customize-phase) steps report step names too, and the
+            // resolver now flips the backend DURING the chroot — the same
+            // reconciliation must run there so the losing branch's pending
+            // chroot cards are removed before the user scrolls past them.
+            if (ActivePhaseId == DeployPageViewModel.PhaseCustomize && !string.IsNullOrEmpty(info.StepName))
+            {
+                _dispatcher.Invoke(() => _viewModel.ReconcilePostBootSteps());
+            }
+
             // Pre-boot sub-step by step name: the ISO stage reports chroot
             // steps (Phase=Customize, StepName=step.Name) and the scenario
             // scripts' VMCREATE:MSG texts land here too (StepName=message).

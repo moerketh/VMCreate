@@ -32,6 +32,17 @@ trap 'echo "install_xrdp_postboot: failed at line $LINENO (exit $?)" >&2' ERR
 #     XRDP_POSTBOOT_TRANSPORT=vsock|tcp|unverified
 # Hard failures exit non-zero before the terminal line (RunCommandAsync
 # throws on the host and the deployment fails loudly).
+#
+# CHROOT MODE (arg 1 = --chroot): runs the offline half only — package
+# install and the xrdp.ini vsock listener config. The service restart and
+# listener verification need a running systemd, which a chroot does not
+# have, so transport stays unverified there; the first boot starts xrdp
+# from this config, and the live half (no flag) verifies it post-boot.
+
+CHROOT_MODE=0
+if [ "${1:-}" = "--chroot" ]; then
+    CHROOT_MODE=1
+fi
 
 RESULT=unknown
 
@@ -125,6 +136,21 @@ echo "xrdp.ini configured for HvSocket Enhanced Session: $INI"
 # A restart failure after our edit usually means this distro's xrdp was
 # built without vsock support — roll the config back, restart again, and
 # report the TCP fallback instead of leaving the image without RDP.
+# CHROOT MODE skips all of it: no systemd manager exists in the chroot.
+# xrdp stays enabled (the units' symlinks) and starts on first boot from
+# the config written above; the post-boot half verifies the listener.
+if [ "$CHROOT_MODE" = "1" ]; then
+    if command -v systemctl >/dev/null 2>&1; then
+        # Offline enable (file/symlink work, no manager needed): benign if
+        # the package already enabled the unit.
+        systemctl enable xrdp >/dev/null 2>&1 || true
+    fi
+    echo "CHROOT: xrdp installed and configured offline — transport verified post-boot."
+    echo "XRDP_POSTBOOT_RESULT=$RESULT"
+    echo "XRDP_POSTBOOT_TRANSPORT=unverified"
+    exit 0
+fi
+
 if ! command -v systemctl >/dev/null 2>&1; then
     echo "WARNING: no systemctl — cannot restart xrdp; transport unverified."
 else

@@ -57,6 +57,8 @@ namespace VMCreate
         public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 236;
         public string? ProgressPhaseId => "Sub_InstallXrdpPostBoot";
+        public bool SupportsChroot => true;
+        public bool RunsAfterChroot => true;
 
         public string DeployTitle => "Install xrdp (post-boot)";
         public string DeployDescription => "Verifying or backfilling the xrdp install";
@@ -70,7 +72,10 @@ namespace VMCreate
         public async Task ExecuteAsync(IGuestShell shell, GalleryItem item, VmCustomizations customizations, ILogger logger, CancellationToken ct)
         {
             ct.ThrowIfCancellationRequested();
-            logger.LogInformation("Installing xrdp post-boot on VM {VMName}", shell.VmName);
+            bool chroot = shell.Context == GuestExecutionContext.Chroot;
+            logger.LogInformation("Installing xrdp {Mode} on VM {VMName}",
+                chroot ? "in the ISO chroot (offline half)" : "post-boot (verify half)",
+                shell.VmName);
 
             string script = ScriptResourceLoader.Load("install_xrdp_postboot.sh");
 
@@ -80,24 +85,30 @@ namespace VMCreate
             string guestScript = $"/tmp/install_xrdp_postboot_{Guid.NewGuid():N}.sh";
             await shell.CopyContentAsync(script, guestScript, ct);
 
+            // Chroot mode runs the script's offline half only: the service
+            // restart and listener verification are skipped inside the
+            // chroot (no systemd) and happen in the post-boot re-run.
+            string modeFlag = chroot ? " --chroot" : "";
+
             // apt/dnf/pacman installs run beyond the default command
             // timeout; 20 minutes matches the InstallLamcoRdpStep budget.
             string result = await shell.RunCommandAsync(
-                $"sudo chown root:root {guestScript} && sudo chmod 0700 {guestScript} && sudo bash {guestScript} && sudo rm -f {guestScript}",
+                $"sudo chown root:root {guestScript} && sudo chmod 0700 {guestScript} && sudo bash {guestScript}{modeFlag} && sudo rm -f {guestScript}",
                 TimeSpan.FromMinutes(20), ct);
 
             string? outcome = ParseResultLine(result);
             switch (outcome)
             {
                 case "installed":
-                    logger.LogInformation("xrdp installed post-boot on VM {VMName}.", shell.VmName);
+                    logger.LogInformation("xrdp installed {Where} on VM {VMName}.",
+                        chroot ? "in the chroot" : "post-boot", shell.VmName);
                     break;
                 case "already":
-                    logger.LogInformation("xrdp was already installed on VM {VMName} (chroot install) — nothing to do.", shell.VmName);
+                    logger.LogInformation("xrdp was already installed on VM {VMName} — nothing to do.", shell.VmName);
                     break;
                 default:
                     throw new InvalidOperationException(
-                        $"xrdp post-boot install on VM {shell.VmName} reported no XRDP_POSTBOOT_RESULT line. " +
+                        $"xrdp install on VM {shell.VmName} reported no XRDP_POSTBOOT_RESULT line. " +
                         "The script exited zero but did not confirm success — treating as failure.");
             }
 
@@ -117,10 +128,16 @@ namespace VMCreate
                         shell.VmName);
                     break;
                 default:
-                    logger.LogWarning(
-                        "xrdp on VM {VMName} reported no XRDP_POSTBOOT_TRANSPORT line — the Enhanced Session " +
-                        "listener could not be verified (no systemctl?). vmconnect may fall back to the basic console.",
-                        shell.VmName);
+                    // Chroot mode reports unverified BY DESIGN (no systemd
+                    // in the chroot); the post-boot re-run does the real
+                    // verification. Only warn on the live path.
+                    if (!chroot)
+                    {
+                        logger.LogWarning(
+                            "xrdp on VM {VMName} reported no XRDP_POSTBOOT_TRANSPORT line — the Enhanced Session " +
+                            "listener could not be verified (no systemctl?). vmconnect may fall back to the basic console.",
+                            shell.VmName);
+                    }
                     break;
             }
         }

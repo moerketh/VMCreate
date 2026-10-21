@@ -46,8 +46,8 @@ namespace VMCreate
     /// </para>
     /// <para>
     /// Gating: only runs when <see cref="VmCustomizations.RdpBackend"/> is
-    /// still <see cref="RdpBackend.Auto"/> (PostBootCustomizationService
-    /// evaluates IsApplicable just-in-time per step).
+    /// still <see cref="RdpBackend.Auto"/> (the executor evaluates
+    /// IsApplicable just-in-time per step).
     /// </para>
     /// </summary>
     public class AutoRdpBackendResolveStep : ICustomizationStep, IStepDisplayInfo
@@ -57,6 +57,7 @@ namespace VMCreate
         public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 232;
         public string? ProgressPhaseId => "Sub_AutoRdpResolve";
+        public bool SupportsChroot => true;
 
         public string DeployTitle => "Auto-select RDP backend";
         public string DeployDescription => "Detecting Wayland vs X11 in the guest to choose the RDP backend";

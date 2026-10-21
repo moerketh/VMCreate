@@ -78,24 +78,27 @@ namespace VMCreate.Tests.GUI
         [TestMethod]
         public void Reconcile_AfterResolverFlipsToLamco_InsertsBranchCards_RemovesXrdpBlock()
         {
-            // The Auto re-plan: the resolver (order 232) mutates the shared
-            // customizations. On the NEXT step report the presenter calls
-            // ReconcilePostBootSteps — the Lamco branch cards must appear
-            // right after the resolver card, and the pending xrdp-block cards
-            // (240-270, now inapplicable) must be removed.
+            // The Auto re-plan: the resolver (order 232, chroot-capable)
+            // mutates the shared customizations DURING the chroot. On the
+            // next step report the presenter calls ReconcilePostBootSteps —
+            // the Lamco branch cards must appear in the PostBoot region
+            // (Lamco stays post-boot), and the pending xrdp-block cards
+            // (240-270, now inapplicable) must be removed from the
+            // Customize (chroot) region where they were built.
             var wizard = NewWizard(KaliDisk(), new VmCustomizations { RdpBackend = RdpBackend.Auto });
             var vm = new DeployPageViewModel(wizard, NullLogger.Instance, configurableSteps: null, Planner);
 
-            // Before resolution: resolver card present, no Lamco card.
+            // Before resolution: resolver card present (in Customize), no
+            // Lamco card.
             Assert.IsNotNull(vm.FindPhase(DeployPageViewModel.SubAutoRdpResolve));
             Assert.IsNull(vm.FindPhase(DeployPageViewModel.SubInstallLamcoRdp));
             Assert.IsNotNull(vm.FindPhase(PostBootStepPlanner.CardId(Steps.First(s => s.Name == "Force X11 Display Server"))),
                 "under Auto (unresolved) the xrdp block is applicable (gate: != Lamco) — its cards are present");
 
-            // The resolver ran: Auto → Lamco. Mirror the real protocol: the
-            // presenter ACTIVATED the resolver's card when it reported, so at
-            // reconcile time the card is Active (kept); only Pending cards
-            // whose step turned inapplicable are removed.
+            // The resolver ran in the chroot: Auto → Lamco. Mirror the real
+            // protocol: the presenter ACTIVATED the resolver's card when it
+            // reported, so at reconcile time the card is Active (kept);
+            // only Pending cards whose step turned inapplicable are removed.
             vm.ActivatePhase(DeployPageViewModel.SubAutoRdpResolve);
             wizard.Customizations.RdpBackend = RdpBackend.Lamco;
             vm.ReconcilePostBootSteps();
@@ -107,28 +110,32 @@ namespace VMCreate.Tests.GUI
             Assert.IsNull(vm.FindPhase(PostBootStepPlanner.CardId(Steps.First(s => s.Name == "Force X11 Display Server"))),
                 "the pending xrdp-block cards must be removed once the backend resolves to Lamco");
 
-            // POSITION, not just presence: the backfilled Lamco cards sit in
-            // plan order — directly after the resolver card (the last still-
-            // applicable card before them) — and every remaining post-boot
-            // card keeps its planner order around the KVP gate.
-            var cardIds = vm.Phases
+            // POSITION, not just presence: the Lamco branch cards (post-boot,
+            // in plan order) sit below the KVP gate card; the resolver's
+            // card remains in the Customize region as completed history.
+            var postBootCards = vm.Phases
                 .SkipWhile(p => p.Id != DeployPageViewModel.PhasePostBoot)
                 .Skip(1)
                 .TakeWhile(p => p.IndentLevel > 0)
                 .Select(p => p.Id)
                 .ToList();
+            var customizeCards = vm.Phases
+                .SkipWhile(p => p.Id != DeployPageViewModel.PhaseCustomize)
+                .Skip(1)
+                .TakeWhile(p => p.IndentLevel > 0)
+                .Select(p => p.Id)
+                .ToList();
 
-            Assert.IsTrue(cardIds.IndexOf(DeployPageViewModel.SubAutoRdpResolve) >= 0, "resolver card still present");
-            Assert.AreEqual(
-                cardIds.IndexOf(DeployPageViewModel.SubAutoRdpResolve) + 1,
-                cardIds.IndexOf(DeployPageViewModel.SubInstallLamcoRdp),
-                "the backfilled Lamco install card must sit directly after the resolver card");
+            Assert.IsTrue(customizeCards.Contains(DeployPageViewModel.SubAutoRdpResolve),
+                "the resolver's card stays in the Customize region (it ran there)");
+            Assert.IsFalse(postBootCards.Contains(DeployPageViewModel.SubAutoRdpResolve),
+                "the resolver no longer duplicates into the post-boot list");
             Assert.IsTrue(
-                cardIds.IndexOf(DeployPageViewModel.SubInstallLamcoRdp) < cardIds.IndexOf(DeployPageViewModel.SubEnableAutologin)
-                && cardIds.IndexOf(DeployPageViewModel.SubEnableAutologin) < cardIds.IndexOf(DeployPageViewModel.SubStartGraphicalSession),
+                postBootCards.IndexOf(DeployPageViewModel.SubInstallLamcoRdp) < postBootCards.IndexOf(DeployPageViewModel.SubEnableAutologin)
+                && postBootCards.IndexOf(DeployPageViewModel.SubEnableAutologin) < postBootCards.IndexOf(DeployPageViewModel.SubStartGraphicalSession),
                 "the Lamco branch cards must keep their plan order (install → autologin → session)");
             Assert.IsTrue(
-                cardIds.IndexOf(DeployPageViewModel.SubStartGraphicalSession) < cardIds.IndexOf(DeployPageViewModel.SubWaitForKvpHeartbeat),
+                postBootCards.IndexOf(DeployPageViewModel.SubStartGraphicalSession) < postBootCards.IndexOf(DeployPageViewModel.SubWaitForKvpHeartbeat),
                 "the Lamco branch cards must stay below the KVP gate card");
         }
 
@@ -174,12 +181,14 @@ namespace VMCreate.Tests.GUI
             var planned = Planner.GetPlannedSteps(platform, wizard.SelectedItem, wizard.Customizations);
             if (expectTempNic && platform == StepPlatform.Linux)
             {
-                // ISO-cycle flow: chroot-capable steps moved to the Customize
-                // phase (the backend's chroot executor runs them there).
-                var chrootNames = new HashSet<string>(
-                    Planner.GetPlannedChrootSteps(wizard.SelectedItem, wizard.Customizations).Select(s => s.Name),
+                // ISO-cycle flow: chroot-ONLY steps moved to the Customize
+                // phase (the backend's chroot executor runs them there);
+                // verify-semantics steps (RunsAfterChroot) run in both
+                // halves and keep their post-boot card.
+                var chrootOnlyNames = new HashSet<string>(
+                    Planner.GetChrootOnlySteps(wizard.SelectedItem, wizard.Customizations).Select(s => s.Name),
                     StringComparer.Ordinal);
-                planned = planned.Where(s => !chrootNames.Contains(s.Name)).ToList();
+                planned = planned.Where(s => !chrootOnlyNames.Contains(s.Name)).ToList();
             }
 
             var expected = new List<string>();
@@ -259,11 +268,12 @@ namespace VMCreate.Tests.GUI
             ReportAndCheck(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.PostBoot, VmDeploymentSubStep.AddTempNic));
             ReportAndCheck(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.PostBoot, VmDeploymentSubStep.WaitForSsh));
 
-            // Chroot-capable steps already ran inside the ISO stage on this
-            // flow (their cards are in the Customize phase); the ledger skips
-            // them post-boot, so the report sequence must skip them too.
-            var chrootNames = new HashSet<string>(
-                Planner.GetPlannedChrootSteps(wizard.SelectedItem, customizations).Select(s => s.Name),
+            // Chroot-ONLY steps already ran inside the ISO stage on this
+            // flow (their cards are in the Customize phase); the ledger
+            // skips them post-boot. Verify-semantics steps (RunsAfterChroot)
+            // DO run post-boot — keep them in the report sequence.
+            var chrootOnlyNames = new HashSet<string>(
+                Planner.GetChrootOnlySteps(wizard.SelectedItem, customizations).Select(s => s.Name),
                 StringComparer.Ordinal);
 
             // Step reports in service order. The resolver flips Auto→Lamco mid
@@ -273,7 +283,7 @@ namespace VMCreate.Tests.GUI
             {
                 if (step.Order >= PostBootStepPlanner.SshRestoreOrder) break;
 
-                if (chrootNames.Contains(step.Name)) continue;
+                if (chrootOnlyNames.Contains(step.Name)) continue;
                 if (!step.IsApplicable(wizard.SelectedItem, customizations)) continue;
                 if (step.Name == "Auto-select RDP backend")
                 {
@@ -300,7 +310,7 @@ namespace VMCreate.Tests.GUI
             foreach (var step in Planner.GetOrderedCandidates(StepPlatform.Linux))
             {
                 if (step.Order < PostBootStepPlanner.SshRestoreOrder) continue;
-                if (chrootNames.Contains(step.Name)) continue;
+                if (chrootOnlyNames.Contains(step.Name)) continue;
                 if (!step.IsApplicable(wizard.SelectedItem, customizations)) continue;
 
                 ReportAndCheck(new CreateVMProgressInfo
@@ -369,6 +379,55 @@ namespace VMCreate.Tests.GUI
                 "no Customize phase on the cloud-init flow");
             Assert.IsNotNull(vm.FindPhase(PostBootStepPlanner.CardId(chrootStep)),
                 "the chroot-capable step keeps its post-boot card (fallback)");
+        }
+
+        [TestMethod]
+        public void ChrootOrdering_ResolverRunsBeforeXrdpFixups_InChrootPlan()
+        {
+            // The resolver (232) is chroot-capable now, and the xrdp
+            // fix-ups (240-270) are gated on the RESOLVED backend. In the
+            // chroot plan the resolver must appear before them so its
+            // in-place mutation is visible when their IsApplicable is
+            // evaluated live by the chroot executor.
+            var resolver = Steps.First(s => s.Name == "Auto-select RDP backend");
+            var fixups = Steps.Where(s => s.Order is >= 240 and <= 270 && s.Platform == StepPlatform.Linux).ToList();
+
+            Assert.IsTrue(resolver.SupportsChroot, "the resolver must be chroot-capable");
+            Assert.IsTrue(fixups.All(s => s.SupportsChroot),
+                "every xrdp fix-up must be chroot-capable (pure file operations)");
+
+            var planned = Planner.GetPlannedChrootSteps(KaliDisk(), new VmCustomizations { RdpBackend = RdpBackend.Auto })
+                .ToList();
+            int resolverIdx = planned.FindIndex(s => s.Name == resolver.Name);
+            Assert.IsTrue(resolverIdx >= 0, "under Auto the resolver is planned for the chroot");
+            foreach (var fixup in fixups.Where(f => planned.Any(p => p.Name == f.Name)))
+            {
+                int fixupIdx = planned.FindIndex(s => s.Name == fixup.Name);
+                Assert.IsTrue(resolverIdx < fixupIdx,
+                    $"{fixup.Name} must be planned after the resolver (resolver@{resolverIdx}, {fixup.Name}@{fixupIdx})");
+            }
+        }
+
+        [TestMethod]
+        public void InstallXrdpPostBoot_IsDualPhase_OfflineAndVerify()
+        {
+            var step = Steps.First(s => s.Name == "Install xrdp (post-boot)");
+            Assert.IsTrue(step.SupportsChroot, "the offline install half runs in the chroot");
+            Assert.IsTrue(step.RunsAfterChroot, "the verify half re-runs post-boot (listener check needs systemd)");
+
+            // Card placement follows the verify half: the step's card stays
+            // in the post-boot list even though its install half ran in the
+            // chroot.
+            var wizard = NewWizard(KaliDisk(), new VmCustomizations { RdpBackend = RdpBackend.Xrdp });
+            var vm = new DeployPageViewModel(wizard, NullLogger.Instance, configurableSteps: null, Planner);
+            var postBootCards = vm.Phases
+                .SkipWhile(p => p.Id != DeployPageViewModel.PhasePostBoot)
+                .Skip(1)
+                .TakeWhile(p => p.IndentLevel > 0)
+                .Select(p => p.Id)
+                .ToList();
+            CollectionAssert.Contains(postBootCards, PostBootStepPlanner.CardId(step),
+                "the dual-phase step's card lives with its post-boot verify half");
         }
 
         private sealed class FakeStep : ICustomizationStep

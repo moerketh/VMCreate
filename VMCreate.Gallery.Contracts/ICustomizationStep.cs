@@ -35,6 +35,18 @@ namespace VMCreate
         bool SupportsChroot => false;
 
         /// <summary>
+        /// True for verify-semantics steps that must run POST-BOOT even
+        /// after completing inside the ISO chroot. Such a step branches on
+        /// <see cref="IGuestShell.Context"/>: chroot = do the offline half
+        /// (install/configure), live = verify the result (running services,
+        /// listeners) — the halves need different systems. The chroot run
+        /// still lands in the ledger, but the post-boot pipeline re-runs the
+        /// step instead of skipping it. Implies the step also declares
+        /// <see cref="SupportsChroot"/>. Defaults to false.
+        /// </summary>
+        bool RunsAfterChroot => false;
+
+        /// <summary>
         /// The guest OS this step targets. The orchestrator only runs a step whose
         /// <see cref="Platform"/> matches the VM being deployed, so Linux steps never run
         /// over PowerShell Direct and Windows steps never run over SSH. Required — every

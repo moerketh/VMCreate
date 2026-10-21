@@ -140,14 +140,17 @@ namespace VMCreate.HyperV.VmCreation
                 // Live (just-in-time) applicability: skip steps whose gate
                 // changed as a result of an earlier step mutating
                 // customizations (the Auto resolver), and steps that already
-                // ran inside the ISO chroot. A skipped candidate leaves the
-                // denominator — it counts neither as done nor as pending —
-                // so the bar tracks progress across the steps that will
-                // actually run and walks the full 0→100% range. total is
-                // always >= 1 at the report below because a report only
-                // happens for a step that is about to run.
+                // ran inside the ISO chroot — EXCEPT verify-semantics steps
+                // (RunsAfterChroot), which deliberately run in both halves
+                // (offline install in the chroot, live verification here).
+                // A skipped candidate leaves the denominator — it counts
+                // neither as done nor as pending — so the bar tracks progress
+                // across the steps that will actually run and walks the full
+                // 0→100% range. total is always >= 1 at the report below
+                // because a report only happens for a step that is about to
+                // run.
                 if (!step.IsApplicable(item, customizations)
-                    || (chrootCompleted?.Contains(step.Name) ?? false))
+                    || (chrootCompleted?.Contains(step.Name) ?? false) && !step.RunsAfterChroot)
                 {
                     total--;
                     continue;

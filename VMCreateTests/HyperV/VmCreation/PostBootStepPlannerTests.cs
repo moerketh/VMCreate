@@ -204,15 +204,35 @@ namespace VMCreate.Tests.HyperV.VmCreation
                 "no xrdp and no applicable Linux steps → no ISO cycle");
         }
 
+        [TestMethod]
+        public void GetChrootOnlySteps_ExcludesVerifySemanticsSteps()
+        {
+            // RunsAfterChroot steps run in BOTH halves (offline install in
+            // the chroot, live verification post-boot): they are NOT
+            // chroot-only, so their card stays in the post-boot list.
+            var planner = new PostBootStepPlanner(new ICustomizationStep[]
+            {
+                new FakeChrootStep("Plain", 100, supportsChroot: true),
+                new FakeChrootStep("Verify", 200, supportsChroot: true, runsAfterChroot: true),
+                new FakeChrootStep("LiveOnly", 300, supportsChroot: false),
+            });
+
+            var names = planner.GetChrootOnlySteps(null, null).Select(s => s.Name).ToArray();
+
+            CollectionAssert.AreEqual(new[] { "Plain" }, names,
+                "only chroot-capable steps WITHOUT RunsAfterChroot are chroot-only");
+        }
+
         private sealed class FakeChrootStep : ICustomizationStep
         {
             public FakeChrootStep(string name, int order, bool applicable = true,
-                bool supportsChroot = true, StepPlatform platform = StepPlatform.Linux)
+                bool supportsChroot = true, bool runsAfterChroot = false, StepPlatform platform = StepPlatform.Linux)
             {
                 Name = name;
                 Order = order;
                 _applicable = applicable;
                 SupportsChroot = supportsChroot;
+                RunsAfterChroot = runsAfterChroot;
                 Platform = platform;
             }
 
@@ -223,7 +243,9 @@ namespace VMCreate.Tests.HyperV.VmCreation
             public int Order { get; }
             public string? ProgressPhaseId => null;
             bool ICustomizationStep.SupportsChroot => SupportsChroot;
+            bool ICustomizationStep.RunsAfterChroot => RunsAfterChroot;
             private bool SupportsChroot { get; }
+            private bool RunsAfterChroot { get; }
             public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations) => _applicable;
             public Task ExecuteAsync(IGuestShell shell, GalleryItem item, VmCustomizations customizations,
                 Microsoft.Extensions.Logging.ILogger logger, System.Threading.CancellationToken ct)

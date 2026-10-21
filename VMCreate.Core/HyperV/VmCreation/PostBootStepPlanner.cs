@@ -44,6 +44,15 @@ namespace VMCreate.HyperV.VmCreation
         bool HasChrootSteps(GalleryItem? item, VmCustomizations? customizations);
 
         /// <summary>
+        /// The chroot candidates that will NOT run again post-boot (i.e.
+        /// excluding verify-semantics <c>RunsAfterChroot</c> steps, whose
+        /// cards belong in the post-boot list next to their live half).
+        /// Used by the deploy UI to decide which cards move into the
+        /// Customize phase.
+        /// </summary>
+        IReadOnlyList<ICustomizationStep> GetChrootOnlySteps(GalleryItem? item, VmCustomizations? customizations);
+
+        /// <summary>
         /// True when the deployment must boot the cloning ISO for a Gen 2
         /// (UEFI) target: pre-boot xrdp is configured or any Linux post-boot
         /// step applies (chroot-capable steps included — they execute inside
@@ -120,6 +129,12 @@ namespace VMCreate.HyperV.VmCreation
         /// <inheritdoc/>
         public bool HasChrootSteps(GalleryItem? item, VmCustomizations? customizations)
             => GetPlannedChrootSteps(item, customizations).Count > 0;
+
+        /// <inheritdoc/>
+        public IReadOnlyList<ICustomizationStep> GetChrootOnlySteps(GalleryItem? item, VmCustomizations? customizations)
+            => GetPlannedChrootSteps(item, customizations)
+                .Where(s => !s.RunsAfterChroot)
+                .ToList();
 
         /// <inheritdoc/>
         public bool NeedsIsoBootCycle(GalleryItem? item, VmCustomizations? customizations)

@@ -29,6 +29,7 @@ namespace VMCreate
         public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 245;
         public string? ProgressPhaseId => "Sub_FixXrdp";
+        public bool SupportsChroot => true;
 
         public string DeployTitle => "Fix xrdp for Hyper-V";
         public string DeployDescription => "Applying xrdp configuration fixes for Hyper-V";
