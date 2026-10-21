@@ -30,10 +30,10 @@ log() {
     
     case "$level" in
         INFO|WARN|ERROR)
-            echo "[$timestamp] [$level] $message" | tee -a /var/log/hyperv-convert.log
+            echo "[$timestamp] [$level] $message" | tee -a /var/log/vmcreate-iso.log
             ;;
         *)
-            echo "[$timestamp] [INFO] $message" | tee -a /var/log/hyperv-convert.log
+            echo "[$timestamp] [INFO] $message" | tee -a /var/log/vmcreate-iso.log
             ;;
     esac
 }

@@ -215,7 +215,7 @@ bool needsIsoBootCycle = detectedGeneration == 1
     || (detectedGeneration == 2 && (vmCustomizations.ConfigureXrdp || needsPostBoot));
 ```
 
-Gen 2 images without xRDP skip the ISO entirely — the VM boots directly from its disk.
+The ISO cycle runs whenever xRDP is configured or any Linux post-boot step applies — post-boot steps need the automation-SSH path the ISO stage provisions, and chroot-capable steps execute inside the ISO stage itself. Only a Gen 2 image with no xRDP and no applicable Linux steps boots directly from its disk.
 
 ---
 

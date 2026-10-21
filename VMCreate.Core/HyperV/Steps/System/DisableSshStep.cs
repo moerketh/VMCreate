@@ -5,10 +5,10 @@ using System.Threading.Tasks;
 namespace VMCreate
 {
     /// <summary>
-    /// Restores the original SSH state if autorun temporarily enabled it.
-    /// Only disables SSH if the marker file was left by autorun.sh, meaning
-    /// the distro originally had SSH disabled (e.g. REMnux).
-    /// Distros that ship with SSH enabled are left unchanged.
+    /// Restores the original SSH state if the ISO stage temporarily enabled it.
+    /// Only disables SSH if the marker file was left by the ISO stage's
+    /// capture_ssh_state, meaning the distro originally had SSH disabled
+    /// (e.g. REMnux). Distros that ship with SSH enabled are left unchanged.
     /// </summary>
     public class DisableSshStep : ICustomizationStep, IStepDisplayInfo
     {
