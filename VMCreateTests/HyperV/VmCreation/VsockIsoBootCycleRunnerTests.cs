@@ -29,6 +29,8 @@ namespace VMCreate.Tests.HyperV.VmCreation
         private Mock<IVmDiskManager> _diskManager = null!;
         private Mock<IVmBootManager> _bootManager = null!;
         private Mock<IVsockGuestScriptRunner> _scriptRunner = null!;
+        private Mock<IPostBootStepPlanner> _stepPlanner = null!;
+        private Mock<IPostBootCustomizationService> _postBootService = null!;
         private Mock<IGuestShell> _shell = null!;
 
         private VmDeploymentPlan _plan = null!;
@@ -49,6 +51,8 @@ namespace VMCreate.Tests.HyperV.VmCreation
             _diskManager = new Mock<IVmDiskManager>();
             _bootManager = new Mock<IVmBootManager>();
             _scriptRunner = new Mock<IVsockGuestScriptRunner>();
+            _stepPlanner = new Mock<IPostBootStepPlanner>();
+            _postBootService = new Mock<IPostBootCustomizationService>();
             _shell = new Mock<IGuestShell>();
 
             _plan = VmDeploymentPlan.FromSettings(new VmSettings { VMName = "TestVM" });
@@ -86,6 +90,8 @@ namespace VMCreate.Tests.HyperV.VmCreation
                 _diskManager.Object,
                 _bootManager.Object,
                 _scriptRunner.Object,
+                _stepPlanner.Object,
+                _postBootService.Object,
                 Mock.Of<ILogger<VsockIsoBootCycleRunner>>());
         }
 

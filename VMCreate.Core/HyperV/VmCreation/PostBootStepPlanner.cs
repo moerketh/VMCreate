@@ -26,6 +26,31 @@ namespace VMCreate.HyperV.VmCreation
         /// when an earlier step (the Auto RDP resolver) mutates the shared customizations.
         /// </summary>
         IReadOnlyList<ICustomizationStep> GetPlannedSteps(StepPlatform platform, GalleryItem? item, VmCustomizations? customizations);
+
+        /// <summary>
+        /// The chroot candidates for this deployment: Linux post-boot steps that
+        /// declared <see cref="ICustomizationStep.SupportsChroot"/> and are currently
+        /// applicable, in execution order. These run pre-boot inside the ISO stage
+        /// when one exists (and post-boot otherwise). Same live-applicability
+        /// caveat as <see cref="GetPlannedSteps"/>.
+        /// </summary>
+        IReadOnlyList<ICustomizationStep> GetPlannedChrootSteps(GalleryItem? item, VmCustomizations? customizations);
+
+        /// <summary>
+        /// True when <see cref="GetPlannedChrootSteps"/> would return at least
+        /// one step — i.e. the ISO cycle has chroot customization work to run
+        /// between its prepare and finalize phases.
+        /// </summary>
+        bool HasChrootSteps(GalleryItem? item, VmCustomizations? customizations);
+
+        /// <summary>
+        /// True when the deployment must boot the cloning ISO for a Gen 2
+        /// (UEFI) target: pre-boot xrdp is configured or any Linux post-boot
+        /// step applies (chroot-capable steps included — they execute inside
+        /// the ISO stage). Single source of truth for the strategy AND the
+        /// deploy page's dynamic card insertion, so the two can't diverge.
+        /// </summary>
+        bool NeedsIsoBootCycle(GalleryItem? item, VmCustomizations? customizations);
     }
 
     /// <inheritdoc/>
@@ -52,6 +77,18 @@ namespace VMCreate.HyperV.VmCreation
                 : "Sub_Step_" + step.Name;
         }
 
+        /// <summary>
+        /// Static form of <see cref="IPostBootStepPlanner.NeedsIsoBootCycle"/> for
+        /// consumers that hold a step collection but not the planner (the deploy
+        /// page presenter receives the step dictionary, not DI services).
+        /// </summary>
+        public static bool NeedsIsoBootCycle(
+            GalleryItem? item, VmCustomizations? customizations, IEnumerable<ICustomizationStep> steps)
+            => customizations?.ConfigureXrdp == true
+               || steps.Any(s => s.Phase == CustomizationPhase.PostBoot
+                                 && s.Platform == StepPlatform.Linux
+                                 && s.IsApplicable(item, customizations));
+
         private readonly IEnumerable<ICustomizationStep> _customizationSteps;
 
         public PostBootStepPlanner(IEnumerable<ICustomizationStep> customizationSteps)
@@ -72,5 +109,20 @@ namespace VMCreate.HyperV.VmCreation
             => GetOrderedCandidates(platform)
                 .Where(s => s.IsApplicable(item, customizations))
                 .ToList();
+
+        /// <inheritdoc/>
+        public IReadOnlyList<ICustomizationStep> GetPlannedChrootSteps(GalleryItem? item, VmCustomizations? customizations)
+            => GetOrderedCandidates(StepPlatform.Linux)
+                .Where(s => s.SupportsChroot)
+                .Where(s => s.IsApplicable(item, customizations))
+                .ToList();
+
+        /// <inheritdoc/>
+        public bool HasChrootSteps(GalleryItem? item, VmCustomizations? customizations)
+            => GetPlannedChrootSteps(item, customizations).Count > 0;
+
+        /// <inheritdoc/>
+        public bool NeedsIsoBootCycle(GalleryItem? item, VmCustomizations? customizations)
+            => NeedsIsoBootCycle(item, customizations, _customizationSteps);
     }
 }

@@ -44,6 +44,8 @@ namespace VMCreate.HyperV.VmCreation
         private readonly IVmDiskManager _diskManager;
         private readonly IVmBootManager _bootManager;
         private readonly IVsockGuestScriptRunner _scriptRunner;
+        private readonly IPostBootStepPlanner _stepPlanner;
+        private readonly IPostBootCustomizationService _postBootService;
         private readonly ILogger<VsockIsoBootCycleRunner> _logger;
 
         /// <summary>The SCSI location the MBR source disk is attached at;
@@ -61,6 +63,8 @@ namespace VMCreate.HyperV.VmCreation
             IVmDiskManager diskManager,
             IVmBootManager bootManager,
             IVsockGuestScriptRunner scriptRunner,
+            IPostBootStepPlanner stepPlanner,
+            IPostBootCustomizationService postBootService,
             ILogger<VsockIsoBootCycleRunner> logger)
         {
             _kvpSender = kvpSender ?? throw new ArgumentNullException(nameof(kvpSender));
@@ -73,6 +77,8 @@ namespace VMCreate.HyperV.VmCreation
             _diskManager = diskManager ?? throw new ArgumentNullException(nameof(diskManager));
             _bootManager = bootManager ?? throw new ArgumentNullException(nameof(bootManager));
             _scriptRunner = scriptRunner ?? throw new ArgumentNullException(nameof(scriptRunner));
+            _stepPlanner = stepPlanner ?? throw new ArgumentNullException(nameof(stepPlanner));
+            _postBootService = postBootService ?? throw new ArgumentNullException(nameof(postBootService));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
@@ -264,7 +270,9 @@ namespace VMCreate.HyperV.VmCreation
             VmCustomizations customizations, IProgress<CreateVMProgressInfo>? progress, CancellationToken ct)
         {
             context.Logger.Log("ISO boot-cycle v2: cloning source disk to UEFI layout");
-            return await _scriptRunner.RunAsync(shell, "clone", sshPublicKey, context, customizations, progress, ct);
+            return await _scriptRunner.RunAsync(
+                shell, "clone", sshPublicKey, context, customizations, progress, ct,
+                BuildChrootStepsDelegate(context, customizations, progress, ct));
         }
 
         private async Task<IsoBootCycleResult> RunCustomizeAsync(
@@ -272,8 +280,27 @@ namespace VMCreate.HyperV.VmCreation
             VmCustomizations customizations, IProgress<CreateVMProgressInfo>? progress, CancellationToken ct)
         {
             context.Logger.Log("ISO boot-cycle v2: customizing target disk in place");
-            return await _scriptRunner.RunAsync(shell, "customize", sshPublicKey, context, customizations, progress, ct);
+            return await _scriptRunner.RunAsync(
+                shell, "customize", sshPublicKey, context, customizations, progress, ct,
+                BuildChrootStepsDelegate(context, customizations, progress, ct));
         }
+
+        /// <summary>
+        /// The chroot-steps callback for the script runner's phase 2: runs
+        /// the deployment's chroot-capable steps (planner-decided) between
+        /// the scenario's prepare and finalize phases, reporting to the
+        /// Customize phase and recording completed steps in
+        /// <see cref="VmCreationContext.ChrootCompletedSteps"/> so the
+        /// post-boot pipeline skips them. Null when there is nothing to run.
+        /// </summary>
+        private Func<ChrootGuestShell, CancellationToken, Task>? BuildChrootStepsDelegate(
+            VmCreationContext context, VmCustomizations customizations,
+            IProgress<CreateVMProgressInfo>? progress, CancellationToken ct)
+            => _stepPlanner.HasChrootSteps(context.GalleryItem, customizations)
+                ? (chrootShell, _) => _postBootService.RunLinuxChrootAsync(
+                    chrootShell, context.Plan, context.GalleryItem, customizations,
+                    progress ?? context.Progress, context.ChrootCompletedSteps, ct)
+                : null;
 
         /// <summary>
         /// Best-effort guest log capture over the live vsock shell: journal

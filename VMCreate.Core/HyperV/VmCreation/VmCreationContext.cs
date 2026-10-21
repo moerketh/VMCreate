@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using VMCreate.MediaHandlers;
 
@@ -55,5 +56,13 @@ namespace VMCreate.HyperV.VmCreation
         /// Per-deployment log for the current VM. Always non-null.
         /// </summary>
         public IDeploymentLogger Logger { get; }
+
+        /// <summary>
+        /// Names of the customization steps that already completed inside
+        /// the ISO stage's chroot (pre-boot). The post-boot pipeline skips
+        /// these — a step runs exactly once per deployment. Populated by the
+        /// chroot executor as steps finish; read by the post-boot service.
+        /// </summary>
+        public ISet<string> ChrootCompletedSteps { get; } = new HashSet<string>(StringComparer.Ordinal);
     }
 }

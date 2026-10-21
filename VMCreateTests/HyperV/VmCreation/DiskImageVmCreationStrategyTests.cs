@@ -26,6 +26,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
         private Mock<IKvpHeartbeatGate> _kvpHeartbeatGate = null!;
         private Mock<IGuestDiagnosticsCollector> _diagnosticsCollector = null!;
         private Mock<IPostBootCustomizationService> _postBootService = null!;
+        private Mock<IPostBootStepPlanner> _stepPlanner = null!;
         private Mock<IHostNetworkService> _hostNetworkService = null!;
         private Mock<IIsoBootCycleRunner> _isoBootRunner = null!;
         private Mock<IGuestShell> _shell = null!;
@@ -50,6 +51,15 @@ namespace VMCreate.Tests.HyperV.VmCreation
             _kvpHeartbeatGate = new Mock<IKvpHeartbeatGate>();
             _diagnosticsCollector = new Mock<IGuestDiagnosticsCollector>();
             _postBootService = new Mock<IPostBootCustomizationService>();
+            _stepPlanner = new Mock<IPostBootStepPlanner>();
+            // Planner defaults mirror the old inline predicate so existing
+            // strategy tests keep their Gen-2 ISO-boot expectations; tests
+            // that need a different verdict override this setup.
+            _stepPlanner
+                .Setup(p => p.NeedsIsoBootCycle(It.IsAny<GalleryItem?>(), It.IsAny<VmCustomizations?>()))
+                .Returns<GalleryItem?, VmCustomizations?>((item, c) =>
+                    c?.ConfigureXrdp == true
+                    || _postBootService.Object.HasLinuxPostBootSteps(item!, c!));
             _hostNetworkService = new Mock<IHostNetworkService>();
             _isoBootRunner = new Mock<IIsoBootCycleRunner>();
 
@@ -105,6 +115,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
                 _kvpHeartbeatGate.Object,
                 _diagnosticsCollector.Object,
                 _postBootService.Object,
+                _stepPlanner.Object,
                 _hostNetworkService.Object,
                 new Mock<ILogger<DiskImageVmCreationStrategy>>().Object,
                 Mock.Of<IVmPathService>(s => s.DefaultVmPath == @"C:\Hyper-V" && s.DefaultVhdxPath == @"C:\Hyper-V\Virtual hard disks"),
@@ -258,7 +269,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
             _postBootService.Verify(p => p.RunLinuxPostBootAsync(
                 It.IsAny<IGuestShell>(), _plan, _item, _customizations,
                 It.IsAny<IProgress<CreateVMProgressInfo>>(), It.IsAny<CancellationToken>(),
-                It.IsAny<int>(), It.IsAny<int>()), Times.Exactly(2));
+                It.IsAny<int>(), It.IsAny<int>(), It.IsAny<ISet<string>?>()), Times.Exactly(2));
             _networkManager.Verify(n => n.AddTemporaryNetworkAdapter(_plan, It.IsAny<CancellationToken>()), Times.Never);
             _bootManager.Verify(h => h.RemoveBootDvd(_plan, It.Is<string>(p => p.EndsWith("_cidata.iso", StringComparison.OrdinalIgnoreCase)), It.IsAny<CancellationToken>()), Times.Once);
         }
@@ -376,12 +387,12 @@ namespace VMCreate.Tests.HyperV.VmCreation
             _postBootService.Verify(p => p.RunLinuxPostBootAsync(
                 It.IsAny<IGuestShell>(), It.IsAny<VmDeploymentPlan>(), It.IsAny<GalleryItem>(),
                 It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(),
-                It.IsAny<CancellationToken>(), It.IsAny<int>(), It.IsAny<int>()), Times.Once,
+                It.IsAny<CancellationToken>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<ISet<string>?>()), Times.Once,
                 "post-boot's main phase must run before the gate fails — it is what enables the daemon the gate checks for");
             _postBootService.Verify(p => p.RunLinuxPostBootAsync(
                 It.IsAny<IGuestShell>(), It.IsAny<VmDeploymentPlan>(), It.IsAny<GalleryItem>(),
                 It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(),
-                It.IsAny<CancellationToken>(), It.IsAny<int>(), 900), Times.Never,
+                It.IsAny<CancellationToken>(), It.IsAny<int>(), 900, It.IsAny<ISet<string>?>()), Times.Never,
                 "the SSH-restore tail must not run when the gate fails");
             _diagnosticsCollector.Verify(d => d.CollectAsync(
                 It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()), Times.Once,
@@ -415,12 +426,12 @@ namespace VMCreate.Tests.HyperV.VmCreation
             _postBootService.Setup(s => s.RunLinuxPostBootAsync(
                 It.IsAny<IGuestShell>(), It.IsAny<VmDeploymentPlan>(), It.IsAny<GalleryItem>(),
                 It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(),
-                It.IsAny<CancellationToken>(), 900, It.IsAny<int>()))
+                It.IsAny<CancellationToken>(), 900, It.IsAny<int>(), It.IsAny<ISet<string>?>()))
                 .Callback(() => timeline.Add("postboot-main"));
             _postBootService.Setup(s => s.RunLinuxPostBootAsync(
                 It.IsAny<IGuestShell>(), It.IsAny<VmDeploymentPlan>(), It.IsAny<GalleryItem>(),
                 It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(),
-                It.IsAny<CancellationToken>(), It.IsAny<int>(), 900))
+                It.IsAny<CancellationToken>(), It.IsAny<int>(), 900, It.IsAny<ISet<string>?>()))
                 .Callback(() => timeline.Add("postboot-restore-tail"));
             _kvpHeartbeatGate.Setup(g => g.WaitForGuestKvpAsync(
                 It.IsAny<string>(), It.IsAny<CancellationToken>(), 420, 2000))
@@ -432,7 +443,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
             _postBootService.Verify(p => p.RunLinuxPostBootAsync(
                 It.IsAny<IGuestShell>(), It.IsAny<VmDeploymentPlan>(), It.IsAny<GalleryItem>(),
                 It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(),
-                It.IsAny<CancellationToken>(), It.IsAny<int>(), It.IsAny<int>()), Times.Exactly(2),
+                It.IsAny<CancellationToken>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<ISet<string>?>()), Times.Exactly(2),
                 "post-boot must run — InstallHypervDaemonsStep is what turns the heartbeat on for such images");
             CollectionAssert.AreEqual(
                 new[] { "postboot-main", "gate", "postboot-restore-tail" }, timeline,
@@ -470,7 +481,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
             _postBootService.Verify(p => p.RunLinuxPostBootAsync(
                 It.IsAny<IGuestShell>(), It.IsAny<VmDeploymentPlan>(), It.IsAny<GalleryItem>(),
                 It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(),
-                It.IsAny<CancellationToken>(), It.IsAny<int>(), It.IsAny<int>()), Times.Exactly(2),
+                It.IsAny<CancellationToken>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<ISet<string>?>()), Times.Exactly(2),
                 "a verifiably healthy guest must proceed through post boot, including the SSH-restore tail");
             _diagnosticsCollector.Verify(d => d.CollectAsync(
                 It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()), Times.Never,
@@ -509,7 +520,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
             _postBootService.Verify(p => p.RunLinuxPostBootAsync(
                 It.IsAny<IGuestShell>(), It.IsAny<VmDeploymentPlan>(), It.IsAny<GalleryItem>(),
                 It.IsAny<VmCustomizations>(), It.IsAny<IProgress<CreateVMProgressInfo>>(),
-                It.IsAny<CancellationToken>(), It.IsAny<int>(), It.IsAny<int>()), Times.Once,
+                It.IsAny<CancellationToken>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<ISet<string>?>()), Times.Once,
                 "only the main phase runs — the SSH-restore tail must not run after a gate failure");
         }
 

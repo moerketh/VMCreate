@@ -296,6 +296,73 @@ namespace VMCreate.Tests.HyperV.VmCreation
             return mock.Object;
         }
 
+        [TestMethod]
+        public async Task RunLinuxChrootAsync_RunsCapableStepsInOrder_RecordsLedger_ReportsCustomizePhase()
+        {
+            var executed = new List<string>();
+            var ledger = new HashSet<string>();
+
+            var capableA = CreateExecutableStep("CapableA", CustomizationPhase.PostBoot, StepPlatform.Linux, 100,
+                onExecute: () => executed.Add("CapableA"));
+            var capableB = CreateExecutableStep("CapableB", CustomizationPhase.PostBoot, StepPlatform.Linux, 200,
+                onExecute: () => executed.Add("CapableB"));
+            var incapable = CreateExecutableStep("Incapable", CustomizationPhase.PostBoot, StepPlatform.Linux, 150,
+                onExecute: () => executed.Add("Incapable"));
+
+            var service = new PostBootCustomizationService(
+                new[] { capableB, incapable, capableA }, _loggerMock.Object);
+            MarkChrootCapability(capableA, true);
+            MarkChrootCapability(capableB, true);
+            MarkChrootCapability(incapable, false);
+
+            var shell = new ChrootGuestShell(ShellProbe(), _stepLoggerMock.Object);
+            await service.RunLinuxChrootAsync(
+                shell,
+                VmDeploymentPlan.FromSettings(new VmSettings { VMName = "TestVM" }),
+                new GalleryItem(), new VmCustomizations(), _progressMock.Object, ledger,
+                CancellationToken.None);
+
+            CollectionAssert.AreEqual(new[] { "CapableA", "CapableB" }, executed,
+                "only chroot-capable steps run, in Order");
+            CollectionAssert.AreEqual(new[] { "CapableA", "CapableB" }, ledger.ToArray(),
+                "completed steps land in the ledger for the post-boot skip");
+
+            _progressMock.Verify(p => p.Report(It.Is<CreateVMProgressInfo>(
+                r => r.Phase == VmDeploymentPhase.Customize && r.StepName == "CapableA")), Times.Once,
+                "chroot steps report on the Customize phase (splash + pre-boot cards)");
+        }
+
+        [TestMethod]
+        public async Task RunLinuxPostBootAsync_SkipsStepsThatCompletedInTheChroot()
+        {
+            var executed = new List<string>();
+
+            var chrootRan = CreateExecutableStep("ChrootRan", CustomizationPhase.PostBoot, StepPlatform.Linux, 100,
+                onExecute: () => executed.Add("ChrootRan"));
+            var liveOnly = CreateExecutableStep("LiveOnly", CustomizationPhase.PostBoot, StepPlatform.Linux, 200,
+                onExecute: () => executed.Add("LiveOnly"));
+
+            var service = new PostBootCustomizationService(
+                new[] { chrootRan, liveOnly }, _loggerMock.Object);
+
+            await service.RunLinuxPostBootAsync(
+                _shellMock.Object,
+                VmDeploymentPlan.FromSettings(new VmSettings { VMName = "TestVM" }),
+                new GalleryItem(), new VmCustomizations(), _progressMock.Object, CancellationToken.None,
+                chrootCompleted: new HashSet<string> { "ChrootRan" });
+
+            CollectionAssert.AreEqual(new[] { "LiveOnly" }, executed,
+                "a step that completed in the chroot must not run again post-boot");
+        }
+
+        /// <summary>Moq cannot set default interface members; force the
+        /// SupportsChroot property through the mock's expression.</summary>
+        private static void MarkChrootCapability(ICustomizationStep step, bool capable)
+            => Moq.Mock.Get(step).Setup(s => s.SupportsChroot).Returns(capable);
+
+        private static SshGuestShell ShellProbe()
+            => new(Mock.Of<ILogger>(), "TestVM", "key");
+
         private static ICustomizationStep CreateExecutableStep(
             string name,
             CustomizationPhase phase,

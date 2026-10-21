@@ -150,6 +150,86 @@ namespace VMCreate.Tests.HyperV.VmCreation
             return services.BuildServiceProvider().GetServices<ICustomizationStep>().ToList();
         }
 
+        [TestMethod]
+        public void GetPlannedChrootSteps_FiltersCapabilityAndApplicability_InOrder()
+        {
+            var planner = new PostBootStepPlanner(new ICustomizationStep[]
+            {
+                new FakeChrootStep("Capable2", 200),
+                new FakeChrootStep("Capable1", 100),
+                new FakeChrootStep("CapableOff", 300, supportsChroot: false),
+                new FakeChrootStep("CapableSkip", 150, applicable: false),
+            });
+
+            var names = planner.GetPlannedChrootSteps(null, null).Select(s => s.Name).ToArray();
+
+            CollectionAssert.AreEqual(new[] { "Capable1", "Capable2" }, names,
+                "only chroot-capable + applicable Linux steps plan for the chroot, in Order-then-Name order");
+        }
+
+        [TestMethod]
+        public void HasChrootSteps_TrueOnlyWhenAChrootStepApplies()
+        {
+            var withSteps = new PostBootStepPlanner(new ICustomizationStep[] { new FakeChrootStep("A", 100) });
+            var without = new PostBootStepPlanner(new ICustomizationStep[] { new FakeChrootStep("A", 100, applicable: false) });
+            var incapable = new PostBootStepPlanner(new ICustomizationStep[] { new FakeChrootStep("A", 100, supportsChroot: false) });
+
+            Assert.IsTrue(withSteps.HasChrootSteps(null, null));
+            Assert.IsFalse(without.HasChrootSteps(null, null), "an inapplicable chroot step must not force the ISO path by itself");
+            Assert.IsFalse(incapable.HasChrootSteps(null, null));
+        }
+
+        [TestMethod]
+        public void NeedsIsoBootCycle_TrueForXrdp_AnyLinuxStep_OrNeither()
+        {
+            var xrdpOnly = new PostBootStepPlanner(new ICustomizationStep[]
+            {
+                new FakeChrootStep("Whatever", 100, applicable: false),
+            });
+            var linuxStepOnly = new PostBootStepPlanner(new ICustomizationStep[]
+            {
+                new FakeChrootStep("Any Linux step", 100, supportsChroot: false),
+            });
+            var nothing = new PostBootStepPlanner(new ICustomizationStep[]
+            {
+                new FakeChrootStep("Skipped", 100, applicable: false),
+                new FakeChrootStep("Windows", 100, supportsChroot: false, platform: StepPlatform.Windows),
+            });
+
+            Assert.IsTrue(xrdpOnly.NeedsIsoBootCycle(null, new VmCustomizations { RdpBackend = RdpBackend.Xrdp }),
+                "explicit xrdp always needs the ISO cycle (pre-boot install)");
+            Assert.IsTrue(linuxStepOnly.NeedsIsoBootCycle(null, new VmCustomizations()),
+                "any applicable Linux post-boot step needs the ISO cycle (the automation-SSH path)");
+            Assert.IsFalse(nothing.NeedsIsoBootCycle(null, new VmCustomizations { RdpBackend = RdpBackend.None }),
+                "no xrdp and no applicable Linux steps → no ISO cycle");
+        }
+
+        private sealed class FakeChrootStep : ICustomizationStep
+        {
+            public FakeChrootStep(string name, int order, bool applicable = true,
+                bool supportsChroot = true, StepPlatform platform = StepPlatform.Linux)
+            {
+                Name = name;
+                Order = order;
+                _applicable = applicable;
+                SupportsChroot = supportsChroot;
+                Platform = platform;
+            }
+
+            private readonly bool _applicable;
+            public string Name { get; }
+            public CustomizationPhase Phase => CustomizationPhase.PostBoot;
+            public StepPlatform Platform { get; }
+            public int Order { get; }
+            public string? ProgressPhaseId => null;
+            bool ICustomizationStep.SupportsChroot => SupportsChroot;
+            private bool SupportsChroot { get; }
+            public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations) => _applicable;
+            public Task ExecuteAsync(IGuestShell shell, GalleryItem item, VmCustomizations customizations,
+                Microsoft.Extensions.Logging.ILogger logger, System.Threading.CancellationToken ct)
+                => Task.CompletedTask;
+        }
+
         private sealed class FakeStep : ICustomizationStep
         {
             public FakeStep(string name, int order, bool applicable, string? progressPhaseId,

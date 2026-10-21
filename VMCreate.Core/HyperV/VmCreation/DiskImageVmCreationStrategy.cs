@@ -28,6 +28,7 @@ namespace VMCreate.HyperV.VmCreation
         private readonly IKvpHeartbeatGate _kvpHeartbeatGate;
         private readonly IGuestDiagnosticsCollector _diagnosticsCollector;
         private readonly IPostBootCustomizationService _postBootService;
+        private readonly IPostBootStepPlanner _stepPlanner;
         private readonly IHostNetworkService _hostNetworkService;
         private readonly IVmPathService _pathService;
         private readonly IIsoBootCycleRunner _isoBootRunner;
@@ -45,6 +46,7 @@ namespace VMCreate.HyperV.VmCreation
             IKvpHeartbeatGate kvpHeartbeatGate,
             IGuestDiagnosticsCollector diagnosticsCollector,
             IPostBootCustomizationService postBootService,
+            IPostBootStepPlanner stepPlanner,
             IHostNetworkService hostNetworkService,
             ILogger<DiskImageVmCreationStrategy> logger,
             IVmPathService pathService,
@@ -60,6 +62,7 @@ namespace VMCreate.HyperV.VmCreation
             _kvpHeartbeatGate = kvpHeartbeatGate ?? throw new ArgumentNullException(nameof(kvpHeartbeatGate));
             _diagnosticsCollector = diagnosticsCollector ?? throw new ArgumentNullException(nameof(diagnosticsCollector));
             _postBootService = postBootService ?? throw new ArgumentNullException(nameof(postBootService));
+            _stepPlanner = stepPlanner ?? throw new ArgumentNullException(nameof(stepPlanner));
             _hostNetworkService = hostNetworkService ?? throw new ArgumentNullException(nameof(hostNetworkService));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _pathService = pathService ?? throw new ArgumentNullException(nameof(pathService));
@@ -138,9 +141,7 @@ namespace VMCreate.HyperV.VmCreation
                 }
                 else
                 {
-                    bool needsIsoBoot = vmCustomizations.ConfigureXrdp
-                        || vmCustomizations.SyncTimezone
-                        || _postBootService.HasLinuxPostBootSteps(item, vmCustomizations);
+                    bool needsIsoBoot = _stepPlanner.NeedsIsoBootCycle(item, vmCustomizations);
 
                     if (needsIsoBoot)
                     {
@@ -208,7 +209,7 @@ namespace VMCreate.HyperV.VmCreation
             // (detectedGeneration == 2) never enter the cycle — the seed
             // already carries their first-boot customization.
             bool needsIsoBootCycle = detectedGeneration == 1
-                || (!isCloudInit && detectedGeneration == 2 && (vmCustomizations.ConfigureXrdp || needsPostBoot));
+                || (!isCloudInit && detectedGeneration == 2 && _stepPlanner.NeedsIsoBootCycle(item, vmCustomizations));
             bool needsCloudInitPostBoot = isCloudInit && needsPostBoot;
 
             if (needsIsoBootCycle)
@@ -326,7 +327,8 @@ namespace VMCreate.HyperV.VmCreation
                         // the deploy falsely failed).
                         await _postBootService.RunLinuxPostBootAsync(
                             shell, plan, item, vmCustomizations, progress, cancellationToken,
-                            upToOrderExclusive: PostBootStepPlanner.SshRestoreOrder);
+                            upToOrderExclusive: PostBootStepPlanner.SshRestoreOrder,
+                            chrootCompleted: ctx.ChrootCompletedSteps);
                     }
 
                     // Hard KVP gate — after post-boot proper, before the SSH
@@ -420,7 +422,8 @@ namespace VMCreate.HyperV.VmCreation
                     {
                         await _postBootService.RunLinuxPostBootAsync(
                             shell, plan, item, vmCustomizations, progress, cancellationToken,
-                            fromOrderInclusive: PostBootStepPlanner.SshRestoreOrder);
+                            fromOrderInclusive: PostBootStepPlanner.SshRestoreOrder,
+                            chrootCompleted: ctx.ChrootCompletedSteps);
                     }
                 }
                 finally

@@ -25,15 +25,11 @@ namespace VMCreate.HyperV.VmCreation
         /// <summary>
         /// Runs Linux post-boot steps over SSH in order and reports progress.
         /// </summary>
-        /// <param name="upToOrderExclusive">
-        /// When set, only steps with <c>Order &lt; upToOrderExclusive</c> run.
-        /// Used by the disk-image strategy to split the pipeline around the
-        /// hard KVP gate: the gate's SSH witness probe must run while SSH is
-        /// still up, i.e. before <c>DisableSshStep</c> (Order 900) restores
-        /// sshd-disabled images to their shipped state.
-        /// </param>
-        /// <param name="fromOrderInclusive">
-        /// When set, only steps with <c>Order &gt;= fromOrderInclusive</c> run.
+        /// <param name="chrootCompleted">
+        /// Names of steps that already ran inside the ISO stage's chroot
+        /// (see <see cref="VmCreationContext.ChrootCompletedSteps"/>); those
+        /// steps are skipped here. Null/empty when no ISO stage ran (the
+        /// cloud-init flow runs every step post-boot).
         /// </param>
         Task RunLinuxPostBootAsync(
             IGuestShell shell,
@@ -43,7 +39,8 @@ namespace VMCreate.HyperV.VmCreation
             IProgress<CreateVMProgressInfo> progress,
             CancellationToken cancellationToken,
             int upToOrderExclusive = int.MaxValue,
-            int fromOrderInclusive = 0);
+            int fromOrderInclusive = 0,
+            ISet<string>? chrootCompleted = null);
 
         /// <summary>
         /// Runs Windows post-boot steps over PowerShell Direct in order and reports progress.
@@ -55,13 +52,30 @@ namespace VMCreate.HyperV.VmCreation
             VmCustomizations customizations,
             IProgress<CreateVMProgressInfo> progress,
             CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Runs the deployment's chroot-capable Linux steps inside the ISO
+        /// stage's chroot (between the scenario's prepare and finalize
+        /// phases), in the same Order the post-boot pipeline would use.
+        /// Reports each step with <c>Phase=Customize</c> so the splash and
+        /// the deploy page light up the pre-boot cards. Every completed
+        /// step's name is recorded in <paramref name="chrootCompleted"/>
+        /// so the later post-boot run skips it.
+        /// </summary>
+        Task RunLinuxChrootAsync(
+            ChrootGuestShell shell,
+            VmDeploymentPlan plan,
+            GalleryItem item,
+            VmCustomizations customizations,
+            IProgress<CreateVMProgressInfo> progress,
+            ISet<string> chrootCompleted,
+            CancellationToken cancellationToken);
     }
 
     public class PostBootCustomizationService : IPostBootCustomizationService
     {
         private readonly IPostBootStepPlanner _planner;
         private readonly ILogger<PostBootCustomizationService> _logger;
-
         public PostBootCustomizationService(
             IPostBootStepPlanner planner,
             ILogger<PostBootCustomizationService> logger)
@@ -96,7 +110,8 @@ namespace VMCreate.HyperV.VmCreation
             IProgress<CreateVMProgressInfo> progress,
             CancellationToken cancellationToken,
             int upToOrderExclusive = int.MaxValue,
-            int fromOrderInclusive = 0)
+            int fromOrderInclusive = 0,
+            ISet<string>? chrootCompleted = null)
         {
             // Phase/platform filtering is a static property of each step, but
             // IsApplicable is deliberately evaluated LIVE inside the loop:
@@ -124,17 +139,15 @@ namespace VMCreate.HyperV.VmCreation
             {
                 // Live (just-in-time) applicability: skip steps whose gate
                 // changed as a result of an earlier step mutating
-                // customizations (the Auto resolver). A skipped candidate
-                // leaves the denominator — it counts neither as done nor as
-                // pending — so the bar tracks progress across the steps
-                // that will actually run and walks the full 0→100% range.
-                // With the denominator pinned to the initial candidate
-                // count (27 Linux steps, of which a typical run applies
-                // ~7), the bar topped out near 25% and then jumped to 100%
-                // at the end — the skip-shrink keeps it monotonic and
-                // honest. total is always >= 1 at the report below because
-                // a report only happens for a step that is about to run.
-                if (!step.IsApplicable(item, customizations))
+                // customizations (the Auto resolver), and steps that already
+                // ran inside the ISO chroot. A skipped candidate leaves the
+                // denominator — it counts neither as done nor as pending —
+                // so the bar tracks progress across the steps that will
+                // actually run and walks the full 0→100% range. total is
+                // always >= 1 at the report below because a report only
+                // happens for a step that is about to run.
+                if (!step.IsApplicable(item, customizations)
+                    || (chrootCompleted?.Contains(step.Name) ?? false))
                 {
                     total--;
                     continue;
@@ -155,6 +168,56 @@ namespace VMCreate.HyperV.VmCreation
             }
 
             progress.Report(CreateVMProgressInfo.ForProgress(VmDeploymentPhase.PostBoot, 100));
+        }
+
+        public async Task RunLinuxChrootAsync(
+            ChrootGuestShell shell,
+            VmDeploymentPlan plan,
+            GalleryItem item,
+            VmCustomizations customizations,
+            IProgress<CreateVMProgressInfo> progress,
+            ISet<string> chrootCompleted,
+            CancellationToken cancellationToken)
+        {
+            // Same live-IsApplicable semantics as RunLinuxPostBootAsync: the
+            // Auto RDP resolver runs chroot-side too (its detection is a
+            // static file check) and mutates RdpBackend mid-run, so every
+            // later step's applicability must be evaluated just-in-time.
+            var steps = _planner.GetOrderedCandidates(StepPlatform.Linux)
+                .Where(s => s.SupportsChroot)
+                .ToList();
+
+            if (!steps.Any(s => s.IsApplicable(item, customizations)))
+                return;
+
+            int completed = 0;
+            int total = steps.Count;
+            foreach (var step in steps)
+            {
+                if (!step.IsApplicable(item, customizations))
+                {
+                    total--;
+                    continue;
+                }
+
+                _logger.LogInformation("Running Linux chroot step: {StepName} (order {Order})", step.Name, step.Order);
+                shell.CurrentStepLabel = step.Name;
+                progress.Report(new CreateVMProgressInfo
+                {
+                    Phase = VmDeploymentPhase.Customize,
+                    ProgressPercentage = (int)((double)completed / total * 100),
+                    StepName = step.Name
+                });
+
+                await step.ExecuteAsync(shell, item, customizations, _logger, cancellationToken);
+
+                chrootCompleted.Add(step.Name);
+                completed++;
+                _logger.LogInformation("Completed Linux chroot step: {StepName}", step.Name);
+            }
+
+            shell.CurrentStepLabel = null;
+            progress.Report(CreateVMProgressInfo.ForProgress(VmDeploymentPhase.Customize, 100));
         }
 
         public async Task RunWindowsPostBootAsync(
