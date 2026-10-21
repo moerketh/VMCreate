@@ -76,24 +76,21 @@ namespace VMCreate.HyperV.VmCreation
     {
         private readonly IPostBootStepPlanner _planner;
         private readonly ILogger<PostBootCustomizationService> _logger;
+
+        /// <summary>
+        /// Single constructor — deliberately. Two public constructors with
+        /// DI-resolvable parameter sets make Microsoft.Extensions.DependencyInjection
+        /// throw "constructors are ambiguous" at ACTIVATION time (deployment
+        /// start, not startup), which is exactly what shipped once. Tests
+        /// that want the step-set form construct
+        /// <c>new PostBootCustomizationService(new PostBootStepPlanner(steps), logger)</c>.
+        /// </summary>
         public PostBootCustomizationService(
             IPostBootStepPlanner planner,
             ILogger<PostBootCustomizationService> logger)
         {
             _planner = planner ?? throw new ArgumentNullException(nameof(planner));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        }
-
-        /// <summary>
-        /// Convenience overload for direct construction (tests, hosts that build
-        /// the service by hand): wraps the step set in the shared planner so
-        /// both always order identically.
-        /// </summary>
-        public PostBootCustomizationService(
-            IEnumerable<ICustomizationStep> customizationSteps,
-            ILogger<PostBootCustomizationService> logger)
-            : this(new PostBootStepPlanner(customizationSteps ?? throw new ArgumentNullException(nameof(customizationSteps))), logger)
-        {
         }
 
         public bool HasLinuxPostBootSteps(GalleryItem item, VmCustomizations customizations)

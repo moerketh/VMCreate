@@ -31,7 +31,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
         [TestMethod]
         public void HasLinuxPostBootSteps_WhenNoApplicableSteps_ReturnsFalse()
         {
-            var service = new PostBootCustomizationService(Array.Empty<ICustomizationStep>(), _loggerMock.Object);
+            var service = new PostBootCustomizationService(new PostBootStepPlanner(Array.Empty<ICustomizationStep>()), _loggerMock.Object);
             Assert.IsFalse(service.HasLinuxPostBootSteps(new GalleryItem(), new VmCustomizations()));
         }
 
@@ -39,7 +39,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
         public void HasLinuxPostBootSteps_WhenApplicableStepExists_ReturnsTrue()
         {
             var step = CreateStep("Test", CustomizationPhase.PostBoot, StepPlatform.Linux, 100, applicable: true);
-            var service = new PostBootCustomizationService(new[] { step }, _loggerMock.Object);
+            var service = new PostBootCustomizationService(new PostBootStepPlanner(new[] { step }), _loggerMock.Object);
             Assert.IsTrue(service.HasLinuxPostBootSteps(new GalleryItem(), new VmCustomizations()));
         }
 
@@ -47,7 +47,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
         public void HasWindowsPostBootSteps_WhenApplicableStepExists_ReturnsTrue()
         {
             var step = CreateStep("WinTest", CustomizationPhase.PostBoot, StepPlatform.Windows, 100, applicable: true);
-            var service = new PostBootCustomizationService(new[] { step }, _loggerMock.Object);
+            var service = new PostBootCustomizationService(new PostBootStepPlanner(new[] { step }), _loggerMock.Object);
             Assert.IsTrue(service.HasWindowsPostBootSteps(new GalleryItem(), new VmCustomizations()));
         }
 
@@ -64,7 +64,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
                 onExecute: () => executed.Add("WinStep"));
 
             var service = new PostBootCustomizationService(
-                new[] { stepB, stepA, windowsStep },
+                new PostBootStepPlanner(new[] { stepB, stepA, windowsStep }),
                 _loggerMock.Object);
 
             await service.RunLinuxPostBootAsync(
@@ -94,7 +94,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
             var step = CreateExecutableStep("WinStep", CustomizationPhase.PostBoot, StepPlatform.Windows, 100,
                 onExecute: () => executed.Add("WinStep"));
 
-            var service = new PostBootCustomizationService(new[] { step }, _loggerMock.Object);
+            var service = new PostBootCustomizationService(new PostBootStepPlanner(new[] { step }), _loggerMock.Object);
 
             await service.RunWindowsPostBootAsync(
                 _shellMock.Object,
@@ -111,7 +111,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
         [TestMethod]
         public async Task RunLinuxPostBootAsync_NoApplicableSteps_ReportsNoProgress()
         {
-            var service = new PostBootCustomizationService(Array.Empty<ICustomizationStep>(), _loggerMock.Object);
+            var service = new PostBootCustomizationService(new PostBootStepPlanner(Array.Empty<ICustomizationStep>()), _loggerMock.Object);
 
             await service.RunLinuxPostBootAsync(
                 _shellMock.Object,
@@ -141,7 +141,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
             var stepC = CreateExecutableStep("StepC-After", CustomizationPhase.PostBoot, StepPlatform.Linux, 300,
                 onExecute: () => executed.Add("StepC-After"));
 
-            var service = new PostBootCustomizationService(new[] { stepA, stepB, stepC }, _loggerMock.Object);
+            var service = new PostBootCustomizationService(new PostBootStepPlanner(new[] { stepA, stepB, stepC }), _loggerMock.Object);
 
             var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 service.RunLinuxPostBootAsync(
@@ -199,7 +199,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
                 .Callback(() => executed.Add("StepB-AutoOnly"))
                 .Returns(Task.CompletedTask);
 
-            var service = new PostBootCustomizationService(new[] { stepA.Object, stepB.Object }, _loggerMock.Object);
+            var service = new PostBootCustomizationService(new PostBootStepPlanner(new[] { stepA.Object, stepB.Object }), _loggerMock.Object);
 
             await service.RunLinuxPostBootAsync(
                 _shellMock.Object,
@@ -243,7 +243,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
                 .Callback<CreateVMProgressInfo>(r => reports.Add(r.ProgressPercentage));
 
             var service = new PostBootCustomizationService(
-                new[] { stepA, skip1, stepB, skip2 },
+                new PostBootStepPlanner(new[] { stepA, skip1, stepB, skip2 }),
                 _loggerMock.Object);
 
             await service.RunLinuxPostBootAsync(
@@ -310,7 +310,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
                 onExecute: () => executed.Add("Incapable"));
 
             var service = new PostBootCustomizationService(
-                new[] { capableB, incapable, capableA }, _loggerMock.Object);
+                new PostBootStepPlanner(new[] { capableB, incapable, capableA }), _loggerMock.Object);
             MarkChrootCapability(capableA, true);
             MarkChrootCapability(capableB, true);
             MarkChrootCapability(incapable, false);
@@ -365,7 +365,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
                 onExecute: () => executed.Add("LiveOnly"));
 
             var service = new PostBootCustomizationService(
-                new[] { chrootRan, liveOnly }, _loggerMock.Object);
+                new PostBootStepPlanner(new[] { chrootRan, liveOnly }), _loggerMock.Object);
 
             await service.RunLinuxPostBootAsync(
                 _shellMock.Object,
