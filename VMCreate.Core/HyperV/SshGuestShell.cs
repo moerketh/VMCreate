@@ -284,7 +284,7 @@ namespace VMCreate
         /// and the transport never logs stdin. Used by the passwordless-
         /// sudo bootstrap, which feeds the gallery password to `sudo -S`.
         /// </summary>
-        public async Task<string> RunCommandWithStdinAsync(string command, string stdinContent, CancellationToken ct)
+        public virtual async Task<string> RunCommandWithStdinAsync(string command, string stdinContent, CancellationToken ct)
         {
             _ = CurrentTarget; // fails with the actionable not-ready error
 
@@ -332,7 +332,7 @@ namespace VMCreate
         }
 
         /// <inheritdoc/>
-        public async Task CopySecretAsync(string content, string guestPath, CancellationToken ct)
+        public virtual async Task CopySecretAsync(string content, string guestPath, CancellationToken ct)
         {
             // Key material (VPN configs embedding client certs/private keys,
             // TLS keys, credentials): root:root 0600. The old 644-for-everything
@@ -343,7 +343,7 @@ namespace VMCreate
         }
 
         /// <inheritdoc/>
-        public async Task CopyFileAsync(string hostPath, string guestPath, CancellationToken ct)
+        public virtual async Task CopyFileAsync(string hostPath, string guestPath, CancellationToken ct)
         {
             if (!File.Exists(hostPath))
                 throw new FileNotFoundException($"Host file not found: {hostPath}");
