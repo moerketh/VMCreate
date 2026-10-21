@@ -34,25 +34,41 @@ namespace VMCreate.CLI.Commands
         private static async Task<int> RunRefreshAsync(IServiceProvider services, CancellationToken ct)
         {
             var galleryService = services.GetRequiredService<IGalleryService>();
-            int count = 0;
 
-            await AnsiConsole.Status()
-                .StartAsync("Refreshing gallery from remote sources...", async statusCtx =>
+            var all = new System.Collections.Generic.List<GalleryItem>();
+            var seen = new System.Collections.Generic.HashSet<(string, string)>();
+
+            // Redirected stdout: line output only. AnsiConsole.Status() drives
+            // the same Live display machinery as create's progress table and
+            // crashes on a non-console handle otherwise.
+            if (Console.IsOutputRedirected)
+            {
+                await galleryService.LoadFromSourcesStreamingAsync(seen, batch =>
                 {
-                    var all = new System.Collections.Generic.List<GalleryItem>();
-                    var seen = new System.Collections.Generic.HashSet<(string, string)>();
-
-                    await galleryService.LoadFromSourcesStreamingAsync(seen, batch =>
+                    all.AddRange(batch);
+                    Console.WriteLine($"Loaded {all.Count} images...");
+                }, ct);
+            }
+            else
+            {
+                await AnsiConsole.Status()
+                    .StartAsync("Refreshing gallery from remote sources...", async statusCtx =>
                     {
-                        all.AddRange(batch);
-                        statusCtx.Status($"Loaded {all.Count} images...");
-                    }, ct);
+                        await galleryService.LoadFromSourcesStreamingAsync(seen, batch =>
+                        {
+                            all.AddRange(batch);
+                            statusCtx.Status($"Loaded {all.Count} images...");
+                        }, ct);
+                    });
+            }
 
-                    galleryService.SaveCache(all);
-                    count = all.Count;
-                });
+            galleryService.SaveCache(all);
+            int count = all.Count;
 
-            AnsiConsole.MarkupLine($"[green]✓[/] Gallery refreshed: {count} images cached.");
+            if (Console.IsOutputRedirected)
+                Console.WriteLine($"Gallery refreshed: {count} images cached.");
+            else
+                AnsiConsole.MarkupLine($"[green]✓[/] Gallery refreshed: {count} images cached.");
             return ExitCodes.Success;
         }
 

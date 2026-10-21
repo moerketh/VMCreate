@@ -316,6 +316,38 @@ namespace VMCreate.CLI.Commands
             return noXrdp ? RdpBackend.None : RdpBackend.Auto;
         }
 
+        /// <summary>
+        /// Progress front end selected for a create run. Pinned by unit tests:
+        /// the redirected-text path must never reach Spectre's Live display
+        /// (it throws IOException on a non-console handle — the crash behind
+        /// the redirect fix), and --quiet/--format json must win over the
+        /// console-shape checks regardless of environment.
+        /// </summary>
+        internal enum ProgressFrontEnd
+        {
+            /// <summary>--quiet: no progress output at all.</summary>
+            None,
+            /// <summary>--format json: NDJSON lines on stdout.</summary>
+            Json,
+            /// <summary>stdout redirected (pipe/file/CI): plain text lines.</summary>
+            PlainText,
+            /// <summary>Interactive terminal: Spectre Live table.</summary>
+            Rich
+        }
+
+        /// <summary>
+        /// Pure reporter selection: quiet → none, json → NDJSON (regardless of
+        /// redirection — CI captures the lines), redirected → plain text,
+        /// otherwise the rich Live display. Order matters and is load-bearing.
+        /// </summary>
+        internal static ProgressFrontEnd SelectProgressFrontEnd(bool quiet, bool jsonMode, bool isOutputRedirected)
+        {
+            if (quiet) return ProgressFrontEnd.None;
+            if (jsonMode) return ProgressFrontEnd.Json;
+            if (isOutputRedirected) return ProgressFrontEnd.PlainText;
+            return ProgressFrontEnd.Rich;
+        }
+
         private static async Task<int> RunAsync(IServiceProvider services, CreateArgs args, CancellationToken ct)
         {
             bool jsonMode = string.Equals(args.Format, "json", StringComparison.OrdinalIgnoreCase);
@@ -586,13 +618,15 @@ namespace VMCreate.CLI.Commands
             }
 
             // ── Set up progress reporter ─────────────────────────────────────
-            if (args.Quiet)
+            var frontEnd = SelectProgressFrontEnd(args.Quiet, jsonMode, Console.IsOutputRedirected);
+
+            if (frontEnd == ProgressFrontEnd.None)
             {
                 return await CreateVmAsync(services, vmSettings, vmCustomizations, galleryItem,
                     new NullProgressReporter(), jsonMode, ct);
             }
 
-            if (jsonMode)
+            if (frontEnd == ProgressFrontEnd.Json)
             {
                 var jsonReporter = new JsonProgressReporter();
                 return await CreateVmAsync(services, vmSettings, vmCustomizations, galleryItem,
@@ -601,10 +635,14 @@ namespace VMCreate.CLI.Commands
 
             // Redirected stdout (pipe/file/CI): Spectre's Live display needs a
             // real console handle and crashes with IOException otherwise.
-            if (Console.IsOutputRedirected)
+            if (frontEnd == ProgressFrontEnd.PlainText)
             {
-                return await CreateVmAsync(services, vmSettings, vmCustomizations, galleryItem,
+                int plainExit = await CreateVmAsync(services, vmSettings, vmCustomizations, galleryItem,
                     new PlainTextProgressReporter(), jsonMode, ct);
+                Console.WriteLine(plainExit == ExitCodes.Success
+                    ? $"[Done] VM '{vmSettings.VMName}' created successfully."
+                    : "[Done] VM creation failed.");
+                return plainExit;
             }
 
             // Rich console output

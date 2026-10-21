@@ -56,26 +56,5 @@ namespace VMCreate.CLI.Progress
 
             _ctx.Refresh();
         }
-
-        public void ReportDone()
-        {
-            // Mark last row green
-            if (_table.Rows.Count > 0)
-            {
-                _table.UpdateCell(_table.Rows.Count - 1, 0, "[green]✓[/] [bold]Done[/]");
-                _table.UpdateCell(_table.Rows.Count - 1, 1, string.Empty);
-                _ctx.Refresh();
-            }
-        }
-
-        public void ReportError(string phase, string message)
-        {
-            if (_table.Rows.Count > 0)
-            {
-                _table.UpdateCell(_table.Rows.Count - 1, 0, $"[red]✗[/] [bold]{Markup.Escape(phase)}[/]");
-                _table.UpdateCell(_table.Rows.Count - 1, 1, $"[red]{Markup.Escape(message)}[/]");
-                _ctx.Refresh();
-            }
-        }
     }
 }

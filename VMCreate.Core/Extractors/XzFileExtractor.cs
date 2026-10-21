@@ -27,7 +27,8 @@ namespace VMCreate
     /// SharpCompress 0.48.1 was re-evaluated as a replacement but remains unsuitable: its XZStream correctly
     /// decompresses single-stream files but silently truncates concatenated multi-stream .xz files, whereas
     /// XZ.NET handles all stream combinations correctly (validated 2026-09 against a multi-stream corpus).
-    /// Progress reporting is implemented using a buffer-based copy to provide incremental updates, as XZ.NET lacks native progress events.
+    /// Progress reporting is implemented using a buffer-based copy, throttled to integer-percentage changes
+    /// (or a 200 ms heartbeat), matching the ArchiveExtractor contract; XZ.NET lacks native progress events.
     /// The class integrates with Serilog for detailed logging and uses dependency injection for compatibility with the application's CreateVM workflow.
     /// </remarks>
     public class XzFileExtractor : IExtractor
@@ -84,21 +85,39 @@ namespace VMCreate
                     int bytesRead;
                     long totalBytesWritten = 0;
 
+                    // Same throttle contract as ArchiveExtractor: report only when
+                    // the integer percentage changes or >=200 ms elapsed. Reporting
+                    // per 8 KB read (~1.6M events for a 13 GB image) floods every
+                    // progress sink — the CLI's NDJSON reporter wrote that many
+                    // lines for a single deploy, and the GUI posted them all to
+                    // the UI thread.
+                    const long ThrottleIntervalTicks = TimeSpan.TicksPerMillisecond * 200;
+                    int lastReportedPercentage = -1;
+                    long lastReportTimeTicks = 0;
+
                     while ((bytesRead = xzStream.Read(buffer, 0, buffer.Length)) > 0)
                     {
                         cancellationToken.ThrowIfCancellationRequested();
                         outputStream.Write(buffer, 0, bytesRead);
                         totalBytesWritten += bytesRead;
 
-                        // // Progress based on estimated uncompressed size
+                        // Progress based on estimated uncompressed size
                         var progress = estimatedUncompressedSize > 0 ? (totalBytesWritten / (double)estimatedUncompressedSize) * 100 : 0;
-                        progressReportInfo?.Report(new CreateVMProgressInfo
+                        int percent = Math.Min(Convert.ToInt32(progress), 99);
+                        long now = DateTime.UtcNow.Ticks;
+
+                        if (percent != lastReportedPercentage || (now - lastReportTimeTicks) >= ThrottleIntervalTicks)
                         {
-                            Phase = VmDeploymentPhase.Extract,
-                            URI = outputPath,
-                            DownloadSpeed = -1,
-                            ProgressPercentage = Math.Min(Convert.ToInt32(progress), 99)
-                        });
+                            lastReportedPercentage = percent;
+                            lastReportTimeTicks = now;
+                            progressReportInfo?.Report(new CreateVMProgressInfo
+                            {
+                                Phase = VmDeploymentPhase.Extract,
+                                URI = outputPath,
+                                DownloadSpeed = -1,
+                                ProgressPercentage = percent
+                            });
+                        }
                     }
 
                     outputStream.Flush();

@@ -103,6 +103,51 @@ namespace VMCreate.Tests
         }
 
         [TestMethod]
+        public void Extract_LargeMultiStreamXz_ThrottlesProgressReports()
+        {
+            // Regression: the loop used to report on EVERY 8 KB read — for a
+            // 13 GB Parrot qcow2 that was 1.66M progress events per deploy
+            // (the CLI's NDJSON reporter wrote ~1.6M stdout lines). The
+            // throttle contract (integer-percentage change or 200 ms) must
+            // keep reports bounded: percent clamps at 99 early and an
+            // in-memory extract finishes in well under 200 ms per report
+            // window, so a per-read regression would emit 1,600+ reports
+            // here while a correct throttle emits a handful.
+            const int Frames = 6871;                       // 6871 × 1,984 B ≈ 13.6 MB ≈ 1,660+ reads
+            byte[] frame = Convert.FromBase64String(StdXzB64);
+
+            string archivePath = Path.Combine(Path.GetTempPath(), "flood-disk.qcow2.xz");
+            using (var archive = File.Create(archivePath))
+                for (int i = 0; i < Frames; i++)
+                    archive.Write(frame, 0, frame.Length);
+
+            string extractDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+            string expectedOut = Path.Combine(extractDir, "flood-disk.qcow2");
+            var reports = new List<CreateVMProgressInfo>();
+            try
+            {
+                _extractor.Extract(archivePath, extractDir, CancellationToken.None,
+                    new ImmediateProgress<CreateVMProgressInfo>(reports.Add));
+
+                long expectedBytes = (long)Frames * Expected.Length;
+                Assert.IsTrue(File.Exists(expectedOut), "Expected decompressed output to exist");
+                Assert.AreEqual(expectedBytes, new FileInfo(expectedOut).Length,
+                    $"Concatenated members must all decode ({expectedBytes} bytes expected)");
+
+                Assert.IsTrue(reports.Count > 0, "Expected at least one Extract progress report");
+                Assert.AreEqual(100, reports.Last().ProgressPercentage, "Final report must be 100%");
+                Assert.IsTrue(reports.Count <= 150,
+                    $"Progress flood: {reports.Count} reports for ~{Frames * Expected.Length / 1024 / 1024} MB " +
+                    "— the extractor is reporting per buffer read again (regression of the throttle)");
+            }
+            finally
+            {
+                File.Delete(archivePath);
+                if (Directory.Exists(extractDir)) Directory.Delete(extractDir, true);
+            }
+        }
+
+        [TestMethod]
         public void Extract_NonXzFile_ThrowsInvalidOperationException()
         {
             string archivePath = Path.Combine(Path.GetTempPath(), "notanxz.bin");

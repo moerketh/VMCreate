@@ -26,10 +26,5 @@ namespace VMCreate.CLI.Progress
             else if (!string.IsNullOrEmpty(value.URI))
                 Console.WriteLine($"  {value.URI}");
         }
-
-        public void ReportDone() => Console.WriteLine("[Done]");
-
-        public void ReportError(string phase, string message) =>
-            Console.WriteLine($"[{phase}] ERROR: {message}");
     }
 }

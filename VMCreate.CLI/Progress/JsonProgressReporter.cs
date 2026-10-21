@@ -35,12 +35,6 @@ namespace VMCreate.CLI.Progress
             Console.WriteLine(JsonSerializer.Serialize(payload, _opts));
         }
 
-        public void ReportError(string phase, string message)
-        {
-            var payload = new ErrorPayload { Phase = phase, Error = message };
-            Console.Error.WriteLine(JsonSerializer.Serialize(payload, _opts));
-        }
-
         private sealed class ProgressPayload
         {
             // Serialized DTO — nullable members are omitted from NDJSON output
@@ -50,12 +44,6 @@ namespace VMCreate.CLI.Progress
             public double? SpeedMbps { get; set; }
             public string? Uri { get; set; }
             public string? DetectedGeneration { get; set; }
-        }
-
-        private sealed class ErrorPayload
-        {
-            public string Phase { get; set; } = "";
-            public string Error { get; set; } = "";
         }
     }
 }
