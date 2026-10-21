@@ -22,6 +22,19 @@ namespace VMCreate
         CustomizationPhase Phase { get; }
 
         /// <summary>
+        /// True when the step can execute against a chroot of the target
+        /// filesystem during the ISO stage (its shell's
+        /// <see cref="IGuestShell.Context"/> is
+        /// <see cref="GuestExecutionContext.Chroot"/>): it must not rely on a
+        /// running systemd, D-Bus, the target's kernel, or any live-session
+        /// state — a step whose commands only touch files, packages and
+        /// enable-state qualifies. Chroot-capable steps run pre-boot when the
+        /// deployment has an ISO stage and post-boot otherwise (the cloud-init
+        /// flow), so they must work in BOTH contexts. Defaults to false.
+        /// </summary>
+        bool SupportsChroot => false;
+
+        /// <summary>
         /// The guest OS this step targets. The orchestrator only runs a step whose
         /// <see cref="Platform"/> matches the VM being deployed, so Linux steps never run
         /// over PowerShell Direct and Windows steps never run over SSH. Required — every

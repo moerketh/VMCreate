@@ -5,6 +5,29 @@ using System.Threading.Tasks;
 namespace VMCreate
 {
     /// <summary>
+    /// Identifies where a guest-shell command actually executes. Steps that
+    /// need different mechanics per context (e.g. <c>SyncTimezoneStep</c>:
+    /// <c>timedatectl</c> live vs <c>ln -sf zoneinfo</c> in a chroot) branch
+    /// on <see cref="IGuestShell.Context"/> instead of carrying two step
+    /// classes. Transports that run on the booted guest report
+    /// <see cref="Live"/> (the default); the ISO-stage chroot decorator
+    /// reports <see cref="Chroot"/>.
+    /// </summary>
+    public enum GuestExecutionContext
+    {
+        /// <summary>Commands run on the booted guest (SSH, PowerShell Direct).</summary>
+        Live,
+
+        /// <summary>
+        /// Commands run inside a chroot of the target filesystem during the
+        /// ISO stage: no systemd PID 1, no D-Bus, and the running kernel is
+        /// the ISO's. Services cannot be started here — only files, packages
+        /// and enable-state may change.
+        /// </summary>
+        Chroot,
+    }
+
+    /// <summary>
     /// Abstraction for executing commands and transferring files inside a guest VM.
     /// Implementations handle the transport details (SSH, PowerShell Direct, etc.)
     /// so that customization steps remain transport-agnostic and testable.
@@ -13,6 +36,15 @@ namespace VMCreate
     {
         /// <summary>The display name of the VM this shell is connected to.</summary>
         string VmName { get; }
+
+        /// <summary>
+        /// Where <see cref="RunCommandAsync"/> commands execute for this shell.
+        /// Defaults to <see cref="GuestExecutionContext.Live"/>; the ISO-stage
+        /// chroot shell overrides it with <see cref="GuestExecutionContext.Chroot"/>
+        /// so steps can pick chroot-safe mechanics (symlinks and files instead
+        /// of systemctl) while remaining a single step class.
+        /// </summary>
+        GuestExecutionContext Context => GuestExecutionContext.Live;
 
         /// <summary>
         /// Executes a command on the guest and returns stdout.

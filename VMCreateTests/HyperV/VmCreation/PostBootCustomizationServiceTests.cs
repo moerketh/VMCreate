@@ -60,13 +60,11 @@ namespace VMCreate.Tests.HyperV.VmCreation
                 onExecute: () => executed.Add("StepA"));
             var stepB = CreateExecutableStep("StepB", CustomizationPhase.PostBoot, StepPlatform.Linux, 200,
                 onExecute: () => executed.Add("StepB"));
-            var preBootStep = CreateExecutableStep("PreBoot", CustomizationPhase.PreBoot, StepPlatform.Linux, 50,
-                onExecute: () => executed.Add("PreBoot"));
             var windowsStep = CreateExecutableStep("WinStep", CustomizationPhase.PostBoot, StepPlatform.Windows, 150,
                 onExecute: () => executed.Add("WinStep"));
 
             var service = new PostBootCustomizationService(
-                new[] { stepB, stepA, preBootStep, windowsStep },
+                new[] { stepB, stepA, windowsStep },
                 _loggerMock.Object);
 
             await service.RunLinuxPostBootAsync(

@@ -19,9 +19,8 @@ namespace VMCreate.Tests.HyperV.VmCreation
     public class PostBootStepPlannerTests
     {
         private static ICustomizationStep Step(string name, int order, bool applicable = true,
-            string? progressPhaseId = null, StepPlatform platform = StepPlatform.Linux,
-            CustomizationPhase phase = CustomizationPhase.PostBoot)
-            => new FakeStep(name, order, applicable, progressPhaseId, platform, phase);
+            string? progressPhaseId = null, StepPlatform platform = StepPlatform.Linux)
+            => new FakeStep(name, order, applicable, progressPhaseId, platform);
 
         [TestMethod]
         public void GetOrderedCandidates_SortsByOrder_ThenNameOrdinal()
@@ -34,7 +33,6 @@ namespace VMCreate.Tests.HyperV.VmCreation
                 Step("Out", 50),
                 Step("Skip", 100, applicable: false), // ordering ignores applicability
                 Step("Win", 100, platform: StepPlatform.Windows),
-                Step("PreBoot", 100, phase: CustomizationPhase.PreBoot),
             });
 
             var names = planner.GetOrderedCandidates(StepPlatform.Linux).Select(s => s.Name).ToArray();
@@ -42,7 +40,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
             // "Skip" (S=83) sorts before "gamma" (g=103) under ordinal
             // comparison — the tie-break must be ordinal, not case-insensitive.
             CollectionAssert.AreEqual(new[] { "Out", "Beta", "Skip", "gamma", "Alpha" }, names,
-                "ordered by Order first, then by Name (ordinal); platform and phase filtered; applicability ignored");
+                "ordered by Order first, then by Name (ordinal); platform filtered; applicability ignored");
         }
 
         [TestMethod]
@@ -155,19 +153,18 @@ namespace VMCreate.Tests.HyperV.VmCreation
         private sealed class FakeStep : ICustomizationStep
         {
             public FakeStep(string name, int order, bool applicable, string? progressPhaseId,
-                StepPlatform platform, CustomizationPhase phase)
+                StepPlatform platform)
             {
                 Name = name;
                 Order = order;
                 _applicable = applicable;
                 ProgressPhaseId = progressPhaseId;
                 Platform = platform;
-                Phase = phase;
             }
 
             private readonly bool _applicable;
             public string Name { get; }
-            public CustomizationPhase Phase { get; }
+            public CustomizationPhase Phase => CustomizationPhase.PostBoot;
             public StepPlatform Platform { get; }
             public int Order { get; }
             public string? ProgressPhaseId { get; }
