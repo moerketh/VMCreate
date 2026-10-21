@@ -292,6 +292,88 @@ namespace VMCreate.Tests.GUI
             presenter.CompleteActive();
         }
 
+        [TestMethod]
+        public void ChrootCapableSteps_GetCustomizeCards_AndVanishFromPostBoot_IsoCycle()
+        {
+            // A chroot-capable planned step runs inside the ISO stage on the
+            // disk-image ISO-cycle flow: its card must live in the Customize
+            // phase (before SshSetup) and must NOT appear in the post-boot
+            // card list (the backend ledger skips it there).
+            var chrootStep = new FakeStep("Chropy Step", 100, applicable: true, supportsChroot: true);
+            var planner = new PostBootStepPlanner(new ICustomizationStep[] { chrootStep });
+            var wizard = NewWizard(KaliDisk(), new VmCustomizations { SyncTimezone = false });
+
+            var vm = new DeployPageViewModel(wizard, NullLogger.Instance, configurableSteps: null, planner);
+
+            var customizeCards = vm.Phases
+                .SkipWhile(p => p.Id != DeployPageViewModel.PhaseCustomize)
+                .Skip(1)
+                .TakeWhile(p => p.IndentLevel > 0)
+                .Select(p => p.Id)
+                .ToList();
+            CollectionAssert.Contains(customizeCards, PostBootStepPlanner.CardId(chrootStep),
+                "the chroot step's card must exist in the Customize phase");
+            Assert.IsTrue(customizeCards.IndexOf(PostBootStepPlanner.CardId(chrootStep))
+                          < customizeCards.IndexOf(DeployPageViewModel.SubSshSetup),
+                "chroot cards run before the automation-user setup");
+
+            var postBootCards = vm.Phases
+                .SkipWhile(p => p.Id != DeployPageViewModel.PhasePostBoot)
+                .Skip(1)
+                .TakeWhile(p => p.IndentLevel > 0)
+                .Select(p => p.Id)
+                .ToList();
+            CollectionAssert.DoesNotContain(postBootCards, PostBootStepPlanner.CardId(chrootStep),
+                "a step that ran in the chroot must not get a post-boot card");
+        }
+
+        [TestMethod]
+        public void ChrootCapableSteps_StayPostBoot_CloudInitFlow()
+        {
+            // Same step, cloud-init flow: no ISO stage exists, so the step
+            // runs post-boot and its card stays in the PostBoot phase.
+            var chrootStep = new FakeStep("Chropy Step", 100, applicable: true, supportsChroot: true);
+            var planner = new PostBootStepPlanner(new ICustomizationStep[] { chrootStep });
+            var wizard = NewWizard(new GalleryItem
+            {
+                Name = "Elastic SIEM",
+                DiskUri = "http://example.com/elastic.vhdx",
+                LinuxDistro = LinuxDistro.Unknown,
+                Tags = { "cloud-init" },
+            }, new VmCustomizations());
+
+            var vm = new DeployPageViewModel(wizard, NullLogger.Instance, configurableSteps: null, planner);
+
+            Assert.IsNull(vm.FindPhase(DeployPageViewModel.PhaseCustomize),
+                "no Customize phase on the cloud-init flow");
+            Assert.IsNotNull(vm.FindPhase(PostBootStepPlanner.CardId(chrootStep)),
+                "the chroot-capable step keeps its post-boot card (fallback)");
+        }
+
+        private sealed class FakeStep : ICustomizationStep
+        {
+            public FakeStep(string name, int order, bool applicable, bool supportsChroot)
+            {
+                Name = name;
+                Order = order;
+                _applicable = applicable;
+                SupportsChroot = supportsChroot;
+            }
+
+            private readonly bool _applicable;
+            public string Name { get; }
+            public CustomizationPhase Phase => CustomizationPhase.PostBoot;
+            public StepPlatform Platform => StepPlatform.Linux;
+            public int Order { get; }
+            public string? ProgressPhaseId => "Sub_" + Name.Replace(' ', '_');
+            bool ICustomizationStep.SupportsChroot => SupportsChroot;
+            private bool SupportsChroot { get; }
+            public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations) => _applicable;
+            public Task ExecuteAsync(IGuestShell shell, GalleryItem item, VmCustomizations customizations,
+                Microsoft.Extensions.Logging.ILogger logger, CancellationToken ct)
+                => Task.CompletedTask;
+        }
+
         private sealed class SynchronousDispatcher : IDispatcher
         {
             public void Invoke(Action action) => action();

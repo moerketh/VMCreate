@@ -188,20 +188,27 @@ namespace VMCreate.Tests.GUI
         {
             // Auto is resolved in the guest at post-boot, so the ISO boot
             // cycle must run (it provisions the automation SSH user the
-            // resolver needs). bare new VmCustomizations() defaults to Auto.
+            // resolver needs). The presenter decides via the planner's
+            // shared predicate over the real step set — under Auto the
+            // resolver itself is the applicable step that forces the cycle,
+            // exactly like the backend's DiskImageVmCreationStrategy.
+            var steps = new Dictionary<string, ICustomizationStep>
+            {
+                [new AutoRdpBackendResolveStep().Name] = new AutoRdpBackendResolveStep(),
+            };
             _presenter = new DeploymentProgressPresenter(
                 _viewModel,
                 _dispatcher,
                 CreateGalleryItem(DiskImageFormat.Vmdk, false),
                 new VmCustomizations(),
-                new Dictionary<string, ICustomizationStep>(),
+                steps,
                 _logger.Object);
 
             _presenter.Present(new CreateVMProgressInfo { DetectedGeneration = 2 });
 
             Assert.AreEqual(2, _viewModel.LastDiskSubStepsGeneration);
             Assert.IsTrue(_viewModel.LastDiskSubStepsNeedsIsoBoot,
-                "Auto backend requires the ISO boot cycle (automation SSH user)");
+                "Auto backend requires the ISO boot cycle (automation SSH user; the resolver step is applicable)");
         }
 
         [TestMethod]

@@ -376,8 +376,19 @@ namespace VMCreate
             // or the image is pre-built.
             if (!isNativeHyperV && !isIso)
             {
-                // Show pre-boot customization card upfront if any pre-boot option was selected
-                if (wizardData.Customizations?.HasPreBootCustomizations == true)
+                // The cloud-init flow never boots the cloning ISO, so it has
+                // no pre-boot stage at all — chroot-capable steps run
+                // post-boot there (fallback) and xrdp is not a cloud-init
+                // concern.
+                bool isCloudInitFlow = wizardData.SelectedItem?.HasTag("cloud-init") == true;
+
+                // Show pre-boot customization card upfront if any pre-boot
+                // work exists: explicit xrdp OR any chroot-capable step
+                // (they execute inside the ISO stage on this flow).
+                bool hasPreBoot = !isCloudInitFlow
+                    && (wizardData.Customizations?.HasPreBootCustomizations == true
+                        || _planner.HasChrootSteps(SelectedItem, wizardData.Customizations));
+                if (hasPreBoot)
                 {
                     Phases.Add(new DeploymentPhase(PhaseCustomize, "Pre-Boot Customizations",
                         "Applying customizations (xRDP, enhancements) and waiting for the VM to restart",
@@ -392,12 +403,13 @@ namespace VMCreate
                         ? BuildPostBootDescription(wizardData.Customizations)
                         : "Applying post-boot customizations via SSH",
                     SymbolRegular.Settings24));
+                _lastPostBootFlow = wizardData.SelectedItem?.HasTag("cloud-init") == true
+                    ? PostBootFlow.DiskImageCloudInit
+                    : PostBootFlow.DiskImageIsoCycle;
                 InsertPostBootSubStepsAt(
                     Phases.Count,
                     wizardData.Customizations,
-                    wizardData.SelectedItem?.HasTag("cloud-init") == true
-                        ? PostBootFlow.DiskImageCloudInit
-                        : PostBootFlow.DiskImageIsoCycle);
+                    _lastPostBootFlow);
             }
             else if (wizardData.SelectedItem?.IsWindows == true)
             {
@@ -583,9 +595,9 @@ namespace VMCreate
             while (listEnd < Phases.Count && Phases[listEnd].IndentLevel > 0)
                 listEnd++;
 
-            var planned = _planner.GetPlannedSteps(
+            var planned = GetPlannedPostBootSteps(
                 SelectedItem.IsWindows ? StepPlatform.Windows : StepPlatform.Linux,
-                SelectedItem, _lastCustomizations);
+                SelectedItem, _lastCustomizations, _lastPostBootFlow);
 
             string[] plannedIds = planned.Select(PostBootStepPlanner.CardId).ToArray();
 
@@ -698,6 +710,13 @@ namespace VMCreate
         /// <summary>Stashed settings so dynamic Insert* methods can add conditional sub-steps.</summary>
         private VmSettings? _lastSettings;
 
+        /// <summary>
+        /// The post-boot flow the phase list was built for, so runtime
+        /// re-planning (ReconcilePostBootSteps) keeps excluding chroot steps
+        /// the same way the initial build did.
+        /// </summary>
+        private PostBootFlow _lastPostBootFlow = PostBootFlow.Direct;
+
         /// <summary>Appends CreateVM sub-step cards (IndentLevel=1, hidden) after the CreateVM parent phase.</summary>
         private void AddCreateVMSubSteps(WizardData wizardData)
         {
@@ -770,6 +789,7 @@ namespace VMCreate
                 Phases.Add(new DeploymentPhase(SubInstallXrdp, "Install xRDP",
                     "Installing xRDP for Enhanced Session support", SymbolRegular.Desktop24) { IndentLevel = 1, IsVisible = false });
             }
+            InsertChrootStepCards(Phases.Count, c);
             Phases.Add(new DeploymentPhase(SubSshSetup, "SSH setup",
                 "Creating automation user and injecting SSH key", SymbolRegular.Key24) { IndentLevel = 1, IsVisible = false });
             Phases.Add(new DeploymentPhase(SubReboot, "Reboot",
@@ -786,10 +806,29 @@ namespace VMCreate
                 Phases.Insert(index++, new DeploymentPhase(SubInstallXrdp, "Install xRDP",
                     "Installing xRDP for Enhanced Session support", SymbolRegular.Desktop24) { IndentLevel = 1, IsVisible = false });
             }
+            index = InsertChrootStepCards(index, c);
             Phases.Insert(index++, new DeploymentPhase(SubSshSetup, "SSH setup",
                 "Creating automation user and injecting SSH key", SymbolRegular.Key24) { IndentLevel = 1, IsVisible = false });
             Phases.Insert(index++, new DeploymentPhase(SubReboot, "Reboot",
                 "Shutting down VM to boot from converted disk", SymbolRegular.Power24) { IndentLevel = 1, IsVisible = false });
+            return index;
+        }
+
+        /// <summary>
+        /// Inserts one card per chroot-capable planned step — the same list,
+        /// order and card IDs the chroot executor reports with
+        /// (Phase=Customize, StepName=step.Name → CardId), so each report
+        /// activates its card. Steps whose card already exists are skipped
+        /// (idempotent for the Insert*/Add* call pairs).
+        /// </summary>
+        private int InsertChrootStepCards(int index, VmCustomizations? c)
+        {
+            foreach (var step in _planner.GetPlannedChrootSteps(SelectedItem, c))
+            {
+                string id = PostBootStepPlanner.CardId(step);
+                if (Phases.Any(p => p.Id == id)) continue;
+                Phases.Insert(index++, BuildCardForStep(step));
+            }
             return index;
         }
 
@@ -819,7 +858,7 @@ namespace VMCreate
             Phases.Insert(index++, NewPostBootSubStep(SubWaitForSsh, "Waiting for VM",
                 "Waiting for the VM to accept remote management connections", SymbolRegular.PlugConnected24));
 
-            var planned = _planner.GetPlannedSteps(platform, SelectedItem, c);
+            var planned = GetPlannedPostBootSteps(platform, SelectedItem, c, flow);
 
             // Steps before the KVP gate: everything below the SSH-restore boundary.
             foreach (var step in planned.Where(s => s.Order < PostBootStepPlanner.SshRestoreOrder))
@@ -843,6 +882,27 @@ namespace VMCreate
             index = InsertCompletionInfoCardsAt(index, c);
 
             return index;
+        }
+
+        /// <summary>
+        /// The post-boot steps that will actually RUN post-boot on this
+        /// deployment. On the ISO-cycle flow, chroot-capable steps execute
+        /// inside the ISO stage instead (their cards live in the Customize
+        /// phase; the backend's run ledger skips them post-boot), so they are
+        /// excluded here. The cloud-init flow has no ISO stage — the same
+        /// steps run post-boot there.
+        /// </summary>
+        private IReadOnlyList<ICustomizationStep> GetPlannedPostBootSteps(
+            StepPlatform platform, GalleryItem? item, VmCustomizations? c, PostBootFlow flow)
+        {
+            var planned = _planner.GetPlannedSteps(platform, item, c);
+            if (flow != PostBootFlow.DiskImageIsoCycle || platform != StepPlatform.Linux)
+                return planned;
+
+            var chrootNames = new HashSet<string>(
+                _planner.GetPlannedChrootSteps(item, c).Select(s => s.Name),
+                StringComparer.Ordinal);
+            return planned.Where(s => !chrootNames.Contains(s.Name)).ToList();
         }
 
         /// <summary>

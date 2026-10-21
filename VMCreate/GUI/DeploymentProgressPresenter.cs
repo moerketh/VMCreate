@@ -167,10 +167,13 @@ namespace VMCreate
                 }
             }
 
-            // Pre-boot sub-step by KVP URI
-            if (ActivePhaseId == DeployPageViewModel.PhaseCustomize && !string.IsNullOrEmpty(info.URI))
+            // Pre-boot sub-step by step name: the ISO stage reports chroot
+            // steps (Phase=Customize, StepName=step.Name) and the scenario
+            // scripts' VMCREATE:MSG texts land here too (StepName=message).
+            // v1's URI-keyed mapping is gone — the v2 protocol never set URI.
+            if (ActivePhaseId == DeployPageViewModel.PhaseCustomize && !string.IsNullOrEmpty(info.StepName))
             {
-                string? subId = MapPreBootProgress(info.URI);
+                string? subId = MapPreBootStepName(info.StepName);
                 if (!string.IsNullOrEmpty(subId) && subId != ActiveSubStepId)
                 {
                     _dispatcher.Invoke(() =>
@@ -225,19 +228,15 @@ namespace VMCreate
 
         private void HandleDetectedGeneration(int generation)
         {
-            // needsIsoBoot mirrors DiskImageVmCreationStrategy: the cloning ISO boot
-            // cycle runs when xrdp is selected (pre-boot install) OR any post-boot
-            // customization is enabled (timezone/VPN/Lamco, which need the SSH path
-            // the ISO boot cycle sets up). ConfigureXrdp is the shim over RdpBackend
-            // (true only for Xrdp; Lamco installs post-boot, not via the ISO chroot).
-            // Under Auto the backend is unknown pre-boot — nothing is pre-installed —
-            // but the resolver runs post-boot, which requires the automation SSH
-            // user that the ISO boot cycle provisions.
-            bool needsIsoBoot = _customizations?.ConfigureXrdp == true
-                || _customizations?.ConfigureHtbVpn == true
-                || _customizations?.SyncTimezone == true
-                || _customizations?.RdpBackend == RdpBackend.Lamco
-                || _customizations?.RdpBackend == RdpBackend.Auto;
+            // needsIsoBoot mirrors DiskImageVmCreationStrategy via the
+            // planner's shared predicate: the cloning ISO cycle runs when
+            // xrdp is selected (pre-boot install) OR any Linux post-boot
+            // step applies (they need the automation-SSH path the ISO cycle
+            // provisions — chroot-capable steps run inside the ISO stage
+            // itself). One predicate for backend and UI so the card list
+            // can't diverge from the boot decision.
+            bool needsIsoBoot = PostBootStepPlanner.NeedsIsoBootCycle(
+                _selectedItem, _customizations, _allSteps.Values);
 
             if (generation == 1)
             {
@@ -354,19 +353,37 @@ namespace VMCreate
             return "Sub_Step_" + stepName;
         }
 
-        private static string? MapPreBootProgress(string progress)
+        /// <summary>
+        /// Maps a Customize-phase step report to its card: first by exact
+        /// step name (chroot steps report their ICustomizationStep.Name and
+        /// get the planner's CardId), then by the scenario scripts' known
+        /// progress messages (VMCREATE:MSG texts like "Installing Hyper-V
+        /// guest integration services" from the ISO stage).
+        /// </summary>
+        private string? MapPreBootStepName(string stepName)
         {
-            if (progress.StartsWith("INSTALL_GRUB", StringComparison.OrdinalIgnoreCase))
+            if (_allSteps.TryGetValue(stepName, out var step) && step != null)
+                return PostBootStepPlanner.CardId(step);
+
+            if (stepName.Contains("cloning root", StringComparison.OrdinalIgnoreCase)
+                || stepName.Contains("disk partitioning", StringComparison.OrdinalIgnoreCase))
+                return DeployPageViewModel.PhaseCloneDisk;
+            if (stepName.Contains("GRUB", StringComparison.OrdinalIgnoreCase))
                 return DeployPageViewModel.SubInstallGrub;
-            if (progress.StartsWith("INSTALL_HYPERV", StringComparison.OrdinalIgnoreCase))
+            if (stepName.Contains("Hyper-V guest", StringComparison.OrdinalIgnoreCase))
                 return DeployPageViewModel.SubInstallHyperV;
-            if (progress.StartsWith("INSTALL_XRDP", StringComparison.OrdinalIgnoreCase))
+            if (stepName.Contains("XRDP", StringComparison.OrdinalIgnoreCase))
                 return DeployPageViewModel.SubInstallXrdp;
-            if (progress.StartsWith("SSH_SETUP", StringComparison.OrdinalIgnoreCase))
+            if (stepName.Contains("automation user", StringComparison.OrdinalIgnoreCase)
+                || stepName.Contains("SSH key", StringComparison.OrdinalIgnoreCase))
                 return DeployPageViewModel.SubSshSetup;
-            if (progress.StartsWith("REBOOT", StringComparison.OrdinalIgnoreCase))
+            if (stepName.Contains("Shutting down", StringComparison.OrdinalIgnoreCase))
                 return DeployPageViewModel.SubReboot;
-            return null;
+
+            // Unknown step name (not registered in the front end): the same
+            // name-derived ID the planner would produce, so a chroot-capable
+            // step the GUI didn't pre-register still maps consistently.
+            return "Sub_Step_" + stepName;
         }
     }
 }
