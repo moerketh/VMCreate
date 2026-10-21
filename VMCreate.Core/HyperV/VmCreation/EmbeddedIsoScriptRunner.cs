@@ -58,7 +58,8 @@ namespace VMCreate.HyperV.VmCreation
 
         public async Task<IsoBootCycleResult> RunAsync(
             IGuestShell shell, string scenario, string? sshPublicKey, VmCreationContext context,
-            VmCustomizations customizations, IProgress<CreateVMProgressInfo>? progress, CancellationToken ct)
+            VmCustomizations customizations, IProgress<CreateVMProgressInfo>? progress, CancellationToken ct,
+            Func<ChrootGuestShell, CancellationToken, Task>? runChrootSteps = null)
         {
             if (!ScenarioScripts.TryGetValue(scenario, out string? scenarioScript))
                 throw new ArgumentException($"Unknown ISO scenario '{scenario}'.");
@@ -77,6 +78,10 @@ namespace VMCreate.HyperV.VmCreation
                 _logger.LogDebug("Uploaded {Script} -> {GuestPath}", script, guestPath);
             }
 
+            if (shell is not SshGuestShell concrete)
+                throw new InvalidOperationException(
+                    $"The ISO script runner requires a {nameof(SshGuestShell)} (streaming exec); got {shell.GetType().Name}.");
+
             // ── Scenario arguments (v1's KVP keys, now argv) ─────────────
             // DNS: same switch as the legacy runner — Host mode resolves
             // the HOST's resolvers (the ISO's chroot has no resolv.conf
@@ -90,23 +95,78 @@ namespace VMCreate.HyperV.VmCreation
             };
             string swapMb = "8192";
 
-            string args = $"{xrdp} {BashSingleQuote(nameservers ?? "")} {swapMb} {BashSingleQuote(sshPublicKey ?? "")}";
-            string command = $"sudo bash {GuestScriptDir}/{scenarioScript} {args}";
+            // ── Phase 1: prepare (mount + built-in chroot work) ─────────
+            var output = new System.Text.StringBuilder();
+            var hvsockCapability = await RunPhaseAsync(
+                concrete, scenario, scenarioScript,
+                $"prepare {xrdp} {BashSingleQuote(nameservers ?? "")} {swapMb}",
+                progress, output, ct);
+            if (hvsockCapability is { failed: true, message: var prepareError })
+                return await FailWithCleanupAsync(concrete, scenarioScript, prepareError!, output, ct);
 
-            // ── Streamed execution with the v2 protocol ─────────────────
-            if (shell is not SshGuestShell concrete)
-                throw new InvalidOperationException(
-                    $"The ISO script runner requires a {nameof(SshGuestShell)} (streaming exec); got {shell.GetType().Name}.");
+            // ── Phase 2: chroot-capable customization steps ─────────────
+            // The scenario mounts stay up between SSH sessions; the steps
+            // run through the ChrootGuestShell decorator (their sudo/file
+            // contracts keep working against /mnt/new).
+            if (runChrootSteps is not null)
+            {
+                var chrootShell = new ChrootGuestShell(concrete, _logger);
+                try
+                {
+                    await runChrootSteps(chrootShell, ct);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw; // user cancel is not a scenario failure
+                }
+                catch (Exception ex)
+                {
+                    return await FailWithCleanupAsync(
+                        concrete, scenarioScript,
+                        $"ISO {scenario} chroot steps failed: {ex.Message}", output, ct);
+                }
+            }
+
+            // ── Phase 3: finalize (automation user, sync, unmount) ──────
+            var finalize = await RunPhaseAsync(
+                concrete, scenario, scenarioScript,
+                $"finalize {BashSingleQuote(sshPublicKey ?? "")}",
+                progress, output, ct);
+            if (finalize.failed)
+                return await FailWithCleanupAsync(concrete, scenarioScript, finalize.message!, output, ct);
+
+            // A protocol line may also record the target's vsock capability
+            // for Phase 4b's post-boot NIC decision.
+            if (finalize.hvsockCapability is { } cap)
+                _logger.LogInformation("Target vsock capability: {Capability}", cap);
+
+            // Scripts exit non-zero on failure — the transport throws on
+            // that, so reaching here means exit 0. CollectedOutput is the
+            // ONLY record of what the guest did once the flip removes the
+            // guest-side autorun log — keep it on success too.
+            return IsoBootCycleResult.Succeeded(output.ToString());
+        }
+
+        /// <summary>
+        /// Streams one scenario phase and appends its output. Returns a
+        /// (failed, message, hvsockCapability) tuple; <c>failed</c> is true
+        /// only for phase failures (timeout/exception), never for user
+        /// cancellation (which rethrows).
+        /// </summary>
+        private async Task<(bool failed, string? message, string? hvsockCapability)> RunPhaseAsync(
+            SshGuestShell shell, string scenario, string scenarioScript, string phaseArgs,
+            IProgress<CreateVMProgressInfo>? progress, System.Text.StringBuilder output, CancellationToken ct)
+        {
+            string command = $"sudo bash {GuestScriptDir}/{scenarioScript} {phaseArgs}";
             var parser = new ProtocolLineParser(progress, _logger, scenario);
             try
             {
-                await concrete.RunStreamingCommandAsync(
+                await shell.RunStreamingCommandAsync(
                     command, ScenarioTotalTimeout, ScenarioIdleTimeout, parser.OnLine, ct);
             }
             catch (TimeoutException tex)
             {
-                return IsoBootCycleResult.Failed(
-                    $"ISO {scenario} scenario timed out: {tex.Message}", parser.CollectedOutput);
+                return (true, $"ISO {scenario} scenario timed out: {tex.Message}", parser.HvsockCapability);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -114,20 +174,40 @@ namespace VMCreate.HyperV.VmCreation
             }
             catch (Exception ex)
             {
-                return IsoBootCycleResult.Failed(
-                    $"ISO {scenario} scenario failed: {ex.Message}", parser.CollectedOutput);
+                return (true, $"ISO {scenario} scenario failed: {ex.Message}", parser.HvsockCapability);
             }
+            finally
+            {
+                lock (output) output.AppendLine(parser.CollectedOutput);
+            }
+            return (false, null, parser.HvsockCapability);
+        }
 
-            // A protocol line may also record the target's vsock capability
-            // for Phase 4b's post-boot NIC decision.
-            if (parser.HvsockCapability is { } cap)
-                _logger.LogInformation("Target vsock capability: {Capability}", cap);
-
-            // Scripts exit non-zero on failure — the transport throws on
-            // that, so reaching here means exit 0. CollectedOutput is the
-            // ONLY record of what the guest did once the flip removes the
-            // guest-side autorun log (plan §1.4) — keep it on success too.
-            return IsoBootCycleResult.Succeeded(parser.CollectedOutput);
+        /// <summary>
+        /// Failure path: best-effort 'cleanup' sub-command (sync + unmount)
+        /// BEFORE the cycle runner collects logs and powers off — a failed
+        /// prepare or chroot step must not leave the target filesystem
+        /// mounted/dirty. Cleanup failures are logged, never surfaced: the
+        /// original phase error is the actionable one.
+        /// </summary>
+        private async Task<IsoBootCycleResult> FailWithCleanupAsync(
+            SshGuestShell shell, string scenarioScript, string error,
+            System.Text.StringBuilder output, CancellationToken ct)
+        {
+            try
+            {
+                using var bounded = CancellationTokenSource.CreateLinkedTokenSource(CancellationToken.None);
+                bounded.CancelAfter(TimeSpan.FromSeconds(90));
+                await shell.RunCommandAsync(
+                    $"sudo bash {GuestScriptDir}/{scenarioScript} cleanup",
+                    TimeSpan.FromSeconds(90), bounded.Token);
+                _logger.LogInformation("ISO failure-path cleanup completed");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "ISO failure-path cleanup failed (non-fatal) — target may need manual unmount");
+            }
+            lock (output) return IsoBootCycleResult.Failed(error, output.ToString());
         }
 
         /// <summary>POSIX single-quote wrapping for argv safety.</summary>

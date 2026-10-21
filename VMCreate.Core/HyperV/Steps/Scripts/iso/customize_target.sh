@@ -5,18 +5,65 @@ set -eo pipefail
 # into it and apply customizations without cloning. The HOST decides the
 # scenario; ported 1:1 from hyperv-convert-iso customize_only.sh.
 #
-# Usage: customize_target.sh [xrdp_flag] [nameservers] [swap_mb] [ssh_pubkey]
+# Split into sub-commands so the host can run chroot-capable customization
+# steps BETWEEN the phases (mounts persist in the live ISO across SSH
+# sessions):
+#
+#   customize_target.sh prepare [xrdp_flag] [nameservers] [swap_mb]
+#       Mount the target, bind-mount /dev /proc /sys, run the built-in
+#       chroot work (Hyper-V packages, xrdp, network fixes…). Leaves the
+#       mounts in place — the host continues with chroot step execution.
+#       MUST NOT unmount on exit: failure or success, the next phase (or
+#       the host's cleanup call) owns unmounting.
+#   customize_target.sh finalize [ssh_pubkey]
+#       Automation user, HVSOCK report, sync + unmount.
+#   customize_target.sh cleanup
+#       sync + unmount. Failure-path only: the host calls this before
+#       collecting logs and powering off, so a failed prepare or chroot
+#       step never leaves the target filesystem dirty.
+#
+# Legacy single-invocation behavior is gone: the host always drives the
+# phases in order (prepare → chroot steps → finalize).
 source /opt/vmcreate/common.sh
 
-XRDP_FLAG="${1:-false}"
-VMCREATE_NAMESERVERS="${2:-}"
-VMCREATE_SWAP_MB="${3:-8192}"
-SSH_PUBKEY="${4:-}"
+SUBCOMMAND="${1:-}"
+case "$SUBCOMMAND" in
+    prepare)
+        XRDP_FLAG="${2:-false}"
+        VMCREATE_NAMESERVERS="${3:-}"
+        VMCREATE_SWAP_MB="${4:-8192}"
+        ;;
+    finalize)
+        SSH_PUBKEY="${2:-}"
+        ;;
+    cleanup)
+        ;;
+    *)
+        echo "Usage: $0 prepare [xrdp_flag] [nameservers] [swap_mb] | finalize [ssh_pubkey] | cleanup" >&2
+        exit 2
+        ;;
+esac
 
-# Set trap for cleanup on script exit
-trap cleanup_mounts EXIT
+# Failure-path sub-command: the host calls this after a failed prepare or
+# chroot step, BEFORE collecting logs and powering off, so the target
+# filesystem is synced and unmounted (dirty unmount = btrfs recovery on
+# next boot at best, corruption at worst). Idempotent — safe to call even
+# if prepare never reached the mounts.
+if [ "$SUBCOMMAND" = "cleanup" ]; then
+    echo "customize_target.sh cleanup: syncing and unmounting"
+    sync
+    cleanup_mounts
+    echo "customize_target.sh cleanup completed"
+    exit 0
+fi
 
 report_progress "CUSTOMIZE_START" "Starting customize-only mode"
+
+# ── prepare: mount target + built-in chroot work ──────────────────────
+# Everything from here through the xrdp block runs ONLY in prepare; the
+# mounts stay up so the host can execute chroot-capable customization
+# steps between prepare and finalize.
+if [ "$SUBCOMMAND" = "prepare" ]; then
 
 # In customize-only mode there is exactly one partitioned disk attached.
 # The ISO boots from DVD; the target disk is the only /dev/sd* device.
@@ -230,7 +277,16 @@ fi
 # customization runs over SSH with bash scripts; pwsh/PS-remoting was never
 # consumed by the host.
 
+echo "customize_target.sh prepare completed (mounts held for chroot steps)"
+
+fi # ── end prepare ────────────────────────────────────────────────────
+
+# ── finalize: after the host's chroot steps ───────────────────────────
+if [ "$SUBCOMMAND" = "finalize" ]; then
+
 # ── Stop Tor daemon if we started it ─────────────────────────────────
+# Tor serves the chroot's apt; it must survive the host's chroot steps
+# (they may run apt too) and stops only now.
 stop_tor_if_running
 
 # ── Create automation user and inject SSH key on target VM ───────────
@@ -265,6 +321,8 @@ echo "VMCREATE:HVSOCK:${hvsock_found}"
 progress 100 "customize workflow complete"
 sync
 cleanup_mounts
-trap - EXIT
-echo "customize_target.sh completed"
+echo "customize_target.sh finalize completed"
+
+fi # ── end finalize ───────────────────────────────────────────────────
+
 exit 0

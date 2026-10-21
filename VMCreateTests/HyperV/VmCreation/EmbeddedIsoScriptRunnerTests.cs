@@ -94,29 +94,116 @@ namespace VMCreate.Tests.HyperV.VmCreation
         }
 
         [TestMethod]
-        public async Task UploadsAllFourScripts_ThenRunsScenarioWithArgs()
+        public async Task UploadsAllFourScripts_ThenRunsPrepareAndFinalizePhases()
         {
             var result = await RunAsync("clone", "ssh-ed25519 AAAAKEY vmcreate user@host");
             Assert.IsTrue(result.Success, result.ErrorMessage);
 
-            string? streamed = _commands.FirstOrDefault(c => c.StartsWith("[stream] "));
-            Assert.IsNotNull(streamed, "scenario must run streamed");
-            StringAssert.Contains(streamed, "sudo bash /opt/vmcreate/clone_disk.sh");
-            // xrdp flag leads the argv (false by default — asserted via the
-            // word boundary so 'false' doesn't match inside other words).
-            Assert.IsTrue(streamed.Contains("/clone_disk.sh false "), "xrdp flag position");
-            // Pubkey with spaces arrives as ONE single-quoted argv word.
-            StringAssert.Contains(streamed, "'ssh-ed25519 AAAAKEY vmcreate user@host'");
+            var streamed = _commands.Where(c => c.StartsWith("[stream] ")).ToList();
+            Assert.AreEqual(2, streamed.Count, "prepare + finalize phases");
+            StringAssert.Contains(streamed[0], "sudo bash /opt/vmcreate/clone_disk.sh");
+            // prepare argv: xrdp flag leads (false by default), nameservers,
+            // swap. No pubkey — that belongs to finalize.
+            StringAssert.Contains(streamed[0], "/clone_disk.sh prepare false ");
+            Assert.IsFalse(streamed[0].Contains("AAAAKEY"), "pubkey must not leak into prepare argv");
+            // finalize argv: the pubkey as ONE single-quoted argv word.
+            StringAssert.Contains(streamed[1], "/clone_disk.sh finalize 'ssh-ed25519 AAAAKEY vmcreate user@host'");
         }
 
         [TestMethod]
-        public async Task PubkeyWithSingleQuote_IsShellEscaped()
+        public async Task ChrootSteps_RunBetweenPhases_ThroughChrootShell()
+        {
+            var seen = new List<GuestExecutionContext>();
+
+            var result = await _runner.RunAsync(
+                _shell.Object, "customize", null, null!, new VmCustomizations(), null, CancellationToken.None,
+                (chrootShell, ct) =>
+                {
+                    seen.Add(chrootShell.Context);
+                    _commands.Add("[chroot-steps]");
+                    return Task.CompletedTask;
+                });
+
+            Assert.IsTrue(result.Success, result.ErrorMessage);
+            Assert.AreEqual(1, seen.Count, "delegate runs exactly once");
+            Assert.AreEqual(GuestExecutionContext.Chroot, seen[0], "delegate receives the chroot shell");
+
+            // Ordering: the delegate must run BETWEEN the two streamed phases.
+            int prepare = _commands.FindIndex(c => c.StartsWith("[stream] ") && c.Contains(" prepare "));
+            int steps = _commands.IndexOf("[chroot-steps]");
+            int finalize = _commands.FindLastIndex(c => c.StartsWith("[stream] ") && c.Contains(" finalize "));
+            Assert.IsTrue(prepare >= 0 && steps > prepare && finalize > steps,
+                $"expected prepare < chroot steps < finalize, got {prepare}/{steps}/{finalize}");
+        }
+
+        [TestMethod]
+        public async Task PrepareFailure_TriggersCleanup_AndReturnsFailure()
+        {
+            var cleanupCalls = new List<string>();
+            _shell
+                .Setup(m => m.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync("")
+                .Callback((string cmd, TimeSpan _, CancellationToken _) => cleanupCalls.Add(cmd));
+            _shell
+                .Setup(m => m.RunStreamingCommandAsync(
+                    It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<TimeSpan>(),
+                    It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
+                .Throws(new InvalidOperationException("guest exploded"));
+
+            var result = await RunAsync();
+
+            Assert.IsFalse(result.Success);
+            StringAssert.Contains(result.ErrorMessage, "guest exploded");
+            CollectionAssert.AreEqual(new[] { "sudo bash /opt/vmcreate/customize_target.sh cleanup" }, cleanupCalls,
+                "failure path must sync+unmount the target before the runner powers off");
+        }
+
+        [TestMethod]
+        public async Task ChrootStepFailure_TriggersCleanup_AndReturnsFailure()
+        {
+            var cleanupCalls = new List<string>();
+            _shell
+                .Setup(m => m.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync("")
+                .Callback((string cmd, TimeSpan _, CancellationToken _) => cleanupCalls.Add(cmd));
+
+            var result = await _runner.RunAsync(
+                _shell.Object, "customize", null, null!, new VmCustomizations(), null, CancellationToken.None,
+                (_, _) => throw new InvalidOperationException("step blew up"));
+
+            Assert.IsFalse(result.Success);
+            StringAssert.Contains(result.ErrorMessage, "chroot steps failed");
+            StringAssert.Contains(result.ErrorMessage, "step blew up");
+            Assert.AreEqual(1, cleanupCalls.Count, "cleanup called once");
+        }
+
+        [TestMethod]
+        public async Task CleanupFailure_IsNonFatal_OriginalErrorWins()
+        {
+            _shell
+                .Setup(m => m.RunStreamingCommandAsync(
+                    It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<TimeSpan>(),
+                    It.IsAny<Action<string>>(), It.IsAny<CancellationToken>()))
+                .Throws(new InvalidOperationException("guest exploded"));
+            _shell
+                .Setup(m => m.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new TimeoutException("cleanup timed out"));
+
+            var result = await RunAsync();
+
+            Assert.IsFalse(result.Success);
+            StringAssert.Contains(result.ErrorMessage, "guest exploded",
+                "the original phase error must not be masked by the cleanup failure");
+        }
+
+        [TestMethod]
+        public async Task PubkeyWithSingleQuote_IsShellEscaped_InFinalize()
         {
             var result = await RunAsync("customize", "ssh-ed25519 AAAA it's a key");
             Assert.IsTrue(result.Success, result.ErrorMessage);
-            string? streamed = _commands.FirstOrDefault(c => c.StartsWith("[stream] "));
-            Assert.IsNotNull(streamed);
-            StringAssert.Contains(streamed, "'ssh-ed25519 AAAA it'\\''s a key'");
+            var finalize = _commands.LastOrDefault(c => c.StartsWith("[stream] "));
+            Assert.IsNotNull(finalize, "finalize phase must run");
+            StringAssert.Contains(finalize, "'ssh-ed25519 AAAA it'\\''s a key'");
         }
 
         [TestMethod]

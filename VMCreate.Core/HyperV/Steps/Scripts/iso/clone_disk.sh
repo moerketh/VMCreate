@@ -5,32 +5,79 @@ set -eo pipefail
 # The HOST decides the scenario and uploads this script; no KVP signaling,
 # no guest-side decision. Ported 1:1 from hyperv-convert-iso autorun.sh.
 #
-# Usage: clone_disk.sh [xrdp_flag] [nameservers] [swap_mb] [ssh_pubkey]
+# Split into sub-commands so the host can run chroot-capable customization
+# steps BETWEEN the phases (mounts persist in the live ISO across SSH
+# sessions):
+#
+#   clone_disk.sh prepare [xrdp_flag] [nameservers] [swap_mb]
+#       Full clone: partition, partclone, GRUB, initramfs, then the built-in
+#       chroot work (Hyper-V packages, xrdp, network fixes…). Leaves the
+#       mounts in place — the host continues with chroot step execution.
+#   clone_disk.sh finalize [ssh_pubkey]
+#       Automation user, ESP redirect grub.cfg (must stay AFTER every chroot
+#       apt call — Ubuntu's signed-grub dpkg trigger overwrites it), sync +
+#       unmount.
+#   clone_disk.sh cleanup
+#       sync + unmount. Failure-path only: the host calls this before
+#       collecting logs and powering off, so a failed prepare or chroot
+#       step never leaves the target filesystem dirty.
+#
+# Legacy single-invocation behavior is gone: the host always drives the
+# phases in order (prepare → chroot steps → finalize).
 #   xrdp_flag   "true" installs xrdp in the target (Enhanced Session)
 #   nameservers comma-separated DNS for the chroot (host-resolved)
 #   swap_mb     swap file size in MB (default 8192)
 #   ssh_pubkey  public key for the target's automation user
 source /opt/vmcreate/common.sh
 
-XRDP_FLAG="${1:-false}"
-VMCREATE_NAMESERVERS="${2:-}"
-VMCREATE_SWAP_MB="${3:-8192}"
-SSH_PUBKEY="${4:-}"
+SUBCOMMAND="${1:-}"
+case "$SUBCOMMAND" in
+    prepare)
+        XRDP_FLAG="${2:-false}"
+        VMCREATE_NAMESERVERS="${3:-}"
+        VMCREATE_SWAP_MB="${4:-8192}"
+        ;;
+    finalize)
+        SSH_PUBKEY="${2:-}"
+        ;;
+    cleanup)
+        ;;
+    *)
+        echo "Usage: $0 prepare [xrdp_flag] [nameservers] [swap_mb] | finalize [ssh_pubkey] | cleanup" >&2
+        exit 2
+        ;;
+esac
 
-echo "=== clone_disk.sh started at $(date -Iseconds) ==="
+# Failure-path sub-command: see header. Idempotent — safe to call even if
+# prepare never reached the mounts.
+if [ "$SUBCOMMAND" = "cleanup" ]; then
+    echo "clone_disk.sh cleanup: syncing and unmounting"
+    sync
+    cleanup_mounts
+    echo "clone_disk.sh cleanup completed"
+    exit 0
+fi
+
+echo "=== clone_disk.sh ($SUBCOMMAND) started at $(date -Iseconds) ==="
 echo "vmcreate-iso version: $(cat /etc/vmcreate-iso-version 2>/dev/null || echo 'unknown')"
 echo "--- Environment ---"
 echo "Kernel: $(uname -r)"
 lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT 2>&1 || true
 
 
-# Set trap for cleanup on script exit
-trap cleanup_mounts EXIT
-
 # Detect disks: new (empty, no partitions) and old (has partitions)
 detect_disks
 
 report_progress "PREFLIGHT" "Disk detection complete"
+
+# ── prepare: clone + mount + built-in chroot work ─────────────────────
+# Everything from here through the xrdp block runs ONLY in prepare; the
+# mounts stay up so the host can execute chroot-capable customization
+# steps between prepare and finalize.
+if [ "$SUBCOMMAND" != "prepare" ]; then
+    # finalize: /mnt/new was mounted by prepare; skip to its own section.
+    true
+else
 
 # Run pre-flight checks before proceeding with disk operations
 preflight_checks
@@ -301,7 +348,16 @@ fi
 # customization runs over SSH with bash scripts; pwsh/PS-remoting was never
 # consumed by the host.
 
+echo "clone_disk.sh prepare completed (mounts held for chroot steps)"
+
+fi # ── end prepare ────────────────────────────────────────────────────
+
+# ── finalize: after the host's chroot steps ───────────────────────────
+if [ "$SUBCOMMAND" = "finalize" ]; then
+
 # ── Stop Tor daemon if we started it ─────────────────────────────────
+# Tor serves the chroot's apt; it must survive the host's chroot steps
+# (they may run apt too) and stops only now.
 stop_tor_if_running
 
 # ── Create automation user and inject SSH key on target VM ───────────
@@ -327,7 +383,10 @@ if [ -d /mnt/new/boot/grub2 ]; then
 else
     _grub_dir="/boot/grub"
 fi
-_root_uuid=$(blkid -o value -s UUID "${new_disk}2" 2>/dev/null || true)
+# Session-independent root source: prepare ran in a different SSH session,
+# so its $new_disk variable is gone here — derive the root partition from
+# the mount itself.
+_root_uuid=$(blkid -o value -s UUID "$(findmnt -n -o SOURCE /mnt/new)" 2>/dev/null || true)
 if [ -n "$_root_uuid" ]; then
     # Discover the distro-specific EFI directory from install_grub.sh output
     # (it writes to EFI/<distro_id>/ via --bootloader-id)
@@ -365,7 +424,6 @@ fi
 rm -rf /mnt/new/opt/vmcreate
 
 report_progress "REBOOT" "Shutting down VM to boot from converted disk"
-echo "autorun completed"
 
 # ── Final contract: everything unmounted and synced ──────────────────
 # The host powers off after this script exits; if the shutdown budget is
@@ -374,6 +432,8 @@ echo "autorun completed"
 progress 100 "clone workflow complete"
 sync
 cleanup_mounts
-trap - EXIT
-echo "clone_disk.sh completed"
+echo "clone_disk.sh finalize completed"
+
+fi # ── end finalize ───────────────────────────────────────────────────
+
 exit 0

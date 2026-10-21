@@ -361,8 +361,14 @@ namespace VMCreate.HyperV.VmCreation
         /// <param name="sshPublicKey">The automation-user key the runner
         /// already delivered via KVP — also becomes the scenario script's
         /// pubkey argument (single source of truth).</param>
+        /// <param name="runChrootSteps">Optional: runs the deployment's
+        /// chroot-capable customization steps between the scenario's
+        /// <c>prepare</c> and <c>finalize</c> phases, through the
+        /// <see cref="ChrootGuestShell"/> decorator over the same ISO
+        /// shell. Null when the deployment has no chroot steps.</param>
         Task<IsoBootCycleResult> RunAsync(
             IGuestShell shell, string scenario, string? sshPublicKey, VmCreationContext context,
-            VmCustomizations customizations, IProgress<CreateVMProgressInfo>? progress, CancellationToken ct);
+            VmCustomizations customizations, IProgress<CreateVMProgressInfo>? progress, CancellationToken ct,
+            Func<ChrootGuestShell, CancellationToken, Task>? runChrootSteps = null);
     }
 }
