@@ -209,6 +209,14 @@ namespace VMCreate.HyperV.VmCreation
                     StepName = step.Name
                 });
 
+                // Splash relay: the chroot itself has no plymouth, and the
+                // heartbeat lines are watchdog-only (filtered host-side), so
+                // the executor drives the splash directly through the LIVE
+                // ISO shell — same call common.sh's progress() makes. A
+                // missing plymouth daemon (verbose GRUB entry) must not
+                // fail the step: best-effort with swallowed errors.
+                await shell.ShowOnSplashAsync(step.Name, completed * 100 / Math.Max(total, 1), cancellationToken);
+
                 await step.ExecuteAsync(shell, item, customizations, _logger, cancellationToken);
 
                 chrootCompleted.Add(step.Name);
@@ -217,6 +225,7 @@ namespace VMCreate.HyperV.VmCreation
             }
 
             shell.CurrentStepLabel = null;
+            await shell.ShowOnSplashAsync(null, 100, cancellationToken);
             progress.Report(CreateVMProgressInfo.ForProgress(VmDeploymentPhase.Customize, 100));
         }
 

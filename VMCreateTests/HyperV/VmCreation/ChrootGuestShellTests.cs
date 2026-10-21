@@ -81,6 +81,40 @@ namespace VMCreate.Tests.HyperV.VmCreation
         }
 
         [TestMethod]
+        public async Task ShowOnSplashAsync_RoutesThroughTheLiveIsoShell_NotTheChroot()
+        {
+            var shell = Create(out var iso);
+
+            await shell.ShowOnSplashAsync("Sync Timezone", 40, CancellationToken.None);
+            await shell.ShowOnSplashAsync(null, 100, CancellationToken.None);
+
+            Assert.AreEqual(2, iso.SplashCommands.Count, "one splash command per call, on the ISO shell");
+            StringAssert.Contains(iso.SplashCommands[0], "plymouth display-message --text='Sync Timezone'");
+            StringAssert.Contains(iso.SplashCommands[0], "plymouth system-update --progress=40");
+            // Message-less call advances the bar only.
+            Assert.IsFalse(iso.SplashCommands[1].Contains("--text", StringComparison.Ordinal));
+            StringAssert.Contains(iso.SplashCommands[1], "--progress=100");
+            // Never through the chroot wrapper.
+            foreach (string cmd in iso.SplashCommands)
+                Assert.IsFalse(cmd.Contains("/mnt/new", StringComparison.Ordinal), "plymouth runs on the live ISO");
+        }
+
+        [TestMethod]
+        public async Task ShowOnSplashAsync_SwallowsFailures_ExceptCancellation()
+        {
+            var shell = Create(out var iso);
+            iso.SplashThrows = new InvalidOperationException("plymouth absent");
+
+            // Must not throw — the splash is cosmetic.
+            await shell.ShowOnSplashAsync("Step", 10, CancellationToken.None);
+
+            var cts = new CancellationTokenSource();
+            cts.Cancel();
+            await Assert.ThrowsAsync<OperationCanceledException>(
+                () => shell.ShowOnSplashAsync("Step", 10, cts.Token));
+        }
+
+        [TestMethod]
         public void InnerScript_SudoShim_MapsMinusUToRunuserEnv_AndDropsFlags()
         {
             var shell = Create(out _);
@@ -116,6 +150,34 @@ namespace VMCreate.Tests.HyperV.VmCreation
 
             StringAssert.Contains(inner, "echo VMCREATE:MSG:'Install OpenVPN'");
             StringAssert.Contains(inner, "trap 'kill $_hb 2>/dev/null' EXIT");
+        }
+
+        [TestMethod]
+        public void InnerScript_HeartbeatIsSelfTerminating()
+        {
+            // The loop must watch the wrapper ($$): a step that resets the
+            // EXIT trap (EnablePasswordlessSudo style) would otherwise
+            // orphan an infinite loop that holds stdout open and hangs the
+            // SSH session until the total timeout.
+            var shell = Create(out _, label: "Any");
+            string inner = ExtractInnerScript(shell.BuildChrootCommand("true"));
+
+            StringAssert.Contains(inner, "while kill -0 $$ 2>/dev/null; do");
+            Assert.IsFalse(inner.Contains("while :; do", StringComparison.Ordinal),
+                "an unconditional heartbeat loop is not survivable");
+        }
+
+        [TestMethod]
+        public void InnerScript_RunsCommandInSubshell()
+        {
+            // The subshell is what protects the wrapper's EXIT trap (and the
+            // heartbeat kill) from a hostile step command.
+            var shell = Create(out _, label: null);
+            string inner = ExtractInnerScript(shell.BuildChrootCommand("sudo bash /tmp/tool.sh"));
+
+            StringAssert.Contains(inner, "( sudo bash /tmp/tool.sh )");
+            Assert.IsTrue(inner.TrimEnd().EndsWith(")", StringComparison.Ordinal),
+                "the subshell must be the last construct — nothing may run after it");
         }
 
         [TestMethod]
@@ -226,6 +288,8 @@ namespace VMCreate.Tests.HyperV.VmCreation
             public List<StreamedCall> StreamedCommands { get; } = new();
             public List<string> CopiedPaths { get; } = new();
             public List<(string Command, string Stdin)> StdinCalls { get; } = new();
+            public List<string> SplashCommands { get; } = new();
+            public Exception? SplashThrows { get; set; }
 
             public override Task<string> RunStreamingCommandAsync(
                 string linuxCommand, TimeSpan timeout, TimeSpan idleTimeout,
@@ -239,6 +303,18 @@ namespace VMCreate.Tests.HyperV.VmCreation
                     "XRDP_POSTBOOT_RESULT=already",
                 })
                     onStdoutLine(line);
+                return Task.FromResult("");
+            }
+
+            public override Task<string> RunCommandAsync(string command, TimeSpan timeout, CancellationToken ct)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (SplashThrows is not null) throw SplashThrows;
+                if (command.Contains("plymouth", StringComparison.Ordinal))
+                {
+                    SplashCommands.Add(command);
+                    return Task.FromResult("");
+                }
                 return Task.FromResult("");
             }
 

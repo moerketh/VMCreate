@@ -51,6 +51,10 @@ esac
 # if prepare never reached the mounts.
 if [ "$SUBCOMMAND" = "cleanup" ]; then
     echo "customize_target.sh cleanup: syncing and unmounting"
+    # Remove the chroot's service-start guard (prepare put it there for
+    # the host's chroot steps): a leftover would deny service starts on
+    # the failed target's next boot too.
+    rm -f /mnt/new/usr/sbin/policy-rc.d 2>/dev/null || true
     sync
     cleanup_mounts
     echo "customize_target.sh cleanup completed"

@@ -32,8 +32,12 @@ namespace VMCreate.HyperV.VmCreation
     /// stretches (initramfs regeneration, dracut) would trip the idle
     /// watchdog, so the wrapper starts a guest-side heartbeat loop that
     /// emits <c>VMCREATE:MSG:&lt;label&gt;</c> lines — any stdout line
-    /// satisfies the watchdog, and the repeated identical message updates
-    /// the splash with the current step name.
+    /// satisfies the idle watchdog and keeps the session alive. These lines
+    /// are host-side only: <see cref="ExecuteWrappedAsync"/> filters them
+    /// from the step's returned stdout, and the plymouth splash is driven
+    /// separately by the executor (see
+    /// <see cref="PostBootCustomizationService.RunLinuxChrootAsync"/>),
+    /// which relays each step name through the ISO shell.
     /// </para>
     /// <para>
     /// File transfers (<see cref="CopyContentAsync"/> etc.) prefix the
@@ -100,6 +104,34 @@ namespace VMCreate.HyperV.VmCreation
 
         public Task WaitForReadyAsync(CancellationToken ct) => _iso.WaitForReadyAsync(ct);
 
+        /// <summary>
+        /// Best-effort splash update on the LIVE ISO (not the chroot — the
+        /// chroot has no plymouth): <c>plymouth display-message</c> plus the
+        /// determinate progress bar, mirroring common.sh's progress(). A
+        /// null <paramref name="message"/> only advances the bar. Failures
+        /// (no plymouth daemon under the verbose GRUB entry, transport
+        /// hiccup) are logged and swallowed: the splash is cosmetic and must
+        /// never fail a customization step.
+        /// </summary>
+        public async Task ShowOnSplashAsync(string? message, int percent, CancellationToken ct)
+        {
+            string text = message is null ? "" : " --text='" + SshTransport.EscapeSingleQuotes(message) + "'";
+            string cmd = $"sudo plymouth display-message{text} >/dev/null 2>&1 || true; "
+                       + $"sudo plymouth system-update --progress={Math.Clamp(percent, 0, 100)} >/dev/null 2>&1 || true";
+            try
+            {
+                await _iso.RunCommandAsync(cmd, TimeSpan.FromSeconds(15), ct);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Splash update skipped on VM {VMName} (plymouth absent or unreachable)", VmName);
+            }
+        }
+
         // ── Wrapping ─────────────────────────────────────────────────────
 
         /// <summary>
@@ -156,14 +188,28 @@ namespace VMCreate.HyperV.VmCreation
             string heartbeat = "";
             if (!string.IsNullOrWhiteSpace(CurrentStepLabel))
             {
-                // Single-quote the label in the inner script (already
-                // POSIX-escaped) so $, " and ` in a step name can't expand.
+                // Self-terminating heartbeat: the loop watches the parent
+                // bash ($$) and exits on its own when the wrapper dies, so
+                // the loop can never outlive the session even if the step
+                // command replaces the EXIT trap (EnablePasswordlessSudo
+                // style) — an orphaned loop holding stdout open would hang
+                // the SSH call until the total timeout instead of failing
+                // fast. An explicit kill on wrapper exit remains as a
+                // fast path (the loop's sleep can outlive $$ by one
+                // interval otherwise).
+                // The label is single-quoted (POSIX-escaped) so $, " and `
+                // in a step name can't expand.
                 string label = SshTransport.EscapeSingleQuotes(CurrentStepLabel);
-                heartbeat = "\n( while :; do sleep " + (int)HeartbeatInterval.TotalSeconds + "; "
+                heartbeat = "\n( while kill -0 $$ 2>/dev/null; do sleep "
+                          + (int)HeartbeatInterval.TotalSeconds + "; "
                           + $"echo VMCREATE:MSG:'{label}'; done ) &\n_hb=$!\ntrap 'kill $_hb 2>/dev/null' EXIT\n";
             }
 
-            return shim + heartbeat + command;
+            // The step command runs in a SUBSHELL: its exit status
+            // propagates ($?), but any trap it installs (or resets) stays
+            // inside the subshell and cannot clobber the wrapper's EXIT
+            // trap — the heartbeat kill survives hostile commands.
+            return shim + heartbeat + "( " + command + " )";
         }
 
         // ── Streaming execution ──────────────────────────────────────────

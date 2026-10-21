@@ -77,14 +77,21 @@ for mod in vmw_balloon vmw_pvscsi vmw_vmxnet3 vmwgfx vmw_vmci; do
 done
 
 # -- Step 6: Regenerate initramfs (critical -- applies blacklist) ----------
+# The chroot is a less-proven environment than the live system, so the
+# exit code is captured and reported: a silent failure here leaves the
+# blacklist unapplied until the next kernel update.
+_initramfs_rc=0
 if command -v update-initramfs >/dev/null 2>&1; then
-    update-initramfs -u -k all 2>&1 || true
+    update-initramfs -u -k all 2>&1 || _initramfs_rc=$?
 elif command -v dracut >/dev/null 2>&1; then
-    dracut --regenerate-all --force 2>&1 || true
+    dracut --regenerate-all --force 2>&1 || _initramfs_rc=$?
 elif command -v mkinitcpio >/dev/null 2>&1; then
-    mkinitcpio -P 2>&1 || true
+    mkinitcpio -P 2>&1 || _initramfs_rc=$?
 elif command -v mkinitrd >/dev/null 2>&1; then
-    mkinitrd 2>&1 || true
+    mkinitrd 2>&1 || _initramfs_rc=$?
+fi
+if [ "$_initramfs_rc" -ne 0 ]; then
+    echo "WARNING: initramfs regeneration failed (exit $_initramfs_rc) — the VMware blacklist may not be active until the next kernel update"
 fi
 
 # -- Step 7: Update GRUB (removes any VMware references) --------------------

@@ -315,7 +315,8 @@ namespace VMCreate.Tests.HyperV.VmCreation
             MarkChrootCapability(capableB, true);
             MarkChrootCapability(incapable, false);
 
-            var shell = new ChrootGuestShell(ShellProbe(), _stepLoggerMock.Object);
+            var isoShell = new SplashRecordingShell();
+            var shell = new ChrootGuestShell(isoShell, _stepLoggerMock.Object);
             await service.RunLinuxChrootAsync(
                 shell,
                 VmDeploymentPlan.FromSettings(new VmSettings { VMName = "TestVM" }),
@@ -330,6 +331,27 @@ namespace VMCreate.Tests.HyperV.VmCreation
             _progressMock.Verify(p => p.Report(It.Is<CreateVMProgressInfo>(
                 r => r.Phase == VmDeploymentPhase.Customize && r.StepName == "CapableA")), Times.Once,
                 "chroot steps report on the Customize phase (splash + pre-boot cards)");
+
+            // Splash relay: every executed step name reaches plymouth on the
+            // LIVE ISO shell (the chroot has no plymouth).
+            CollectionAssert.AreEqual(new[] { "CapableA", "CapableB", null }, isoShell.SplashMessages,
+                "each step is announced on the splash, plus the final 100%");
+        }
+
+        /// <summary>ISO-side shell that records splash relay calls.</summary>
+        private sealed class SplashRecordingShell : SshGuestShell
+        {
+            public SplashRecordingShell() : base(Mock.Of<ILogger>(), "TestVM", "key") { }
+
+            public List<string?> SplashMessages { get; } = new();
+
+            public override Task<string> RunCommandAsync(string command, TimeSpan timeout, CancellationToken ct)
+            {
+                const string marker = "plymouth display-message --text='";
+                int start = command.IndexOf(marker, StringComparison.Ordinal);
+                SplashMessages.Add(start >= 0 ? command[(start + marker.Length)..command.IndexOf('\'', start + marker.Length)] : null);
+                return Task.FromResult("");
+            }
         }
 
         [TestMethod]
@@ -359,9 +381,6 @@ namespace VMCreate.Tests.HyperV.VmCreation
         /// SupportsChroot property through the mock's expression.</summary>
         private static void MarkChrootCapability(ICustomizationStep step, bool capable)
             => Moq.Mock.Get(step).Setup(s => s.SupportsChroot).Returns(capable);
-
-        private static SshGuestShell ShellProbe()
-            => new(Mock.Of<ILogger>(), "TestVM", "key");
 
         private static ICustomizationStep CreateExecutableStep(
             string name,
