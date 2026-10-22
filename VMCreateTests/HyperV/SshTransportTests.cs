@@ -2,7 +2,9 @@ using Microsoft.Extensions.Logging;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Moq;
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -21,72 +23,160 @@ namespace VMCreate.Tests.HyperV
         private const string VmIp = "192.168.42.7";
         private const string User = "vmcreate";
 
-        #region BuildArguments
+        #region BuildArgumentList
 
         [TestMethod]
-        public void BuildArguments_TofuMode_UsesAcceptNewAndPerVmKnownHosts()
+        public void BuildArgumentList_TofuMode_UsesAcceptNewAndPerVmKnownHosts()
         {
             string knownHosts = @"C:\Users\t\AppData\Local\Temp\VMCreate\known_hosts\test-vm.known_hosts";
-            string args = SshTransport.BuildArguments(KeyPath, VmIp, User, knownHosts, "echo hi");
+            var args = SshTransport.BuildArgumentList(KeyPath, VmIp, User, knownHosts, "echo hi");
 
-            StringAssert.Contains(args, "-o StrictHostKeyChecking=accept-new");
-            StringAssert.Contains(args, $"-o UserKnownHostsFile=\"{knownHosts}\"");
+            AssertContainsPair(args, "-o", "StrictHostKeyChecking=accept-new");
+            AssertContainsPair(args, "-o", $"UserKnownHostsFile={knownHosts}");
             Assert.IsFalse(args.Contains("StrictHostKeyChecking=no"), "TOFU mode must not disable host-key checking");
             Assert.IsFalse(args.Contains("UserKnownHostsFile=NUL"), "TOFU mode must not discard host keys");
         }
 
         [TestMethod]
-        public void BuildArguments_NoPinningMode_UsesNoAndNul()
+        public void BuildArgumentList_NoPinningMode_UsesNoAndNul()
         {
-            string args = SshTransport.BuildArguments(KeyPath, VmIp, User, null, "echo hi");
+            var args = SshTransport.BuildArgumentList(KeyPath, VmIp, User, null, "echo hi");
 
-            StringAssert.Contains(args, "-o StrictHostKeyChecking=no");
-            StringAssert.Contains(args, "-o UserKnownHostsFile=NUL");
+            AssertContainsPair(args, "-o", "StrictHostKeyChecking=no");
+            AssertContainsPair(args, "-o", "UserKnownHostsFile=NUL");
             Assert.IsFalse(args.Contains("accept-new"), "Diagnostics mode must stay permissive (transient ISO guest)");
         }
 
         [TestMethod]
-        public void BuildArguments_VsockTarget_UsesGuidHostAndAbsoluteHvcProxyCommand()
+        public void BuildArgumentList_VsockTarget_UsesGuidHostAndAbsoluteHvcProxyCommand()
         {
             var target = SshConnectionTarget.ForVsock("d811e738-5c46-4f57-a171-4f822a38f22a");
-            string args = SshTransport.BuildArguments(KeyPath, target, User, null, "echo hi");
+            var args = SshTransport.BuildArgumentList(KeyPath, target, User, null, "echo hi");
 
             // Destination is the GUID, not an IP.
-            StringAssert.Contains(args, $"{User}@d811e738-5c46-4f57-a171-4f822a38f22a");
+            StringAssert.Contains(string.Join(' ', args), $"{User}@d811e738-5c46-4f57-a171-4f822a38f22a");
             // ProxyCommand carries hvc by ABSOLUTE expanded path (anti-hijack,
             // same posture as SshExePath) and the vsock transport flag.
-            StringAssert.Contains(args, "ProxyCommand=");
-            StringAssert.Contains(args, "nc -t vsock %h 22");
+            string proxy = args.First(a => a.StartsWith("ProxyCommand=", StringComparison.Ordinal));
+            StringAssert.Contains(proxy, "nc -t vsock %h 22");
             Assert.IsTrue(
-                args.Contains(@"\System32\hvc.exe") || args.Contains("/System32/hvc.exe"),
+                proxy.Contains(@"\System32\hvc.exe") || proxy.Contains("/System32/hvc.exe"),
                 "ProxyCommand must invoke hvc.exe by absolute path");
-            Assert.IsFalse(args.Contains("%SystemRoot%"), "ssh expands %-tokens in ProxyCommand itself; the path must arrive pre-expanded");
+            Assert.IsFalse(proxy.Contains("%SystemRoot%"), "ssh expands %-tokens in ProxyCommand itself; the path must arrive pre-expanded");
         }
 
         [TestMethod]
-        public void BuildArguments_VsockTarget_NoPercentTokensExceptProxyHost()
+        public void BuildArgumentList_VsockTarget_NoPercentTokensExceptProxyHost()
         {
             // ssh performs %-token substitution inside ProxyCommand values:
-            // any other % in the argument line would be misread (e.g.
-            // %SystemRoot% as %S + "ystemRoot%"). Assert the ONLY % in the
-            // vsock argument line is the intended %h host token.
+            // any other % in the argv would be misread (e.g. %SystemRoot% as
+            // %S + "ystemRoot%"). Assert the ONLY % in the whole element
+            // list is the intended %h host token.
             var target = SshConnectionTarget.ForVsock("d811e738-5c46-4f57-a171-4f822a38f22a");
-            string args = SshTransport.BuildArguments(KeyPath, target, User, null, "echo hi");
+            var args = SshTransport.BuildArgumentList(KeyPath, target, User, null, "echo hi");
 
-            int percentCount = 0;
-            for (int i = 0; i < args.Length; i++)
-                if (args[i] == '%') percentCount++;
-            Assert.AreEqual(1, percentCount, $"exactly one % (the %h token) expected, got {percentCount}: {args}");
-            StringAssert.Contains(args, "%h");
+            int percentCount = string.Concat(args).Count(c => c == '%');
+            Assert.AreEqual(1, percentCount, $"exactly one % (the %h token) expected, got {percentCount}: {string.Join(' ', args)}");
+            StringAssert.Contains(string.Join(' ', args), "%h");
         }
 
         [TestMethod]
-        public void BuildArguments_IpTarget_HasNoProxyCommand()
+        public void BuildArgumentList_IpTarget_HasNoProxyCommand()
         {
-            // The IP path must remain byte-identical in behavior: no vsock
-            // arguments leak into post-boot connections.
-            string args = SshTransport.BuildArguments(KeyPath, VmIp, User, null, "echo hi");
-            Assert.IsFalse(args.Contains("ProxyCommand"), "IP target must not carry a ProxyCommand");
+            // The IP path must remain proxy-free: no vsock arguments leak
+            // into post-boot connections.
+            var args = SshTransport.BuildArgumentList(KeyPath, VmIp, User, null, "echo hi");
+            Assert.IsTrue(args.All(a => !a.Contains("ProxyCommand", StringComparison.Ordinal)), "IP target must not carry a ProxyCommand");
+        }
+
+        /// <summary>
+        /// The transport corrupts nothing when every element stays a whole
+        /// argv element: option flags and their values must never be fused
+        /// into one element (a fused "-o value" element would be parsed by
+        /// ssh as a single unknown option).
+        /// </summary>
+        [TestMethod]
+        public void BuildArgumentList_OptionsAreSeparateElements()
+        {
+            var args = SshTransport.BuildArgumentList(KeyPath, VmIp, User, null, "echo hi");
+
+            AssertContainsPair(args, "-i", KeyPath);
+            AssertContainsPair(args, "-o", "BatchMode=yes");
+            AssertContainsPair(args, "-o", "ConnectTimeout=10");
+            Assert.IsFalse(args.Any(a => a.StartsWith("-o ", StringComparison.Ordinal)), "option flags and values must be separate elements");
+        }
+
+        [TestMethod]
+        public void BuildArgumentList_WrapsCommandInBashC()
+        {
+            var args = SshTransport.BuildArgumentList(KeyPath, VmIp, User, null, "echo 'ready'");
+            // Payload "echo 'ready'" → 'echo '\''ready'\''' (open quote, escaped
+            // inner quote pair, close quote): the whole command is ONE literal
+            // shell word, as its own argv element right after bash -c.
+            int bashC = Array.IndexOf(args.ToArray(), "bash");
+            Assert.IsTrue(bashC >= 0 && args[bashC + 1] == "-c", "bash -c must lead the remote command");
+            Assert.AreEqual("'echo '\\''ready'\\'''", args[bashC + 2],
+                $"Expected single-quote-escaped payload element after bash -c, got: {string.Join(' ', args)}");
+            Assert.AreEqual(args.Count - 3, bashC, "the payload must be the LAST element — nothing may follow it");
+        }
+
+        /// <summary>
+        /// THE production regression: any double quote in a linuxCommand must
+        /// reach the guest byte-for-byte. Hand-quoted raw Arguments strings
+        /// lost every " to Windows argv parsing (then ssh.exe joined argv
+        /// without re-quoting), which degraded the chroot sudo shim's
+        /// <c>[ -n "$user" ]</c> to the always-true <c>[ -n $user ]</c> and
+        /// killed deployments with "runuser: user -- does not exist". As its
+        /// own ArgumentList element the payload cannot be touched.
+        /// </summary>
+        [TestMethod]
+        public void BuildArgumentList_PayloadDoubleQuotesSurviveAsElement()
+        {
+            var args = SshTransport.BuildArgumentList(KeyPath, VmIp, User, null, "if [ -n \"$user\" ]; then echo hi; fi");
+
+            string payload = args[^1];
+            StringAssert.Contains(payload, "\"$user\"", "double quotes must survive verbatim inside the payload element");
+            // The whole payload is still ONE element — no Windows quoting
+            // may split it into several argv slots.
+            Assert.AreEqual(1, args.Count(a => a.Contains("$user", StringComparison.Ordinal)));
+        }
+
+        [TestMethod]
+        public void BuildArgumentList_PayloadIsFullyEscaped()
+        {
+            // A quote-terminated command followed by a second command must be
+            // impossible: the shell-safe single-quote escape makes the whole
+            // payload one literal bash word.
+            string malicious = "echo 'don''t'; rm -rf /";
+            var args = SshTransport.BuildArgumentList(KeyPath, VmIp, User, null, malicious);
+
+            // The raw payload must NOT appear as-is anywhere in the argv: the
+            // single quotes must be broken up by the '\'' escape sequence.
+            Assert.IsFalse(args.Any(a => a.Contains("'rm -rf /", StringComparison.Ordinal)), $"Escaping failed; argv: {string.Join(' ', args)}");
+        }
+
+        [TestMethod]
+        public void BuildArgumentList_NormalizesCrLfInPayload()
+        {
+            var args = SshTransport.BuildArgumentList(KeyPath, VmIp, User, null, "a\r\nb");
+            Assert.IsFalse(string.Concat(args).Contains('\r'), "CR must be stripped before the payload hits argv");
+        }
+
+        [TestMethod]
+        public void EstimateCommandLineLength_CountsDoubledQuotes()
+        {
+            // Upper-bound estimator for the CreateProcess 32,767-char limit:
+            // each element is quoted and every internal " doubles.
+            int estimate = SshTransport.EstimateCommandLineLength(new[] { "a\"b", "plain" });
+            Assert.AreEqual(/*"a"b"→"a""b" (7) + space*/ 7 + 1 + /*"plain" (7)*/ 7, estimate);
+        }
+
+        private static void AssertContainsPair(IReadOnlyList<string> args, string flag, string value)
+        {
+            for (int i = 0; i < args.Count - 1; i++)
+                if (args[i] == flag && args[i + 1] == value)
+                    return;
+            Assert.Fail($"Expected consecutive elements [{flag}] [{value}] in: {string.Join(' ', args)}");
         }
 
         #endregion
@@ -175,54 +265,20 @@ namespace VMCreate.Tests.HyperV
         #endregion
 
         [TestMethod]
-        public void BuildArguments_AppliesCommonSshOptions()
+        public void BuildArgumentList_AppliesCommonSshOptions()
         {
-            string args = SshTransport.BuildArguments(KeyPath, VmIp, User, null, "echo hi");
+            var args = SshTransport.BuildArgumentList(KeyPath, VmIp, User, null, "echo hi");
 
             // BatchMode (never prompt), ConnectTimeout 10s, key file, target.
-            StringAssert.Contains(args, "-o BatchMode=yes");
-            StringAssert.Contains(args, "-o ConnectTimeout=10");
+            AssertContainsPair(args, "-i", KeyPath);
+            AssertContainsPair(args, "-o", "BatchMode=yes");
+            AssertContainsPair(args, "-o", "ConnectTimeout=10");
             // ServerAlive keepalives: black-holed sessions (mid-pipeline IP
             // change) must die in ~15s, not sit for the whole command timeout.
-            StringAssert.Contains(args, "-o ServerAliveInterval=5");
-            StringAssert.Contains(args, "-o ServerAliveCountMax=3");
-            StringAssert.Contains(args, $"-i \"{KeyPath}\"");
-            StringAssert.Contains(args, $" {User}@{VmIp} ");
+            AssertContainsPair(args, "-o", "ServerAliveInterval=5");
+            AssertContainsPair(args, "-o", "ServerAliveCountMax=3");
+            StringAssert.Contains(string.Join(' ', args), $" {User}@{VmIp} ");
         }
-
-        [TestMethod]
-        public void BuildArguments_WrapsCommandInBashC()
-        {
-            string args = SshTransport.BuildArguments(KeyPath, VmIp, User, null, "echo 'ready'");
-            // Payload "echo 'ready'" → 'echo '\''ready'\''' (open quote, escaped
-            // inner quote pair, close quote): the whole command is ONE literal
-            // shell word following bash -c.
-            string expectedTail = "bash -c " + "'echo '\\''ready'\\'''" ;
-            Assert.IsTrue(args.EndsWith(expectedTail, StringComparison.Ordinal),
-                $"Expected trailing bash -c with single-quote-escaped payload, got: {args}");
-        }
-
-        [TestMethod]
-        public void BuildArguments_PayloadIsFullyEscaped()
-        {
-            // A quote-terminated command followed by a second command must be
-            // impossible: the shell-safe single-quote escape makes the whole
-            // payload one literal bash word.
-            string malicious = "echo 'don''t'; rm -rf /";
-            string args = SshTransport.BuildArguments(KeyPath, VmIp, User, null, malicious);
-
-            // The raw payload must NOT appear as-is anywhere in the args: the
-            // single quotes must be broken up by the '\'' escape sequence.
-            Assert.IsFalse(args.Contains("'rm -rf /"), $"Escaping failed; args: {args}");
-        }
-
-        [TestMethod]
-        public void BuildArguments_NormalizesCrLfInPayload()
-        {
-            string args = SshTransport.BuildArguments(KeyPath, VmIp, User, null, "a\r\nb");
-            Assert.IsFalse(args.Contains("\r"), "CR must be stripped before the payload hits argv");
-        }
-
 
         #region Escaping helpers
         [TestMethod]

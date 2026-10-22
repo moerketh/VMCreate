@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 
 namespace VMCreate
@@ -35,15 +36,18 @@ namespace VMCreate
         public TargetKind Kind { get; }
 
         /// <summary>
-        /// Extra ssh arguments for this target. For vsock, the ProxyCommand
-        /// invoking hvc.exe by ABSOLUTE path — ssh expands %-tokens in
-        /// ProxyCommand values itself, so the path must already be expanded
-        /// (never pass a literal %SystemRoot% through; ssh would read it as
-        /// the token %S).
+        /// Extra ssh arguments for this target as distinct argv elements.
+        /// For vsock, the ProxyCommand invoking hvc.exe by ABSOLUTE path —
+        /// ssh expands %-tokens in ProxyCommand values itself, so the path
+        /// must already be expanded (never pass a literal %SystemRoot%
+        /// through; ssh would read it as the token %S). Elements are passed
+        /// to <see cref="System.Diagnostics.ProcessStartInfo.ArgumentList"/>,
+        /// so they reach ssh.exe verbatim; any quotes are ssh's own
+        /// ProxyCommand syntax, not Windows command-line quoting.
         /// </summary>
-        public string? ExtraArguments { get; }
+        public IReadOnlyList<string> ExtraArguments { get; }
 
-        private SshConnectionTarget(string host, TargetKind kind, string? extraArguments)
+        private SshConnectionTarget(string host, TargetKind kind, IReadOnlyList<string> extraArguments)
         {
             Host = host;
             Kind = kind;
@@ -51,7 +55,7 @@ namespace VMCreate
         }
 
         public static SshConnectionTarget ForIp(string ipAddress) =>
-            new(ipAddress, TargetKind.IpAddress, null);
+            new(ipAddress, TargetKind.IpAddress, Array.Empty<string>());
 
         /// <param name="vmGuid">VM's Hyper-V GUID — the string hvc.exe accepts
         /// (GUIDs are unique where VM names can be duplicated or contain
@@ -77,13 +81,15 @@ namespace VMCreate
         public static string HvcExePath =>
             Environment.ExpandEnvironmentVariables(@"%SystemRoot%\System32\hvc.exe");
 
-        private static string BuildVsockArguments()
+        private static IReadOnlyList<string> BuildVsockArguments()
         {
             // %h is ssh's own token for the destination host (the VM GUID).
-            // Quoted whole so the backslashed absolute path survives argv
-            // parsing (live-verified end-to-end against a booting ISO guest).
+            // The element embeds the hvc.exe path in ssh's ProxyCommand quote
+            // syntax — with ArgumentList delivery the quotes and backslashes
+            // reach ssh.exe verbatim (live-verified end-to-end against a
+            // booting ISO guest).
             string hvc = HvcExePath;
-            return $"-o ProxyCommand=\"\\\"{hvc}\\\" nc -t vsock %h 22\" ";
+            return new[] { "-o", $"ProxyCommand=\"{hvc}\" nc -t vsock %h 22" };
         }
     }
 }

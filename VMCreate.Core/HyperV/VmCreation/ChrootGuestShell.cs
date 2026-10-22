@@ -172,9 +172,7 @@ namespace VMCreate.HyperV.VmCreation
             // Flag parsing mirrors sudo's own rules, because step command
             // trees include third-party scripts whose sudo forms we don't
             // control (VirtualBox's uninstall.sh in particular):
-            //   - '--' ends option parsing and is consumed — 'sudo -u --
-            //     cmd' once became 'runuser -u "--"' and killed deployments
-            //     with "runuser: user -- does not exist".
+            //   - '--' ends option parsing and is consumed.
             //   - -u only takes a value that is non-empty and not
             //     option-shaped; a following '--' or flag means the switch
             //     itself was malformed and is skipped (root context needs

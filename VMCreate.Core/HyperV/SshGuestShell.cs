@@ -371,11 +371,10 @@ namespace VMCreate
         private async Task CopyBase64ToGuestAsync(string base64, string guestPath, string chmodMode, CancellationToken ct)
         {
             string safePath = SshTransport.EscapeSingleQuotes(guestPath);
-            // Host-side dirname: the previous $@"sudo mkdir -p ""$(dirname
-            // '{safePath}')""..." embedded real double quotes in a verbatim
-            // string — ssh.exe's argv parser strips them, so the guest
-            // received an unquoted $(dirname '...') that would word-split on
-            // any path with spaces. Compute it here and single-quote it.
+            // Host-side dirname, single-quoted for the guest shell: keeps
+            // the copy command one flat string with no nested command
+            // substitution — the fewer quoting layers ride the transport,
+            // the fewer can be mis-parsed at either end.
             string guestDir = SshTransport.EscapeSingleQuotes(GuestParentDirectory(guestPath));
 
             const int maxCopyAttempts = 3;

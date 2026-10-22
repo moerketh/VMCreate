@@ -27,10 +27,23 @@ namespace VMCreate
             Environment.ExpandEnvironmentVariables(@"%SystemRoot%\System32\OpenSSH\ssh.exe");
 
         /// <summary>
-        /// Builds the ssh.exe argument string. Kept internal and pure so tests
-        /// can assert the exact transport posture (host-key checking, batch
-        /// mode, agent/known-hosts, user@ip placement, command escaping).
+        /// Builds the ssh.exe argv as distinct elements. Kept internal and
+        /// pure so tests can assert the exact transport posture (host-key
+        /// checking, batch mode, agent/known-hosts, user@ip placement,
+        /// command escaping).
         /// </summary>
+        /// <remarks>
+        /// Elements are consumed via <see cref="System.Diagnostics.ProcessStartInfo.ArgumentList"/>,
+        /// which quotes each element for the Windows command line — the ONLY
+        /// delivery that preserves every byte of the remote command. A raw
+        /// hand-quoted <c>Arguments</c> string silently corrupted payloads
+        /// instead: Windows argv parsing consumed every double quote in the
+        /// line as quoting syntax, and ssh.exe joins its argv with plain
+        /// spaces without restoring them — so any <c>"</c> in a linuxCommand
+        /// never reached the guest (the chroot sudo shim once degraded to
+        /// <c>[ -n $user ]</c>, true when empty, and killed deployments with
+        /// "runuser: user -- does not exist").
+        /// </remarks>
         /// <param name="privateKeyPath">Private identity for key-based auth.</param>
         /// <param name="vmIpAddress">Guest IPv4 as discovered from Hyper-V.</param>
         /// <param name="username">Guest user (vmcreate for automation; ubuntu on the ISO cycle guest).</param>
@@ -45,51 +58,83 @@ namespace VMCreate
         /// matches the deployed disk anyway.
         /// </param>
         /// <param name="linuxCommand">Bash command for the guest.</param>
-        internal static string BuildArguments(
+        internal static IReadOnlyList<string> BuildArgumentList(
             string privateKeyPath, string vmIpAddress, string username,
             string? knownHostsFile, string linuxCommand)
-            => BuildArguments(privateKeyPath, SshConnectionTarget.ForIp(vmIpAddress), username, knownHostsFile, linuxCommand);
+            => BuildArgumentList(privateKeyPath, SshConnectionTarget.ForIp(vmIpAddress), username, knownHostsFile, linuxCommand);
 
         /// <summary>Target-aware overload: vsock targets carry their
         /// ProxyCommand in the target's extra arguments.</summary>
-        internal static string BuildArguments(
+        internal static IReadOnlyList<string> BuildArgumentList(
             string privateKeyPath, SshConnectionTarget target, string username,
             string? knownHostsFile, string linuxCommand)
         {
             // Normalize Windows CRLF → LF so bash doesn't choke on \r
             linuxCommand = linuxCommand.Replace("\r\n", "\n").Replace("\r", "\n").Trim();
 
-            var args = new StringBuilder();
-            args.Append($"-i \"{privateKeyPath}\" ");
-            if (target.ExtraArguments is not null)
-                args.Append(target.ExtraArguments);
+            var args = new List<string> { "-i", privateKeyPath };
+            args.AddRange(target.ExtraArguments);
             if (!string.IsNullOrEmpty(knownHostsFile))
             {
                 // TOFU pinning: trust first use, record to the per-VM file,
                 // hard-fail on any later key change for the same host entry.
-                args.Append("-o StrictHostKeyChecking=accept-new ");
-                args.Append($"-o UserKnownHostsFile=\"{knownHostsFile}\" ");
+                args.Add("-o");
+                args.Add("StrictHostKeyChecking=accept-new");
+                args.Add("-o");
+                args.Add($"UserKnownHostsFile={knownHostsFile}");
             }
             else
             {
                 // No pinning (ISO-cycle diagnostics guest): freshly-created
                 // local guests, keys never persist to a host file.
-                args.Append("-o StrictHostKeyChecking=no ");
-                args.Append("-o UserKnownHostsFile=NUL ");
+                args.Add("-o");
+                args.Add("StrictHostKeyChecking=no");
+                args.Add("-o");
+                args.Add("UserKnownHostsFile=NUL");
             }
-            args.Append("-o BatchMode=yes ");
-            args.Append("-o ConnectTimeout=10 ");
+            args.Add("-o");
+            args.Add("BatchMode=yes");
+            args.Add("-o");
+            args.Add("ConnectTimeout=10");
             // ServerAlive keepalives: a guest whose IP changed mid-pipeline (e.g.
             // a NetworkManager restart re-DHCPing the interface) black-holes the
             // TCP session — packets go into the void with no RST, and ssh.exe
             // would otherwise sit until the host-side timeout. Three missed
             // 5s probes terminate the client in ~15s so the transport-error
             // retry path (nulls the IP, re-discovers, reconnects) can run.
-            args.Append("-o ServerAliveInterval=5 ");
-            args.Append("-o ServerAliveCountMax=3 ");
-            args.Append($"{username}@{target.Host} ");
-            args.Append($"bash -c {EscapeForSsh(linuxCommand)}");
-            return args.ToString();
+            args.Add("-o");
+            args.Add("ServerAliveInterval=5");
+            args.Add("-o");
+            args.Add("ServerAliveCountMax=3");
+            args.Add($"{username}@{target.Host}");
+            args.Add("bash");
+            args.Add("-c");
+            // EscapeForSsh makes the command ONE literal shell word for the
+            // guest's bash -c; as its own argv element it survives Windows
+            // argv parsing byte-for-byte.
+            args.Add(EscapeForSsh(linuxCommand));
+            return args;
+        }
+
+        /// <summary>
+        /// Upper bound on the Windows command line ssh.exe would receive for
+        /// these argv elements: each element is quoted, and every internal
+        /// quote doubles. The actual line is shorter or equal — the guard
+        /// exists to fail fast under the 32,767-char CreateProcess limit
+        /// with an actionable message instead of Win32Exception 206.
+        /// </summary>
+        internal static int EstimateCommandLineLength(System.Collections.Generic.IEnumerable<string> arguments)
+        {
+            int total = 0;
+            foreach (string arg in arguments)
+            {
+                // 2 quotes + a separating space; each internal " doubles.
+                int doubled = 0;
+                foreach (char c in arg)
+                    if (c == '"') doubled++;
+                total += 2 + arg.Length + doubled + 1;
+            }
+            return total;
         }
 
         /// <summary>
@@ -180,12 +225,12 @@ namespace VMCreate
             Action<string>? onStdoutLine = null,
             TimeSpan? idleTimeout = null)
         {
-            string args = BuildArguments(privateKeyPath, target, username, knownHostsFile, linuxCommand);
+            IReadOnlyList<string> args = BuildArgumentList(privateKeyPath, target, username, knownHostsFile, linuxCommand);
 
-            if (maxArgumentLength.HasValue && args.Length > maxArgumentLength.Value)
+            if (maxArgumentLength.HasValue && EstimateCommandLineLength(args) > maxArgumentLength.Value)
             {
                 throw new InvalidOperationException(
-                    $"SSH command line for VM '{vmName}' is {args.Length} characters (limit {maxArgumentLength.Value}). " +
+                    $"SSH command line for VM '{vmName}' is ~{EstimateCommandLineLength(args)} characters (limit {maxArgumentLength.Value}). " +
                     "Windows cannot pass a command line this long to ssh.exe. " +
                     "Transfer the payload as a file via CopyContentAsync/CopyFileAsync (chunked) and execute it on the guest instead.");
             }
@@ -196,13 +241,18 @@ namespace VMCreate
                 // also absent from service contexts). Windows ships OpenSSH
                 // exactly here.
                 FileName = SshExePath,
-                Arguments = args,
                 RedirectStandardInput = !string.IsNullOrEmpty(stdinContent),
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true,
             };
+            // ArgumentList (not a raw Arguments string): each element is
+            // re-quoted by the runtime for the Windows command line, so the
+            // payload element — including every double quote — reaches
+            // ssh.exe byte-for-byte. See BuildArgumentList remarks.
+            foreach (string arg in args)
+                psi.ArgumentList.Add(arg);
 
             using var process = new Process { StartInfo = psi };
             var stdout = new StringBuilder();
@@ -685,10 +735,9 @@ namespace VMCreate
             value.Replace("'", "'\\''");
 
         /// <summary>
-        /// Escapes a full bash command for embedding in ssh.exe's argv (the
-        /// argv parser strips the outer quotes; the guest must receive the
-        /// entire command as one single-quoted bash -c string with internal
-        /// quotes re-opened the POSIX way).
+        /// Escapes a full bash command for its own single ssh argv element:
+        /// the guest must receive the entire command as one single-quoted
+        /// bash -c string, with internal quotes re-opened the POSIX way.
         /// </summary>
         public static string EscapeForSsh(string command)
         {
