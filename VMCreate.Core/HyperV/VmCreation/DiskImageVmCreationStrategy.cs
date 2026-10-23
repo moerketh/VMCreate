@@ -517,9 +517,12 @@ namespace VMCreate.HyperV.VmCreation
         private enum KvpWitnessResult { Confirmed, Absent, Unreachable }
 
         /// <summary>
-        /// How long the pool gate polls before the witness probe first runs.
-        /// The guest daemon reliably answers SSH within seconds of boot; pools
-        /// can lag it by many minutes on first boot.
+        /// <summary>
+        /// How long the pool gate polls before the witness probe re-runs.
+        /// The first witness probe happens immediately (the guest daemon
+        /// answers SSH within seconds of boot; pools can lag it by many
+        /// minutes on first boot), so this grace only matters when that
+        /// first probe came back silent — e.g. the daemon was still starting.
         /// </summary>
         private const int KvpWitnessGraceSeconds = 60;
 
@@ -540,10 +543,10 @@ namespace VMCreate.HyperV.VmCreation
             if (outcome == KvpGateRace.Outcome.WitnessConfirmed)
             {
                 _logger.LogWarning(
-                    "KVP pools still unreadable for {VMName} after {Grace}s, but the guest's KVP daemon is running " +
-                    "(SSH witness probe) — proceeding now instead of waiting out the gate budget. Host-side pool " +
-                    "materialization can lag first boot by many minutes; the exchange becomes usable later.",
-                    vmName, KvpWitnessGraceSeconds);
+                    "KVP pools unreadable for {VMName}, but the guest's KVP daemon is running (SSH witness probe) — " +
+                    "proceeding instead of waiting out the gate budget. Host-side pool materialization can lag first " +
+                    "boot by many minutes; the exchange becomes usable later.",
+                    vmName);
             }
 
             return outcome;

@@ -8,8 +8,9 @@ namespace VMCreate.Tests.HyperV.Vmbus
 {
     /// <summary>
     /// Race semantics of <see cref="CreateVM.HyperV.vmbus.KvpGateRace"/>:
-    /// early witness exit, gate cancellation, budget preservation and
-    /// cancellation propagation — all delegate-injected, no Hyper-V.
+    /// witness-first early exit, pool-wins precedence, gate cancellation,
+    /// budget preservation and cancellation propagation — all
+    /// delegate-injected, no Hyper-V.
     /// </summary>
     [TestClass]
     public class KvpGateRaceTests
@@ -17,41 +18,44 @@ namespace VMCreate.Tests.HyperV.Vmbus
         private static readonly TimeSpan Grace = TimeSpan.FromMilliseconds(50);
 
         [TestMethod]
-        public async Task PoolConfirmDuringGrace_SkipsTheWitness()
+        public async Task LiveDaemon_WitnessConfirmsImmediately_WithoutWaitingGrace()
         {
-            bool witnessRan = false;
-            var outcome = await KvpGateRace.RunAsync(
-                _ => Task.FromResult(true),
-                _ => { witnessRan = true; return Task.FromResult(true); },
-                Grace, CancellationToken.None);
-
-            Assert.AreEqual(KvpGateRace.Outcome.PoolConfirmed, outcome);
-            Assert.IsFalse(witnessRan, "the witness must not run when pools confirm within grace");
-        }
-
-        [TestMethod]
-        public async Task SilentPoolsWithLiveDaemon_WitnessConfirmsEarly()
-        {
-            // The observed live case: pools unreadable for the entire budget
-            // while the guest daemon answers. The race must return early at
-            // grace instead of waiting out the (simulated long) gate.
-            var gateStartedAt = DateTime.UtcNow;
+            // The observed live case (first boot): pools unreadable for the
+            // whole budget while the guest daemon answers. The first witness
+            // probe runs at t=0 — confirmation must not pay the grace.
+            var startedAt = DateTime.UtcNow;
             var outcome = await KvpGateRace.RunAsync(
                 async ct => { await Task.Delay(TimeSpan.FromSeconds(30), ct); return false; },
                 _ => Task.FromResult(true),
                 Grace, CancellationToken.None);
-            var elapsed = DateTime.UtcNow - gateStartedAt;
+            var elapsed = DateTime.UtcNow - startedAt;
 
             Assert.AreEqual(KvpGateRace.Outcome.WitnessConfirmed, outcome);
-            Assert.IsTrue(elapsed < TimeSpan.FromSeconds(10),
-                $"witness confirmation must not wait out the gate budget (took {elapsed.TotalSeconds:F1}s)");
+            Assert.IsTrue(elapsed < Grace,
+                $"an immediately-confirmed daemon must proceed without the grace (took {elapsed.TotalMilliseconds:F0}ms)");
+        }
+
+        [TestMethod]
+        public async Task PoolConfirm_WinsOverSlowWitness()
+        {
+            // Pools settle while the witness probe is still in flight: the
+            // pool verdict is the certain one and must win; the unobserved
+            // witness result must not fault the race.
+            int witnessCalls = 0;
+            var outcome = await KvpGateRace.RunAsync(
+                _ => Task.FromResult(true),
+                async _ => { witnessCalls++; await Task.Delay(TimeSpan.FromSeconds(30)); return true; },
+                Grace, CancellationToken.None);
+
+            Assert.AreEqual(KvpGateRace.Outcome.PoolConfirmed, outcome);
+            Assert.AreEqual(1, witnessCalls, "the immediate probe ran; no re-probe is needed after a pool confirm");
         }
 
         [TestMethod]
         public async Task SilentPoolsSilentWitness_GateRunsFullBudget_TimesOut()
         {
-            // The failure path is unchanged: a silent witness leaves the
-            // verdict to the gate, which times out.
+            // The failure path is unchanged: a silent witness (immediate AND
+            // post-grace) leaves the verdict to the gate, which times out.
             var outcome = await KvpGateRace.RunAsync(
                 _ => Task.FromResult(false),
                 _ => Task.FromResult(false),
@@ -61,11 +65,25 @@ namespace VMCreate.Tests.HyperV.Vmbus
         }
 
         [TestMethod]
+        public async Task SilentFirstWitness_DelayedDaemonConfirmsAfterGrace()
+        {
+            // Daemon still starting at t=0 (first probe silent), answering by
+            // the post-grace re-probe: proceeds early instead of timing out.
+            int calls = 0;
+            var outcome = await KvpGateRace.RunAsync(
+                async ct => { await Task.Delay(TimeSpan.FromSeconds(30), ct); return false; },
+                _ => Task.FromResult(++calls == 2),
+                Grace, CancellationToken.None);
+
+            Assert.AreEqual(KvpGateRace.Outcome.WitnessConfirmed, outcome);
+            Assert.AreEqual(2, calls, "the delayed daemon is caught by the post-grace re-probe");
+        }
+
+        [TestMethod]
         public async Task WitnessConfirmed_CancelsTheGate()
         {
             CancellationToken gateToken = CancellationToken.None;
             var gateCompletion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            var witnessAllowed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
             var race = KvpGateRace.RunAsync(
                 async ct =>
@@ -75,21 +93,19 @@ namespace VMCreate.Tests.HyperV.Vmbus
                     catch (OperationCanceledException) { gateCompletion.SetCanceled(); }
                     return false;
                 },
-                async _ => { await witnessAllowed.Task; return true; },
+                _ => Task.FromResult(true),
                 Grace, CancellationToken.None);
 
-            await Task.Delay(Grace + Grace, CancellationToken.None); // let grace elapse, witness start
-            witnessAllowed.SetResult();
             Assert.AreEqual(KvpGateRace.Outcome.WitnessConfirmed, await race);
             Assert.IsTrue(gateToken.IsCancellationRequested, "early exit must cancel the gate's polling");
+            await Task.Delay(Grace + Grace); // let the gate observe its cancellation
         }
 
         [TestMethod]
         public async Task OuterCancellation_Propagates()
         {
-            // Grace elapses first; the witness then blocks on the token, so
-            // the race can only end via cancellation — proving the outer
-            // token flows through the grace delay AND the witness call.
+            // Both probes block on the token; the immediate witness probe at
+            // t=0 means cancellation must flow through it without the grace.
             using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
             await Assert.ThrowsAsync<OperationCanceledException>(
                 () => KvpGateRace.RunAsync(

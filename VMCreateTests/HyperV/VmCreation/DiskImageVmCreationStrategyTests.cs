@@ -357,7 +357,11 @@ namespace VMCreate.Tests.HyperV.VmCreation
             _postBootService.Setup(s => s.HasLinuxPostBootSteps(_item, _customizations)).Returns(true);
             _kvpHeartbeatGate.Setup(g => g.WaitForGuestKvpAsync(
                 It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<int>(), It.IsAny<int>()))
-                .ReturnsAsync(false);
+                .Returns(async (string _, CancellationToken _, int _, int _) =>
+                {
+                    await Task.Delay(50); // witness-first: the immediate probe must win the race
+                    return false;
+                });
             _kvpHeartbeatGate.SetupGet(g => g.LastDiagnostics).Returns(new KvpGateDiagnostics
             {
                 StartedUtc = DateTime.UtcNow.AddSeconds(-420),
@@ -399,8 +403,8 @@ namespace VMCreate.Tests.HyperV.VmCreation
                 "failure path must collect guest diagnostics for the log");
             _shell.Verify(s => s.RunCommandAsync(
                 It.Is<string>(cmd => cmd.Contains("pgrep", StringComparison.Ordinal)),
-                It.IsAny<CancellationToken>()), Times.Once,
-                "the witness probe must have distinguished dead-daemon from host lag");
+                It.IsAny<CancellationToken>()), Times.Exactly(2),
+                "witness-first: one immediate probe (silent), then the failure-path probe that confirms the daemon is truly absent");
         }
 
         [TestMethod]
@@ -462,7 +466,11 @@ namespace VMCreate.Tests.HyperV.VmCreation
             // proceed instead of failing a verifiably healthy guest.
             _kvpHeartbeatGate.Setup(g => g.WaitForGuestKvpAsync(
                 It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<int>(), It.IsAny<int>()))
-                .ReturnsAsync(false);
+                .Returns(async (string _, CancellationToken _, int _, int _) =>
+                {
+                    await Task.Delay(50); // witness-first: the immediate probe must win the race
+                    return false;
+                });
             _kvpHeartbeatGate.SetupGet(g => g.LastDiagnostics).Returns(new KvpGateDiagnostics
             {
                 StartedUtc = DateTime.UtcNow.AddSeconds(-420),
@@ -488,7 +496,8 @@ namespace VMCreate.Tests.HyperV.VmCreation
                 "the rescue path is a warning, not a failure — no diagnostics collection");
             _shell.Verify(s => s.RunCommandAsync(
                 It.Is<string>(cmd => cmd.Contains("pgrep", StringComparison.Ordinal)),
-                It.IsAny<CancellationToken>()), Times.Once);
+                It.IsAny<CancellationToken>()), Times.Once,
+                "the immediate witness probe rescues the healthy guest before any failure path runs");
         }
 
         [TestMethod]
