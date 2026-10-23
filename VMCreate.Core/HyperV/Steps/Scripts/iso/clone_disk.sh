@@ -69,10 +69,16 @@ echo "Kernel: $(uname -r)"
 lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT 2>&1 || true
 
 
-# Detect disks: new (empty, no partitions) and old (has partitions)
-detect_disks
-
-report_progress "PREFLIGHT" "Disk detection complete"
+# Detect disks: new (empty, no partitions) and old (has partitions).
+# PREPARE ONLY — detection classifies the new disk by its emptiness, so it
+# can only run before the clone writes partitions. finalize and cleanup
+# derive everything from the prepare-time mounts (e.g. findmnt /mnt/new)
+# and must not re-detect: after cloning both disks have partitions and the
+# "empty disk" classification can never match again.
+if [ "$SUBCOMMAND" = "prepare" ]; then
+    detect_disks
+    report_progress "PREFLIGHT" "Disk detection complete"
+fi
 
 # ── prepare: clone + mount + built-in chroot work ─────────────────────
 # Everything from here through the xrdp block runs ONLY in prepare; the
