@@ -106,6 +106,45 @@ namespace VMCreate.Tests
         }
 
         [TestMethod]
+        public async Task EnsureIsoAsync_ReleaseWithoutSha256Asset_FailsClosed()
+        {
+            // The cloning ISO boots in the created VM and drives root-level
+            // automation: a release with no .sha256 asset must not be
+            // installed, cached, or booted — the download must abort.
+            var noChecksumJson = $$"""
+                [
+                  {
+                    "tag_name": "{{_latestTag}}",
+                    "prerelease": false,
+                    "assets": [
+                      {
+                        "name": "vmcreate-iso-2.0.0-alpha.1.iso",
+                        "browser_download_url": "https://github.com/moerketh/vmcreate-iso/releases/download/{{_latestTag}}/vmcreate-iso-2.0.0-alpha.1.iso"
+                      }
+                    ]
+                  }
+                ]
+                """;
+            _clientFactory.Setup(f => f.CreateClient(It.IsAny<string>()))
+                .Returns(() => new HttpClient(new StubHttpHandler(() =>
+                    new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(noChecksumJson)
+                    })));
+            var downloader = CreateDownloader();
+
+            try
+            {
+                await downloader.EnsureIsoAsync(_plan, CancellationToken.None, new Progress<CreateVMProgressInfo>());
+                Assert.Fail("Expected InvalidOperationException for a release without a .sha256 asset.");
+            }
+            catch (InvalidOperationException) { }
+
+            Assert.IsFalse(File.Exists(_isoPath), "an unverified ISO must not be installed into the cache");
+            Assert.IsFalse(File.Exists(_versionPath), "no version sidecar may suppress future verification");
+        }
+
+        [TestMethod]
         public async Task EnsureIsoAsync_IsoWithoutVersionFile_Redownloads()
         {
             // Arrange: an ISO cached by an older VMCreate write-up — no sidecar

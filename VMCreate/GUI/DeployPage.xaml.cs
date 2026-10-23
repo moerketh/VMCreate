@@ -300,9 +300,15 @@ namespace VMCreate
                 if (string.IsNullOrEmpty(vmName)) return;
 
                 _logger.LogInformation("Demo mode: launching VMConnect for {VMName}", vmName);
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(
-                    "vmconnect.exe", $"localhost \"{vmName}\"")
-                { UseShellExecute = true });
+                // ArgumentList builds the argv safely; the VM name is
+                // gallery-influenced and must never be hand-quoted.
+                var psi = new System.Diagnostics.ProcessStartInfo("vmconnect.exe")
+                {
+                    UseShellExecute = true
+                };
+                psi.ArgumentList.Add("localhost");
+                psi.ArgumentList.Add(vmName);
+                System.Diagnostics.Process.Start(psi);
             }
             catch (Exception ex)
             {

@@ -107,8 +107,11 @@ namespace VMCreate
 
         public async Task StartVMConnect(VmDeploymentPlan plan, CancellationToken cancellationToken)
         {
+            // Escape for a SINGLE-quoted PowerShell string context (doubling
+            // embedded single quotes), matching RemoveTemporaryNetworkAdapter.
+            // The vmconnect path is a compile-time constant.
             string escapedVmName = plan.VmName.Replace("'", "''");
-            string vmConnectCommand = $"& \"C:\\Windows\\System32\\vmconnect.exe\" localhost \"{escapedVmName}\"";
+            string vmConnectCommand = $"& 'C:\\Windows\\System32\\vmconnect.exe' localhost '{escapedVmName}'";
             _logger.LogDebug("Executing VMConnect command: {Command}", vmConnectCommand);
 
             var result = await _executor.RunScriptAsync(vmConnectCommand, cancellationToken);

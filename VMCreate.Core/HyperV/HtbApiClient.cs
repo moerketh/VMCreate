@@ -362,14 +362,21 @@ namespace VMCreate
         /// <summary>
         /// Sends a GET request, manually following redirects while preserving the Authorization header.
         /// .NET's default HttpClient strips auth headers on redirect which breaks Academy auth.
+        /// The token is only re-sent while the redirect stays on an https://
+        /// *.hackthebox.com host; hops to any other origin or scheme are
+        /// followed without the Authorization header so the bearer token can
+        /// never be forwarded to a third party or downgraded to cleartext.
         /// </summary>
         private async Task<HttpResponseMessage> SendWithAuthRedirectAsync(
             string url, string apiToken, CancellationToken ct, int maxRedirects = 5)
         {
+            bool sendAuth = true;
+
             for (int i = 0; i <= maxRedirects; i++)
             {
                 using var request = new HttpRequestMessage(HttpMethod.Get, url);
-                SetAuthHeaders(request, apiToken);
+                if (sendAuth)
+                    SetAuthHeaders(request, apiToken);
 
                 var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
 
@@ -381,7 +388,9 @@ namespace VMCreate
                         ? location.AbsoluteUri
                         : new Uri(new Uri(url), location).AbsoluteUri;
 
-                    _logger.LogDebug("Following redirect {Code} -> {RedirectUrl}", code, redirectUrl);
+                    sendAuth = IsInScopeRedirect(redirectUrl);
+
+                    _logger.LogDebug("Following redirect {Code} -> {RedirectUrl} (auth: {Auth})", code, redirectUrl, sendAuth);
                     response.Dispose();
                     url = redirectUrl;
                     continue;
@@ -391,6 +400,20 @@ namespace VMCreate
             }
 
             throw new HttpRequestException($"Too many redirects (>{maxRedirects}) for {url}");
+        }
+
+        /// <summary>
+        /// True when a redirect target remains an https:// host under
+        /// hackthebox.com, the only origin the App Token may be sent to.
+        /// </summary>
+        private static bool IsInScopeRedirect(string redirectUrl)
+        {
+            if (!Uri.TryCreate(redirectUrl, UriKind.Absolute, out Uri? target))
+                return false;
+
+            return target.Scheme == Uri.UriSchemeHttps
+                && (string.Equals(target.Host, "hackthebox.com", StringComparison.OrdinalIgnoreCase)
+                    || target.Host.EndsWith(".hackthebox.com", StringComparison.OrdinalIgnoreCase));
         }
 
         private void SetAuthHeaders(HttpRequestMessage request, string apiToken)

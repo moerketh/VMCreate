@@ -41,6 +41,94 @@ namespace VMCreate.Tests.VMCreate
             catch (ArgumentException) { }
         }
 
+        // ── Path-safety: the VM name becomes a host filesystem component ──
+
+        [TestMethod]
+        [DataRow("..\\..\\evil")]
+        [DataRow("foo/../bar")]
+        [DataRow("foo\\..")]
+        [DataRow("C:\\Users\\evil")]
+        [DataRow("/etc/passwd-style-name")]
+        [DataRow("trailing\\slash\\")]
+        public void Constructor_PathUnsafeName_Throws(string name)
+        {
+            try
+            {
+                _ = new VmDeploymentPlan(name);
+                Assert.Fail($"Expected ArgumentException for path-unsafe VM name '{name}'.");
+            }
+            catch (ArgumentException) { }
+        }
+
+        [TestMethod]
+        [DataRow("COM1")]
+        [DataRow("lpt9.txt")]
+        [DataRow("con")]
+        [DataRow("AuX.log")]
+        public void Constructor_ReservedDeviceName_Throws(string name)
+        {
+            try
+            {
+                _ = new VmDeploymentPlan(name);
+                Assert.Fail($"Expected ArgumentException for reserved device name '{name}'.");
+            }
+            catch (ArgumentException) { }
+        }
+
+        [TestMethod]
+        public void Constructor_InvalidFileNameChars_Throws()
+        {
+            foreach (char c in new[] { '<', '>', ':', '"', '|', '?' })
+            {
+                try
+                {
+                    _ = new VmDeploymentPlan($"bad{c}name");
+                    Assert.Fail($"Expected ArgumentException for invalid filename char '{c}'.");
+                }
+                catch (ArgumentException) { }
+            }
+        }
+
+        [TestMethod]
+        public void Constructor_DotDotWithTrailingDots_Throws()
+        {
+            // "x/.. .." style: the trailing-dots form still collapses to a
+            // parent traversal once Windows normalizes the segment.
+            try
+            {
+                _ = new VmDeploymentPlan("foo/.. ...");
+                Assert.Fail("Expected ArgumentException for '..' segment with trailing dots.");
+            }
+            catch (ArgumentException) { }
+        }
+
+        [TestMethod]
+        public void Constructor_NormalNames_Accepted()
+        {
+            // Names the UI produces today must keep working, including ones
+            // with spaces, dots, dashes, parentheses, and non-ASCII text.
+            foreach (string name in new[]
+                     {
+                         "Kali Linux", "arch-2026_01", "My VM (test)", "Ünïcødé VM",
+                         "a.b.c", "trailing dot.", "x" + new string('y', 80)
+                     })
+            {
+                _ = new VmDeploymentPlan(name);
+            }
+        }
+
+        [TestMethod]
+        public void WithVmName_PathUnsafeName_Throws()
+        {
+            var plan = new VmDeploymentPlan("Good");
+            try
+            {
+                _ = plan.WithVmName("..\\..\\evil");
+                Assert.Fail("Expected ArgumentException for path-unsafe WithVmName value.");
+            }
+            catch (ArgumentException) { }
+        }
+
         [TestMethod]
         public void FromSettings_MapsAllFields()
         {

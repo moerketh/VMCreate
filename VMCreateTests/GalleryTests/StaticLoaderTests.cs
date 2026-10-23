@@ -112,8 +112,11 @@ namespace VMCreate.Tests.GalleryTests
 
             // The Arch mirror publishes a GNU-format .SHA256 file next to the
             // qcow2 template (uppercase extension — lowercase 404s on nginx).
-            Assert.IsTrue(item.HasChecksum,
-                "Arch must publish a checksum so the downloaded template can be verified");
+            // The sidecar gives transport-grade verification (it is served by
+            // the same mirror as the image), so the card badges as unverified:
+            // "verified" is reserved for digests pinned in VMCreate's source.
+            Assert.IsFalse(item.HasChecksum,
+                "a mirror-served checksum sidecar must not badge as verified (same-origin digest)");
             Assert.AreEqual(item.DiskUri + ".SHA256", item.ChecksumUri,
                 $"ChecksumUri must be the mirror's .SHA256 sidecar beside the qcow2, got: {item.ChecksumUri}");
             Assert.IsTrue(string.IsNullOrEmpty(item.Checksum),

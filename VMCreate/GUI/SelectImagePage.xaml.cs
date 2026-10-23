@@ -61,6 +61,17 @@ namespace VMCreate
         /// <summary>Opens the disk image source URL externally instead of navigating the frame.</summary>
         private void DownloadLink_RequestNavigate(object sender, System.Windows.Navigation.RequestNavigateEventArgs e)
         {
+            // DiskUri originates in remote gallery feeds and is bound here
+            // unfiltered; UseShellExecute would invoke whatever protocol
+            // handler the URI scheme maps to, so only plain web URLs pass.
+            if (e.Uri.Scheme != System.Uri.UriSchemeHttp && e.Uri.Scheme != System.Uri.UriSchemeHttps)
+            {
+                _loggerFactory.CreateLogger<SelectImagePage>()
+                    .LogWarning("Blocked non-web download URI scheme '{Scheme}' for {Uri}", e.Uri.Scheme, e.Uri);
+                e.Handled = true;
+                return;
+            }
+
             try
             {
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(e.Uri.AbsoluteUri)

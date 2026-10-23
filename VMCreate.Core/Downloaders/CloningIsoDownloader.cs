@@ -129,10 +129,16 @@ namespace VMCreate
                 }
                 else
                 {
-                    // Releases ship a .sha256 asset; a missing one means
-                    // the ISO can't be integrity-checked before boot.
-                    _logger.LogWarning(
-                        "vmcreate-iso release {Version} has no .sha256 asset — skipping checksum verification.", version);
+                    // Fail closed: this ISO is the deployment's most privileged
+                    // artifact — it boots in the created VM and drives root-level
+                    // automation. A release without a .sha256 asset cannot be
+                    // integrity-checked before boot, so it must not be installed.
+                    _logger.LogError(
+                        "vmcreate-iso release {Version} has no .sha256 asset — refusing to install the unverified ISO.",
+                        version);
+                    throw new InvalidOperationException(
+                        $"The vmcreate-iso release {version} does not publish a .sha256 checksum asset, " +
+                        "so its integrity cannot be verified before boot. Refusing to install it.");
                 }
 
                 string? directory = Path.GetDirectoryName(isoPath);

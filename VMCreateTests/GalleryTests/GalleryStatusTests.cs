@@ -100,16 +100,19 @@ namespace VMCreate.Tests.GalleryTests
         // ── GalleryItem badge properties (card checksum / deploy semantics) ──
 
         [TestMethod]
-        public void HasChecksum_TrueForInlineHashAndForChecksumUri()
+        public void HasChecksum_TrueOnlyForPinnedInlineHash()
         {
             var inline = new GalleryItem { Checksum = "deadbeef" };
             var viaUri = new GalleryItem { ChecksumUri = "https://example.com/SHA256SUMS" };
             var none = new GalleryItem();
 
-            Assert.IsTrue(inline.HasChecksum, "inline hash must badge as verified");
-            Assert.IsTrue(viaUri.HasChecksum, "checksum file URI must badge as verified");
+            Assert.IsTrue(inline.HasChecksum, "pinned inline hash must badge as verified");
+            // A checksum fetched from the same mirror as the image only proves
+            // transport consistency — it must not badge as publisher-verified.
+            Assert.IsFalse(viaUri.HasChecksum, "mirror-served checksum file must not badge as verified");
             Assert.IsFalse(none.HasChecksum, "no checksum at all must badge as unverified");
             Assert.IsTrue(none.HasNoChecksum, "HasNoChecksum is the XAML-facing inverse");
+            Assert.IsTrue(viaUri.HasNoChecksum, "mirror-served checksum file badges unverified");
         }
 
         [TestMethod]

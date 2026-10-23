@@ -188,11 +188,13 @@ namespace VMCreate
                 {
                     lastError = ex;
                     _logger.LogDebug("SSH not ready yet: {Message}", ex.Message);
-                    // Any connect failure leaves the cached IP suspect: the guest
-                    // may have rebooted into a different SSH identity (new host
-                    // key) or moved to another address, so re-pin (accept-new) and
-                    // re-resolve from Hyper-V on the next attempt.
-                    ResetHostKeyPinning();
+                    // A connect failure leaves the cached IP suspect: the guest
+                    // may have moved to another address, so re-resolve from
+                    // Hyper-V on the next attempt. The host-key pin is kept:
+                    // accept-new still fails the connection when a DIFFERENT
+                    // host key answers the re-discovered address, which is the
+                    // documented TOFU guarantee; deleting the pin here would
+                    // freshly trust any endpoint that took over the IP.
                     _vmIpAddress = null;
                 }
 
@@ -337,9 +339,80 @@ namespace VMCreate
             // Key material (VPN configs embedding client certs/private keys,
             // TLS keys, credentials): root:root 0600. The old 644-for-everything
             // contract left VPN private keys world-readable in /etc/openvpn/client/.
-            byte[] bytes = Encoding.UTF8.GetBytes(content);
-            await CopyBase64ToGuestAsync(Convert.ToBase64String(bytes), guestPath, "600", ct);
-            _logger.LogInformation("Wrote secret content -> {GuestPath} on VM {VMName} (root:root 0600)", guestPath, VmName);
+            //
+            // The base64 payload travels over ssh stdin (the sanctioned secret
+            // channel) in chunks, never on any command line, and the guest-side
+            // intermediate is created 0600 via `umask 077` before the first
+            // secret byte lands.
+            string safePath = SshTransport.EscapeSingleQuotes(guestPath);
+            string guestDir = SshTransport.EscapeSingleQuotes(GuestParentDirectory(guestPath));
+
+            const int maxCopyAttempts = 3;
+            for (int attempt = 1; ; attempt++)
+            {
+                string tmpRemote = $"/tmp/vmcreate-copy-{Guid.NewGuid():N}.b64";
+                try
+                {
+                    await RunCommandInternalAsync($"umask 077; : > '{tmpRemote}'", CommandTimeout, ct);
+
+                    int offset = 0;
+                    while (offset < content.Length)
+                    {
+                        int length = Math.Min(CopyChunkBase64Length, content.Length - offset);
+                        string piece = content.Substring(offset, length);
+                        // stdin-fed append: the chunk is piped to `tee -a` over
+                        // ssh stdin, so it never appears in any argv or `ps`.
+                        await RunCommandWithStdinAsync($"tee -a '{tmpRemote}' >/dev/null", piece, ct);
+                        offset += length;
+                    }
+
+                    string decode = $@"
+                        sudo mkdir -p '{guestDir}'
+                        base64 -d '{tmpRemote}' | sudo tee '{safePath}' > /dev/null
+                        sudo chmod 600 '{safePath}'
+                        sudo chown root:root '{safePath}'
+                    ";
+                    await RunCommandInternalAsync(decode, CommandTimeout, ct);
+                    return;
+                }
+                catch (Exception ex) when (attempt < maxCopyAttempts && IsSshTransportError(ex))
+                {
+                    _logger.LogWarning("SSH transport error during secret copy to {GuestPath} (attempt {Attempt}/{Max}); restarting the transfer from scratch: {Message}",
+                        guestPath, attempt, maxCopyAttempts, ex.Message);
+
+                    // Vsock target: GUID is stable — no re-discovery, the
+                    // whole copy simply restarts (fresh temp file = safe).
+                    if (_fixedTarget is not null)
+                    {
+                        await Task.Delay(RetryDelay, ct);
+                        continue;
+                    }
+
+                    // Same changed-IP gate as RunWithRetryAsync: a copy is
+                    // chunk-append idempotent only when it restarts on a NEW
+                    // address; retrying the same dead session against the
+                    // same IP just burns the attempts.
+                    string? previousIp = _vmIpAddress;
+                    _vmIpAddress = null;
+                    await Task.Delay(RetryDelay, ct);
+                    _vmIpAddress = await DiscoverVmIpAsync(ct);
+                    if (_vmIpAddress is not null && previousIp is not null
+                        && _vmIpAddress == previousIp
+                        && ex is TimeoutException)
+                    {
+                        _logger.LogWarning("Secret copy to {GuestPath} timed out but VM {VMName} still at {Ip}; not retrying",
+                            guestPath, VmName, previousIp);
+                        throw;
+                    }
+                }
+                finally
+                {
+                    // Best-effort temp cleanup; failures are harmless in /tmp
+                    // (the intermediate is 0600 by then in any case).
+                    try { await RunCommandInternalAsync($"rm -f '{tmpRemote}'", CommandTimeout, ct); }
+                    catch { _logger.LogDebug("Temp copy file {Path} left behind on VM {VMName}", tmpRemote, VmName); }
+                }
+            }
         }
 
         /// <inheritdoc/>

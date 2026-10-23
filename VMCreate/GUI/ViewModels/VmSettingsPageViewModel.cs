@@ -260,6 +260,19 @@ namespace VMCreate
                 return;
             }
 
+            // The name becomes a host path component (per-VM disk directory,
+            // .vhdx/.iso filenames) and is seeded from gallery-item names
+            // that remote feeds control — reject path-unsafe names early.
+            try
+            {
+                VmDeploymentPlan.ValidateVmName(_vmName.Trim());
+            }
+            catch (ArgumentException ex)
+            {
+                ValidationError = ex.Message;
+                return;
+            }
+
             // Sliders enforce range, but guard against out-of-host-range values
             if (_memoryMB < 512)
             {

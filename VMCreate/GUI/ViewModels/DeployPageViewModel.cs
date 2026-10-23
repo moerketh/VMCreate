@@ -1114,8 +1114,15 @@ namespace VMCreate
         {
             try
             {
-                Process.Start(new ProcessStartInfo("vmconnect.exe", $"localhost \"{_vmName}\"")
-                { UseShellExecute = true });
+                // ArgumentList builds the argv safely; the VM name is
+                // gallery-influenced and must never be hand-quoted.
+                var psi = new ProcessStartInfo("vmconnect.exe")
+                {
+                    UseShellExecute = true
+                };
+                psi.ArgumentList.Add("localhost");
+                psi.ArgumentList.Add(_vmName ?? string.Empty);
+                Process.Start(psi);
             }
             catch (Exception ex)
             {

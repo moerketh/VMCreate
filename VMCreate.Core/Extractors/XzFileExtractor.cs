@@ -36,6 +36,12 @@ namespace VMCreate
         private readonly ILogger<XzFileExtractor> _logger;
         private const double EstimatedCompressionRatio = 1.5;
 
+        // Decompression-bomb bound: refuse to write more than this many bytes
+        // for a single .xz, even when free space would allow it. Gallery
+        // images compress well but not beyond this ratio; zero-filled bombs
+        // exceed it by orders of magnitude.
+        private const long MaxUncompressedBytes = 4L * 1024 * 1024 * 1024; // 4 GiB
+
         public XzFileExtractor(ILogger<XzFileExtractor> logger)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -68,16 +74,32 @@ namespace VMCreate
 
                 string filePart = Path.GetFileNameWithoutExtension(filePath);
                 string outputPath = Path.Combine(extractPath, filePart);
-                
-                // Estimate uncompressed size for progress
+
+                // Estimate uncompressed size for progress and the pre-flight
+                // free-space check (the 1.5x ratio also bounds that check; the
+                // in-loop cap below is the hard defense against bombs).
                 long estimatedUncompressedSize = (long)(fileInfo.Length * EstimatedCompressionRatio);
                 _logger.LogDebug("Estimated uncompressed size for {FilePath}: {EstimatedSize} bytes (using {CompressionRatio}:1 ratio)", filePath, estimatedUncompressedSize, EstimatedCompressionRatio);
 
                 _logger.LogInformation("Attempting extraction with XZ.NET for {FilePath}", filePath);
+
+                var extractDrive = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(extractPath)) ?? extractPath);
+                if (extractDrive.IsReady && extractDrive.AvailableFreeSpace < estimatedUncompressedSize)
+                {
+                    string msg = $"Not enough disk space on {extractDrive.Name} to extract the XZ file. " +
+                                 $"Need at least {estimatedUncompressedSize:N0} bytes, only {extractDrive.AvailableFreeSpace:N0} available. Free up space and try again.";
+                    _logger.LogError(msg);
+                    throw new IOException(msg);
+                }
+
+                bool outputCreated = false;
+                try
+                {
                 using (var inputStream = File.OpenRead(filePath))
                 using (var xzStream = new XZInputStream(inputStream)) // Requires liblzma.dll
                 using (var outputStream = File.Create(outputPath))
                 {
+                    outputCreated = true;
                     cancellationToken.ThrowIfCancellationRequested();
                     _logger.LogDebug("Decompressing XZ stream to {OutputPath}", outputPath);
 
@@ -98,8 +120,18 @@ namespace VMCreate
                     while ((bytesRead = xzStream.Read(buffer, 0, buffer.Length)) > 0)
                     {
                         cancellationToken.ThrowIfCancellationRequested();
-                        outputStream.Write(buffer, 0, bytesRead);
                         totalBytesWritten += bytesRead;
+
+                        // Hard cap: stop writing as soon as the payload proves
+                        // itself larger than any legitimate gallery image.
+                        if (totalBytesWritten > MaxUncompressedBytes)
+                        {
+                            throw new IOException(
+                                $"XZ payload for '{filePath}' exceeds the {MaxUncompressedBytes:N0}-byte decompression cap — " +
+                                "refusing to continue (possible decompression bomb).");
+                        }
+
+                        outputStream.Write(buffer, 0, bytesRead);
 
                         // Progress based on estimated uncompressed size
                         var progress = estimatedUncompressedSize > 0 ? (totalBytesWritten / (double)estimatedUncompressedSize) * 100 : 0;
@@ -123,6 +155,18 @@ namespace VMCreate
                     outputStream.Flush();
                     var outputFileInfo = new FileInfo(outputPath);
                     _logger.LogDebug("Output file {OutputPath} size: {OutputSize} bytes", outputPath, outputFileInfo.Length);
+                }
+                }
+                catch
+                {
+                    // Never leave a partial (possibly near-volume-size) output
+                    // behind; a retry targets a fresh timestamped directory and
+                    // would otherwise accumulate partials across attempts.
+                    if (outputCreated)
+                    {
+                        try { File.Delete(outputPath); } catch { /* best-effort cleanup */ }
+                    }
+                    throw;
                 }
                 progressReportInfo?.Report(new CreateVMProgressInfo
                 {

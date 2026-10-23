@@ -239,13 +239,14 @@ namespace VMCreate
         }
 
         /// <summary>
-        /// True when the publisher's checksum is known (inline hash or checksum
-        /// file URI), so the download will be verified. Drives the
-        /// verified/unverified badge on gallery cards — the integrity state
-        /// must be visible before the user clicks Deploy, not just in the log.
+        /// True when the image bytes can be verified against a digest the
+        /// download mirror cannot alter — a hash pinned in this application's
+        /// source (<see cref="Checksum"/>). Drives the verified/unverified
+        /// badge on gallery cards: a <see cref="ChecksumUri"/> fetched from the
+        /// same mirror as the image only proves transport consistency, never
+        /// publisher authenticity, so it must not surface as "verified".
         /// </summary>
-        public bool HasChecksum =>
-            !string.IsNullOrEmpty(Checksum) || !string.IsNullOrEmpty(ChecksumUri);
+        public bool HasChecksum => !string.IsNullOrEmpty(Checksum);
 
         /// <summary>Inverse of <see cref="HasChecksum"/> for XAML visibility bindings.</summary>
         public bool HasNoChecksum => !HasChecksum;

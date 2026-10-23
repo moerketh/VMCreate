@@ -73,13 +73,15 @@
                                                ToolTip="What Deploy will do with this image format">
                                         <Run Text="{Binding FileType, Mode=OneWay}"/><Run Text=" · "/><Run Text="{Binding DeploySemantics, Mode=OneWay}"/>
                                     </TextBlock>
-                                    <!-- Integrity state: visible before clicking Deploy, not just in the log -->
+                                    <!-- Integrity state: visible before clicking Deploy, not just in the log.
+                                         "Verified" means a digest pinned in VMCreate's own source; a
+                                         mirror-served checksum file only proves transport consistency. -->
                                     <TextBlock Text="✓ verified" Style="{StaticResource VerifiedPillStyle}"
                                                Visibility="{Binding HasChecksum, Converter={StaticResource BoolToVis}}"
-                                               ToolTip="The download will be verified against the publisher's checksum"/>
+                                               ToolTip="The download will be verified against a checksum pinned in VMCreate's source"/>
                                     <TextBlock Text="⚠ unverified" Style="{StaticResource UnverifiedPillStyle}"
                                                Visibility="{Binding HasNoChecksum, Converter={StaticResource BoolToVis}}"
-                                               ToolTip="No publisher checksum is available — the downloaded image cannot be verified"/>
+                                               ToolTip="The downloaded image cannot be verified against the publisher: no digest is pinned in VMCreate's source (a mirror-served checksum file only proves transport consistency)"/>
                                     <TextBlock Text="Security" Style="{StaticResource SecurityPillStyle}"
                                                Visibility="{Binding IsSecurity, Converter={StaticResource BoolToVis}}"
                                                ToolTip="Security / penetration-testing distribution"/>

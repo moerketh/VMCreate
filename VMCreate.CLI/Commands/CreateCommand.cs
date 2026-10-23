@@ -437,9 +437,23 @@ namespace VMCreate.CLI.Commands
             }
 
             // ── Build VmSettings ─────────────────────────────────────────────
+            // The VM name becomes a host path component (per-VM disk directory,
+            // .vhdx/.iso filenames) and defaults to the gallery-item name,
+            // which remote feeds control — validate before any file is touched.
+            string effectiveName = args.Name ?? galleryItem.Name;
+            try
+            {
+                VmDeploymentPlan.ValidateVmName(effectiveName);
+            }
+            catch (ArgumentException ex)
+            {
+                PrintError(jsonMode, "validation", ex.Message);
+                return ExitCodes.InvalidArguments;
+            }
+
             var vmSettings = new VmSettings
             {
-                VMName = args.Name ?? galleryItem.Name,
+                VMName = effectiveName,
                 MemoryInMB = args.MemoryMb,
                 CPUCount = args.CpuCount,
                 VirtualizationEnabled = !args.NoNestedVirt,

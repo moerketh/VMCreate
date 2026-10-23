@@ -58,13 +58,15 @@ namespace VMCreate
                 ai.ApiKey ?? string.Empty,
                 ai.Model ?? string.Empty);
 
-            // Base64 transport: the LLM API key is part of the payload when AI
-            // is enabled, so the script must not be visible in process listings.
+            // The script embeds the LLM API key when AI is enabled, so it must
+            // never appear on any command line — the base64 payload travels
+            // over ssh stdin (the sanctioned secret channel) instead.
             string b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(script));
             logger.LogInformation("Deploying Elastic setup script to VM {VMName} ({Bytes} bytes)", shell.VmName, script.Length);
 
-            await shell.RunCommandAsync(
-                $"echo {b64} | base64 -d | sudo tee /opt/vmcreate-elastic-setup.sh >/dev/null && sudo chmod 700 /opt/vmcreate-elastic-setup.sh",
+            await shell.RunCommandWithStdinAsync(
+                "base64 -d | sudo tee /opt/vmcreate-elastic-setup.sh >/dev/null && sudo chmod 700 /opt/vmcreate-elastic-setup.sh",
+                b64 + "\n",
                 ct);
 
             string output = await shell.RunCommandAsync(
@@ -83,6 +85,7 @@ namespace VMCreate
             sb.AppendLine(@"#!/usr/bin/env bash
 # VMCreate Elastic SIEM setup — idempotent. Secrets stay in the guest.
 set -uo pipefail
+umask 077
 exec >>/var/log/vmcreate-elastic.log 2>&1
 fail() { echo ""ELASTIC_SETUP_FAILED: $*""; echo ""ELASTIC_SETUP_FAILED: $*"" >&2; exit 1; }
 log()  { echo ""[vmcreate-elastic] $*""; echo ""[vmcreate-elastic] $*"" >&2; }
@@ -246,7 +249,7 @@ if [ -n ""${FLEET_TOKEN:-}"" ]; then
     # agent stalls on ""Waiting on default policy"" (live-observed defect #4).
     FLEET_POLICY_RESP=$(curl -s --max-time 30 -u ""elastic:${ES_PW}"" -H 'kbn-xsrf: true' -H 'Content-Type: application/json' -X POST http://localhost:5601/api/fleet/agent_policies --data '{""name"":""VMCreate Fleet Server Policy"",""namespace"":""default"",""is_default_fleet_server"":true,""has_fleet_server"":true}')
     FLEET_POLICY_ID=$(printf '%s' ""${FLEET_POLICY_RESP}"" | sed -n 's/.*""id"": *""\([^""]*\)"".*/\1/p')
-    echo ""fleet-server policy response: ${FLEET_POLICY_RESP}""
+    echo ""fleet-server policy id: ${FLEET_POLICY_ID:-none} (response not logged — may embed keys)""
   else
     log ""WARNING: Kibana fleet setup never returned 200 — skipping fleet enrollment""
   fi
@@ -280,11 +283,17 @@ if [ -n ""${FLEET_TOKEN:-}"" ]; then
     # Kibana fleet API is the supported way to mint the key (live-verified).
     AGENT_POLICY_RESP=$(curl -s --max-time 30 -u ""elastic:${ES_PW}"" -H 'kbn-xsrf: true' -H 'Content-Type: application/json' -X POST http://localhost:5601/api/fleet/agent_policies --data '{""name"":""VMCreate Agent Policy"",""namespace"":""default"",""is_default"":true}')
     AGENT_POLICY_ID=$(printf '%s' ""${AGENT_POLICY_RESP}"" | sed -n 's/.*""id"": *""\([^""]*\)"".*/\1/p')
-    echo ""agent policy response: ${AGENT_POLICY_RESP}""
+    echo ""agent policy id: ${AGENT_POLICY_ID:-none} (response not logged — may embed keys)""
     if [ -n ""${AGENT_POLICY_ID}"" ]; then
       AGENT_KEY_RESP=$(curl -s --max-time 30 -u ""elastic:${ES_PW}"" -H 'kbn-xsrf: true' -H 'Content-Type: application/json' -X POST http://localhost:5601/api/fleet/enrollment_api_keys --data ""{\""policy_id\"":\""${AGENT_POLICY_ID}\"",\""name\"":\""VMCreate Agent Enrollment\""}"")
       AGENT_TOKEN=$(printf '%s' ""${AGENT_KEY_RESP}"" | sed -n 's/.*""api_key"": *""\([^""]*\)"".*/\1/p')
-      echo ""agent enrollment key response: ${AGENT_KEY_RESP}""
+      # Never echo AGENT_KEY_RESP: the enrollment api_key it embeds is the
+      # fleet enrollment credential; it lives only in credentials.txt (0600).
+      if [ -n ""${AGENT_TOKEN}"" ]; then
+        echo ""agent enrollment key created (key value not logged)""
+      else
+        echo ""agent enrollment key creation returned no api_key""
+      fi
     fi
     {
       echo ""Fleet server:      https://${GUEST_IP:-<vm-ip>}:8220""

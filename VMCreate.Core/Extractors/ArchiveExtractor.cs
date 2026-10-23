@@ -186,6 +186,12 @@ namespace VMCreate
                     int processedEntries = 0;
                     const int MaxEntries = 250_000;
 
+                    // Decompression-bomb bound independent of metadata: the
+                    // pre-flight above is skipped when TotalUncompressedSize
+                    // is 0 (metadata-absent formats such as gzip), so enforce
+                    // a hard cumulative write cap here instead.
+                    const long MaxCumulativeBytes = 4L * 1024 * 1024 * 1024; // 4 GiB
+
                     foreach (var entry in archive.Entries)
                     {
                         cancellationToken.ThrowIfCancellationRequested();
@@ -194,6 +200,13 @@ namespace VMCreate
                         {
                             throw new IOException(
                                 $"Archive contains more than {MaxEntries} entries — refusing to extract (possible zip bomb or corrupted archive).");
+                        }
+
+                        if (cumulativeBytes > MaxCumulativeBytes)
+                        {
+                            throw new IOException(
+                                $"Archive '{filePath}' expands beyond the {MaxCumulativeBytes:N0}-byte extraction cap — " +
+                                "refusing to continue (possible decompression bomb or corrupted archive).");
                         }
 
                         if (!string.IsNullOrEmpty(entry.LinkTarget))

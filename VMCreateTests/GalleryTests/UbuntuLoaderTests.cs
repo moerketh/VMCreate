@@ -122,7 +122,11 @@ namespace VMCreate.Tests.GalleryTests
             {
                 Assert.AreEqual("Canonical Group Ltd", item.Publisher);
                 Assert.AreEqual(LinuxDistro.Ubuntu, item.LinuxDistro);
-                Assert.IsTrue(item.HasChecksum, $"{item.Name} must wire SHA256SUMS so its download verifies");
+                // SHA256SUMS rides the same mirror origin as the image:
+                // transport-grade verification only, so the card badges as
+                // unverified under the pinned-digest badge contract.
+                Assert.IsFalse(item.HasChecksum, $"{item.Name} must not badge as verified for a mirror-served digest");
+                Assert.IsFalse(string.IsNullOrEmpty(item.ChecksumUri), $"{item.Name} must wire SHA256SUMS so its download is consistency-checked");
                 Assert.AreEqual("sha256", item.ChecksumAlgorithm, ignoreCase: true, message: $"{item.Name} must verify with SHA-256");
             }
         }
@@ -199,7 +203,10 @@ namespace VMCreate.Tests.GalleryTests
             foreach (var item in items)
             {
                 StringAssert.Contains(item.DiskUri, "/release/current/");
-                Assert.IsTrue(item.HasChecksum, "pinned fallback items must verify too");
+                // Mirror-served SHA256SUMS: consistency check, not a pinned
+                // publisher digest, so the card badges as unverified.
+                Assert.IsFalse(item.HasChecksum);
+                Assert.IsFalse(string.IsNullOrEmpty(item.ChecksumUri), "fallback items must still wire SHA256SUMS");
             }
         }
 
