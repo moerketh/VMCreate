@@ -63,8 +63,8 @@ namespace VMCreate
         public bool SupportsChroot => true;
         public bool RunsAfterChroot => true;
 
-        public string DeployTitle => "Install xrdp";
-        public string DeployDescription => "Verifying or backfilling the xrdp install";
+        public string DeployTitle => "Verify xrdp listener";
+        public string DeployDescription => "Installing or confirming xrdp and its Enhanced Session (vsock) listener";
         public string DeployIconName => "Desktop24";
 
         public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)

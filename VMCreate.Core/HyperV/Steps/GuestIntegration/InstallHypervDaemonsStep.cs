@@ -28,8 +28,8 @@ namespace VMCreate
         public int Order => 280;
         public string? ProgressPhaseId => "Sub_InstallHypervDaemons";
 
-        public string DeployTitle => "Install Hyper-V Daemons";
-        public string DeployDescription => "Installing and enabling the Hyper-V guest integration daemons";
+        public string DeployTitle => "Verify Hyper-V integration";
+        public string DeployDescription => "Ensuring the Hyper-V guest daemons (KVP, VSS, fcopy) are installed and enabled";
         public string DeployIconName => "Box24";
 
         public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations) => true;

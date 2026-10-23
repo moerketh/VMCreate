@@ -43,6 +43,7 @@ namespace VMCreate.Tests.HyperV.Steps
             Assert.AreEqual(StepPlatform.Linux, _step.Platform);
             Assert.AreEqual(236, _step.Order);
             Assert.AreEqual("Sub_InstallXrdpPostBoot", _step.ProgressPhaseId);
+            Assert.AreEqual("Verify xrdp listener", _step.DeployTitle);
             Assert.IsTrue(_step.SupportsChroot, "the offline install half runs in the chroot");
             Assert.IsTrue(_step.RunsAfterChroot, "the verify half re-runs post-boot");
         }

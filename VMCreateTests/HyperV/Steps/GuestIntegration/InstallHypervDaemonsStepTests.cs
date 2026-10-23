@@ -34,6 +34,7 @@ namespace VMCreate.Tests.HyperV.Steps
             Assert.AreEqual(StepPlatform.Linux, _step.Platform);
             Assert.AreEqual(280, _step.Order);
             Assert.AreEqual("Sub_InstallHypervDaemons", _step.ProgressPhaseId);
+            Assert.AreEqual("Verify Hyper-V integration", _step.DeployTitle);
             Assert.IsTrue(_step.IsApplicable(_item, _customizations));
         }
 
@@ -84,6 +85,25 @@ namespace VMCreate.Tests.HyperV.Steps
                     content.Contains("dracut") &&
                     content.Contains("mkinitcpio") &&
                     content.Contains("mkinitrd")),
+                "/tmp/install_hyperv_daemons.sh",
+                It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_ScriptGatesInitramfsRegenOnChange()
+        {
+            // The ISO cycle installs the integration packages pre-boot, so
+            // the common post-boot run is verify-only — the expensive regen
+            // must be conditional on a package/daemon actually changing.
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("");
+
+            await _step.ExecuteAsync(_shell.Object, _item, _customizations, _logger.Object, CancellationToken.None);
+
+            _shell.Verify(s => s.CopyContentAsync(
+                It.Is<string>(content =>
+                    content.Contains("changed=0") &&
+                    content.Contains("""if [ "$changed" -eq 1 ]""") &&
+                    content.Contains("update-initramfs")),
                 "/tmp/install_hyperv_daemons.sh",
                 It.IsAny<CancellationToken>()), Times.Once);
         }
