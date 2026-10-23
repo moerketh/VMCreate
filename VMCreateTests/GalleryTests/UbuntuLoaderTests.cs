@@ -72,7 +72,9 @@ namespace VMCreate.Tests.GalleryTests
         /// GA/daily channel listings (amd64 vs the resolute amd64v3 rename),
         /// build-info serials, and the releases.ubuntu.com ISO page.
         /// </summary>
-        private static IHttpClientFactory RoutingFactory() => FactoryFor(req =>
+        private static IHttpClientFactory RoutingFactory() => FactoryFor(RouteRequest);
+
+        private static HttpResponseMessage RouteRequest(HttpRequestMessage req)
         {
             var url = req.RequestUri!.ToString();
             var ok = new Func<string, HttpResponseMessage>(body => new HttpResponseMessage(HttpStatusCode.OK)
@@ -105,7 +107,7 @@ namespace VMCreate.Tests.GalleryTests
             if (url.EndsWith("releases.ubuntu.com/26.10/")) return ok(ReleasesIsoPage);
 
             return notFound;
-        });
+        }
 
         [TestMethod]
         public async Task Discovery_ReturnsOneCardPerSupportedSeries_NewestFirst()
@@ -225,6 +227,34 @@ namespace VMCreate.Tests.GalleryTests
             // variant's own serial (20261021), not the GA's.
             Assert.AreEqual(new DateTime(2022, 5, 5).ToLongDateString(), jammy.LastUpdated);
             Assert.AreEqual(new DateTime(2026, 10, 21).ToLongDateString(), jammy.ReleaseVariants!.Single().LastUpdated);
+        }
+
+        [TestMethod]
+        public async Task Discovery_PerRequestTimeoutOnOneChannel_DegradesThatChannelOnly()
+        {
+            // A per-request HttpClient timeout surfaces as TaskCanceledException
+            // while the loader's own token stays live. It must drop only the
+            // timed-out channel — noble's GA fetch here — not the whole
+            // gallery: noble still appears from its daily channel and every
+            // other series is untouched, instead of the whole discovery
+            // collapsing to the pinned fallback pair.
+            var factory = FactoryFor(req =>
+            {
+                if (req.RequestUri!.ToString().EndsWith("noble/release/current/"))
+                    throw new TaskCanceledException("simulated per-request timeout");
+                return RouteRequest(req);
+            });
+
+            var items = await new Ubuntu(new Mock<ILogger<Ubuntu>>().Object, factory).LoadGalleryItems();
+
+            CollectionAssert.AreEqual(
+                new[] { "Ubuntu 26.10", "Ubuntu 26.04 LTS", "Ubuntu 24.04 LTS", "Ubuntu 22.04 LTS" },
+                items.Select(i => i.Name).ToList(),
+                "one timed-out channel must not collapse discovery to the pinned fallback");
+
+            var noble = items.Single(i => i.Version == "24.04 LTS");
+            StringAssert.Contains(noble.DiskUri, "/noble/current/",
+                "the GA channel timed out, so the card falls back to the daily build");
         }
 
         #region Mock HTTP factory

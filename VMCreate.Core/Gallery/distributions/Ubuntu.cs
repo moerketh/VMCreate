@@ -148,7 +148,10 @@ namespace VMCreate.Gallery
                 var serial = await TryParseSerialAsync(client, dirUri + "unpacked/build-info.txt", cancellationToken).ConfigureAwait(false);
                 return new ChannelImage(dirUri + match.Groups[1].Value, dirUri + "SHA256SUMS", serial);
             }
-            catch (OperationCanceledException)
+            // Only a caller-requested cancel rethrows: a per-request
+            // HttpClient timeout also surfaces as OCE (with a live token)
+            // and must degrade this channel, not the whole gallery.
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
             }
@@ -226,7 +229,7 @@ namespace VMCreate.Gallery
                     LinuxDistro = LinuxDistro.Ubuntu
                 };
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
             }
@@ -285,7 +288,7 @@ namespace VMCreate.Gallery
                 var parts = content.Split('=');
                 return parts.Length > 1 ? parts[1].Trim() : null;
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
             }
