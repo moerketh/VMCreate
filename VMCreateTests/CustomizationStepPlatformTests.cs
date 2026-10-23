@@ -48,11 +48,11 @@ namespace VMCreate.Tests
         }
 
         [TestMethod]
-        public void VBoxGuestAdditionsStep_IsLinuxOnly()
+        public void GuestToolsStep_IsLinuxOnly()
         {
             // Regression guard: this Linux step runs `sudo` and previously ran on the Windows
             // FLARE VM over PowerShell Direct, failing with "'sudo' is not recognized".
-            var step = DiscoverSteps().Single(s => s is RemoveVBoxGuestAdditionsStep);
+            var step = DiscoverSteps().Single(s => s is RemoveGuestToolsStep);
             Assert.AreEqual(StepPlatform.Linux, step.Platform);
         }
 

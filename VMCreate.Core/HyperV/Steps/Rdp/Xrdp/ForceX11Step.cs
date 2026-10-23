@@ -37,8 +37,7 @@ namespace VMCreate
     /// so the headless Hyper-V console does not hang at the greeter.
     /// </para>
     /// <para>
-    /// Runs at Order 240, after <see cref="RemoveVmwareToolsStep"/> (230)
-    /// and before <see cref="FixXrdpStep"/> (245).
+    /// Runs at Order 240, before <see cref="FixXrdpStep"/> (245).
     /// </para>
     /// </summary>
     public class ForceX11Step : ICustomizationStep, IStepDisplayInfo

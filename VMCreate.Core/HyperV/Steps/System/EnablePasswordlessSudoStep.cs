@@ -23,7 +23,7 @@ namespace VMCreate
     /// <see cref="RemovePasswordlessSudoStep"/> (order 880).
     /// <para>
     /// Order 45 runs directly ahead of the first sudo-based step
-    /// (RemoveVBoxGuestAdditions at 50) so the whole Linux pipeline inherits
+    /// (RemoveGuestTools at 50) so the whole Linux pipeline inherits
     /// passwordless sudo for the rest of the deployment.
     /// </para>
     /// </remarks>

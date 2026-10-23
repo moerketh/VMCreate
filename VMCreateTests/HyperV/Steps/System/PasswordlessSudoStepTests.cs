@@ -54,7 +54,7 @@ namespace VMCreate.Tests.HyperV.Steps
 
             Assert.AreEqual(CustomizationPhase.PostBoot, step.Phase);
             Assert.AreEqual(StepPlatform.Linux, step.Platform);
-            Assert.AreEqual(45, step.Order, "45 = directly ahead of the first sudo-based step (RemoveVBoxGuestAdditions at 50)");
+            Assert.AreEqual(45, step.Order, "45 = directly ahead of the first sudo-based step (RemoveGuestTools at 50)");
             Assert.IsFalse(step.IsOptional, "required infrastructure — not a user-toggleable add-on");
             Assert.IsTrue(step.DefaultEnabled);
             Assert.AreEqual("Sub_PasswordlessSudoBootstrap", step.DeployPhaseId);
@@ -236,7 +236,7 @@ namespace VMCreate.Tests.HyperV.Steps
             var shippedOrders = new (string Name, int Order)[]
             {
                 ("EnablePasswordlessSudoStep", new EnablePasswordlessSudoStep().Order),
-                ("RemoveVBoxGuestAdditionsStep", new RemoveVBoxGuestAdditionsStep().Order),
+                ("RemoveGuestToolsStep", new RemoveGuestToolsStep().Order),
                 ("RemoveAutomationUserStep", new RemoveAutomationUserStep().Order),
                 ("RemovePasswordlessSudoStep", new RemovePasswordlessSudoStep().Order),
                 ("DisableSshStep", new DisableSshStep().Order),
@@ -246,7 +246,7 @@ namespace VMCreate.Tests.HyperV.Steps
             foreach (var (name, order) in shippedOrders)
                 Assert.IsTrue(orders.Add(order), $"order {order} collides with another step ({name})");
 
-            Assert.IsTrue(new EnablePasswordlessSudoStep().Order < new RemoveVBoxGuestAdditionsStep().Order,
+            Assert.IsTrue(new EnablePasswordlessSudoStep().Order < new RemoveGuestToolsStep().Order,
                 "the bootstrap must run before the first sudo-based step");
             Assert.IsTrue(new RemoveAutomationUserStep().Order < new RemovePasswordlessSudoStep().Order,
                 "teardown must run after automation-user removal");

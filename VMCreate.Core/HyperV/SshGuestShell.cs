@@ -44,7 +44,7 @@ namespace VMCreate
         // is detected immediately.
         private static readonly TimeSpan ReadyTimeout = TimeSpan.FromSeconds(600);
         // 2026-09-27: 120s proved too tight for legitimate guest work —
-        // remove_vmware.sh runs `mkinitcpio -P`, which regenerates EVERY
+        // remove_guest_tools.sh runs `mkinitcpio -P`, which regenerates EVERY
         // preset and measured >6 min on a 2-vCPU Omarchy guest; the timeout
         // killed a healthy deploy mid-script. Dead sessions no longer need a
         // short timeout to fail fast: ServerAlive keepalives (5s×3) kill

@@ -4,7 +4,7 @@ set -o pipefail
 # never yields EOF on its own — an interactive `read` blocks until the host
 # kills the session. Omarchy's /usr/local/bin/mkinitcpio wrapper asks
 # "run limine-mkinitcpio now? [Y/n]" after -P; with /dev/null stdin its read
-# returns instantly (empty answer → default branch). See remove_vmware.sh.
+# returns instantly (empty answer → default branch). See remove_guest_tools.sh.
 exec 0</dev/null
 
 # -- Install hyperv-daemons (best-effort) ----------------------------------

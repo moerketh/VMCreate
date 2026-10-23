@@ -66,7 +66,6 @@ namespace VMCreate
         public const string SubCleanupTasks    = "Sub_CleanupTasks";
 
         // Linux-only post-boot sub-step IDs
-        public const string SubRemoveVBox      = "Sub_RemoveVBox";
         public const string SubSyncTimezone    = "Sub_SyncTimezone";
         public const string SubInstallOpenVpn  = "Sub_InstallOpenVpn";
         public const string SubConfigureVpn    = "Sub_ConfigureVpn";
@@ -396,7 +395,7 @@ namespace VMCreate
                     AddPreBootSubSteps(wizardData.Customizations);
                 }
 
-                // Always show the post-boot card — RemoveVBoxGuestAdditionsStep runs
+                // Always show the post-boot card — RemoveGuestToolsStep runs
                 // unconditionally, and user-selected options (timezone, VPN) add to it.
                 Phases.Add(new DeploymentPhase(PhasePostBoot, "Post-Boot Config",
                     wizardData.Customizations != null
