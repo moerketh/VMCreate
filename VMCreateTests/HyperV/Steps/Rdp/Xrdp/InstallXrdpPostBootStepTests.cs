@@ -212,11 +212,73 @@ namespace VMCreate.Tests.HyperV.Steps
             StringAssert.Contains(copiedContent, "security_layer=rdp", StringComparison.Ordinal);
             StringAssert.Contains(copiedContent, "crypt_level=none", StringComparison.Ordinal);
             StringAssert.Contains(copiedContent, "systemctl restart xrdp",
-                "a pre-existing xrdp (RESULT=already) still needs a restart to pick up the listener config");
+                "an xrdp whose ini lacks the vsock listener still gets the restart to pick up the config");
             StringAssert.Contains(copiedContent, "XRDP_POSTBOOT_TRANSPORT=",
                 "the transport outcome must be machine-readable so the host can warn on the TCP fallback");
             StringAssert.Contains(copiedContent, "vmcreate-bak",
                 "a vsock-less distro build must be rolled back instead of left without RDP");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_ScriptKeysSkipOnVsockConfig_NotPackagePresence()
+        {
+            // Regression: the skip used to key on dpkg/rpm/pacman presence,
+            // so a preinstalled xrdp WITHOUT the vsock listener was reported
+            // "tcp" and never fixed, and a chroot run against preinstalled
+            // xrdp exited without writing the config at all. The gate must
+            // read the ini's vsock listener instead.
+            string? copiedContent = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => copiedContent = content)
+                  .Returns(Task.CompletedTask);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+                  .ReturnsAsync("XRDP_POSTBOOT_RESULT=already");
+
+            await _step.ExecuteAsync(_shell.Object, _item, _xrdpCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(copiedContent);
+            Assert.IsFalse(copiedContent.Contains("SKIP_CONFIG"), "the skip must not be keyed on package presence");
+            StringAssert.Contains(copiedContent,
+                "grep -Eq '^[[:space:]]*port[[:space:]]*=[[:space:]]*vsock://' \"$INI\"",
+                "the skip gate reads xrdp.ini's vsock listener");
+
+            // The ini lookup must precede the skip gate (the gate greps $INI).
+            int iniIdx = copiedContent.IndexOf("INI=/etc/xrdp/xrdp.ini", StringComparison.Ordinal);
+            int gateIdx = copiedContent.IndexOf("[[:space:]]*vsock://", StringComparison.Ordinal);
+            Assert.IsTrue(iniIdx >= 0 && gateIdx > iniIdx,
+                "the xrdp.ini lookup must run before the skip gate checks it");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_Script_ChrootNeverSkipsConfigWrite_LiveConfiguredNeverRestarts()
+        {
+            // The skip gate must be live-mode-only (--chroot always converges
+            // the config on disk) and its body must never restart xrdp (the
+            // session-killing restart): a chroot with preinstalled xrdp gets
+            // the config written, and a live run whose ini already carries
+            // the listener only probes it.
+            string? copiedContent = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => copiedContent = content)
+                  .Returns(Task.CompletedTask);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+                  .ReturnsAsync("XRDP_POSTBOOT_RESULT=already");
+
+            await _step.ExecuteAsync(_shell.Object, _item, _xrdpCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(copiedContent);
+            int gateIdx = copiedContent.IndexOf(
+                "if [ \"$CHROOT_MODE\" = \"0\" ] && [ -n \"$INI\" ] && grep -Eq",
+                StringComparison.Ordinal);
+            Assert.IsTrue(gateIdx >= 0, "the skip gate must require live mode, a resolved ini, and the vsock listener");
+
+            // The gate's whole block (down to the empty-ini check that ends
+            // the short-circuit section) runs to its exits without a restart.
+            int emptyIniIdx = copiedContent.IndexOf("if [ -z \"$INI\" ]", gateIdx, StringComparison.Ordinal);
+            Assert.IsTrue(emptyIniIdx > gateIdx, "the skip block must be bounded by the empty-ini check");
+            string skipBody = copiedContent.Substring(gateIdx, emptyIniIdx - gateIdx);
+            Assert.IsFalse(skipBody.Contains("systemctl restart", StringComparison.Ordinal),
+                "the already-configured path must probe, never restart — a restart kills live RDP sessions");
         }
     }
 }

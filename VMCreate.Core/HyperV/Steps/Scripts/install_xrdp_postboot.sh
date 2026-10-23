@@ -16,8 +16,10 @@ trap 'echo "install_xrdp_postboot: failed at line $LINENO (exit $?)" >&2' ERR
 # chroot backfill (a missing install is recovered here).
 #
 # TRANSPORT: whatever installed xrdp, the HvSocket listener for Hyper-V
-# Enhanced Session Mode is APPENDED here on every path (installed or
-# already-present) — without it (stock xrdp = TCP 3389 only) vmconnect
+# Enhanced Session Mode is configured here on every path that lacks it
+# (fresh install, preinstalled-but-unconfigured, and always in chroot
+# mode); a live daemon already listening on vsock is left untouched —
+# without the listener (stock xrdp = TCP 3389 only) vmconnect
 # silently falls back to the basic console and no Enhanced Session popup
 # ever appears. The image's own TCP listener is kept: xrdp >= 0.9 accepts
 # multiple port= lines in [Globals], so network RDP keeps working. Distro
@@ -46,23 +48,10 @@ fi
 
 RESULT=unknown
 
-# "Already installed" means the chroot half already installed AND
-# configured xrdp (this script wrote the vsock listener in --chroot mode),
-# and first boot started the daemon from that config. Nothing remains to
-# do here — and doing it is actively harmful: the restart below kills
-# sesman mid-session, orphaning any live RDP session (its zombie keeps
-# owning the user's session bus, and every later login single-instances
-# against that bus and exits — an unrecoverable login loop until reboot).
-# The listener verification below still runs; a genuinely missing install
-# (chroot half failed silently, Auto resolved to xrdp post-chroot) still
-# gets the full install + restart path.
-SKIP_CONFIG=0
-
 if command -v apt-get >/dev/null 2>&1; then
     if dpkg -s xrdp >/dev/null 2>&1; then
         echo "xrdp already installed (dpkg) — skipping install."
         RESULT=already
-        SKIP_CONFIG=1
     else
         echo "Installing xrdp via apt..."
         if ! apt-get update -qq 2>&1; then
@@ -78,7 +67,6 @@ elif command -v dnf >/dev/null 2>&1; then
     if rpm -q xrdp >/dev/null 2>&1; then
         echo "xrdp already installed (rpm) — skipping install."
         RESULT=already
-        SKIP_CONFIG=1
     else
         echo "Installing xrdp via dnf..."
         if ! dnf install -y xrdp xorgxrdp 2>&1; then
@@ -94,7 +82,6 @@ elif command -v zypper >/dev/null 2>&1; then
     if rpm -q xrdp >/dev/null 2>&1; then
         echo "xrdp already installed (rpm) — skipping install."
         RESULT=already
-        SKIP_CONFIG=1
     else
         echo "Installing xrdp via zypper..."
         if ! zypper --non-interactive install -y xrdp xorgxrdp 2>&1; then
@@ -107,7 +94,6 @@ elif command -v pacman >/dev/null 2>&1; then
     if pacman -Q xrdp >/dev/null 2>&1; then
         echo "xrdp already installed (pacman) — skipping install."
         RESULT=already
-        SKIP_CONFIG=1
     else
         echo "Installing xrdp via pacman..."
         if ! pacman -S --noconfirm xrdp xorgxrdp 2>&1; then
@@ -134,11 +120,21 @@ fi
 
 TRANSPORT=unverified
 
-# Already-installed short-circuit (see SKIP_CONFIG above): the listener
-# verification still runs — it needs no restart, just a probe of the
-# live daemon. Only a freshly installed xrdp gets the config write and
-# the (session-killing) restart.
-if [ "$SKIP_CONFIG" = "1" ]; then
+# Already-configured short-circuit, live runs only: xrdp.ini already
+# carries the vsock listener — the chroot half (or a previous run) wrote
+# it, and first boot started the daemon from that config. Nothing
+# remains to write, and restarting is actively harmful: the restart
+# kills sesman mid-session, orphaning any live RDP session (its zombie
+# keeps owning the user's session bus, and every later login
+# single-instances against that bus and exits — an unrecoverable login
+# loop until reboot). The gate reads the ini's vsock listener, NOT
+# package presence: a preinstalled xrdp without the listener
+# (distro-shipped, or the chroot half failed silently) still gets the
+# config write and restart below. CHROOT MODE never takes this path —
+# the offline half always converges the config on disk. The listener
+# verification below still runs; it needs no restart, just a probe of
+# the live daemon.
+if [ "$CHROOT_MODE" = "0" ] && [ -n "$INI" ] && grep -Eq '^[[:space:]]*port[[:space:]]*=[[:space:]]*vsock://' "$INI"; then
     if command -v systemctl >/dev/null 2>&1 && systemctl is-active xrdp >/dev/null 2>&1; then
         if ss -H -l 2>/dev/null | grep -q "v_str.*:3389"; then
             TRANSPORT=vsock
