@@ -31,6 +31,15 @@ namespace VMCreate
 
         public async Task ExecuteAsync(IGuestShell shell, GalleryItem item, VmCustomizations customizations, ILogger logger, CancellationToken ct)
         {
+            // In debug builds (debugger attached), keep SSH up alongside the
+            // preserved vmcreate user (see RemoveAutomationUserStep): a
+            // deployment preserved for investigation must stay reachable.
+            if (System.Diagnostics.Debugger.IsAttached)
+            {
+                logger.LogWarning("Debug mode: skipping SSH disable on VM {VMName} — access preserved for investigation", shell.VmName);
+                return;
+            }
+
             string check = await shell.RunCommandAsync(
                 "test -f /var/lib/vmcreate/.ssh_was_disabled && echo RESTORE || echo KEEP", ct);
 

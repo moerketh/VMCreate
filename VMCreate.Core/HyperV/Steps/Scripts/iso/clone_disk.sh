@@ -390,9 +390,12 @@ rm -f /mnt/new/usr/sbin/policy-rc.d
 
 # ── Create automation user and inject SSH key on target VM ───────────
 # The 'vmcreate' user is used by the host for post-boot SSH connections.
-# The public key arrives as an argument (header).
+# The public key arrives as an argument (header). The report_progress text
+# must contain "automation user"/"SSH key" — the deploy page maps those
+# words to the pre-boot "SSH setup" card (customize_target.sh reports the
+# same step).
 if [ -n "$SSH_PUBKEY" ]; then
-    echo "Injecting SSH key and creating vmcreate automation user on target VM"
+    report_progress "SSH_SETUP" "Setting up automation user and SSH key on target VM"
     create_automation_user /mnt/new "$SSH_PUBKEY"
 else
     echo "No SSH public key in KVP — skipping automation user setup"

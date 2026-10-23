@@ -23,6 +23,8 @@ namespace VMCreate
         private string? _progressText;
         private bool _isIndeterminate;
         private bool _isVisible = true;
+        private bool _isExpanded = true;
+        private bool _hasChildren;
 
         public DeploymentPhase(string id, string name, string description, SymbolRegular icon)
         {
@@ -99,6 +101,28 @@ namespace VMCreate
         {
             get => _isVisible;
             set => SetProperty(ref _isVisible, value);
+        }
+
+        /// <summary>
+        /// Whether this parent card's children are currently shown. Driven by
+        /// the deployment flow (expand on activation, collapse on completion)
+        /// and by the user clicking a finished phase header to review its
+        /// sub-steps.
+        /// </summary>
+        public bool IsExpanded
+        {
+            get => _isExpanded;
+            set => SetProperty(ref _isExpanded, value);
+        }
+
+        /// <summary>
+        /// Whether any indented child card follows this parent. Shows the
+        /// expand chevron; a phase without children has nothing to toggle.
+        /// </summary>
+        public bool HasChildren
+        {
+            get => _hasChildren;
+            set => SetProperty(ref _hasChildren, value);
         }
     }
 }

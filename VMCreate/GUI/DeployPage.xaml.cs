@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Threading;
 using VMCreate.HyperV;
 using VMCreate.HyperV.VmCreation;
@@ -208,6 +209,18 @@ namespace VMCreate
 
         /// <summary>Exposed so MainWindow can mark the Deploy step as failed in the step indicator.</summary>
         internal DeployPageViewModel ViewModel => _viewModel;
+
+        /// <summary>
+        /// Chevron on a finished phase card: re-expands (or re-collapses) the
+        /// phase's sub-step cards. Completed sections used to collapse with no
+        /// way back in, hiding the step history.
+        /// </summary>
+        private void ExpandToggle_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        {
+            if (sender is FrameworkElement { DataContext: DeploymentPhase phase })
+                _viewModel.TogglePhaseExpanded(phase.Id);
+            e.Handled = true;
+        }
 
         /// <summary>Raised when the deployment transitions to the failed state.</summary>
         public event EventHandler? DeploymentFailed;
