@@ -52,7 +52,10 @@ namespace VMCreate
     /// </summary>
     public class InstallXrdpPostBootStep : ICustomizationStep, IStepDisplayInfo
     {
-        public string Name => "Install xrdp (post-boot)";
+        // Phase-neutral name: the step is dual-phase (offline install in the
+        // ISO chroot, live verify post-boot), so "(post-boot)" in the label
+        // was wrong for the chroot half showing in the pre-boot region.
+        public string Name => "Install xrdp";
         public CustomizationPhase Phase => CustomizationPhase.PostBoot;
         public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 236;
@@ -60,7 +63,7 @@ namespace VMCreate
         public bool SupportsChroot => true;
         public bool RunsAfterChroot => true;
 
-        public string DeployTitle => "Install xrdp (post-boot)";
+        public string DeployTitle => "Install xrdp";
         public string DeployDescription => "Verifying or backfilling the xrdp install";
         public string DeployIconName => "Desktop24";
 

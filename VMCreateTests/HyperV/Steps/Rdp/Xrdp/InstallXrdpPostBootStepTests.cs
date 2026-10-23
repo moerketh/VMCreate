@@ -38,7 +38,7 @@ namespace VMCreate.Tests.HyperV.Steps
         [TestMethod]
         public void StepMetadata_IsCorrect()
         {
-            Assert.AreEqual("Install xrdp (post-boot)", _step.Name);
+            Assert.AreEqual("Install xrdp", _step.Name);
             Assert.AreEqual(CustomizationPhase.PostBoot, _step.Phase);
             Assert.AreEqual(StepPlatform.Linux, _step.Platform);
             Assert.AreEqual(236, _step.Order);

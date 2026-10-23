@@ -25,6 +25,107 @@ namespace VMCreate.Tests.HyperV.Steps
     public class IsoScriptPhaseTests
     {
         [TestMethod]
+        public void ForceX11_FastPathBlock_SkipsOnlyWhenX11Only()
+        {
+            // Executes the REAL fast-path block (extracted from the embedded
+            // script at test time — no drift) against seeded session files,
+            // with its absolute /usr/share paths sandboxed. This is the
+            // decision logic that made "Force X11" a no-op rewrite on
+            // X11-only desktops like PwnCloudOS.
+            string? bash = FindWsl();
+            if (bash is null)
+            {
+                Assert.Inconclusive("WSL not available — force_x11.sh fast-path test skipped");
+                return;
+            }
+
+            string script = LoadEmbeddedScript("force_x11.sh");
+            const string startMarker = "# -- Fast path: desktop is already X11-only";
+            int start = script.IndexOf(startMarker, StringComparison.Ordinal);
+            Assert.IsTrue(start >= 0, "force_x11.sh must carry the fast-path block");
+            // The block ends at its 'exit 0' + 'fi' — the skip's exit.
+            int exitIdx = script.IndexOf("    exit 0", start, StringComparison.Ordinal);
+            Assert.IsTrue(exitIdx > start, "fast-path block must end with an exit 0 skip");
+            int blockEnd = script.IndexOf("\nfi", exitIdx, StringComparison.Ordinal);
+            Assert.IsTrue(blockEnd > exitIdx, "fast-path block must close");
+
+            string block = script[start..(blockEnd + 3)]
+                .Replace("/usr/share/xsessions", "$SANDBOX/usr/share/xsessions")
+                .Replace("/usr/share/wayland-sessions", "$SANDBOX/usr/share/wayland-sessions")
+                .Replace("exit 0", "echo FAST_PATH_SKIPPED");
+
+            string stage = Path.Combine(Path.GetTempPath(), "vmcreate-forcex11-" + Guid.NewGuid().ToString("N")[..8]);
+            Directory.CreateDirectory(stage);
+            File.WriteAllText(Path.Combine(stage, "block.sh"),
+                "SANDBOX=\"$1\"\n" + block.Replace("\r\n", "\n") + "\n",
+                new UTF8Encoding(false));
+            try
+            {
+                string wslStage = ToWslPath(stage);
+                // X11-only shape (PwnCloudOS): skip expected.
+                (int exit, string output, string error) = RunInWsl(bash, $@"
+set -e
+S=/tmp/vmcreate-x11-sandbox; rm -rf $S
+mkdir -p $S/usr/share/xsessions $S/usr/share/wayland-sessions
+printf '[Desktop Entry]\nName=LightDM Xsession\n' > $S/usr/share/xsessions/lightdm-xsession.desktop
+restored=0 x11_session=lightdm-xsession bash {wslStage}/block.sh $S
+");
+                Assert.AreEqual(0, exit, $"block failed: {error}{Environment.NewLine}{output}");
+                StringAssert.Contains(output, "FAST_PATH_SKIPPED", "X11-only desktops must take the skip path");
+
+                // Wayland present: no skip.
+                (exit, output, error) = RunInWsl(bash, $@"
+set -e
+S=/tmp/vmcreate-x11-sandbox; rm -rf $S
+mkdir -p $S/usr/share/xsessions $S/usr/share/wayland-sessions
+printf '[Desktop Entry]\nName=Plasma X11\n' > $S/usr/share/xsessions/plasmax11.desktop
+printf '[Desktop Entry]\nName=Plasma\n' > $S/usr/share/wayland-sessions/plasma.desktop
+restored=0 x11_session=plasmax11 bash {wslStage}/block.sh $S
+");
+                Assert.AreEqual(0, exit, $"block failed: {error}{Environment.NewLine}{output}");
+                Assert.IsFalse(output.Contains("FAST_PATH_SKIPPED", StringComparison.Ordinal),
+                    "a desktop with Wayland sessions must run full enforcement");
+
+                // Previously-disabled Wayland leftovers: no skip (they must
+                // be handled by the full path's restore logic).
+                (exit, output, error) = RunInWsl(bash, $@"
+set -e
+S=/tmp/vmcreate-x11-sandbox; rm -rf $S
+mkdir -p $S/usr/share/xsessions $S/usr/share/wayland-sessions/disabled
+printf '[Desktop Entry]\nName=X\n' > $S/usr/share/xsessions/x.desktop
+printf '[Desktop Entry]\nName=Plasma\n' > $S/usr/share/wayland-sessions/disabled/plasma.desktop
+restored=0 x11_session=x bash {wslStage}/block.sh $S
+");
+                Assert.AreEqual(0, exit, $"block failed: {error}{Environment.NewLine}{output}");
+                Assert.IsFalse(output.Contains("FAST_PATH_SKIPPED", StringComparison.Ordinal),
+                    "disabled Wayland leftovers must run the full path");
+            }
+            finally
+            {
+                try { Directory.Delete(stage, recursive: true); } catch (IOException) { }
+                RunInWsl(bash, "rm -rf /tmp/vmcreate-x11-sandbox; true");
+            }
+        }
+
+        [TestMethod]
+        public void ForceX11_FastPath_PrecedesDisplayManagerWrites()
+        {
+            // String-level ordering guard: the skip must come before every
+            // display-manager config write so an X11-only desktop never gets
+            // them, and the writes must still exist after it for Wayland
+            // desktops.
+            string script = LoadEmbeddedScript("force_x11.sh");
+
+            int fastPath = script.IndexOf("# -- Fast path: desktop is already X11-only", StringComparison.Ordinal);
+            int sddm = script.IndexOf("Step 3: Configure SDDM", StringComparison.Ordinal);
+            int lightdm = script.IndexOf("Step 4: Configure LightDM", StringComparison.Ordinal);
+            int gdm = script.IndexOf("Step 5: Configure GDM", StringComparison.Ordinal);
+
+            Assert.IsTrue(fastPath >= 0 && sddm > fastPath && lightdm > fastPath && gdm > fastPath,
+                "the fast-path skip must precede all display-manager config writes");
+        }
+
+        [TestMethod]
         public void CloneDisk_Finalize_Completes_WithoutEmptyDiskDetection()
         {
             string? bash = FindWsl();
@@ -88,9 +189,18 @@ bash /opt/vmcreate/clone_disk.sh finalize
             using var p = Process.Start(psi)!;
             p.StandardInput.Write(script.Replace("\r\n", "\n"));
             p.StandardInput.Close();
-            string output = p.StandardOutput.ReadToEnd();
-            string error = p.StandardError.ReadToEnd();
-            p.WaitForExit(120000);
+            // Read on background threads with a hard deadline: a wedged
+            // guest-side command (e.g. a mount that never returns) must not
+            // block ReadToEnd forever — the test fails fast instead.
+            string output = "", error = "";
+            var reader = Task.Run(() => { output = p.StandardOutput.ReadToEnd(); });
+            var errReader = Task.Run(() => { error = p.StandardError.ReadToEnd(); });
+            if (!p.WaitForExit(120000))
+            {
+                try { p.Kill(entireProcessTree: true); } catch { }
+                Assert.Fail("WSL bash did not exit within 120s — sandboxed script wedged");
+            }
+            Task.WhenAll(reader, errReader).Wait(5000);
             return (p.ExitCode, output, error);
         }
 

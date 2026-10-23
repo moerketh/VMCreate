@@ -28,7 +28,7 @@ namespace VMCreate.Tests.HyperV
     [TestClass]
     public class SshTransportDeliveryTests
     {
-        private const string Host = "127.0.0.1";
+        private const string Host = "::1";
         private const string User = "root";
 
         private static readonly TimeSpan Budget = TimeSpan.FromSeconds(20);

@@ -377,9 +377,8 @@ namespace VMCreate.HyperV.VmCreation
                     {
                         progress.Report(CreateVMProgressInfo.ForPhase(
                             VmDeploymentPhase.PostBoot, VmDeploymentSubStep.WaitForKvpHeartbeat));
-                        bool kvpAlive = await _kvpHeartbeatGate.WaitForGuestKvpAsync(
-                            plan.VmName, cancellationToken);
-                        if (!kvpAlive)
+                        var gateOutcome = await WaitForKvpGateRacingWitnessAsync(shell, plan.VmName, cancellationToken);
+                        if (gateOutcome == KvpGateRace.Outcome.TimedOut)
                         {
                             // The gate watches the HOST-side pools, which can
                             // lag the guest daemon by many minutes on first
@@ -434,10 +433,12 @@ namespace VMCreate.HyperV.VmCreation
                                           $"deployment, or disable integration services for this VM.");
                             }
                         }
-                        else
+                        else if (gateOutcome == KvpGateRace.Outcome.PoolConfirmed)
                         {
                             _logger.LogInformation("KVP heartbeat confirmed for {VMName} — guest integration daemon is answering.", plan.VmName);
                         }
+                        // WitnessConfirmed already logged its early-proceed
+                        // warning inside the race helper.
                     }
 
                     // SSH-restore tail (DisableSshStep, Order 900): put
@@ -514,6 +515,39 @@ namespace VMCreate.HyperV.VmCreation
         /// restore — every outcome other than Confirmed fails the deployment.
         /// </summary>
         private enum KvpWitnessResult { Confirmed, Absent, Unreachable }
+
+        /// <summary>
+        /// How long the pool gate polls before the witness probe first runs.
+        /// The guest daemon reliably answers SSH within seconds of boot; pools
+        /// can lag it by many minutes on first boot.
+        /// </summary>
+        private const int KvpWitnessGraceSeconds = 60;
+
+        /// <summary>
+        /// Races the pool gate against the delayed SSH witness probe
+        /// (<see cref="KvpGateRace"/>). Early witness-confirmed proceeds are
+        /// logged here so the deploy log carries the evidence for them.
+        /// </summary>
+        private async Task<KvpGateRace.Outcome> WaitForKvpGateRacingWitnessAsync(
+            IGuestShell shell, string vmName, CancellationToken cancellationToken)
+        {
+            var outcome = await KvpGateRace.RunAsync(
+                gateToken => _kvpHeartbeatGate.WaitForGuestKvpAsync(vmName, gateToken),
+                async ct => await TryConfirmGuestKvpDaemonAsync(shell, ct) == KvpWitnessResult.Confirmed,
+                TimeSpan.FromSeconds(KvpWitnessGraceSeconds),
+                cancellationToken);
+
+            if (outcome == KvpGateRace.Outcome.WitnessConfirmed)
+            {
+                _logger.LogWarning(
+                    "KVP pools still unreadable for {VMName} after {Grace}s, but the guest's KVP daemon is running " +
+                    "(SSH witness probe) — proceeding now instead of waiting out the gate budget. Host-side pool " +
+                    "materialization can lag first boot by many minutes; the exchange becomes usable later.",
+                    vmName, KvpWitnessGraceSeconds);
+            }
+
+            return outcome;
+        }
 
         private async Task<KvpWitnessResult> TryConfirmGuestKvpDaemonAsync(IGuestShell shell, CancellationToken cancellationToken)
         {

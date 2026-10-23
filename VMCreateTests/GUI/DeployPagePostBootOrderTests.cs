@@ -411,7 +411,7 @@ namespace VMCreate.Tests.GUI
         [TestMethod]
         public void InstallXrdpPostBoot_IsDualPhase_OfflineAndVerify()
         {
-            var step = Steps.First(s => s.Name == "Install xrdp (post-boot)");
+            var step = Steps.First(s => s.Name == "Install xrdp");
             Assert.IsTrue(step.SupportsChroot, "the offline install half runs in the chroot");
             Assert.IsTrue(step.RunsAfterChroot, "the verify half re-runs post-boot (listener check needs systemd)");
 

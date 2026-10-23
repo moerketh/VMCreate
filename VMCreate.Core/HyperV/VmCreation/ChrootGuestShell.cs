@@ -66,6 +66,10 @@ namespace VMCreate.HyperV.VmCreation
         private static readonly TimeSpan IdleTimeout = TimeSpan.FromMinutes(5);
         private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(60);
 
+        // One-shot latch for the plymouth-death warning: the daemon stays
+        // dead once it dies, so logging per splash update would spam.
+        private bool _splashDeathLogged;
+
         /// <summary>
         /// The step name shown by the heartbeat lines. Set by the executor
         /// before each step's commands run; when null the heartbeat is
@@ -116,11 +120,24 @@ namespace VMCreate.HyperV.VmCreation
         public async Task ShowOnSplashAsync(string? message, int percent, CancellationToken ct)
         {
             string text = message is null ? "" : " --text='" + SshTransport.EscapeSingleQuotes(message) + "'";
-            string cmd = $"sudo plymouth display-message{text} >/dev/null 2>&1 || true; "
+            // The leading --ping probe doubles as instrumentation: when the
+            // daemon has died mid-run (the guest screen falls back to the
+            // text console), every later display-message silently no-ops.
+            // A one-time warning with the current step label pinpoints WHEN
+            // the splash was lost instead of leaving only a visual symptom.
+            string cmd = "sudo plymouth --ping >/dev/null 2>&1 && echo VMCREATE:SPLASH_ALIVE; "
+                       + $"sudo plymouth display-message{text} >/dev/null 2>&1 || true; "
                        + $"sudo plymouth system-update --progress={Math.Clamp(percent, 0, 100)} >/dev/null 2>&1 || true";
             try
             {
-                await _iso.RunCommandAsync(cmd, TimeSpan.FromSeconds(15), ct);
+                string stdout = await _iso.RunCommandAsync(cmd, TimeSpan.FromSeconds(15), ct);
+                if (!stdout.Contains("VMCREATE:SPLASH_ALIVE", StringComparison.Ordinal) && !_splashDeathLogged)
+                {
+                    _splashDeathLogged = true;
+                    _logger.LogWarning(
+                        "Plymouth daemon stopped answering on VM {VMName} (during step '{Step}') — the guest screen falls back to the text console; splash updates will no-op until the daemon returns.",
+                        VmName, CurrentStepLabel ?? "(between steps)");
+                }
             }
             catch (OperationCanceledException)
             {
@@ -215,11 +232,20 @@ namespace VMCreate.HyperV.VmCreation
                 // fast. An explicit kill on wrapper exit remains as a
                 // fast path (the loop's sleep can outlive $$ by one
                 // interval otherwise).
+                // The sleep's output is redirected to /dev/null: the sleep
+                // process never writes anything, but an UNREDIRECTED sleep
+                // inherits the session's stdout pipe, and the EXIT-trap
+                // kill takes out the subshell only — the orphaned sleep
+                // then held the pipe open and every step cost a full
+                // heartbeat interval (60s) past its real work while sshd
+                // waited for EOF. Redirected, the orphan holds nothing and
+                // the session closes the moment the wrapper exits; the
+                // loop's echo still relays to the host normally.
                 // The label is single-quoted (POSIX-escaped) so $, " and `
                 // in a step name can't expand.
                 string label = SshTransport.EscapeSingleQuotes(CurrentStepLabel);
                 heartbeat = "\n( while kill -0 $$ 2>/dev/null; do sleep "
-                          + (int)HeartbeatInterval.TotalSeconds + "; "
+                          + (int)HeartbeatInterval.TotalSeconds + " >/dev/null 2>&1; "
                           + $"echo VMCREATE:MSG:'{label}'; done ) &\n_hb=$!\ntrap 'kill $_hb 2>/dev/null' EXIT\n";
             }
 

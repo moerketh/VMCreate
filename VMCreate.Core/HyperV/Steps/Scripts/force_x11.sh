@@ -79,6 +79,26 @@ else
     echo "No X11 sessions found -- display managers will use their defaults"
 fi
 
+# -- Fast path: desktop is already X11-only -------------------------------
+# When an X11 session exists, no Wayland sessions are installed (or left
+# disabled by a previous run), and autologin is not requested, the X11
+# posture is already in place: the display managers already resolve to this
+# session and rewriting their configs changes nothing. Skip the rewrites
+# (with autologin requested the LightDM drop-in below still matters, so
+# that case runs the full path).
+wayland_present=0
+for ws in /usr/share/wayland-sessions/*.desktop /usr/share/wayland-sessions/disabled/*.desktop; do
+    if [ -f "$ws" ]; then
+        wayland_present=1
+        break
+    fi
+done
+if [ "$wayland_present" -eq 0 ] && [ "$restored" -eq 0 ] && [ -n "$x11_session" ] && [ "__ENABLE_AUTOLOGIN__" != "1" ]; then
+    echo "Already X11-only (session: $x11_session) -- nothing to enforce"
+    echo "=== X11 enforcement complete ==="
+    exit 0
+fi
+
 # -- Step 3: Configure SDDM (KDE/Plasma) ---------------------------------
 mkdir -p /etc/sddm.conf.d
 cat > /etc/sddm.conf.d/force-x11.conf << SDDM_EOF
