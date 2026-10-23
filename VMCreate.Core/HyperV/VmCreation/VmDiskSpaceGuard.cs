@@ -17,12 +17,13 @@ namespace VMCreate.HyperV.VmCreation
     public static class VmDiskSpaceGuard
     {
         /// <summary>
-        /// Headroom beyond the computed requirement: swap, the swap file the
-        /// ISO stage creates (8 GB), config drift, and filesystem metadata.
-        /// Deliberately small — this is a "will it survive" floor, not a
-        /// comfort margin.
+        /// Headroom beyond the computed requirement: the ISO stage's 8 GB
+        /// swap file (the dd fallback writes it non-sparse, so budget the
+        /// full size), config drift, and filesystem metadata. Covers the
+        /// swap with margin rather than exactly — this is a "will it
+        /// survive" floor, not a comfort margin.
         /// </summary>
-        public const long HeadroomBytes = 5L * 1024 * 1024 * 1024;
+        public const long HeadroomBytes = 10L * 1024 * 1024 * 1024;
 
         /// <summary>
         /// Throws <see cref="InvalidOperationException"/> when the drive

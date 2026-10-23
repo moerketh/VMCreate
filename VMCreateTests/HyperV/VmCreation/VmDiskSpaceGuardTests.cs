@@ -79,6 +79,16 @@ namespace VMCreate.Tests.HyperV.VmCreation
         }
 
         [TestMethod]
+        public void Headroom_CoversTheEightGbSwapFile_PlusMargin()
+        {
+            // The ISO stage's swap file is 8 GB (create_swap_file's dd
+            // fallback writes it non-sparse), so the headroom floor must
+            // cover it with margin.
+            Assert.AreEqual(10L * 1024 * 1024 * 1024, VmDiskSpaceGuard.HeadroomBytes,
+                "headroom = 10 GB: the 8 GB swap file plus drift/metadata margin");
+        }
+
+        [TestMethod]
         public void ProbeFailure_DoesNotBlock()
         {
             // A probe that cannot read the drive reports long.MaxValue (see
