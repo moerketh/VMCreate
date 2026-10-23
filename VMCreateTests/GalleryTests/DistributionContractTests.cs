@@ -337,10 +337,12 @@ namespace VMCreate.Tests.GalleryTests
         [TestMethod]
         public async Task Ubuntu_MeetsContract()
         {
-            // All build-info.txt fetches receive the same canned response.
+            // All discovery sources receive the same canned response; the
+            // CSV parse fails (no rows), so the loader degrades to the
+            // pinned fallback pair.
             var items = await new Ubuntu(
                 new Mock<ILogger<Ubuntu>>().Object,
-                FactoryFor("serial=20240301")).LoadGalleryItems();
+                FactoryFor("version,codename,series,created,release,eol")).LoadGalleryItems();
 
             AssertContractInvariants(items, nameof(Ubuntu));
             Assert.AreEqual(2, items.Count);

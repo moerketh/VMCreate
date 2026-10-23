@@ -33,7 +33,7 @@ verifies whenever a `GalleryItem` carries `Checksum` (inline) or
 | SecurityOnion | none | download.securityonion.net returns an SPA for .sha256 URLs — no usable sidecar |
 | Tails | inline `Checksum` (SHA-256) | Added; the Tails JSON API ships the hash per target file |
 | Tsurugi | none | No checksums published |
-| Ubuntu | none | partner-images publishes no checksum; noble `.vhdx.zip.sha256` → 404 |
+| Ubuntu | `ChecksumUri` (SHA256SUMS) | Discovered per supported series; each channel dir publishes GNU-format SHA256SUMS (the earlier `.vhdx.zip.sha256` 404 was the wrong probe, not a missing file). GA + daily variants carry their own directory's sums; the interim-series desktop ISO card uses releases.ubuntu.com's SHA256SUMS |
 | Whonix | `ChecksumUri` (.ova.sha512sums, SHA-512) | Added; upstream publishes SHA-512 only — keep the algorithm at SHA512, do not "fix" it to SHA-256 |
 
 Unverified loaders log a visible warning at download time ("proceeding
