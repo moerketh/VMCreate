@@ -158,41 +158,26 @@ namespace VMCreate.Tests.GUI
         }
 
         [TestMethod]
-        public void CompletedPhase_CollapsesChildren_ToggleReExpands()
+        public void CompletedPhase_KeepsChildrenVisible()
         {
-            // Completing a phase hides its sub-step cards — that is the
-            // intended collapse — but the history was unrecoverable: there
-            // was no way back into a finished section. The toggle is the way
-            // back, and only for finished phases.
+            // Finished sections must NOT collapse: hiding a phase's cards on
+            // completion removed the run history exactly when it mattered
+            // (verifying what already ran while later phases are still
+            // going, or reviewing a failure after the fact).
             var wizard = NewWizard(KaliDisk(), new VmCustomizations { RdpBackend = RdpBackend.Xrdp, EnableIntegrationServices = true });
             var vm = new DeployPageViewModel(wizard, NullLogger.Instance, configurableSteps: null, Planner);
 
             var parent = vm.FindPhase(DeployPageViewModel.PhasePostBoot);
             Assert.IsNotNull(parent);
 
-            // Mid-run: active parent must ignore the toggle (expansion is
-            // the flow's job while the phase is live).
             vm.ActivatePhase(DeployPageViewModel.PhasePostBoot);
-            vm.TogglePhaseExpanded(DeployPageViewModel.PhasePostBoot);
-            Assert.IsTrue(parent!.IsExpanded, "an active phase's expansion is not user-togglable");
-
             vm.CompletePhase(DeployPageViewModel.PhasePostBoot);
-            Assert.IsFalse(parent.IsExpanded, "completion collapses the section");
-            Assert.IsTrue(parent.HasChildren);
-            Assert.IsTrue(vm.Phases.First(p => p.Id == DeployPageViewModel.SubWaitForSsh).IsVisible == false,
-                "children are hidden after completion");
 
-            vm.TogglePhaseExpanded(DeployPageViewModel.PhasePostBoot);
-            Assert.IsTrue(parent.IsExpanded, "the toggle re-expands a completed section");
             Assert.IsTrue(vm.Phases.First(p => p.Id == DeployPageViewModel.SubWaitForSsh).IsVisible,
-                "children are visible again after the toggle");
-
-            vm.TogglePhaseExpanded(DeployPageViewModel.PhasePostBoot);
-            Assert.IsFalse(parent.IsExpanded, "a second toggle collapses it again");
-
-            // Sub-step cards are never expandable themselves.
-            vm.TogglePhaseExpanded(DeployPageViewModel.SubWaitForSsh);
-            Assert.IsFalse(vm.Phases.First(p => p.Id == DeployPageViewModel.SubWaitForSsh).HasChildren);
+                "children stay visible after the phase completes");
+            vm.FailPhase(DeployPageViewModel.PhaseCustomize, "boom");
+            Assert.IsTrue(vm.Phases.First(p => p.Id == DeployPageViewModel.SubWaitForSsh).IsVisible,
+                "a failed sibling phase must not hide another phase's children either");
         }
 
         /// <summary>

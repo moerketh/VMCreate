@@ -372,7 +372,16 @@ namespace VMCreate
         private string? MapPreBootStepName(string stepName)
         {
             if (_allSteps.TryGetValue(stepName, out var step) && step != null)
+            {
+                // Dual-phase steps (RunsAfterChroot) have no card in the
+                // Customize region — their card is the post-boot one, and
+                // the post-boot half's report drives it. Activating it from
+                // here would flip a PostBoot card while the chroot is still
+                // running.
+                if (step.RunsAfterChroot)
+                    return null;
                 return PostBootStepPlanner.CardId(step);
+            }
 
             if (stepName.Contains("cloning root", StringComparison.OrdinalIgnoreCase)
                 || stepName.Contains("disk partitioning", StringComparison.OrdinalIgnoreCase))

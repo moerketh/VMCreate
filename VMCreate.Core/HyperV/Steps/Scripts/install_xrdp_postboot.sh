@@ -46,10 +46,23 @@ fi
 
 RESULT=unknown
 
+# "Already installed" means the chroot half already installed AND
+# configured xrdp (this script wrote the vsock listener in --chroot mode),
+# and first boot started the daemon from that config. Nothing remains to
+# do here — and doing it is actively harmful: the restart below kills
+# sesman mid-session, orphaning any live RDP session (its zombie keeps
+# owning the user's session bus, and every later login single-instances
+# against that bus and exits — an unrecoverable login loop until reboot).
+# The listener verification below still runs; a genuinely missing install
+# (chroot half failed silently, Auto resolved to xrdp post-chroot) still
+# gets the full install + restart path.
+SKIP_CONFIG=0
+
 if command -v apt-get >/dev/null 2>&1; then
     if dpkg -s xrdp >/dev/null 2>&1; then
         echo "xrdp already installed (dpkg) — skipping install."
         RESULT=already
+        SKIP_CONFIG=1
     else
         echo "Installing xrdp via apt..."
         if ! apt-get update -qq 2>&1; then
@@ -65,6 +78,7 @@ elif command -v dnf >/dev/null 2>&1; then
     if rpm -q xrdp >/dev/null 2>&1; then
         echo "xrdp already installed (rpm) — skipping install."
         RESULT=already
+        SKIP_CONFIG=1
     else
         echo "Installing xrdp via dnf..."
         if ! dnf install -y xrdp xorgxrdp 2>&1; then
@@ -80,6 +94,7 @@ elif command -v zypper >/dev/null 2>&1; then
     if rpm -q xrdp >/dev/null 2>&1; then
         echo "xrdp already installed (rpm) — skipping install."
         RESULT=already
+        SKIP_CONFIG=1
     else
         echo "Installing xrdp via zypper..."
         if ! zypper --non-interactive install -y xrdp xorgxrdp 2>&1; then
@@ -92,6 +107,7 @@ elif command -v pacman >/dev/null 2>&1; then
     if pacman -Q xrdp >/dev/null 2>&1; then
         echo "xrdp already installed (pacman) — skipping install."
         RESULT=already
+        SKIP_CONFIG=1
     else
         echo "Installing xrdp via pacman..."
         if ! pacman -S --noconfirm xrdp xorgxrdp 2>&1; then
@@ -117,6 +133,32 @@ elif [ -f /usr/local/etc/xrdp/xrdp.ini ]; then
 fi
 
 TRANSPORT=unverified
+
+# Already-installed short-circuit (see SKIP_CONFIG above): the listener
+# verification still runs — it needs no restart, just a probe of the
+# live daemon. Only a freshly installed xrdp gets the config write and
+# the (session-killing) restart.
+if [ "$SKIP_CONFIG" = "1" ]; then
+    if command -v systemctl >/dev/null 2>&1 && systemctl is-active xrdp >/dev/null 2>&1; then
+        if ss -H -l 2>/dev/null | grep -q "v_str.*:3389"; then
+            TRANSPORT=vsock
+            echo "xrdp already active with the vsock listener — no restart needed."
+        else
+            echo "XRDP_POSTBOOT_RESULT=$RESULT"
+            echo "XRDP_POSTBOOT_TRANSPORT=tcp"
+            echo "xrdp is active but has no vsock listener (not built with vsock support?) — TCP RDP kept."
+            exit 0
+        fi
+    else
+        echo "XRDP_POSTBOOT_RESULT=$RESULT"
+        echo "XRDP_POSTBOOT_TRANSPORT=unverified"
+        echo "xrdp installed but not active — listener verified on next boot."
+        exit 0
+    fi
+    echo "XRDP_POSTBOOT_RESULT=$RESULT"
+    echo "XRDP_POSTBOOT_TRANSPORT=$TRANSPORT"
+    exit 0
+fi
 
 if [ -z "$INI" ]; then
     echo "ERROR: no xrdp.ini found — cannot configure the Enhanced Session transport."

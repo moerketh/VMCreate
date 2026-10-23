@@ -582,7 +582,16 @@ namespace VMCreate
         {
             if (_lastCustomizations == null || SelectedItem == null) return;
 
-            ReconcileRegion(PhaseCustomize, _planner.GetPlannedChrootSteps(SelectedItem, _lastCustomizations), allowGateSplit: false);
+            // Each region reconciles against the SAME list it was built
+            // from: the Customize region holds chroot-ONLY cards, so
+            // reconciling it against the full chroot-capable plan would
+            // insert a duplicate card for every dual-phase
+            // (RunsAfterChroot) step — whose real card lives in the
+            // PostBoot region. The duplicate then swallowed both the
+            // chroot and the post-boot reports (FindPhase returns the
+            // first match), leaving the visible PostBoot card pending
+            // forever.
+            ReconcileRegion(PhaseCustomize, _planner.GetChrootOnlySteps(SelectedItem, _lastCustomizations), allowGateSplit: false);
             ReconcileRegion(PhasePostBoot, GetPlannedPostBootSteps(
                 SelectedItem.IsWindows ? StepPlatform.Windows : StepPlatform.Linux,
                 SelectedItem, _lastCustomizations, _lastPostBootFlow), allowGateSplit: true);
@@ -1053,9 +1062,9 @@ namespace VMCreate
             phase.IsIndeterminate = false;
             phase.ProgressText = null;
 
-            // Collapse children when a parent phase completes
-            if (phase.IndentLevel == 0)
-                SetChildrenVisible(Phases.IndexOf(phase), false);
+            // Children stay visible: collapsing finished sections hid the
+            // run history exactly when it mattered most (verifying what ran
+            // while later phases are still going).
 
             _logger.LogDebug("Phase completed: {Phase}", id);
         }
@@ -1067,10 +1076,6 @@ namespace VMCreate
             phase.Status = DeploymentPhaseStatus.Failed;
             phase.IsIndeterminate = false;
             phase.ProgressText = message;
-
-            // Collapse children when a parent phase fails
-            if (phase.IndentLevel == 0)
-                SetChildrenVisible(Phases.IndexOf(phase), false);
         }
 
         /// <summary>
@@ -1079,35 +1084,12 @@ namespace VMCreate
         private void SetChildrenVisible(int parentIndex, bool visible)
         {
             if (parentIndex < 0) return;
-            bool hasChildren = false;
             for (int i = parentIndex + 1; i < Phases.Count; i++)
             {
                 if (Phases[i].IndentLevel <= Phases[parentIndex].IndentLevel)
                     break;
                 Phases[i].IsVisible = visible;
-                hasChildren = true;
             }
-            Phases[parentIndex].HasChildren = hasChildren;
-            Phases[parentIndex].IsExpanded = visible;
-        }
-
-        /// <summary>
-        /// User toggle for a finished phase's children: completed/failed
-        /// phases collapse their cards when they finish, and without this
-        /// toggle there was no way to review what ran under them.
-        /// </summary>
-        public void TogglePhaseExpanded(string id)
-        {
-            var phase = FindPhase(id);
-            if (phase == null) return;
-            // Only parent cards with children are expandable, and only once
-            // the flow is done with them — mid-run expansion is driven by
-            // activation and must not fight the user.
-            if (phase.IndentLevel != 0 || !phase.HasChildren) return;
-            if (phase.Status is not (DeploymentPhaseStatus.Completed or DeploymentPhaseStatus.Failed)) return;
-
-            bool expand = !phase.IsExpanded;
-            SetChildrenVisible(Phases.IndexOf(phase), expand);
         }
 
         public void UpdatePhaseProgress(string id, int percentage, string? text = null)
