@@ -244,6 +244,11 @@ namespace VMCreate
                 RedirectStandardInput = !string.IsNullOrEmpty(stdinContent),
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
+                // Guests are UTF-8; without this the default OEM/ANSI
+                // codepage decodes guest output (box-drawing banners,
+                // non-ASCII filenames) into mojibake in logs and results.
+                StandardOutputEncoding = System.Text.Encoding.UTF8,
+                StandardErrorEncoding = System.Text.Encoding.UTF8,
                 UseShellExecute = false,
                 CreateNoWindow = true,
             };
