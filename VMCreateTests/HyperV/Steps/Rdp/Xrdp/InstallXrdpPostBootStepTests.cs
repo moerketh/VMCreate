@@ -242,24 +242,29 @@ namespace VMCreate.Tests.HyperV.Steps
 
             Assert.IsNotNull(copiedContent);
 
-            // 1. The chroot half keeps the backup (no rm between the backup
-            //    write and the CHROOT_MODE exit).
+            // 1. The chroot half keeps the backup: on the chroot execution
+            //    path (backup write → config write → CHROOT exit) the
+            //    backup is never deleted. The first-boot gate earlier in
+            //    the file does delete it, but that branch is live-only
+            //    (CHROOT_MODE=0) dead code in the chroot run.
+            int backupWrite = copiedContent.IndexOf("cp \"$INI\" \"$INI.vmcreate-bak\"", StringComparison.Ordinal);
+            Assert.IsTrue(backupWrite > 0, "the backup write must exist");
             int chrootExit = copiedContent.IndexOf("CHROOT: xrdp installed and configured offline", StringComparison.Ordinal);
-            Assert.IsTrue(chrootExit > 0, "the chroot half's exit block must exist");
-            string chrootBlock = copiedContent.Substring(0, chrootExit);
+            Assert.IsTrue(chrootExit > backupWrite, "the chroot half's exit block must exist after the backup write");
+            string chrootBlock = copiedContent.Substring(backupWrite, chrootExit - backupWrite);
             Assert.IsFalse(chrootBlock.Contains("rm -f \"$INI.vmcreate-bak\"",
                 StringComparison.Ordinal),
                 "the chroot half must keep the pre-edit TCP backup for first boot's fallback");
 
             // 2. The first-boot skip gate restores the backup when the
-            //    daemon is active without a vsock listener (and when it is
-            //    not active), before any "TCP RDP kept" claim.
+            //    daemon cannot serve the vsock listener, and the restore
+            //    precedes the settled-transport message.
             StringAssert.Contains(copiedContent, "cp \"$INI.vmcreate-bak\" \"$INI\"",
                 "the skip gate must restore the TCP backup when vsock never comes up");
             int restoreIdx = copiedContent.IndexOf("cp \"$INI.vmcreate-bak\" \"$INI\"", StringComparison.Ordinal);
-            int keptIdx = copiedContent.IndexOf("TCP RDP kept", StringComparison.Ordinal);
+            int keptIdx = copiedContent.IndexOf("TCP config restored from backup", StringComparison.Ordinal);
             Assert.IsTrue(restoreIdx >= 0 && keptIdx > restoreIdx,
-                "the restore must exist in the skip gate before any TCP-kept message");
+                "the restore must exist in the skip gate before the TCP-restored message");
         }
 
         [TestMethod]

@@ -132,58 +132,67 @@ TRANSPORT=unverified
 # verification below still runs; it needs no restart, just a probe of
 # the live daemon.
 if [ "$CHROOT_MODE" = "0" ] && [ -n "$INI" ] && grep -Eq '^[[:space:]]*port[[:space:]]*=[[:space:]]*vsock://' "$INI"; then
-    if command -v systemctl >/dev/null 2>&1 && systemctl is-active xrdp >/dev/null 2>&1; then
-        # ss without -A vsock only lists INET sockets; the vsock listener
-        # lives in the AF_VSOCK family and needs the explicit family
-        # selector. xrdp's own socket type string is "vsock".
-        if ss -H -l -A vsock 2>/dev/null | grep -q ":3389"; then
-            TRANSPORT=vsock
-            echo "xrdp already active with the vsock listener — no restart needed."
-        elif [ -f "$INI.vmcreate-bak" ] && systemctl restart xrdp 2>&1; then
-            # First boot of a chroot-configured xrdp that started WITHOUT
-            # the vsock listener: this build cannot serve vsock (the ini
-            # asked for it and the daemon ignored it). Restore the pre-edit
-            # TCP config the chroot half preserved and restart — the same
-            # recovery as the live rollback path. Safe here: no RDP session
-            # exists yet on first boot, so the restart cannot orphan one.
-            if sleep 1 && systemctl is-active xrdp >/dev/null 2>&1 \
-               && ! ss -H -l -A vsock 2>/dev/null | grep -q ":3389"; then
-                cp "$INI.vmcreate-bak" "$INI"
-                systemctl restart xrdp 2>/dev/null || true
-                TRANSPORT=tcp
-                echo "xrdp cannot serve the vsock listener — TCP config restored from backup."
-            else
-                TRANSPORT=vsock
-                echo "xrdp now serves the vsock listener after restart."
-            fi
-        else
+    # Helper probes (ss without -A vsock lists INET sockets only; the
+    # vsock listener lives in the AF_VSOCK family).
+    listener_up() { ss -H -l -A vsock 2>/dev/null | grep -q ":3389"; }
+    daemon_up() { systemctl is-active xrdp >/dev/null 2>&1; }
+
+    if command -v systemctl >/dev/null 2>&1 && daemon_up && listener_up; then
+        TRANSPORT=vsock
+        echo "xrdp already active with the vsock listener — no restart needed."
+    elif command -v systemctl >/dev/null 2>&1 && systemctl restart xrdp 2>/dev/null \
+         && sleep 1 && daemon_up && listener_up; then
+        # Daemon was mid-start, or started without the listener from a
+        # config it had not re-read — one restart on the vsock config
+        # settles it. Only a LISTENER is success: an active daemon
+        # without the listener, or a restart that dies, is not.
+        TRANSPORT=vsock
+        echo "xrdp now serves the vsock listener after restart."
+    elif command -v systemctl >/dev/null 2>&1 && [ -f "$INI.vmcreate-bak" ]; then
+        # This build cannot serve the vsock listener (or the daemon will
+        # not stay up on the vsock config): restore the pre-edit TCP
+        # config the chroot half preserved and restart — the same
+        # recovery as the live rollback path. Safe here: no RDP session
+        # can exist yet on a first boot, so the restart cannot orphan
+        # one. The report is only as good as the recovery: tcp requires
+        # the daemon to be back, otherwise the honest verdict is
+        # unverified.
+        cp "$INI.vmcreate-bak" "$INI"
+        if systemctl restart xrdp 2>/dev/null && sleep 1 && daemon_up \
+           && ! listener_up; then
+            rm -f "$INI.vmcreate-bak"
             echo "XRDP_POSTBOOT_RESULT=$RESULT"
             echo "XRDP_POSTBOOT_TRANSPORT=tcp"
-            echo "xrdp is active but has no AF_VSOCK listener on 3389 — TCP RDP kept."
+            echo "xrdp cannot serve the vsock listener — TCP config restored from backup."
             exit 0
         fi
-    else
-        # Daemon not active. On first boot of a chroot-written vsock-only
-        # config, a start failure likely means this build cannot serve the
-        # vsock listener — restore the preserved TCP config and try again
-        # so the image keeps network RDP (the same recovery as the live
-        # rollback). Without a backup (live re-run) nothing to restore:
-        # report unverified for the next boot.
-        if [ -f "$INI.vmcreate-bak" ]; then
-            cp "$INI.vmcreate-bak" "$INI"
-            if systemctl restart xrdp 2>&1 && sleep 1 && systemctl is-active xrdp >/dev/null 2>&1 \
-               && ! ss -H -l -A vsock 2>/dev/null | grep -q ":3389"; then
-                echo "XRDP_POSTBOOT_RESULT=$RESULT"
-                echo "XRDP_POSTBOOT_TRANSPORT=tcp"
-                echo "xrdp failed on the vsock-only config — TCP config restored from backup."
-                exit 0
-            fi
-        fi
+        rm -f "$INI.vmcreate-bak"
         echo "XRDP_POSTBOOT_RESULT=$RESULT"
         echo "XRDP_POSTBOOT_TRANSPORT=unverified"
-        echo "xrdp installed but not active — listener verified on next boot."
+        echo "xrdp did not come back on either config — listener state unknown, verified on next boot."
+        exit 0
+    else
+        # No manager (or no backup to recover into): nothing can be
+        # restarted, so report only what is observable. With the
+        # replace-semantics config write, "TCP RDP kept" is only true when
+        # the ini still carries a TCP port line — a vsock-only ini with a
+        # listener-less daemon has nothing serving, and the honest verdict
+        # is unverified for the next boot.
+        if daemon_up && grep -Eq '^[[:space:]]*port[[:space:]]*=[[:space:]]*3389' "$INI"; then
+            echo "XRDP_POSTBOOT_RESULT=$RESULT"
+            echo "XRDP_POSTBOOT_TRANSPORT=tcp"
+            echo "xrdp is active with a TCP config — no vsock listener on this build."
+        else
+            echo "XRDP_POSTBOOT_RESULT=$RESULT"
+            echo "XRDP_POSTBOOT_TRANSPORT=unverified"
+            echo "xrdp state unknown (no manager or no listener observable) — verified on next boot."
+        fi
         exit 0
     fi
+    # Transport settled: the backup has no further recovery role. Delete
+    # it so a later re-run of this script can never restore-and-restart
+    # over a live session.
+    rm -f "$INI.vmcreate-bak"
     echo "XRDP_POSTBOOT_RESULT=$RESULT"
     echo "XRDP_POSTBOOT_TRANSPORT=$TRANSPORT"
     exit 0
