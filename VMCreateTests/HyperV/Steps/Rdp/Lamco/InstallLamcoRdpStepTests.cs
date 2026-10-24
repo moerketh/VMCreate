@@ -620,7 +620,7 @@ namespace VMCreate.Tests.HyperV.Steps
             await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
 
             Assert.IsNotNull(captured);
-            StringAssert.Contains(captured, "Accept dispatcher started",
+            StringAssert.Contains(captured, ReadinessProbe,
                 "readiness gate present in the script");
             // The gate is on the main path: it must no longer be nested
             // inside a `command -v cargo` block (the source build is gone).
@@ -655,9 +655,9 @@ namespace VMCreate.Tests.HyperV.Steps
             StringAssert.Contains(captured, "systemctl --user is-active graphical-session.target",
                 "the gate checks the session state before polling the journal");
             int sessionCheck = captured.IndexOf("systemctl --user is-active graphical-session.target", StringComparison.Ordinal);
-            int dispatcherPoll = captured.IndexOf("Accept dispatcher started", StringComparison.Ordinal);
-            Assert.IsTrue(sessionCheck >= 0 && dispatcherPoll > sessionCheck,
-                "the session-state check must precede the dispatcher journal poll");
+            int readinessPoll = captured.IndexOf(ReadinessProbe, StringComparison.Ordinal);
+            Assert.IsTrue(sessionCheck >= 0 && readinessPoll > sessionCheck,
+                "the session-state check must precede the readiness poll");
             // The deferred branch exists (assigned in the no-session else arm)
             // and reports an explanatory NOTICE, not a failure.
             StringAssert.Contains(captured, "RDY_OUTCOME=\"deferred\"",
@@ -699,8 +699,139 @@ namespace VMCreate.Tests.HyperV.Steps
                 "marker file makes the oneshot skip after a successful grant");
             StringAssert.Contains(all, "WantedBy=graphical-session.target",
                 "grant runs at graphical session start (dialog on the console)");
-            StringAssert.Contains(all, "Accept dispatcher started",
+            StringAssert.Contains(all, ReadinessProbe,
                 "readiness gate distinguishes service-up from blocked-on-consent");
+        }
+
+        // The server's own loopback TCP listener: the early vsock hold binds
+        // vsock only, so this cannot be satisfied by the hold.
+        private const string ReadinessProbe = "ss -H -ltnp 'sport = :3389' 2>/dev/null | grep -a 'lamco'";
+
+        [TestMethod]
+        public async Task ExecuteAsync_ConsentGrant_SucceedsOnExitStatusNotTokenFile()
+        {
+            // The fork stores the restore token in the Secret Service and
+            // writes no restore_token file, so a file check never matched:
+            // the marker was never written and the grant re-prompted on
+            // every boot (live: Parrot 7.4). Success is the exit status.
+            string? captured = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("LAMCO_RESULT=ok");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(captured);
+            string execStart = captured.Split('\n')
+                .Single(l => l.StartsWith("ExecStart=", StringComparison.Ordinal) && l.Contains("--grant-permission"));
+            StringAssert.Contains(execStart,
+                "if timeout 300 /usr/bin/lamco-rdp-server --grant-permission; then touch \"%h/.local/share/lamco-rdp-server/consent-granted\"",
+                "the marker is written when the grant exits 0");
+            Assert.IsFalse(execStart.Contains("restore_token"),
+                "the grant's success must not depend on a token file the fork never writes");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_ProvisionsPersistentKeyring_OnlyWhenNoneExists()
+        {
+            // An autologin user has no login keyring, so gnome-keyring keeps
+            // the restore token in its in-memory session collection and the
+            // consent dialog returns after every reboot (live: Parrot 7.4).
+            string? captured = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("LAMCO_RESULT=ok");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(captured);
+            int guard = captured.IndexOf("if [ ! -e \"$KR_DIR/default\" ] && [ ! -e \"$KR_DIR/login.keyring\" ]; then", StringComparison.Ordinal);
+            int write = captured.IndexOf("> \"$KR_DIR/login.keyring\"", StringComparison.Ordinal);
+            Assert.IsTrue(guard > 0 && write > guard,
+                "the keyring is only created when the user has no default or login keyring");
+            StringAssert.Contains(captured, "printf 'login' > \"$KR_DIR/default\"",
+                "the new keyring becomes the default collection");
+            // A running daemon only picks up the alias file, not the new
+            // collection: it must be restarted to load the keyring.
+            int daemonRestart = captured.IndexOf("systemctl --user restart gnome-keyring-daemon.service", StringComparison.Ordinal);
+            Assert.IsTrue(daemonRestart > write,
+                "the user's keyring daemon is restarted after the keyring is written");
+            int restart = captured.IndexOf("systemctl --user restart lamco-rdp-server.service", StringComparison.Ordinal);
+            Assert.IsTrue(restart > daemonRestart,
+                "the keyring is live before the server restart can surface the consent dialog");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_GnomeFixes_ManagerStartOwnershipSecurityModeMonitorsVersion()
+        {
+            // Live (Kali GNOME, VM at the greeter): enable-linger starts
+            // user@UID asynchronously and every `systemctl --user` call raced
+            // it; root `mkdir -p` left ~/.config/systemd/user root-owned;
+            // Mutter Direct builds no vsock plain server; mutter 50
+            // segfaults on a version-less monitors.xml.
+            string? captured = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("LAMCO_RESULT=ok");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(captured);
+            // Every enable-linger is followed by a synchronous manager start
+            // before the next `systemctl --user` call.
+            int from = 0, lingers = 0;
+            while ((from = captured.IndexOf("loginctl enable-linger \"$AUTOLOGIN_USER\"", from, StringComparison.Ordinal)) >= 0)
+            {
+                int start = captured.IndexOf("systemctl start \"user@$(id -u \"$AUTOLOGIN_USER\").service\"", from, StringComparison.Ordinal);
+                int userCall = captured.IndexOf("systemctl --user", from, StringComparison.Ordinal);
+                Assert.IsTrue(start > from && start < userCall,
+                    $"enable-linger at {from} must start user@UID synchronously before any systemctl --user call");
+                from++; lingers++;
+            }
+            Assert.IsTrue(lingers >= 2, "both linger sites are covered");
+
+            int mkdirUnits = captured.IndexOf("mkdir -p \"$USER_HOME/.config/systemd/user\"", StringComparison.Ordinal);
+            int handOver = captured.IndexOf("for d in .config .config/systemd .config/systemd/user .local .local/share; do", StringComparison.Ordinal);
+            int enable = captured.IndexOf("systemctl --user enable lamco-rdp-server.service", StringComparison.Ordinal);
+            Assert.IsTrue(mkdirUnits > 0 && handOver > mkdirUnits && enable > handOver,
+                "root-created unit-dir parents are handed to the user before the units are enabled");
+
+            int config = captured.IndexOf("security_mode = \"hybrid\"", StringComparison.Ordinal);
+            int gnomeSwitch = captured.IndexOf("[ -f /usr/share/wayland-sessions/gnome.desktop ] && [ ! -f /usr/share/wayland-sessions/plasma.desktop ]", StringComparison.Ordinal);
+            Assert.IsTrue(config > 0 && gnomeSwitch > config,
+                "a Plasma-less GNOME guest is switched to the single plain server after the config write");
+            StringAssert.Contains(captured, "s/^security_mode = \"hybrid\"$/security_mode = \"rdp\"/");
+
+            StringAssert.Contains(captured, "<monitors version=\"2\">");
+            Assert.IsFalse(captured.Contains("<monitors>\n"), "no version-less monitors.xml is written");
+
+            // Omarchy's update-guard hook aborts any direct -Syu (live: 4.0.6).
+            StringAssert.Contains(captured, "OMARCHY_ALLOW_DIRECT_PACMAN=1 pacman -Syu --noconfirm");
+            Assert.IsFalse(System.Text.RegularExpressions.Regex.IsMatch(captured, @"(?m)^\s*pacman -Syu"),
+                "every -Syu carries the Omarchy guard bypass");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_ReadinessGate_ConsentIsNoticeNotDegraded()
+        {
+            // StartGraphicalSessionStep owns the session verdict and reports
+            // consent ok-with-notice; the install gate must not degrade the
+            // install for the same expected one-click state.
+            string? captured = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("LAMCO_RESULT=ok");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(captured);
+            int arm = captured.IndexOf("        consent)", StringComparison.Ordinal);
+            Assert.IsTrue(arm > 0, "the case statement has a consent arm");
+            int armEnd = captured.IndexOf(";;", arm, StringComparison.Ordinal);
+            string body = captured.Substring(arm, armEnd - arm);
+            Assert.IsFalse(body.Contains("DEGRADED=1"), "consent pending must not degrade the install");
+            Assert.IsFalse(captured.Contains("| grep -aqi \"permission dialog will appear\""),
+                "journalctl | grep -q returns 141 under pipefail even on a match");
         }
 
         [TestMethod]

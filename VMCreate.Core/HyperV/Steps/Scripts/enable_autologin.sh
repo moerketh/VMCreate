@@ -86,10 +86,15 @@ loginctl enable-linger "$USER" 2>/dev/null || true
 echo "Display managers detected: sddm=$has_sddm lightdm=$has_lightdm gdm=$has_gdm greetd=$has_greetd"
 
 # -- GDM (GNOME: Ubuntu, Debian-GNOME) -------------------------------------
-# Enable AutomaticLogin in /etc/gdm3/custom.conf or /etc/gdm/custom.conf.
+# Enable AutomaticLogin in the gdm daemon config. The file name differs:
+# Debian/Kali/Parrot gdm3 ships /etc/gdm3/daemon.conf (Debian patch), Ubuntu
+# /etc/gdm3/custom.conf, Fedora/Arch /etc/gdm/custom.conf. Only custom.conf
+# was handled, so on Kali GNOME the VM sat at the gdm greeter with no
+# session and no lamco listener (live: /etc/gdm3 held only daemon.conf).
 # Do NOT set WaylandEnable=false — Lamco requires Wayland.
 if [ "$has_gdm" = "1" ]; then
-    for conf in /etc/gdm3/custom.conf /etc/gdm/custom.conf; do
+    gdm_configured=0
+    for conf in /etc/gdm3/daemon.conf /etc/gdm3/custom.conf /etc/gdm/custom.conf; do
         if [ -f "$conf" ]; then
             if ! grep -q '^\[daemon\]' "$conf"; then
                 printf '\n[daemon]\n' >> "$conf"
@@ -99,8 +104,14 @@ if [ "$has_gdm" = "1" ]; then
             sed -i '/^\[daemon\]/a AutomaticLoginEnable=true' "$conf"
             sed -i '/^\[daemon\]/a AutomaticLogin='"$USER" "$conf"
             echo "Configured GDM autologin in $conf"
+            gdm_configured=1
         fi
     done
+    # A bare /etc/gdm3 dir without the daemon is not a GDM install.
+    if [ "$gdm_configured" = "0" ] && { command -v gdm3 >/dev/null 2>&1 || command -v gdm >/dev/null 2>&1; }; then
+        echo "WARNING: gdm detected but no daemon.conf/custom.conf found — GDM autologin NOT configured."
+        DEGRADED=1
+    fi
 fi
 
 # -- SDDM (KDE: Parrot-KDE, Debian-KDE) ------------------------------------
@@ -217,9 +228,11 @@ MON_LUA_EOF
         fi
         echo "Configured Hyprland (Lua config) for __CONSOLE_RESOLUTION__ resolution."
     else
+    # version="2" is mandatory — mutter 50 segfaults without it (see
+    # install_lamco.sh).
     mkdir -p "$USER_HOME/.config"
     cat > "$USER_HOME/.config/monitors.xml" << 'MONITORS_EOF'
-<monitors>
+<monitors version="2">
   <configuration>
     <layoutmode>logical</layoutmode>
     <logicalmonitor>

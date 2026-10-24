@@ -202,6 +202,31 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
+        public async Task ExecuteAsync_GdmAutologin_CoversDebianDaemonConfAndVersionedMonitorsXml()
+        {
+            // Live (Kali GNOME): Debian's gdm3 reads /etc/gdm3/daemon.conf —
+            // only custom.conf was handled, so autologin was silently skipped.
+            // And mutter 50 segfaults on a version-less monitors.xml, killing
+            // the autologin session in under a second.
+            string? captured = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("AUTOLOGIN_RESULT=ok");
+
+            await _step.ExecuteAsync(_shell.Object, _item, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(captured);
+            StringAssert.Contains(captured, "for conf in /etc/gdm3/daemon.conf /etc/gdm3/custom.conf /etc/gdm/custom.conf; do",
+                "Debian/Kali gdm3's daemon.conf is configured alongside Ubuntu/Fedora custom.conf");
+            StringAssert.Contains(captured, "GDM autologin NOT configured.\"\n        DEGRADED=1",
+                "an installed gdm with no config file degrades instead of passing silently");
+            StringAssert.Contains(captured, "<monitors version=\"2\">",
+                "monitors.xml carries the format version mutter requires");
+            Assert.IsFalse(captured.Contains("<monitors>\n"),
+                "no version-less monitors.xml is written");
+        }
+
+        [TestMethod]
         public async Task ExecuteAsync_InvalidConsoleResolution_ThrowsBeforeCopy()
         {
             // The resolution comes from a hand-editable settings file; a

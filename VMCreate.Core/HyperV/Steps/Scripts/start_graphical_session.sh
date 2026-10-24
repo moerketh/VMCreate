@@ -134,15 +134,13 @@ for r in $(seq 1 12); do
     LAMCO=$(sudo -u "$USER" XDG_RUNTIME_DIR=/run/user/$USER_UID \
         systemctl --user is-active lamco-rdp-server.service 2>/dev/null || true)
     if [ "$SESS" = "active" ] || [ "$LAMCO" = "active" ]; then
-        # Server dispatcher line = listeners bound.
-        if journalctl _UID=$USER_UID --since "-5 min" --no-pager 2>/dev/null \
-            | grep -aq "Accept dispatcher started"; then
-            RDY_OUTCOME="ready"
-            break
-        fi
-        # Server active with a bound listener (vsock/TCP 3389) also proves
-        # readiness even when the dispatcher line predates the journal window.
-        if [ "$LAMCO" = "active" ] && sudo -n ss -l 2>/dev/null | grep -q ':3389 '; then
+        # Listeners bound = the server's own loopback TCP 3389 listener.
+        # Not `ss -l | grep :3389`: that also matched the early vsock hold
+        # (lamco-vsock-hold.py, vsock only), reporting "listeners bound"
+        # while the server itself sat blocked on the consent dialog. The
+        # fork does not log "Accept dispatcher started" at INFO, so the
+        # socket is the proof. (grep without -q: see below.)
+        if ss -H -ltnp 'sport = :3389' 2>/dev/null | grep -a 'lamco' >/dev/null; then
             RDY_OUTCOME="ready"
             break
         fi
@@ -151,8 +149,13 @@ for r in $(seq 1 12); do
         # ("Permission dialog will appear (one-time grant)" in server/mod.rs,
         # "permission dialog will appear" in portal.rs/libei) — match
         # case-insensitively so no capitalization drift re-breaks the gate.
+        # grep WITHOUT -q (output discarded): under this script's pipefail,
+        # `journalctl | grep -q` returns 141 even on a match — grep exits at
+        # the first hit and journalctl dies of SIGPIPE — so the consent
+        # outcome was unreachable and every consent-pending deploy reported
+        # a 120 s timeout (verified live on Parrot 7.4).
         if journalctl _UID=$USER_UID --since "-5 min" --no-pager 2>/dev/null \
-            | grep -aqi "permission dialog will appear"; then
+            | grep -ai "permission dialog will appear" >/dev/null; then
             RDY_OUTCOME="consent"
             break
         fi

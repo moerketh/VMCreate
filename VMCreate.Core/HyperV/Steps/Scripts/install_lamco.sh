@@ -225,7 +225,11 @@ echo "sha256 OK ($LAMCO_FORK_PKG_SHA256)"
 # can break packages. pacman -U then installs the verified file and resolves
 # its hard deps (glibc, pipewire, xdg-desktop-portal, ...) from the sync
 # repositories in one transaction.
-pacman -Syu --noconfirm >/dev/null 2>&1 || true
+# OMARCHY_ALLOW_DIRECT_PACMAN=1: Omarchy's 00-omarchy-update-guard pacman
+# hook (AbortOnFail) rejects every -S+-u transaction not run through
+# `omarchy update` (live: openvpn and the lamco -Syu both refused). The
+# variable is the guard's documented bypass; other Arch guests ignore it.
+OMARCHY_ALLOW_DIRECT_PACMAN=1 pacman -Syu --noconfirm >/dev/null 2>&1 || true
 if ! pacman -U --noconfirm "$FORK_PKG_TMP" 2>&1; then
     echo "ERROR: pacman -U failed installing the fork pacman package." >&2
     rm -f "$FORK_PKG_TMP"
@@ -661,6 +665,23 @@ metrics_bind = "127.0.0.1:9100"
 CONFIG_EOF
 chmod 644 /etc/lamco-rdp-server/config.toml
 
+# -- GNOME: single plain server (fork gap on the Mutter Direct path) --------
+# The fork's per-transport routing (vsock -> dedicated Standard-RDP-Security
+# server, see [server.transports.vsock] above) is only built for the
+# KwinVirtual/WlrDirect/PortalGeneric/ScreenCastOnly strategies. GNOME
+# selects Mutter Direct, which takes the portal path and keeps upstream's
+# SINGLE server — Hybrid here — so every vsock client failed (live, Kali
+# GNOME: "server requires HYBRID|HYBRID_EX" / "no credentials while doing
+# credssp"; the fork's own startup WARN says vmconnect will fail).
+# security_mode="rdp" makes that single server plain, which is what the
+# vsock host relay speaks. TCP stays loopback-only (threat model above), so
+# no exposure changes. Mirrors EnableGraphicalAutologinStep's session pick:
+# plasma wins over gnome, so only a Plasma-less GNOME guest is switched.
+if [ -f /usr/share/wayland-sessions/gnome.desktop ] && [ ! -f /usr/share/wayland-sessions/plasma.desktop ]; then
+    sed -i 's/^security_mode = "hybrid"$/security_mode = "rdp"/' /etc/lamco-rdp-server/config.toml
+    echo "GNOME (Mutter Direct): security_mode=rdp — the fork builds no separate vsock plain server on this path."
+fi
+
 # -- Install the systemd user service unit ----------------------------------
 # Write to the autologin user's ~/.config/systemd/user. The PRIMARY user
 # source is __AUTOLOGIN_USER__, substituted host-side from the gallery
@@ -747,6 +768,15 @@ if [ -n "$AUTOLOGIN_USER" ]; then
     mkdir -p "$USER_HOME/.local/share/lamco-rdp-server"
     mkdir -p "$USER_HOME/Downloads"
     chown -R "$AUTOLOGIN_USER" "$USER_HOME/.config/lamco-rdp-server" "$USER_HOME/.local/share/lamco-rdp-server" "$USER_HOME/Downloads"
+    # Parents the root `mkdir -p` calls above may have CREATED are root-owned.
+    # A root ~/.config/systemd/user blocks `systemctl --user enable` (it
+    # cannot create graphical-session.target.wants/: "Unit ... does not
+    # exist") — live on Kali GNOME, whose fresh home had no ~/.config/systemd.
+    # Only root-owned dirs are handed over; existing user dirs are untouched.
+    for d in .config .config/systemd .config/systemd/user .local .local/share; do
+        [ -d "$USER_HOME/$d" ] && [ "$(stat -c %u "$USER_HOME/$d")" = 0 ] \
+            && chown "$AUTOLOGIN_USER":"$(id -gn "$AUTOLOGIN_USER")" "$USER_HOME/$d"
+    done
     # lamco-grant.service runs `--grant-permission`, which loads TLS
     # material from Config::default_config() — the hardcoded
     # ~/.config/lamco-rdp-server cert/key paths (a --config flag is not
@@ -837,7 +867,14 @@ ConditionPathExists=!%h/.local/share/lamco-rdp-server/consent-granted
 [Service]
 Type=oneshot
 ExecStartPre=/bin/sh -c 'if [ -s "%h/.local/share/lamco-rdp-server/restore_token" ] || kreadconfig6 --file xdg-desktop-portal-kderc --group remote-desktop --key "lamco-rdp-server" 2>/dev/null | grep -q .; then touch "%h/.local/share/lamco-rdp-server/consent-granted"; echo "Consent already present — skipping dialog."; exit 111; fi; exit 0'
-ExecStart=/bin/sh -c 'timeout 300 /usr/bin/lamco-rdp-server --grant-permission || true; if [ -s "%h/.local/share/lamco-rdp-server/restore_token" ]; then touch "%h/.local/share/lamco-rdp-server/consent-granted"; echo "Consent granted — restore token stored."; else echo "Consent flow did not complete (timeout or dismissed) — will retry next boot."; fi'
+# Success is the grant's exit status, not a token FILE: the fork stores the
+# restore token in the Secret Service (GNOME Keyring/KWallet) when one is
+# unlocked and writes no restore_token file at all, so a file check never
+# matched — the marker was never written and the grant re-ran (and re-
+# prompted) on every boot (live: Parrot 7.4, "✅ Permission granted and
+# token stored!" followed by "did not complete"). --grant-permission exits
+# 0 only once the portal session was granted and the token saved.
+ExecStart=/bin/sh -c 'if timeout 300 /usr/bin/lamco-rdp-server --grant-permission; then touch "%h/.local/share/lamco-rdp-server/consent-granted"; echo "Consent granted — restore token stored."; else echo "Consent flow did not complete (timeout or dismissed) — will retry next boot."; fi'
 # ExecStartPre's exit 111 is the "already granted, skip" path, not a
 # failure — without this the unit shows as FAILED in systemctl status and
 # trips failure monitors for every already-provisioned VM.
@@ -920,10 +957,12 @@ AUTO_LUA_EOF
     # -- Create monitors.xml to force the console resolution --------------
     # The hyperv_drm driver reports 1024x768 as the preferred mode, which
     # mutter/GNOME picks by default. This overrides it to the configured
-    # console mode.
+    # console mode. version="2" is mandatory: mutter 50 SEGFAULTS on a
+    # version-less file ("Missing config file format version"), so gdm
+    # autologin died in <1s and the VM sat at the greeter (live, Kali GNOME).
     mkdir -p "$USER_HOME/.config"
     cat > "$USER_HOME/.config/monitors.xml" << 'MONITORS_EOF'
-<monitors>
+<monitors version="2">
   <configuration>
     <layoutmode>logical</layoutmode>
     <logicalmonitor>
@@ -968,6 +1007,44 @@ MONITORS_EOF
     fi
     fi
 
+    # -- Persistent keyring for the portal restore token --------------------
+    # The fork keeps the portal restore token in the Secret Service whenever
+    # one is unlocked. An autologin desktop user has no login keyring (no
+    # password ever unlocks one), so gnome-keyring serves only its in-memory
+    # "session" collection: the token is "stored successfully" and gone at
+    # the next reboot, and the consent dialog returns on EVERY boot (live:
+    # Parrot 7.4 — no ~/.local/share/keyrings, ReadAlias default = "/").
+    # An unencrypted login keyring as the default collection persists the
+    # token and opens without a password under autologin. A RUNNING daemon
+    # (Parrot: the session is already up at install time) only picks up the
+    # alias file, not the collection — ReadAlias says "login" while no such
+    # object exists and the token still lands in "session" (verified live).
+    # Restarting the user's daemon loads it (locked, but an unencrypted
+    # keyring unlocks prompt-free, which the fork does on first use). Never
+    # touch a keyring the image or user already has.
+    if command -v gnome-keyring-daemon >/dev/null 2>&1; then
+        KR_DIR="$USER_HOME/.local/share/keyrings"
+        if [ ! -e "$KR_DIR/default" ] && [ ! -e "$KR_DIR/login.keyring" ]; then
+            install -d -o "$AUTOLOGIN_USER" -g "$(id -gn "$AUTOLOGIN_USER")" -m 700 "$KR_DIR"
+            printf '[keyring]\ndisplay-name=login\nctime=0\nmtime=0\nlock-on-idle=false\nlock-after=false\n' > "$KR_DIR/login.keyring"
+            printf 'login' > "$KR_DIR/default"
+            chown "$AUTOLOGIN_USER":"$(id -gn "$AUTOLOGIN_USER")" "$KR_DIR/login.keyring" "$KR_DIR/default"
+            chmod 600 "$KR_DIR/login.keyring" "$KR_DIR/default"
+            echo "Persistent login keyring created for $AUTOLOGIN_USER (portal restore token survives reboots)."
+            if sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
+                    systemctl --user is-active gnome-keyring-daemon.service >/dev/null 2>&1; then
+                if sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
+                        systemctl --user restart gnome-keyring-daemon.service 2>/dev/null; then
+                    echo "Restarted $AUTOLOGIN_USER's gnome-keyring-daemon so the login keyring is live for this session."
+                else
+                    echo "NOTICE: could not restart gnome-keyring-daemon — the login keyring is used from the next login on."
+                fi
+            fi
+        else
+            echo "Existing keyring kept for $AUTOLOGIN_USER."
+        fi
+    fi
+
     # -- Restart the service under the freshly installed binary ------------
     # The deb installed the binary and its units; restart so the service
     # acquires its portal session under the new binary. The restart also
@@ -975,6 +1052,14 @@ MONITORS_EOF
     # not been answered yet. (No AUTOLOGIN_USER re-test here: this whole
     # block is already inside `if [ -n "$AUTOLOGIN_USER" ]`.)
     loginctl enable-linger "$AUTOLOGIN_USER" 2>/dev/null || { echo "DEGRADED: enable-linger failed for $AUTOLOGIN_USER — user units will not start at boot"; DEGRADED=1; }
+    # enable-linger starts user@UID ASYNCHRONOUSLY. With no session yet (VM at
+    # the greeter) every user-manager call below raced the manager's
+    # startup and failed (live, Kali GNOME: user@1000 starting at .506,
+    # daemon-reload/enable at .531–.547, the user bus socket only at .578 —
+    # lamco-rdp-server/lamco-grant never got enabled). user@.service is
+    # Type=notify, so a synchronous start returns once the manager is ready.
+    systemctl start "user@$(id -u "$AUTOLOGIN_USER").service" 2>/dev/null \
+        || echo "NOTICE: user@$(id -u "$AUTOLOGIN_USER").service did not start synchronously — the user-unit calls below may fail."
     sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
         systemctl --user daemon-reload 2>/dev/null || true
     sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
@@ -1020,14 +1105,21 @@ MONITORS_EOF
     LAMCO_ACTIVE=$(sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
         systemctl --user is-active lamco-rdp-server.service 2>/dev/null || true)
     if [ "$SESSION_ACTIVE" = "active" ] || [ "$LAMCO_ACTIVE" = "active" ]; then
+        # grep without -q, output discarded: under `set -o pipefail` a
+        # `journalctl | grep -q` exits 141 even on a match (grep quits at
+        # the first hit and journalctl dies of SIGPIPE), so neither outcome
+        # could ever be seen and every live gate "timed out" (verified live
+        # on Parrot: same pipeline, rc=141 with pipefail, 0 without).
+        # Readiness is the server's own loopback TCP listener — the early
+        # vsock hold binds vsock only, so TCP 3389 is unambiguous; the
+        # fork does not log "Accept dispatcher started" at INFO.
         for r in $(seq 1 12); do
-            if journalctl _UID=$RDY_UID --since "-5 min" --no-pager 2>/dev/null \
-                | grep -aq "Accept dispatcher started"; then
+            if ss -H -ltnp 'sport = :3389' 2>/dev/null | grep -a 'lamco' >/dev/null; then
                 RDY_OUTCOME="ready"
                 break
             fi
             if journalctl _UID=$RDY_UID --since "-5 min" --no-pager 2>/dev/null \
-                | grep -aqi "permission dialog will appear"; then
+                | grep -ai "permission dialog will appear" >/dev/null; then
                 RDY_OUTCOME="consent"
                 break
             fi
@@ -1055,9 +1147,12 @@ MONITORS_EOF
             # stdout per the STREAM RULE: the SSH transport returns stdout
             # only on zero-exit runs; a reason line on stderr never reached
             # the host's DEGRADED warning (TEST_20260910165003).
+            # Expected on images whose session is already up at install time
+            # (Parrot ships its own autologin): the install is complete and
+            # one Allow click binds the listeners. StartGraphicalSessionStep
+            # owns the session verdict and reports it ok-with-notice, so
+            # this is a NOTICE here, not a degradation of the install.
             echo "NOTICE: one-time portal consent dialog is on the VM console — click Allow once, then the service binds its listeners."
-            echo "DEGRADED: deployed but NOT listening yet — portal consent pending on the VM console."
-            DEGRADED=1
             ;;
         timeout)
             echo "DEGRADED: readiness gate timed out (120s) — graphical session active but neither dispatcher start nor consent prompt appeared in the journal."
@@ -1216,6 +1311,9 @@ DESKTOPEOF
 
     # linger + enable (the service starts on next graphical-session target)
     loginctl enable-linger "$AUTOLOGIN_USER" 2>/dev/null || { echo "DEGRADED: enable-linger failed for $AUTOLOGIN_USER — user units will not start at boot"; DEGRADED=1; }
+    # Synchronous manager start (see the restart block above: enable-linger
+    # alone races the user-manager calls). Idempotent when running.
+    systemctl start "user@$(id -u "$AUTOLOGIN_USER").service" 2>/dev/null || true
     sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
         systemctl --user daemon-reload 2>/dev/null || { echo "DEGRADED: systemctl --user daemon-reload failed for $AUTOLOGIN_USER"; DEGRADED=1; }
     sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
