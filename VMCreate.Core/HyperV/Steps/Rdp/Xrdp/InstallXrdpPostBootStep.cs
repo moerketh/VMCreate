@@ -125,9 +125,9 @@ namespace VMCreate
                     break;
                 case "tcp":
                     logger.LogWarning(
-                        "xrdp on VM {VMName} could not start with the vsock listener (distro package likely built " +
-                        "without vsock support) and was rolled back to its TCP config. Network RDP works; Hyper-V " +
-                        "Enhanced Session (the vmconnect popup) will NOT appear for this VM.",
+                        "xrdp on VM {VMName} has no AF_VSOCK listener on 3389 (the daemon could not serve it; " +
+                        "the TCP fallback config was kept). Network RDP works; Hyper-V Enhanced Session " +
+                        "(the vmconnect popup) will NOT appear for this VM.",
                         shell.VmName);
                     break;
                 default:

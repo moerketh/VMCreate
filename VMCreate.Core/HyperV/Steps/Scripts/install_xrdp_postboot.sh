@@ -108,9 +108,6 @@ else
 fi
 
 # ── Enhanced Session transport (every path, idempotent) ──────────────
-# Appends port=vsock://-1:3389 to [Globals] (keeping any TCP port= lines)
-# and pins the security settings the vsock path needs. A previous run's
-# vsock line is removed first so re-runs never duplicate it.
 INI=""
 if [ -f /etc/xrdp/xrdp.ini ]; then
     INI=/etc/xrdp/xrdp.ini
@@ -136,13 +133,16 @@ TRANSPORT=unverified
 # the live daemon.
 if [ "$CHROOT_MODE" = "0" ] && [ -n "$INI" ] && grep -Eq '^[[:space:]]*port[[:space:]]*=[[:space:]]*vsock://' "$INI"; then
     if command -v systemctl >/dev/null 2>&1 && systemctl is-active xrdp >/dev/null 2>&1; then
-        if ss -H -l 2>/dev/null | grep -q "v_str.*:3389"; then
+        # ss without -A vsock only lists INET sockets; the vsock listener
+        # lives in the AF_VSOCK family and needs the explicit family
+        # selector. xrdp's own socket type string is "vsock".
+        if ss -H -l -A vsock 2>/dev/null | grep -q ":3389"; then
             TRANSPORT=vsock
             echo "xrdp already active with the vsock listener — no restart needed."
         else
             echo "XRDP_POSTBOOT_RESULT=$RESULT"
             echo "XRDP_POSTBOOT_TRANSPORT=tcp"
-            echo "xrdp is active but has no vsock listener (not built with vsock support?) — TCP RDP kept."
+            echo "xrdp is active but has no AF_VSOCK listener on 3389 — TCP RDP kept."
             exit 0
         fi
     else
@@ -163,8 +163,15 @@ fi
 
 cp "$INI" "$INI.vmcreate-bak"
 
-sed -i '/^\[Globals\]/,/^\[/{/^port=vsock:/d}' "$INI"
-sed -i '/^\[Globals\]/a port=vsock://-1:3389' "$INI"
+# Replace every [Globals] port= line with the vsock listener — the
+# semantics the pre-chroot pipeline shipped and deployments were verified
+# against. Appending the vsock line while KEEPING the TCP port= line
+# leaves some distro xrdp builds (PwnCloudOS v1.2) binding TCP only —
+# the vsock listener never comes up and Enhanced Session is silently
+# lost (live-verified 2026-10-24: both lines present, TCP 3389 bound,
+# vsock refused). A single vsock port= makes the daemon bind vsock or
+# fail loudly; the rollback path below then restores the TCP backup.
+sed -i '/^\[Globals\]/,/^\[/{s/^port=.*/port=vsock:\/\/-1:3389/}' "$INI"
 sed -i '/^\[Globals\]/,/^\[/{s/^security_layer=.*/security_layer=rdp/}' "$INI"
 sed -i '/^\[Globals\]/,/^\[/{s/^crypt_level=.*/crypt_level=none/}' "$INI"
 echo "xrdp.ini configured for HvSocket Enhanced Session: $INI"
@@ -183,6 +190,7 @@ if [ "$CHROOT_MODE" = "1" ]; then
         # the package already enabled the unit.
         systemctl enable xrdp >/dev/null 2>&1 || true
     fi
+    rm -f "$INI.vmcreate-bak"
     echo "CHROOT: xrdp installed and configured offline — transport verified post-boot."
     echo "XRDP_POSTBOOT_RESULT=$RESULT"
     echo "XRDP_POSTBOOT_TRANSPORT=unverified"
@@ -193,7 +201,8 @@ if ! command -v systemctl >/dev/null 2>&1; then
     echo "WARNING: no systemctl — cannot restart xrdp; transport unverified."
 else
     systemctl enable xrdp 2>/dev/null || true
-    if systemctl restart xrdp 2>&1 && systemctl is-active xrdp >/dev/null 2>&1; then
+    if systemctl restart xrdp 2>&1 && systemctl is-active xrdp >/dev/null 2>&1 \
+       && ss -H -l -A vsock 2>/dev/null | grep -q ":3389"; then
         TRANSPORT=vsock
         echo "xrdp restarted and active with the vsock listener."
     else
