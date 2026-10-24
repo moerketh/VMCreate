@@ -117,6 +117,11 @@ namespace VMCreate
                         $"Desktop switch on VM {shell.VmName} reported no DESKTOP_SWITCH_RESULT line. " +
                         "The script exited zero but did not confirm success — treating as failure.");
             }
+
+            // The switch has landed: clear the pending marker so the RDP
+            // auto-resolver (order 232, gated on "no pending switch") runs
+            // live against the SWITCHED desktop instead of deferring.
+            customizations.DesktopEnvironmentId = null;
         }
 
         // ── IConfigurableCustomizationStep (UI metadata) ────────────────

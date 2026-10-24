@@ -66,8 +66,19 @@ namespace VMCreate
         public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
             // Headless appliances (tag "headless", e.g. Elastic SIEM) have no
             // desktop to share — the whole RDP pipeline is skipped.
+            //
+            // A pending desktop switch makes the resolver inapplicable until
+            // the switch completes: any display-server verdict produced now
+            // would read the STOCK desktop (e.g. Kali's Xfce/X11) while the
+            // backend must match the SWITCHED desktop (KDE/GNOME, Wayland).
+            // DesktopSwitchStep (order 231) runs post-boot only and clears
+            // DesktopEnvironmentId when it completes — so under Auto with a
+            // switch pending, this gate keeps the resolver out of the ISO
+            // chroot (whose verdict would be wrong and sticky) and the live
+            // loop re-evaluates it at order 232, right after the switch.
             => !item.HasTag("headless")
-               && customizations?.RdpBackend == RdpBackend.Auto;
+               && customizations?.RdpBackend == RdpBackend.Auto
+               && string.IsNullOrEmpty(customizations?.DesktopEnvironmentId);
 
         public async Task ExecuteAsync(IGuestShell shell, GalleryItem item, VmCustomizations customizations, ILogger logger, CancellationToken ct)
         {
