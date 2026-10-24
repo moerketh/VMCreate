@@ -31,10 +31,11 @@ namespace VMCreate
 
         public async Task ExecuteAsync(IGuestShell shell, GalleryItem item, VmCustomizations customizations, ILogger logger, CancellationToken ct)
         {
-            // In debug builds (debugger attached), keep SSH up alongside the
-            // preserved vmcreate user (see RemoveAutomationUserStep): a
-            // deployment preserved for investigation must stay reachable.
-            if (System.Diagnostics.Debugger.IsAttached)
+            // Debug preservation (debugger attached or VMCREATE_DEBUG_PRESERVE=1):
+            // keep SSH up alongside the preserved vmcreate user (see
+            // RemoveAutomationUserStep): a deployment preserved for
+            // investigation must stay reachable.
+            if (DebugPreservation.IsEnabled)
             {
                 logger.LogWarning("Debug mode: skipping SSH disable on VM {VMName} — access preserved for investigation", shell.VmName);
                 return;

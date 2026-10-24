@@ -7,7 +7,10 @@ using VMCreate;
 
 namespace VMCreate.Tests.HyperV.Steps
 {
+    // Not parallelized: pins release behavior via the shared
+    // DebugPreservation.TestOverride (see also DebugPreservationTests).
     [TestClass]
+    [DoNotParallelize]
     public class RemoveAutomationUserStepTests
     {
         private Mock<IGuestShell> _shellMock = null!;
@@ -16,10 +19,14 @@ namespace VMCreate.Tests.HyperV.Steps
         [TestInitialize]
         public void Setup()
         {
+            DebugPreservation.TestOverride = false; // pin release behavior (Debug builds preserve)
             _shellMock = new Mock<IGuestShell>();
             _loggerMock = new Mock<ILogger>();
             _step = new RemoveAutomationUserStep();
         }
+
+        [TestCleanup]
+        public void Cleanup() => DebugPreservation.TestOverride = null;
 
         [TestMethod]
         public void Metadata_IsCorrect()

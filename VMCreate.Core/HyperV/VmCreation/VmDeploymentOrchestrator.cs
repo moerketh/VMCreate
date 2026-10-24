@@ -128,13 +128,13 @@ namespace VMCreate.HyperV.VmCreation
             catch (OperationCanceledException)
             {
                 _logger.LogWarning("VM deployment cancelled for {VMName} — cleaning up", plan.VmName);
-                await CleanupFailedVmAsync(plan, vmCreated, preserveInDebug: System.Diagnostics.Debugger.IsAttached);
+                await CleanupFailedVmAsync(plan, vmCreated, preserveInDebug: DebugPreservation.IsEnabled);
                 return new VmDeploymentResult(plan.VmName, success: false, errorMessage: "Deployment cancelled.", deploymentLog: deploymentLogger.GetLog());
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error deploying VM: {Message}", ex.Message);
-                await CleanupFailedVmAsync(plan, vmCreated, preserveInDebug: System.Diagnostics.Debugger.IsAttached);
+                await CleanupFailedVmAsync(plan, vmCreated, preserveInDebug: DebugPreservation.IsEnabled);
                 return new VmDeploymentResult(plan.VmName, success: false, errorMessage: ex.Message, deploymentLog: deploymentLogger.GetLog());
             }
         }
