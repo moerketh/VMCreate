@@ -319,6 +319,53 @@ namespace VMCreate.Tests.GalleryTests
         }
 
         [TestMethod]
+        public async Task LoadParrot_PrefersQcow2AndNamesIsoDistinctly()
+        {
+            // Parrot 7.4 ships .qcow2.xz alongside the ISO. Two contracts:
+            // the loader must match the .xz archive (a pattern that only
+            // knows .qcow2/.qcow2.zip silently fell every edition back to
+            // its ISO URL), and the ISO item must carry a DISTINCT name —
+            // `create --image` resolves an exact name to the first item, so
+            // a same-name ISO entry shadowed the disk image and name-based
+            // deploys took the ISO pipeline by accident.
+            const string indexHtml =
+                @"<a href=""7.4/"">7.4/</a>  01-Oct-2026 09:16";
+            const string versionHtml =
+                @"<a href=""Parrot-security-7.4_amd64.iso"">Parrot-security-7.4_amd64.iso</a> 01-Oct-2026 09:54  8682078208
+                  <a href=""Parrot-security-7.4_amd64.qcow2.xz"">Parrot-security-7.4_amd64.qcow2.xz</a> 01-Oct-2026 14:25  9077613360
+                  <a href=""Parrot-home-7.4_amd64.iso"">Parrot-home-7.4_amd64.iso</a> 01-Oct-2026 09:16  4165287936
+                  <a href=""Parrot-home-7.4_amd64.qcow2.xz"">Parrot-home-7.4_amd64.qcow2.xz</a> 01-Oct-2026 11:44  3616981564";
+
+            var factory = FactoryFor(req =>
+            {
+                var content = req.RequestUri?.AbsolutePath?.Contains("/7.4/") == true
+                    ? versionHtml
+                    : indexHtml;
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(content)
+                };
+            });
+
+            var items = await new Parrot(factory).LoadGalleryItems();
+
+            AssertContractInvariants(items, nameof(Parrot));
+
+            // Each edition publishes exactly one item under its plain name,
+            // pointing at the qcow2.xz, plus one distinctly-named ISO item.
+            var security = items.FirstOrDefault(i => i.Name == "Parrot Security OS");
+            Assert.IsNotNull(security, "the qcow2 item owns the edition name");
+            StringAssert.EndsWith(security.DiskUri, "Parrot-security-7.4_amd64.qcow2.xz",
+                "the qcow2.xz archive must win over the same-release ISO");
+            Assert.IsTrue(security.IsRecommended, "the pre-installed image is the recommended one");
+
+            var securityIso = items.FirstOrDefault(i => i.Name == "Parrot Security OS (ISO installer)");
+            Assert.IsNotNull(securityIso, "the ISO item is published under a distinct name");
+            StringAssert.EndsWith(securityIso.DiskUri, "Parrot-security-7.4_amd64.iso");
+            Assert.IsFalse(securityIso.IsRecommended, "ISO installers are never recommended");
+        }
+
+        [TestMethod]
         public async Task LoadPentooCurrent_MeetsContract()
         {
             const string json = """

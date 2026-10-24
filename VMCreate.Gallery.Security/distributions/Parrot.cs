@@ -157,14 +157,14 @@ namespace VMCreate.Gallery
             var isoMatch = Regex.Match(html, isoPattern, RegexOptions.Singleline);
             var qcow2Match = Regex.Match(html, qcow2Pattern, RegexOptions.Singleline);
 
-            // The pre-installed qcow2 image and the ISO installer share one
-            // gallery name, and `create --image` resolves an exact name to
-            // the FIRST item — publish the qcow2 item only, falling back to
-            // the ISO when the mirror has no qcow2 for the release. A same-
-            // name ISO entry ahead of the qcow2 one makes every name-based
-            // deployment take the ISO pipeline by accident (observed live:
-            // 7.4's .qcow2.xz initially failed the loader's pattern and the
-            // ISO item silently won).
+            // The pre-installed image carries the edition name; the ISO
+            // installer is published under a distinct "... (ISO installer)"
+            // name so both coexist. `create --image` resolves an exact name
+            // to the FIRST item — a same-name ISO entry ahead of (or behind)
+            // the qcow2 one makes name-based deployments silently take the
+            // wrong pipeline (observed live: 7.4's .qcow2.xz failed the
+            // loader's pattern, the ISO item won the shared name, and the
+            // deploy took the ISO path by accident).
             if (qcow2Match.Success)
             {
                 var filename = qcow2Match.Groups[1].Value;
@@ -173,7 +173,7 @@ namespace VMCreate.Gallery
 
                 items.Add(new GalleryItem
                 {
-                    Name = $"{editionName}",
+                    Name = editionName,
                     Publisher = "Parrot Project",
                     Description = $"{editionName} pre-installed disk image, {editionDesc} (version {version})",
                     ThumbnailUri = thumbnailUri,
@@ -194,7 +194,6 @@ namespace VMCreate.Gallery
                     LinuxDistro = LinuxDistro.Parrot,
                     IsRecommended = isRecommended
                 });
-                return;
             }
 
             if (isoMatch.Success)
@@ -205,7 +204,7 @@ namespace VMCreate.Gallery
 
                 items.Add(new GalleryItem
                 {
-                    Name = editionName,
+                    Name = $"{editionName} (ISO installer)",
                     Publisher = "Parrot Project",
                     Description = $"{editionName} ISO installer, {editionDesc} (version {version})",
                     ThumbnailUri = thumbnailUri,
