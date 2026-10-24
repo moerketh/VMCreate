@@ -139,6 +139,23 @@ if [ "$CHROOT_MODE" = "0" ] && [ -n "$INI" ] && grep -Eq '^[[:space:]]*port[[:sp
         if ss -H -l -A vsock 2>/dev/null | grep -q ":3389"; then
             TRANSPORT=vsock
             echo "xrdp already active with the vsock listener — no restart needed."
+        elif [ -f "$INI.vmcreate-bak" ] && systemctl restart xrdp 2>&1; then
+            # First boot of a chroot-configured xrdp that started WITHOUT
+            # the vsock listener: this build cannot serve vsock (the ini
+            # asked for it and the daemon ignored it). Restore the pre-edit
+            # TCP config the chroot half preserved and restart — the same
+            # recovery as the live rollback path. Safe here: no RDP session
+            # exists yet on first boot, so the restart cannot orphan one.
+            if sleep 1 && systemctl is-active xrdp >/dev/null 2>&1 \
+               && ! ss -H -l -A vsock 2>/dev/null | grep -q ":3389"; then
+                cp "$INI.vmcreate-bak" "$INI"
+                systemctl restart xrdp 2>/dev/null || true
+                TRANSPORT=tcp
+                echo "xrdp cannot serve the vsock listener — TCP config restored from backup."
+            else
+                TRANSPORT=vsock
+                echo "xrdp now serves the vsock listener after restart."
+            fi
         else
             echo "XRDP_POSTBOOT_RESULT=$RESULT"
             echo "XRDP_POSTBOOT_TRANSPORT=tcp"
@@ -146,6 +163,22 @@ if [ "$CHROOT_MODE" = "0" ] && [ -n "$INI" ] && grep -Eq '^[[:space:]]*port[[:sp
             exit 0
         fi
     else
+        # Daemon not active. On first boot of a chroot-written vsock-only
+        # config, a start failure likely means this build cannot serve the
+        # vsock listener — restore the preserved TCP config and try again
+        # so the image keeps network RDP (the same recovery as the live
+        # rollback). Without a backup (live re-run) nothing to restore:
+        # report unverified for the next boot.
+        if [ -f "$INI.vmcreate-bak" ]; then
+            cp "$INI.vmcreate-bak" "$INI"
+            if systemctl restart xrdp 2>&1 && sleep 1 && systemctl is-active xrdp >/dev/null 2>&1 \
+               && ! ss -H -l -A vsock 2>/dev/null | grep -q ":3389"; then
+                echo "XRDP_POSTBOOT_RESULT=$RESULT"
+                echo "XRDP_POSTBOOT_TRANSPORT=tcp"
+                echo "xrdp failed on the vsock-only config — TCP config restored from backup."
+                exit 0
+            fi
+        fi
         echo "XRDP_POSTBOOT_RESULT=$RESULT"
         echo "XRDP_POSTBOOT_TRANSPORT=unverified"
         echo "xrdp installed but not active — listener verified on next boot."
@@ -190,7 +223,8 @@ if [ "$CHROOT_MODE" = "1" ]; then
         # the package already enabled the unit.
         systemctl enable xrdp >/dev/null 2>&1 || true
     fi
-    rm -f "$INI.vmcreate-bak"
+    # The .vmcreate-bak (pre-edit TCP config) stays on disk: first boot's
+    # verify half restores it if this build cannot serve the vsock listener.
     echo "CHROOT: xrdp installed and configured offline — transport verified post-boot."
     echo "XRDP_POSTBOOT_RESULT=$RESULT"
     echo "XRDP_POSTBOOT_TRANSPORT=unverified"

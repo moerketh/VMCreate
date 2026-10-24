@@ -221,6 +221,48 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
+        public async Task ExecuteAsync_Script_ChrootKeepsBackup_FirstBootRestoresTcpFallback()
+        {
+            // The vsock-only config write means a vsock-less xrdp build has
+            // no listener unless the TCP config is recovered. Two contracts
+            // pin that: the CHROOT half must LEAVE the .vmcreate-bak on disk
+            // (deleting it stranded the fallback), and the first-boot skip
+            // gate must restore that backup and restart when the daemon
+            // runs without the vsock listener — the same recovery as the
+            // live rollback, safe on first boot because no RDP session
+            // exists yet to orphan.
+            string? copiedContent = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => copiedContent = content)
+                  .Returns(Task.CompletedTask);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+                  .ReturnsAsync("XRDP_POSTBOOT_RESULT=already\nXRDP_POSTBOOT_TRANSPORT=vsock");
+
+            await _step.ExecuteAsync(_shell.Object, _item, _xrdpCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(copiedContent);
+
+            // 1. The chroot half keeps the backup (no rm between the backup
+            //    write and the CHROOT_MODE exit).
+            int chrootExit = copiedContent.IndexOf("CHROOT: xrdp installed and configured offline", StringComparison.Ordinal);
+            Assert.IsTrue(chrootExit > 0, "the chroot half's exit block must exist");
+            string chrootBlock = copiedContent.Substring(0, chrootExit);
+            Assert.IsFalse(chrootBlock.Contains("rm -f \"$INI.vmcreate-bak\"",
+                StringComparison.Ordinal),
+                "the chroot half must keep the pre-edit TCP backup for first boot's fallback");
+
+            // 2. The first-boot skip gate restores the backup when the
+            //    daemon is active without a vsock listener (and when it is
+            //    not active), before any "TCP RDP kept" claim.
+            StringAssert.Contains(copiedContent, "cp \"$INI.vmcreate-bak\" \"$INI\"",
+                "the skip gate must restore the TCP backup when vsock never comes up");
+            int restoreIdx = copiedContent.IndexOf("cp \"$INI.vmcreate-bak\" \"$INI\"", StringComparison.Ordinal);
+            int keptIdx = copiedContent.IndexOf("TCP RDP kept", StringComparison.Ordinal);
+            Assert.IsTrue(restoreIdx >= 0 && keptIdx > restoreIdx,
+                "the restore must exist in the skip gate before any TCP-kept message");
+        }
+
+        [TestMethod]
         public async Task ExecuteAsync_ScriptKeysSkipOnVsockConfig_NotPackagePresence()
         {
             // Regression: the skip used to key on dpkg/rpm/pacman presence,
@@ -251,13 +293,17 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
-        public async Task ExecuteAsync_Script_ChrootNeverSkipsConfigWrite_LiveConfiguredNeverRestarts()
+        public async Task ExecuteAsync_Script_ChrootNeverSkipsConfigWrite_LiveConfiguredProbesBeforeRestarts()
         {
             // The skip gate must be live-mode-only (--chroot always converges
-            // the config on disk) and its body must never restart xrdp (the
-            // session-killing restart): a chroot with preinstalled xrdp gets
-            // the config written, and a live run whose ini already carries
-            // the listener only probes it.
+            // the config on disk): a chroot with preinstalled xrdp gets the
+            // config written, and a live run whose ini already carries the
+            // listener PROBES it first. A restart is only permitted as the
+            // last resort inside the gate — when the daemon is active
+            // WITHOUT the vsock listener and the chroot half's TCP backup
+            // exists to recover into (first boot, no live RDP session can
+            // exist yet, so the session-killing concern does not apply). A
+            // listener-serving daemon must never be restarted.
             string? copiedContent = null;
             _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                   .Callback<string, string, CancellationToken>((content, _, _) => copiedContent = content)
@@ -274,12 +320,22 @@ namespace VMCreate.Tests.HyperV.Steps
             Assert.IsTrue(gateIdx >= 0, "the skip gate must require live mode, a resolved ini, and the vsock listener");
 
             // The gate's whole block (down to the empty-ini check that ends
-            // the short-circuit section) runs to its exits without a restart.
+            // the short-circuit section): the probe comes first, and every
+            // restart in the block is guarded by the no-listener condition.
             int emptyIniIdx = copiedContent.IndexOf("if [ -z \"$INI\" ]", gateIdx, StringComparison.Ordinal);
             Assert.IsTrue(emptyIniIdx > gateIdx, "the skip block must be bounded by the empty-ini check");
             string skipBody = copiedContent.Substring(gateIdx, emptyIniIdx - gateIdx);
-            Assert.IsFalse(skipBody.Contains("systemctl restart", StringComparison.Ordinal),
-                "the already-configured path must probe, never restart — a restart kills live RDP sessions");
+
+            int probeIdx = skipBody.IndexOf("ss -H -l -A vsock", StringComparison.Ordinal);
+            Assert.IsTrue(probeIdx >= 0, "the gate probes the live listener before anything else");
+            Assert.IsFalse(skipBody.Substring(0, probeIdx).Contains("systemctl restart", StringComparison.Ordinal),
+                "the already-configured path must probe before any restart");
+
+            // Every restart in the gate sits under the probe's failure
+            // branches (elif/else of the listener check) — i.e. after the
+            // probe, never before it.
+            Assert.IsTrue(skipBody.LastIndexOf("systemctl restart", StringComparison.Ordinal) > probeIdx,
+                "restarts in the gate are recovery-only, on the no-listener branches");
         }
     }
 }
