@@ -104,12 +104,14 @@ namespace VMCreate.Gallery
                     IsRecommended = true,
                     LinuxDistro = LinuxDistro.Kali,
                     // Kali's Hyper-V images ship a uid-1000 desktop user named
-                    // 'kali' (toor is the legacy root alias). InstallLamcoRdpStep
-                    // substitutes this into the root-run install script and
+                    // 'kali' with the matching default password (toor is the
+                    // legacy root alias). InstallLamcoRdpStep substitutes the
+                    // username into the root-run install script and
                     // EnableGraphicalAutologinStep needs it to configure the DM —
                     // a blank field previously collapsed every user-unit path
                     // (TEST_20260910165003: units written to /.config).
                     InitialUsername = "kali",
+                    InitialPassword = "kali",
                     ReleaseVariants = variants
                 }
             };
