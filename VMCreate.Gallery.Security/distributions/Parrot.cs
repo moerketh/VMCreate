@@ -60,7 +60,7 @@ namespace VMCreate.Gallery
             // ── Security Edition ──
             AddEdition(items, htmlContent, baseUrl, logoUri,
                 isoPattern:   @"<a href=""(Parrot-security-[\d\.]+_amd64\.iso)"">.*?</a>\s+(\d{2}-[A-Za-z]{3}-\d{4} \d{2}:\d{2})\s+(\d+)",
-                qcow2Pattern: @"<a href=""(Parrot-security-[\d\.]+_amd64\.qcow2(?:\.zip)?)"">.*?</a>\s+(\d{2}-[A-Za-z]{3}-\d{4} \d{2}:\d{2})\s+(\d+)",
+                qcow2Pattern: @"<a href=""(Parrot-security-[\d\.]+_amd64\.qcow2(?:\.(?:zip|xz))?)"">.*?</a>\s+(\d{2}-[A-Za-z]{3}-\d{4} \d{2}:\d{2})\s+(\d+)",
                 versionPattern: @"Parrot-security-([\d\.]+)_amd64\.",
                 editionName: "Parrot Security OS",
                 editionDesc: "includes a full set of penetration testing tools",
@@ -70,7 +70,7 @@ namespace VMCreate.Gallery
             // ── Home Edition ──
             AddEdition(items, htmlContent, baseUrl, logoUri,
                 isoPattern:   @"<a href=""(Parrot-home-[\d\.]+_amd64\.iso)"">.*?</a>\s+(\d{2}-[A-Za-z]{3}-\d{4} \d{2}:\d{2})\s+(\d+)",
-                qcow2Pattern: @"<a href=""(Parrot-home-[\d\.]+_amd64\.qcow2(?:\.zip)?)"">.*?</a>\s+(\d{2}-[A-Za-z]{3}-\d{4} \d{2}:\d{2})\s+(\d+)",
+                qcow2Pattern: @"<a href=""(Parrot-home-[\d\.]+_amd64\.qcow2(?:\.(?:zip|xz))?)"">.*?</a>\s+(\d{2}-[A-Za-z]{3}-\d{4} \d{2}:\d{2})\s+(\d+)",
                 versionPattern: @"Parrot-home-([\d\.]+)_amd64\.",
                 editionName: "Parrot Home Edition",
                 editionDesc: "for daily use with a focus on privacy and productivity",
@@ -80,7 +80,7 @@ namespace VMCreate.Gallery
             // ── HTB (Hack The Box) Edition ──
             AddEdition(items, htmlContent, baseUrl, logoUri,
                 isoPattern:   @"<a href=""(Parrot-spin-htb-[\d\.]+_amd64\.iso)"">.*?</a>\s+(\d{2}-[A-Za-z]{3}-\d{4} \d{2}:\d{2})\s+(\d+)",
-                qcow2Pattern: @"<a href=""(Parrot-spin-htb-[\d\.]+_amd64\.qcow2(?:\.zip)?)"">.*?</a>\s+(\d{2}-[A-Za-z]{3}-\d{4} \d{2}:\d{2})\s+(\d+)",
+                qcow2Pattern: @"<a href=""(Parrot-spin-htb-[\d\.]+_amd64\.qcow2(?:\.(?:zip|xz))?)"">.*?</a>\s+(\d{2}-[A-Za-z]{3}-\d{4} \d{2}:\d{2})\s+(\d+)",
                 versionPattern: @"Parrot-spin-htb-([\d\.]+)_amd64\.",
                 editionName: "Parrot HTB Edition",
                 editionDesc: "Hack The Box edition with pre-configured HTB tools and VPN integration",
@@ -157,6 +157,46 @@ namespace VMCreate.Gallery
             var isoMatch = Regex.Match(html, isoPattern, RegexOptions.Singleline);
             var qcow2Match = Regex.Match(html, qcow2Pattern, RegexOptions.Singleline);
 
+            // The pre-installed qcow2 image and the ISO installer share one
+            // gallery name, and `create --image` resolves an exact name to
+            // the FIRST item — publish the qcow2 item only, falling back to
+            // the ISO when the mirror has no qcow2 for the release. A same-
+            // name ISO entry ahead of the qcow2 one makes every name-based
+            // deployment take the ISO pipeline by accident (observed live:
+            // 7.4's .qcow2.xz initially failed the loader's pattern and the
+            // ISO item silently won).
+            if (qcow2Match.Success)
+            {
+                var filename = qcow2Match.Groups[1].Value;
+                var version = ExtractVersion(filename, versionPattern);
+                var lastUpdated = ParseDate(qcow2Match.Groups[2].Value);
+
+                items.Add(new GalleryItem
+                {
+                    Name = $"{editionName}",
+                    Publisher = "Parrot Project",
+                    Description = $"{editionName} pre-installed disk image, {editionDesc} (version {version})",
+                    ThumbnailUri = thumbnailUri,
+                    SymbolUri = SymbolUrl,
+                    DiskUri = baseUrl + filename,
+                    // Same multi-algorithm signed hash file as the ISO; verified
+                    // against the downloaded .qcow2 archive name, which the
+                    // hash file lists directly.
+                    ChecksumUri = baseUrl + SignedHashesFileName,
+                    ChecksumAlgorithm = "SHA256",
+                    SecureBoot = "false",
+                    EnhancedSessionTransportType = "HvSocket",
+                    Version = version,
+                    LastUpdated = lastUpdated.ToString("o"),
+                    InitialUsername = "user",
+                    InitialPassword = "parrot",
+                    Category = "Security",
+                    LinuxDistro = LinuxDistro.Parrot,
+                    IsRecommended = isRecommended
+                });
+                return;
+            }
+
             if (isoMatch.Success)
             {
                 var filename = isoMatch.Groups[1].Value;
@@ -187,37 +227,6 @@ namespace VMCreate.Gallery
                     LinuxDistro = LinuxDistro.Parrot,
                     // ISO installers are never recommended — only pre-installed disk images are.
                     IsRecommended = false
-                });
-            }
-
-            if (qcow2Match.Success)
-            {
-                var filename = qcow2Match.Groups[1].Value;
-                var version = ExtractVersion(filename, versionPattern);
-                var lastUpdated = ParseDate(qcow2Match.Groups[2].Value);
-
-                items.Add(new GalleryItem
-                {
-                    Name = $"{editionName}",
-                    Publisher = "Parrot Project",
-                    Description = $"{editionName} pre-installed disk image, {editionDesc} (version {version})",
-                    ThumbnailUri = thumbnailUri,
-                    SymbolUri = SymbolUrl,
-                    DiskUri = baseUrl + filename,
-                    // Same multi-algorithm signed hash file as the ISO; verified
-                    // against the downloaded .qcow2.zip archive name, which the
-                    // hash file lists directly.
-                    ChecksumUri = baseUrl + SignedHashesFileName,
-                    ChecksumAlgorithm = "SHA256",
-                    SecureBoot = "false",
-                    EnhancedSessionTransportType = "HvSocket",
-                    Version = version,
-                    LastUpdated = lastUpdated.ToString("o"),
-                    InitialUsername = "user",
-                    InitialPassword = "parrot",
-                    Category = "Security",
-                    LinuxDistro = LinuxDistro.Parrot,
-                    IsRecommended = isRecommended
                 });
             }
         }
