@@ -94,7 +94,11 @@ install_freerdp_deps() {
         # -Syu, not a bare -Sy: refreshing databases without upgrading is a
         # partial upgrade, which Arch warns can break packages against the
         # mixed-version databases on a stale image.
-        pacman -Syu --noconfirm --needed freerdp openssl libxkbcommon wayland 2>&1 || {
+        # OMARCHY_ALLOW_DIRECT_PACMAN=1: Omarchy's 00-omarchy-update-guard pacman
+        # hook (AbortOnFail) rejects every -S+-u transaction not run through
+        # `omarchy update` (live: openvpn and the lamco -Syu both refused). The
+        # variable is the guard's documented bypass; other Arch guests ignore it.
+        OMARCHY_ALLOW_DIRECT_PACMAN=1 pacman -Syu --noconfirm --needed freerdp openssl libxkbcommon wayland 2>&1 || {
             echo "ERROR: pacman failed to install freerdp runtime deps." >&2
             exit 1
         }

@@ -106,6 +106,26 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
+        public async Task ExecuteAsync_PacmanBranch_BypassesOmarchyUpdateGuard()
+        {
+            // Live (Omarchy 4.0.6): the 00-omarchy-update-guard hook aborts any
+            // direct -Syu. The env must survive sudo, so `sudo env VAR=1`.
+            _shellMock.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync("");
+
+            await _step.ExecuteAsync(
+                _shellMock.Object,
+                new GalleryItem(),
+                new VmCustomizations { InstallOpenVpn = true },
+                _loggerMock.Object,
+                CancellationToken.None);
+
+            _shellMock.Verify(s => s.RunCommandAsync(
+                It.Is<string>(cmd => cmd.Contains("sudo env OMARCHY_ALLOW_DIRECT_PACMAN=1 pacman -Syu --noconfirm openvpn")),
+                It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [TestMethod]
         public async Task ExecuteAsync_OpenVpnMissingAfterInstall_LogsWarningAndCompletes()
         {
             const string dnfOutput =

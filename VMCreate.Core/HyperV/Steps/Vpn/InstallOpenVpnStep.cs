@@ -45,6 +45,10 @@ namespace VMCreate
             // Every branch neutralises its exit status: the SSH automation
             // path treats non-zero guest exits as fatal for the deployment,
             // and a missing optional package must not abort a VM build.
+            // pacman: OMARCHY_ALLOW_DIRECT_PACMAN=1 passes Omarchy's
+            // 00-omarchy-update-guard hook, which aborts any direct -Syu
+            // (live: Omarchy 4.0.6 refused this install); `sudo env` because
+            // sudo resets the environment. Other Arch guests ignore it.
             string installCmd = @"
                 if command -v apt-get >/dev/null 2>&1; then
                     sudo DEBIAN_FRONTEND=noninteractive apt-get update -y -qq 2>&1 || echo 'WARNING: apt update failed'
@@ -60,7 +64,7 @@ namespace VMCreate
                         || sudo yum install -y -q openvpn NetworkManager-openvpn 2>&1 \
                         || echo 'WARNING: openvpn packages unavailable in enabled yum repos (EPEL may be required on this distro)'
                 elif command -v pacman >/dev/null 2>&1; then
-                    sudo pacman -Syu --noconfirm openvpn networkmanager-openvpn 2>&1 || echo 'WARNING: openvpn packages unavailable via pacman'
+                    sudo env OMARCHY_ALLOW_DIRECT_PACMAN=1 pacman -Syu --noconfirm openvpn networkmanager-openvpn 2>&1 || echo 'WARNING: openvpn packages unavailable via pacman'
                 elif command -v zypper >/dev/null 2>&1; then
                     sudo zypper --non-interactive install openvpn NetworkManager-openvpn 2>&1 || echo 'WARNING: openvpn packages unavailable via zypper'
                 else

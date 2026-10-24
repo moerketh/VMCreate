@@ -46,7 +46,11 @@ set -o pipefail
 DEGRADED=0
 
 echo "Syncing + upgrading pacman databases and packages..."
-if ! pacman -Syu --noconfirm 2>&1; then
+# OMARCHY_ALLOW_DIRECT_PACMAN=1: Omarchy's 00-omarchy-update-guard pacman
+# hook (AbortOnFail) rejects every -S+-u transaction not run through
+# `omarchy update` (live: openvpn and the lamco -Syu both refused). The
+# variable is the guard's documented bypass; other Arch guests ignore it.
+if ! OMARCHY_ALLOW_DIRECT_PACMAN=1 pacman -Syu --noconfirm 2>&1; then
     echo "ERROR: pacman -Syu failed."
     exit 1
 fi

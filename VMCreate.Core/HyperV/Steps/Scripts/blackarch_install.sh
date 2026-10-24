@@ -43,7 +43,11 @@ bash "$workdir/strap.sh" || {
 # Full sync + upgrade (not a bare -Sy): a refresh without -u is a partial
 # upgrade, which Arch warns can break packages once the -S installs below
 # pull against mixed-version databases on a stale image.
-pacman -Syu --noconfirm || {
+# OMARCHY_ALLOW_DIRECT_PACMAN=1: Omarchy's 00-omarchy-update-guard pacman
+# hook (AbortOnFail) rejects every -S+-u transaction not run through
+# `omarchy update` (live: openvpn and the lamco -Syu both refused). The
+# variable is the guard's documented bypass; other Arch guests ignore it.
+OMARCHY_ALLOW_DIRECT_PACMAN=1 pacman -Syu --noconfirm || {
     echo "ERROR: pacman -Syu failed after adding the BlackArch repository." >&2
     exit 1
 }
