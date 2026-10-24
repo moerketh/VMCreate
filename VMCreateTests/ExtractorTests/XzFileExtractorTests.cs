@@ -148,6 +148,40 @@ namespace VMCreate.Tests
         }
 
         [TestMethod]
+        public void Extract_LargeLegitimateImage_IsNotBlockedBySizeCeiling()
+        {
+            // Regression: a 4 GiB hard cap aborted real fixed-size disk images
+            // (.vhdfixed.xz decompresses to the full virtual disk). The bound
+            // now tracks free space; this 12 MB multi-member payload (far
+            // above any per-byte cap that could be mistaken for sane) must
+            // extract cleanly whenever the drive has room.
+            const int Frames = 6400; // 6400 × 1,984 B ≈ 12.7 MB
+            byte[] frame = Convert.FromBase64String(StdXzB64);
+
+            string archivePath = Path.Combine(Path.GetTempPath(), "big-fixed-disk.vhdfixed.xz");
+            using (var archive = File.Create(archivePath))
+                for (int i = 0; i < Frames; i++)
+                    archive.Write(frame, 0, frame.Length);
+
+            string extractDir = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+            string expectedOut = Path.Combine(extractDir, "big-fixed-disk.vhdfixed");
+            try
+            {
+                _extractor.Extract(archivePath, extractDir, CancellationToken.None, null);
+
+                long expectedBytes = (long)Frames * Expected.Length;
+                Assert.IsTrue(File.Exists(expectedOut), "large legitimate image must extract");
+                Assert.AreEqual(expectedBytes, new FileInfo(expectedOut).Length,
+                    $"all {Frames} members must decode ({expectedBytes} bytes expected)");
+            }
+            finally
+            {
+                File.Delete(archivePath);
+                if (Directory.Exists(extractDir)) Directory.Delete(extractDir, true);
+            }
+        }
+
+        [TestMethod]
         public void Extract_NonXzFile_ThrowsInvalidOperationException()
         {
             string archivePath = Path.Combine(Path.GetTempPath(), "notanxz.bin");

@@ -110,6 +110,86 @@ namespace VMCreate
             }
         }
 
+        /// <summary>
+        /// Wraps the per-entry destination and aborts the write when the
+        /// drive's free space drops to the headroom floor. This bounds a
+        /// single-entry decompression bomb to one buffer overshoot instead of
+        /// letting it stream until the volume is full between entry probes.
+        /// The probe runs on a time interval (not every write) because free
+        /// space lookups are not free on large archives.
+        /// </summary>
+        private sealed class FreeSpaceBoundedStream : Stream
+        {
+            private readonly Stream _inner;
+            private readonly Func<string, (long AvailableFreeSpace, string DriveName)> _getAvailableFreeSpace;
+            private readonly string _extractPath;
+            private readonly long _headroomBytes;
+            private readonly string _archivePath;
+            private DateTime _lastCheck = DateTime.UtcNow;
+            private long _totalWritten;
+
+            public FreeSpaceBoundedStream(
+                Stream inner,
+                Func<string, (long AvailableFreeSpace, string DriveName)> getAvailableFreeSpace,
+                string extractPath,
+                long headroomBytes,
+                string archivePath)
+            {
+                _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+                _getAvailableFreeSpace = getAvailableFreeSpace ?? throw new ArgumentNullException(nameof(getAvailableFreeSpace));
+                _extractPath = extractPath;
+                _headroomBytes = headroomBytes;
+                _archivePath = archivePath;
+            }
+
+            public override bool CanRead => _inner.CanRead;
+            public override bool CanSeek => _inner.CanSeek;
+            public override bool CanWrite => _inner.CanWrite;
+            public override long Length => _inner.Length;
+            public override long Position
+            {
+                get => _inner.Position;
+                set => _inner.Position = value;
+            }
+
+            public override void Flush() => _inner.Flush();
+
+            public override int Read(byte[] buffer, int offset, int count) => _inner.Read(buffer, offset, count);
+
+            public override long Seek(long offset, SeekOrigin origin) => _inner.Seek(offset, origin);
+
+            public override void SetLength(long value) => _inner.SetLength(value);
+
+            public override void Write(byte[] buffer, int offset, int count)
+            {
+                _inner.Write(buffer, offset, count);
+                _totalWritten += count;
+
+                if ((DateTime.UtcNow - _lastCheck).TotalSeconds >= 5)
+                {
+                    _lastCheck = DateTime.UtcNow;
+                    var (freeSpace, driveName) = _getAvailableFreeSpace(_extractPath);
+                    if (freeSpace <= _headroomBytes)
+                    {
+                        throw new IOException(
+                            $"Extraction of '{_archivePath}' is about to exhaust {driveName} " +
+                            $"({freeSpace:N0} bytes free after {_totalWritten:N0} written to this entry) — " +
+                            "aborting (possible decompression bomb or undersized disk). Free up space and try again.");
+                    }
+                }
+            }
+
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing)
+                {
+                    _inner.Dispose();
+                }
+
+                base.Dispose(disposing);
+            }
+        }
+
         public ArchiveExtractor(ILogger<ArchiveExtractor> logger)
             : this(logger, GetAvailableFreeSpaceDefault)
         {
@@ -188,9 +268,14 @@ namespace VMCreate
 
                     // Decompression-bomb bound independent of metadata: the
                     // pre-flight above is skipped when TotalUncompressedSize
-                    // is 0 (metadata-absent formats such as gzip), so enforce
-                    // a hard cumulative write cap here instead.
-                    const long MaxCumulativeBytes = 4L * 1024 * 1024 * 1024; // 4 GiB
+                    // is 0 (metadata-absent formats such as gzip), and
+                    // attacker-supplied metadata cannot be trusted for a
+                    // per-entry guess either — so track the drive's ACTUAL
+                    // free space during extraction (probed per entry, and
+                    // periodically inside each entry's write stream) and stop
+                    // before the volume fills.
+                    long headroomBytes = XzFileExtractor.ExtractionHeadroomBytes;
+                    string driveRoot = Path.GetPathRoot(extractRoot) ?? extractRoot;
 
                     foreach (var entry in archive.Entries)
                     {
@@ -202,11 +287,13 @@ namespace VMCreate
                                 $"Archive contains more than {MaxEntries} entries — refusing to extract (possible zip bomb or corrupted archive).");
                         }
 
-                        if (cumulativeBytes > MaxCumulativeBytes)
+                        var (loopFreeSpace, loopDriveName) = _getAvailableFreeSpace(extractPath);
+                        if (loopFreeSpace <= headroomBytes)
                         {
                             throw new IOException(
-                                $"Archive '{filePath}' expands beyond the {MaxCumulativeBytes:N0}-byte extraction cap — " +
-                                "refusing to continue (possible decompression bomb or corrupted archive).");
+                                $"Extraction of '{filePath}' is about to exhaust {loopDriveName} " +
+                                $"({loopFreeSpace:N0} bytes free after {cumulativeBytes:N0} written) — " +
+                                "aborting (possible decompression bomb or undersized disk). Free up space and try again.");
                         }
 
                         if (!string.IsNullOrEmpty(entry.LinkTarget))
@@ -253,6 +340,8 @@ namespace VMCreate
 
                         using (var fileStream = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None))
                         using (var cancellationStream = new CancellationTokenStream(fileStream, cancellationToken))
+                        using (var boundedStream = new FreeSpaceBoundedStream(
+                            cancellationStream, _getAvailableFreeSpace, extractPath, headroomBytes, filePath))
                         {
                             var entryProgress = new ImmediateProgress<ProgressReport>(report =>
                             {
@@ -284,7 +373,7 @@ namespace VMCreate
                                 }
                             });
 
-                            entry.WriteTo(cancellationStream, entryProgress);
+                            entry.WriteTo(boundedStream, entryProgress);
                         }
 
                         // Preserve file time if available

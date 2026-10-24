@@ -36,11 +36,18 @@ namespace VMCreate
         private readonly ILogger<XzFileExtractor> _logger;
         private const double EstimatedCompressionRatio = 1.5;
 
-        // Decompression-bomb bound: refuse to write more than this many bytes
-        // for a single .xz, even when free space would allow it. Gallery
-        // images compress well but not beyond this ratio; zero-filled bombs
-        // exceed it by orders of magnitude.
-        private const long MaxUncompressedBytes = 4L * 1024 * 1024 * 1024; // 4 GiB
+        // Headroom kept free beyond the extraction output: the deployment
+        // writes the converted VHDX, swap and config beside the extracted
+        // file, so filling the drive to the last byte would fail later
+        // stages that this extractor cannot see.
+        internal const long ExtractionHeadroomBytes = 10L * 1024 * 1024 * 1024; // 10 GiB (matches VmDiskSpaceGuard)
+
+        // Hard ceiling for a single .xz, independent of free space: real
+        // gallery images are fixed-size disks (vhdfixed) whose decompressed
+        // size is the full virtual disk, so the ceiling must sit well above
+        // any shipping virtual-disk size. This exists only to stop absurd
+        // inputs (sparse bombs); the free-space check is the primary bound.
+        private const long MaxUncompressedBytes = 512L * 1024 * 1024 * 1024; // 512 GiB
 
         public XzFileExtractor(ILogger<XzFileExtractor> logger)
         {
@@ -75,22 +82,14 @@ namespace VMCreate
                 string filePart = Path.GetFileNameWithoutExtension(filePath);
                 string outputPath = Path.Combine(extractPath, filePart);
 
-                // Estimate uncompressed size for progress and the pre-flight
-                // free-space check (the 1.5x ratio also bounds that check; the
-                // in-loop cap below is the hard defense against bombs).
+                // Estimate uncompressed size for progress; the free-space
+                // pre-flight below uses the stream index's recorded size when
+                // available (exact for all real .xz files) and falls back to
+                // this estimate otherwise.
                 long estimatedUncompressedSize = (long)(fileInfo.Length * EstimatedCompressionRatio);
                 _logger.LogDebug("Estimated uncompressed size for {FilePath}: {EstimatedSize} bytes (using {CompressionRatio}:1 ratio)", filePath, estimatedUncompressedSize, EstimatedCompressionRatio);
 
                 _logger.LogInformation("Attempting extraction with XZ.NET for {FilePath}", filePath);
-
-                var extractDrive = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(extractPath)) ?? extractPath);
-                if (extractDrive.IsReady && extractDrive.AvailableFreeSpace < estimatedUncompressedSize)
-                {
-                    string msg = $"Not enough disk space on {extractDrive.Name} to extract the XZ file. " +
-                                 $"Need at least {estimatedUncompressedSize:N0} bytes, only {extractDrive.AvailableFreeSpace:N0} available. Free up space and try again.";
-                    _logger.LogError(msg);
-                    throw new IOException(msg);
-                }
 
                 bool outputCreated = false;
                 try
@@ -102,6 +101,26 @@ namespace VMCreate
                     outputCreated = true;
                     cancellationToken.ThrowIfCancellationRequested();
                     _logger.LogDebug("Decompressing XZ stream to {OutputPath}", outputPath);
+
+                    // Pre-flight with the index-recorded uncompressed size when
+                    // the stream publishes one (XZ.NET reads it from the stream
+                    // index footer). Multi-stream concatenations report the
+                    // current member's size, so treat Length as authoritative
+                    // only when it exceeds the file-based estimate.
+                    long indexSize = xzStream.Length;
+                    long requiredSize = Math.Max(estimatedUncompressedSize, indexSize > 0 ? indexSize : 0);
+                    var extractDrive = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(extractPath)) ?? extractPath);
+                    if (extractDrive.IsReady
+                        && (requiredSize > MaxUncompressedBytes
+                            || extractDrive.AvailableFreeSpace < requiredSize + ExtractionHeadroomBytes))
+                    {
+                        string msg = extractDrive.AvailableFreeSpace < requiredSize + ExtractionHeadroomBytes
+                            ? $"Not enough disk space on {extractDrive.Name} to extract the XZ file. " +
+                              $"Need at least {requiredSize:N0} bytes plus headroom, only {extractDrive.AvailableFreeSpace:N0} available. Free up space and try again."
+                            : $"XZ payload for '{filePath}' declares more than the {MaxUncompressedBytes:N0}-byte extraction ceiling — refusing.";
+                        _logger.LogError(msg);
+                        throw new IOException(msg);
+                    }
 
                     byte[] buffer = new byte[8192];
                     int bytesRead;
@@ -116,19 +135,29 @@ namespace VMCreate
                     const long ThrottleIntervalTicks = TimeSpan.TicksPerMillisecond * 200;
                     int lastReportedPercentage = -1;
                     long lastReportTimeTicks = 0;
+                    DateTime lastSpaceCheck = DateTime.UtcNow;
 
                     while ((bytesRead = xzStream.Read(buffer, 0, buffer.Length)) > 0)
                     {
                         cancellationToken.ThrowIfCancellationRequested();
                         totalBytesWritten += bytesRead;
 
-                        // Hard cap: stop writing as soon as the payload proves
-                        // itself larger than any legitimate gallery image.
-                        if (totalBytesWritten > MaxUncompressedBytes)
+                        // Track reality instead of trusting metadata: re-probe
+                        // free space periodically during the write. A bomb that
+                        // lied in its index (or an estimate that undershot) is
+                        // stopped when the drive approaches full, before the OS
+                        // write failure cascades into other applications.
+                        if ((DateTime.UtcNow - lastSpaceCheck).TotalSeconds >= 5 && extractDrive.IsReady)
                         {
-                            throw new IOException(
-                                $"XZ payload for '{filePath}' exceeds the {MaxUncompressedBytes:N0}-byte decompression cap — " +
-                                "refusing to continue (possible decompression bomb).");
+                            lastSpaceCheck = DateTime.UtcNow;
+                            if (extractDrive.AvailableFreeSpace <= ExtractionHeadroomBytes
+                                || totalBytesWritten > MaxUncompressedBytes)
+                            {
+                                throw new IOException(
+                                    $"Extraction of '{filePath}' exceeded the available space on {extractDrive.Name} " +
+                                    $"(wrote {totalBytesWritten:N0} bytes, {extractDrive.AvailableFreeSpace:N0} free) — " +
+                                    "aborting (possible decompression bomb or undersized disk).");
+                            }
                         }
 
                         outputStream.Write(buffer, 0, bytesRead);

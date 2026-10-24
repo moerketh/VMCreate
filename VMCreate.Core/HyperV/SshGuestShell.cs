@@ -344,6 +344,7 @@ namespace VMCreate
             // channel) in chunks, never on any command line, and the guest-side
             // intermediate is created 0600 via `umask 077` before the first
             // secret byte lands.
+            string b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(content));
             string safePath = SshTransport.EscapeSingleQuotes(guestPath);
             string guestDir = SshTransport.EscapeSingleQuotes(GuestParentDirectory(guestPath));
 
@@ -353,26 +354,34 @@ namespace VMCreate
                 string tmpRemote = $"/tmp/vmcreate-copy-{Guid.NewGuid():N}.b64";
                 try
                 {
-                    await RunCommandInternalAsync($"umask 077; : > '{tmpRemote}'", CommandTimeout, ct);
+                    await RunCommandAsync($"umask 077; : > '{tmpRemote}'", CommandTimeout, ct);
 
                     int offset = 0;
-                    while (offset < content.Length)
+                    while (offset < b64.Length)
                     {
-                        int length = Math.Min(CopyChunkBase64Length, content.Length - offset);
-                        string piece = content.Substring(offset, length);
+                        int length = Math.Min(CopyChunkBase64Length, b64.Length - offset);
+                        string piece = b64.Substring(offset, length);
                         // stdin-fed append: the chunk is piped to `tee -a` over
                         // ssh stdin, so it never appears in any argv or `ps`.
                         await RunCommandWithStdinAsync($"tee -a '{tmpRemote}' >/dev/null", piece, ct);
                         offset += length;
                     }
 
+                    // pipefail + decoded-size check: without pipefail the exit
+                    // status would come from the LAST pipeline element (tee),
+                    // so a failed `base64 -d` would silently land an empty or
+                    // garbled file. The size check catches a decode that
+                    // succeeded with wrong byte count (e.g. truncated input).
                     string decode = $@"
                         sudo mkdir -p '{guestDir}'
+                        set -o pipefail
                         base64 -d '{tmpRemote}' | sudo tee '{safePath}' > /dev/null
+                        [ ""$(sudo stat -c %s '{safePath}')"" -eq {Encoding.UTF8.GetByteCount(content)} ] ||
+                          {{ echo ""decoded size mismatch for '{safePath}'"" >&2; exit 1; }}
                         sudo chmod 600 '{safePath}'
                         sudo chown root:root '{safePath}'
                     ";
-                    await RunCommandInternalAsync(decode, CommandTimeout, ct);
+                    await RunCommandAsync(decode, CommandTimeout, ct);
                     return;
                 }
                 catch (Exception ex) when (attempt < maxCopyAttempts && IsSshTransportError(ex))
@@ -476,8 +485,12 @@ namespace VMCreate
                     if (first)
                         await RunCommandInternalAsync($": > '{tmpRemote}'", CommandTimeout, ct);
 
+                    // pipefail: without it the pipeline's exit status comes
+                    // from tee, so a failed `base64 -d` would silently leave
+                    // an empty or garbled target.
                     string decode = $@"
                         sudo mkdir -p '{guestDir}'
+                        set -o pipefail
                         base64 -d '{tmpRemote}' | sudo tee '{safePath}' > /dev/null
                         sudo chmod {chmodMode} '{safePath}'
                         sudo chown root:root '{safePath}'

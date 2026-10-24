@@ -357,6 +357,126 @@ namespace VMCreate.Tests.HyperV
 
         #endregion
 
+        #region CopySecretAsync transport (what actually crosses the wire)
+
+        /// <summary>
+        /// Records every command/stdin pair and simulates the guest side:
+        /// appended stdin chunks build the .b64 temp file, the decode script
+        /// is executed as written (pipefail + base64 -d + size check), so a
+        /// secret that is not valid base64, or a decode script without the
+        /// size check, fails the copy exactly as it would on a real guest.
+        /// </summary>
+        private sealed class RecordingGuestShell : SshGuestShell
+        {
+            public RecordingGuestShell() : base(Mock.Of<ILogger>(), "TestVM", "key") { }
+
+            public List<(string Command, string? Stdin)> Execs { get; } = new();
+
+            public override Task<string> RunCommandAsync(string command, CancellationToken ct)
+                => Exec(command, stdin: null);
+
+            public override Task<string> RunCommandAsync(string command, TimeSpan timeout, CancellationToken ct)
+                => Exec(command, stdin: null);
+
+            public override Task<string> RunCommandWithStdinAsync(string command, string stdinContent, CancellationToken ct)
+                => Exec(command, stdinContent);
+
+            private Task<string> Exec(string command, string? stdin)
+            {
+                Execs.Add((command, stdin));
+
+                if (command.Contains("umask 077", StringComparison.Ordinal))
+                    SimulatedTempFile = "";
+
+                if (stdin is not null && command.StartsWith("tee -a ", StringComparison.Ordinal))
+                {
+                    if (SimulatedTempFile is null)
+                        throw new InvalidOperationException("chunk appended before umask/create step");
+                    SimulatedTempFile += stdin;
+                }
+
+                if (command.Contains("base64 -d", StringComparison.Ordinal))
+                {
+                    if (SimulatedTempFile is null)
+                        throw new InvalidOperationException("decode before any chunk");
+                    if (!command.Contains("set -o pipefail", StringComparison.Ordinal))
+                        throw new InvalidOperationException("decode script lacks pipefail");
+                    if (!command.Contains("stat -c %s", StringComparison.Ordinal))
+                        throw new InvalidOperationException("decode script lacks the decoded-size check");
+
+                    byte[] decoded;
+                    try { decoded = Convert.FromBase64String(SimulatedTempFile); }
+                    catch (FormatException)
+                    {
+                        Console.Error.WriteLine("guest base64 -d failed; input head: " +
+                            (SimulatedTempFile.Length > 40 ? SimulatedTempFile[..40] : SimulatedTempFile));
+                        throw new InvalidOperationException("guest base64 -d exited non-zero");
+                    }
+
+                    // The size assertion from the decode script itself.
+                    var sizeMatch = System.Text.RegularExpressions.Regex.Match(
+                        command, @"-eq (\d+)");
+                    if (!sizeMatch.Success || long.Parse(sizeMatch.Groups[1].Value) != decoded.Length)
+                        throw new InvalidOperationException("decoded size mismatch");
+                    SimulatedDecoded = decoded;
+                }
+
+                return Task.FromResult("");
+            }
+
+            public string? SimulatedTempFile { get; private set; }
+            public byte[]? SimulatedDecoded { get; private set; }
+        }
+
+        [TestMethod]
+        public async Task CopySecretAsync_RoundTripsValidBase64OverStdin()
+        {
+            // A realistic .ovpn body: client cert + private key block.
+            string secret = "-----BEGIN OpenVPN Static key V1-----\n" +
+                            new string('A', 3 * 12 * 1024) + // spans multiple chunks
+                            "\n-----END OpenVPN Static key V1-----\n";
+
+            var shell = new RecordingGuestShell();
+
+            await shell.CopySecretAsync(secret, "/etc/openvpn/client/htb-labs.ovpn", CancellationToken.None);
+
+            // What crossed the wire: every chunk must be valid base64 and the
+            // concatenation must decode to the exact secret bytes.
+            string chunked = string.Concat(shell.Execs
+                .Where(e => e.Stdin is not null)
+                .Select(e => e.Stdin!));
+            CollectionAssert.AreEqual(
+                System.Text.Encoding.UTF8.GetBytes(secret),
+                Convert.FromBase64String(chunked),
+                "concatenated stdin chunks must be the base64 of the exact secret");
+
+            // The guest-side simulation decoded the same bytes.
+            CollectionAssert.AreEqual(
+                System.Text.Encoding.UTF8.GetBytes(secret), shell.SimulatedDecoded,
+                "the guest decode script must land the exact secret bytes");
+
+            // No secret material may ever appear on a command line (argv):
+            Assert.IsFalse(shell.Execs.Any(e => e.Stdin is null &&
+                e.Command.Contains(chunked.Length > 0 ? chunked[..Math.Min(64, chunked.Length)] : "-----", StringComparison.Ordinal)),
+                "secret base64 must never appear in any command string");
+        }
+
+        [TestMethod]
+        public async Task CopySecretAsync_TempFileCreatedRestrictiveBeforeFirstChunk()
+        {
+            var shell = new RecordingGuestShell();
+
+            await shell.CopySecretAsync("secret", "/etc/openvpn/x.ovpn", CancellationToken.None);
+
+            int umaskIndex = shell.Execs.FindIndex(e => e.Command.Contains("umask 077", StringComparison.Ordinal));
+            int firstChunkIndex = shell.Execs.FindIndex(e => e.Stdin is not null);
+            Assert.IsTrue(umaskIndex >= 0, "the temp file must be created with umask 077");
+            Assert.IsTrue(firstChunkIndex > umaskIndex,
+                "the restrictive-create must run before the first secret chunk lands");
+        }
+
+        #endregion
+
         #region ResetHostKeyPinning (via SshGuestShell)
 
         [TestMethod]

@@ -436,6 +436,83 @@ namespace VMCreate.Tests
             }
         }
 
+        // ── Free-space-tracked extraction bound (decompression bombs) ────
+        // The pre-flight check trusts archive metadata (TotalUncompressedSize),
+        // which a malicious archive can omit or lie about. The in-loop bound
+        // tracks the drive's real free space instead — these tests drive it
+        // through the injectable space probe.
+
+        [TestMethod]
+        public void Extract_LargeSingleEntry_AboveAnyFixedCap_ExtractsWhenSpaceAllows()
+        {
+            // Regression: a fixed cumulative byte cap (4 GiB at the time)
+            // aborted legitimate gallery images — fixed-size disks whose
+            // single decompressed entry exceeds the cap. The bound must track
+            // free space, not an absolute size ceiling. A ~6 MB entry here
+            // stands in for a >4 GiB disk; the probe reports ample space.
+            byte[] data = new byte[6 * 1024 * 1024];
+            new Random(11).NextBytes(data);
+            string archivePath = CreateZipArchive(new Dictionary<string, byte[]> { { "disk.vhdx", data } });
+            string extractPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+
+            var extractor = new ArchiveExtractor(_mockLogger.Object,
+                _ => (1_000_000_000_000L, @"C:\"));
+
+            try
+            {
+                extractor.Extract(archivePath, extractPath, CancellationToken.None,
+                    new ImmediateProgress<CreateVMProgressInfo>(_ => { }));
+
+                string extractedFile = Path.Combine(extractPath, "disk.vhdx");
+                Assert.IsTrue(File.Exists(extractedFile), "a large single entry must extract when space allows");
+                Assert.AreEqual(data.Length, new FileInfo(extractedFile).Length);
+            }
+            finally
+            {
+                File.Delete(archivePath);
+                if (Directory.Exists(extractPath)) Directory.Delete(extractPath, true);
+            }
+        }
+
+        [TestMethod]
+        public void Extract_SpaceExhaustedMidExtraction_AbortsBeforeVolumeFull()
+        {
+            // First probe: ample (passes pre-flight). Subsequent probes: the
+            // drive is nearly full — the in-loop bound must abort with the
+            // disk-space message rather than stream until the volume fills.
+            byte[] data = new byte[64 * 1024];
+            new Random(13).NextBytes(data);
+            string archivePath = CreateZipArchive(new Dictionary<string, byte[]>
+            {
+                { "a.bin", data }, { "b.bin", data }, { "c.bin", data },
+            });
+            string extractPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+
+            int probeCount = 0;
+            var extractor = new ArchiveExtractor(_mockLogger.Object, _ =>
+            {
+                probeCount++;
+                return probeCount <= 1
+                    ? (1_000_000_000_000L, @"C:\")
+                    : (1L, @"C:\"); // pre-flight saw ample; the loop sees none
+            });
+
+            try
+            {
+                var ex = Assert.Throws<IOException>(() =>
+                    extractor.Extract(archivePath, extractPath, CancellationToken.None,
+                        new ImmediateProgress<CreateVMProgressInfo>(_ => { })));
+
+                StringAssert.Contains(ex.Message, "exhaust",
+                    "the mid-extraction abort must explain the disk-space problem");
+            }
+            finally
+            {
+                File.Delete(archivePath);
+                if (Directory.Exists(extractPath)) Directory.Delete(extractPath, true);
+            }
+        }
+
         // ── Zip-Slip traversal defenses ──────────────────────────────────
         // Many gallery loaders download archives with weak or no checksum
         // verification, so a compromised or MITM'd mirror may control the
