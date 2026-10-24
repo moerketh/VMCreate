@@ -122,6 +122,25 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
+        public async Task ExecuteAsync_AllowsColordWithoutPolkitPrompt()
+        {
+            // Live (PwnCloudOS): every xrdp login opened "Authentication is
+            // required to create a color managed device".
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("");
+
+            await _step.ExecuteAsync(_shell.Object, _item, _customizations, _logger.Object, CancellationToken.None);
+
+            _shell.Verify(s => s.CopyContentAsync(
+                It.Is<string>(content =>
+                    content.Contains("/etc/polkit-1/rules.d/45-vmcreate-xrdp-colord.rules") &&
+                    content.Contains("action.id == \"org.freedesktop.color-manager.create-device\"") &&
+                    content.Contains("/etc/polkit-1/localauthority/50-local.d/45-vmcreate-xrdp-colord.pkla") &&
+                    content.Contains("ResultAny=yes")),
+                "/tmp/fix_xrdp.sh",
+                It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [TestMethod]
         public void IsApplicable_FalseForWaylandNativeBackends()
         {
             // xrdp-fix steps only apply to the xrdp path; Lamco (Wayland-native) skips them.

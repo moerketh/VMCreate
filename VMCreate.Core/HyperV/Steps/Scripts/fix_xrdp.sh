@@ -99,5 +99,44 @@ else
     echo "xrdp not installed -- skipping startwm.sh"
 fi
 
+# -- Allow colord device/profile creation without a polkit prompt -----------
+# An xrdp session is not an "active local" seat session, so colord's
+# create-device/create-profile actions fall back to auth_admin: every xrdp
+# login opens "Authentication is required to create a color managed device"
+# (live: PwnCloudOS, on first connect and after every restart). The JS rule
+# covers polkit >= 0.106 (rules.d); the .pkla covers the legacy 0.105
+# localauthority backend. Each backend ignores the other's file. No
+# session-state condition: the xrdp session is exactly the one polkit does
+# not rate local+active. Colord devices/profiles are display colour
+# metadata — low-risk to allow for any logged-in user.
+if [ -d /usr/share/polkit-1 ] || [ -d /etc/polkit-1 ]; then
+    mkdir -p /etc/polkit-1/rules.d /etc/polkit-1/localauthority/50-local.d
+    cat > /etc/polkit-1/rules.d/45-vmcreate-xrdp-colord.rules << 'COLORD_RULES_EOF'
+// VMCreate: no colord auth prompt in xrdp sessions.
+polkit.addRule(function(action, subject) {
+    if ((action.id == "org.freedesktop.color-manager.create-device" ||
+         action.id == "org.freedesktop.color-manager.create-profile" ||
+         action.id == "org.freedesktop.color-manager.delete-device" ||
+         action.id == "org.freedesktop.color-manager.delete-profile" ||
+         action.id == "org.freedesktop.color-manager.modify-device" ||
+         action.id == "org.freedesktop.color-manager.modify-profile") &&
+        subject.user != "root") {
+        return polkit.Result.YES;
+    }
+});
+COLORD_RULES_EOF
+    cat > /etc/polkit-1/localauthority/50-local.d/45-vmcreate-xrdp-colord.pkla << 'COLORD_PKLA_EOF'
+[VMCreate: no colord auth prompt in xrdp sessions]
+Identity=unix-user:*
+Action=org.freedesktop.color-manager.create-device;org.freedesktop.color-manager.create-profile;org.freedesktop.color-manager.delete-device;org.freedesktop.color-manager.delete-profile;org.freedesktop.color-manager.modify-device;org.freedesktop.color-manager.modify-profile
+ResultAny=yes
+ResultInactive=yes
+ResultActive=yes
+COLORD_PKLA_EOF
+    chmod 644 /etc/polkit-1/rules.d/45-vmcreate-xrdp-colord.rules \
+              /etc/polkit-1/localauthority/50-local.d/45-vmcreate-xrdp-colord.pkla
+    echo "polkit: colord device/profile actions allowed without a prompt (xrdp sessions)"
+fi
+
 echo "=== xrdp fix complete ==="
 exit 0
