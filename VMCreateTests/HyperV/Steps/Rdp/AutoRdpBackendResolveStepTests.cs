@@ -80,6 +80,37 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
+        public void IsApplicable_DefersWhileDesktopSwitchIsPending()
+        {
+            // A pending desktop switch (DesktopEnvironmentId set) means any
+            // display-server verdict NOW would read the stock desktop
+            // (Kali's Xfce/X11) while the backend must match the SWITCHED
+            // desktop (KDE/GNOME, Wayland). The resolver must stay
+            // inapplicable — keeping it out of the ISO chroot — until
+            // DesktopSwitchStep (order 231) completes and clears the
+            // marker; the live loop then re-evaluates it at order 232.
+            var pending = new VmCustomizations
+            {
+                RdpBackend = RdpBackend.Auto,
+                DesktopEnvironmentId = "kde"
+            };
+            Assert.IsFalse(_step.IsApplicable(_lamcoCapableItem, pending),
+                "a pending desktop switch must defer the resolution");
+
+            // Stock-desktop deployments (no switch requested) resolve in the
+            // ISO chroot as before.
+            var stock = new VmCustomizations { RdpBackend = RdpBackend.Auto };
+            Assert.IsTrue(_step.IsApplicable(_lamcoCapableItem, stock),
+                "no pending switch — the chroot half runs as before");
+
+            // After the switch lands the marker is cleared and the resolver
+            // becomes applicable again (the live loop picks it up).
+            pending.DesktopEnvironmentId = null;
+            Assert.IsTrue(_step.IsApplicable(_lamcoCapableItem, pending),
+                "switch completed — the live resolution proceeds");
+        }
+
+        [TestMethod]
         public async Task ExecuteAsync_WaylandOnLamcoCapableDistro_ResolvesLamco()
         {
             SetupScriptOutput("RDP_DETECT=wayland");
