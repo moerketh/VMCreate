@@ -165,6 +165,20 @@ namespace VMCreate
         public string? DesktopEnvironmentId { get; set; }
 
         /// <summary>
+        /// True while an Auto RDP backend cannot be resolved yet because a
+        /// desktop switch is still pending: any display-server verdict before
+        /// the switch reads the STOCK desktop. Everything that depends on the
+        /// resolved backend — the resolver itself and the xrdp/X11 fixups —
+        /// waits; <c>DesktopSwitchStep</c> clears <see cref="DesktopEnvironmentId"/>
+        /// when the switch lands, and the post-boot loop re-evaluates them.
+        /// (Live: Kali + GNOME ran the X11 fixups in the ISO stage under the
+        /// unresolved Auto, pre-seeding gdm3's WaylandEnable=false, so the
+        /// switched GNOME came up X11-only and Auto picked xrdp.)
+        /// </summary>
+        public bool AutoRdpAwaitsDesktopSwitch =>
+            RdpBackend == RdpBackend.Auto && !string.IsNullOrEmpty(DesktopEnvironmentId);
+
+        /// <summary>
         /// Per-distribution options selected by the user on the customization page.
         /// Order is preserved so the deployment UI can show cards in the intended sequence.
         /// </summary>

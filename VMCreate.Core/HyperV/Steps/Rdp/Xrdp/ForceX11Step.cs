@@ -61,8 +61,11 @@ namespace VMCreate
         public bool IsApplicable(GalleryItem? item, VmCustomizations? customizations)
             // xrdp/X11 path only — gating on "not Lamco" leaks xrdp fixups
             // onto Wayland-native wayrdp guests (see DisableWaylandSessionsStep).
+            // An Auto backend still awaiting a desktop switch is not yet
+            // xrdp: this step would pre-seed the switched desktop's DM to X11.
             => customizations?.RdpBackend is not RdpBackend.Lamco
-                                      and not RdpBackend.Wayrdp;
+                                      and not RdpBackend.Wayrdp
+               && customizations?.AutoRdpAwaitsDesktopSwitch != true;
 
         public async Task ExecuteAsync(IGuestShell shell, GalleryItem item, VmCustomizations customizations, ILogger logger, CancellationToken ct)
         {

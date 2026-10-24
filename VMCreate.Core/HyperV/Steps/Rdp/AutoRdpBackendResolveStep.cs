@@ -78,7 +78,7 @@ namespace VMCreate
             // loop re-evaluates it at order 232, right after the switch.
             => !item.HasTag("headless")
                && customizations?.RdpBackend == RdpBackend.Auto
-               && string.IsNullOrEmpty(customizations?.DesktopEnvironmentId);
+               && !customizations.AutoRdpAwaitsDesktopSwitch;
 
         public async Task ExecuteAsync(IGuestShell shell, GalleryItem item, VmCustomizations customizations, ILogger logger, CancellationToken ct)
         {
