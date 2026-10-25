@@ -35,6 +35,14 @@ namespace VMCreate.CLI.Progress
             Console.WriteLine(JsonSerializer.Serialize(payload, _opts));
         }
 
+        /// <summary>
+        /// The final line of a successful run, naming the created VM (the
+        /// requested name plus its <c>_yyyyMMddHHmmss</c> suffix):
+        /// {"phase":"Done","vm_name":"kali_20261025162932"}
+        /// </summary>
+        public static string DoneLine(string vmName)
+            => JsonSerializer.Serialize(new ProgressPayload { Phase = "Done", VmName = vmName }, _opts);
+
         private sealed class ProgressPayload
         {
             // Serialized DTO — nullable members are omitted from NDJSON output
@@ -44,6 +52,7 @@ namespace VMCreate.CLI.Progress
             public double? SpeedMbps { get; set; }
             public string? Uri { get; set; }
             public string? DetectedGeneration { get; set; }
+            public string? VmName { get; set; }
         }
     }
 }
