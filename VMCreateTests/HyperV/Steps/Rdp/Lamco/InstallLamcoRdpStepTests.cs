@@ -447,6 +447,25 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
+        public async Task ExecuteAsync_PinsStagingFileTransfer_UnderSandboxedUnit()
+        {
+            // The hardened user unit runs in a user namespace where setuid
+            // fusermount3 cannot mount; "auto" picked FUSE and failed on every
+            // start. Staging (~/Downloads, in ReadWritePaths) is the working mode.
+            string? captured = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("LAMCO_RESULT=ok");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(captured);
+            StringAssert.Contains(captured, "file_transfer_mode = \"staging\"");
+            StringAssert.Contains(captured, "ProtectSystem=strict", "the sandbox that rules FUSE out stays on");
+            StringAssert.Contains(captured, "%h/Downloads", "staging target is writable inside the sandbox");
+        }
+
+        [TestMethod]
         public async Task ExecuteAsync_ProvisionsKwinPrivateInterfaceGrant()
         {
             // KWin 6.x only advertises zkde_screencast_unstable_v1 to clients
@@ -701,6 +720,60 @@ namespace VMCreate.Tests.HyperV.Steps
                 "grant runs at graphical session start (dialog on the console)");
             StringAssert.Contains(all, ReadinessProbe,
                 "readiness gate distinguishes service-up from blocked-on-consent");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_Kde_PreAuthorizesRemoteDesktopPortal_BeforeFirstSessionStart()
+        {
+            // Parrot (KDE, no preinstalled vsock xrdp) ended every deploy at
+            // ESM 6: lamco blocked on the consent dialog and bound nothing.
+            // xdg-desktop-portal-kde skips the dialog for an app id listed
+            // "yes" in kde-authorized/remote-desktop; lamco's app id is "".
+            string? captured = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("LAMCO_RESULT=ok");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(captured);
+            const string seed = "SetPermission sbssas kde-authorized true remote-desktop \"\" 1 yes";
+            int seedAt = captured.IndexOf(seed, StringComparison.Ordinal);
+            Assert.IsTrue(seedAt >= 0, "kde-authorized/remote-desktop is seeded for app id \"\"");
+            string guard = captured[..seedAt];
+            StringAssert.Contains(guard[guard.LastIndexOf("if [", StringComparison.Ordinal)..],
+                "if [ \"$desktop\" = \"KDE\" ]", "the seed is KDE-only");
+            int restartAt = captured.IndexOf("systemctl --user restart lamco-rdp-server.service", StringComparison.Ordinal);
+            Assert.IsTrue(restartAt > seedAt, "the seed precedes the first lamco session start");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_LamcoUnit_WaitsForVsockHoldHandOff_BeforeBinding()
+        {
+            // lamco-vsock-hold releases vsock:3389 only after polling lamco's
+            // unit as active(ating); lamco binds ~0.5s after start and lost
+            // the race (EADDRINUSE, unit failed, 5s restart) on every boot.
+            string? captured = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("LAMCO_RESULT=ok");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(captured);
+            int unitStart = captured.IndexOf("/.config/systemd/user/lamco-rdp-server.service\" << 'UNIT_EOF'", StringComparison.Ordinal);
+            Assert.IsTrue(unitStart >= 0, "lamco user unit heredoc present");
+            string unit = captured[unitStart..captured.IndexOf("\nUNIT_EOF", unitStart, StringComparison.Ordinal)];
+
+            int waitAt = unit.IndexOf("\nExecStartPre=", StringComparison.Ordinal);
+            Assert.IsTrue(waitAt >= 0, "lamco waits for the port before ExecStart");
+            Assert.IsTrue(waitAt < unit.IndexOf("\nExecStart=", StringComparison.Ordinal));
+            string wait = unit[(waitAt + 1)..unit.IndexOf('\n', waitAt + 1)];
+            StringAssert.StartsWith(wait, "ExecStartPre=+", "unsandboxed: ss needs AF_NETLINK, which the unit denies");
+            StringAssert.Contains(wait, "ss -Hl --vsock");
+            StringAssert.Contains(wait, ":3389 ");
+            StringAssert.Contains(wait, "$$(seq", "systemd expands a single $ — the shell must receive $(seq)");
+            StringAssert.EndsWith(wait.TrimEnd(), "exit 0'", "bounded wait that never fails the unit");
         }
 
         // The server's own loopback TCP listener: the early vsock hold binds

@@ -519,6 +519,11 @@ allowed_types = []
 protocol = "auto"
 allow_fallback = true
 kde_syncselection_hint = false
+# Staging, not the "auto" FUSE pick: the hardened user unit below runs in a
+# user namespace (ProtectSystem= & co.), where setuid fusermount3 cannot
+# mount — every FUSE attempt failed with "Operation not permitted" and fell
+# back to staging anyway (campaign 3, K3). Pinning it skips the doomed mount.
+file_transfer_mode = "staging"
 
 [multimon]
 enabled = true
@@ -801,6 +806,14 @@ ConditionEnvironment=WAYLAND_DISPLAY
 
 [Service]
 Type=simple
+# Hand-off from lamco-vsock-hold (the root early listener on vsock:3389):
+# the holder releases once this unit is active/activating, but it polls,
+# and lamco binds ~0.5s after start — it lost that race and died with
+# EADDRINUSE until the 5s restart. While ExecStartPre runs the unit is
+# already "activating", so wait (bounded, never fails) for the port to be
+# free. "+" lifts the sandbox below for this check only: ss needs
+# AF_NETLINK, which RestrictAddressFamilies= denies.
+ExecStartPre=+/bin/sh -c 'for i in $$(seq 50); do ss -Hl --vsock 2>/dev/null | grep -q ":3389 " || exit 0; sleep 0.1; done; exit 0'
 ExecStart=/usr/bin/lamco-rdp-server --config /etc/lamco-rdp-server/config.toml
 # Cursor lifecycle note: the fork (>= v1.4.5-hyperv.2) owns pointer handling
 # entirely via the transparent color-pointer shape PDU and Runtime Painted
@@ -1060,6 +1073,32 @@ MONITORS_EOF
     # Type=notify, so a synchronous start returns once the manager is ready.
     systemctl start "user@$(id -u "$AUTOLOGIN_USER").service" 2>/dev/null \
         || echo "NOTICE: user@$(id -u "$AUTOLOGIN_USER").service did not start synchronously — the user-unit calls below may fail."
+
+    # -- KDE: pre-authorize the RemoteDesktop portal (no consent dialog) ----
+    # xdg-desktop-portal-kde ("MegaAuth") skips the consent dialog for an app
+    # listed "yes" in the permission-store table kde-authorized, entry
+    # remote-desktop — the mechanism krdp documents (`flatpak permission-set
+    # kde-authorized remote-desktop <app> yes`). lamco runs unsandboxed, so
+    # its portal app id is "" (the restore entry the dialog writes is keyed
+    # ""). Without it a fresh deployment binds NO listener until someone
+    # clicks Allow on the console, so on images without a preinstalled vsock
+    # xrdp (Parrot) vmms's Enhanced Session probe finds nothing for the whole
+    # deployment run and the VM ends at ESM 6. Must precede the first session
+    # start (the restart below / the autologin session). busctl, not gdbus or
+    # flatpak: systemd is always there. Other desktops keep the
+    # lamco-grant.service dialog.
+    if [ "$desktop" = "KDE" ]; then
+        if sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
+            busctl --user call org.freedesktop.impl.portal.PermissionStore \
+                /org/freedesktop/impl/portal/PermissionStore \
+                org.freedesktop.impl.portal.PermissionStore \
+                SetPermission sbssas kde-authorized true remote-desktop "" 1 yes >/dev/null 2>&1; then
+            echo "KDE portal: lamco pre-authorized for RemoteDesktop (kde-authorized) — no consent dialog."
+        else
+            echo "NOTICE: could not pre-authorize lamco in the KDE permission store — the one-time consent dialog will appear on the console."
+        fi
+    fi
+
     sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
         systemctl --user daemon-reload 2>/dev/null || true
     sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
