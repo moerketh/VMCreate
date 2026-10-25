@@ -118,6 +118,7 @@ namespace VMCreate.HyperV.VmCreation
                 await strategy.CreateVMAsync(strategyContext);
                 vmCreated = true;
 
+                WriteDeploymentLog(deploymentLogger, LogLevel.Information);
                 return new VmDeploymentResult(
                     plan.VmName,
                     success: true,
@@ -128,15 +129,32 @@ namespace VMCreate.HyperV.VmCreation
             catch (OperationCanceledException)
             {
                 _logger.LogWarning("VM deployment cancelled for {VMName} — cleaning up", plan.VmName);
+                WriteDeploymentLog(deploymentLogger, LogLevel.Warning);
                 await CleanupFailedVmAsync(plan, vmCreated, preserveInDebug: DebugPreservation.IsEnabled);
                 return new VmDeploymentResult(plan.VmName, success: false, errorMessage: "Deployment cancelled.", deploymentLog: deploymentLogger.GetLog());
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error deploying VM: {Message}", ex.Message);
+                WriteDeploymentLog(deploymentLogger, LogLevel.Warning);
                 await CleanupFailedVmAsync(plan, vmCreated, preserveInDebug: DebugPreservation.IsEnabled);
                 return new VmDeploymentResult(plan.VmName, success: false, errorMessage: ex.Message, deploymentLog: deploymentLogger.GetLog());
             }
+        }
+
+        /// <summary>
+        /// Copies the per-deployment log into the application log. Some
+        /// entries exist nowhere else — the ISO boot-cycle's guest scenario
+        /// output and its guest diagnostics on failure (the guest-side log
+        /// dies with the boot flip) — and nothing else persists
+        /// <see cref="VmDeploymentResult.DeploymentLog"/>. Warning level on
+        /// failure keeps the diagnostics next to the error.
+        /// </summary>
+        private void WriteDeploymentLog(IDeploymentLogger deploymentLogger, LogLevel level)
+        {
+            if (deploymentLogger.Entries.Count == 0)
+                return;
+            _logger.Log(level, "{DeploymentLog}", deploymentLogger.GetLog().TrimEnd());
         }
 
         private async Task EnsureCloningIsoAsync(

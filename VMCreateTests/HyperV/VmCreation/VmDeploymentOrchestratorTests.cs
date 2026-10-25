@@ -212,6 +212,65 @@ namespace VMCreate.Tests.HyperV.VmCreation
             }
         }
 
+        [TestMethod]
+        public async Task DeployAsync_Success_WritesTheDeploymentLogToTheAppLog()
+        {
+            // The ISO boot-cycle's guest scenario output lives only in the
+            // deployment log; it must reach the persistent application log.
+            VmDeploymentResult result = await DeployWithTempDisksAsync(ctx =>
+            {
+                ctx.Logger.Log("ISO boot-cycle v2: guest scenario output:\nSTEP_RESULT=ok");
+                return Task.CompletedTask;
+            });
+
+            Assert.IsTrue(result.Success);
+            VerifyAppLog(LogLevel.Information, "STEP_RESULT=ok", Times.Once());
+        }
+
+        [TestMethod]
+        public async Task DeployAsync_Failure_WritesTheDeploymentLogAtWarning()
+        {
+            VmDeploymentResult result = await DeployWithTempDisksAsync(ctx =>
+            {
+                ctx.Logger.LogError("ISO boot-cycle v2 guest diagnostics (steps failed):\njournal tail");
+                throw new InvalidOperationException("boom");
+            });
+
+            Assert.IsFalse(result.Success);
+            VerifyAppLog(LogLevel.Warning, "journal tail", Times.Once());
+            StringAssert.Contains(result.DeploymentLog, "journal tail", "the result still carries it");
+        }
+
+        private async Task<VmDeploymentResult> DeployWithTempDisksAsync(Func<VmCreationContext, Task> createVm)
+        {
+            string baseDir = Path.Combine(Path.GetTempPath(), $"vmcreate-orch-{Guid.NewGuid():N}");
+            _pathService.Setup(s => s.DefaultVmPath).Returns(baseDir);
+            _pathService.Setup(s => s.DefaultVhdxPath).Returns(baseDir);
+            _pathService.Setup(s => s.GetVirtualHardDiskPath(It.IsAny<string>()))
+                .Returns((string vmName) => Path.Combine(baseDir, vmName));
+            var plan = VmDeploymentPlan.FromSettings(new VmSettings { VMName = "TestVM_20250601120000" });
+            var galleryItem = new GalleryItem { Name = "Test", DiskUri = "https://x/image.iso", IsNativeHyperV = false };
+            _mediaHandlerFactory.Setup(f => f.CreateHandler(It.IsAny<DiskImageFormat>()))
+                .Returns(new FakeMediaHandler(DiskImageFormat.Iso));
+            _strategy.Setup(s => s.CanHandle(It.IsAny<GalleryItem>(), It.IsAny<DiskImageFormat>())).Returns(true);
+            _strategy.Setup(s => s.CreateVMAsync(It.IsAny<VmCreationContext>())).Returns(createVm);
+            try
+            {
+                return await _orchestrator.DeployAsync(
+                    plan, new VmCustomizations(), galleryItem, CancellationToken.None, null, "image.iso");
+            }
+            finally
+            {
+                if (Directory.Exists(baseDir))
+                    Directory.Delete(baseDir, true);
+            }
+        }
+
+        private void VerifyAppLog(LogLevel level, string fragment, Times times) =>
+            _logger.Verify(l => l.Log(level, It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, _) => v.ToString()!.Contains(fragment)),
+                It.IsAny<Exception?>(), It.IsAny<Func<It.IsAnyType, Exception?, string>>()), times);
+
         private sealed class FakeMediaHandler : IMediaHandler
         {
             private readonly DiskImageFormat _fileType;
