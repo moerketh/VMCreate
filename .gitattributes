@@ -4,3 +4,8 @@
 # CRLF file it renders as full of '\r' commands.
 *.sh text eol=lf
 .githooks/* text eol=lf
+
+# Signature-verification fixtures: the manifest's signature covers its
+# EXACT bytes, and the sig is DER binary. Any eol translation breaks the
+# test that proves .NET accepts what openssl signed.
+VMCreateTests/Downloaders/Fixtures/** -text
