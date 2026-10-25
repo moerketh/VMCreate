@@ -3,6 +3,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,13 +14,43 @@ namespace VMCreate
     public interface ICloningIsoDownloader
     {
         /// <summary>
-        /// Ensures the cloning ISO at <see cref="VmDeploymentPlan.CloningIsoPath"/> is the latest
-        /// vmcreate-iso release. Downloads from GitHub when the ISO is missing, when the
-        /// version file written next to it is missing, or when the recorded version is outdated.
-        /// Keeps the cached copy when GitHub cannot be reached and its version is already known.
+        /// Ensures the cloning ISO at <see cref="VmDeploymentPlan.CloningIsoPath"/> is a
+        /// verified vmcreate-iso release. A release counts only when it publishes the
+        /// ISO plus <c>vmcreate-&lt;ver&gt;.manifest.json</c> and its <c>.sig</c>; the
+        /// manifest signature must verify against a key in <see cref="IsoReleaseTrust"/>
+        /// and the ISO's size and SHA-256 must match it before anything reaches the
+        /// cache. Keeps the cached copy when GitHub cannot be reached and the cache
+        /// still verifies.
         /// </summary>
         Task EnsureIsoAsync(VmDeploymentPlan plan, CancellationToken cancellationToken,
                             IProgress<CreateVMProgressInfo>? progress);
+
+        /// <summary>
+        /// Re-checks the cached ISO against its cached manifest right before the VM
+        /// boots from it: the manifest signature must verify again and the ISO's size
+        /// and SHA-256 must match it again. Throws when the cache is missing, unsigned,
+        /// or no longer matches — offline included; an unverified cache never boots.
+        /// </summary>
+        Task VerifyCachedIsoAsync(VmDeploymentPlan plan, CancellationToken cancellationToken);
+    }
+
+    /// <summary>
+    /// A verified vmcreate-iso release manifest and the bytes it was verified over.
+    /// <see cref="ManifestBytes"/> is the exact downloaded content — the signature
+    /// covers it and the cache stores it byte-for-byte.
+    /// </summary>
+    public sealed record VerifiedIsoManifest
+    {
+        public required byte[] ManifestBytes { get; init; }
+        public required byte[] SignatureBytes { get; init; }
+        public required string Version { get; init; }
+        public required string Tag { get; init; }
+        public required string Name { get; init; }
+        public required long Schema { get; init; }
+        public required string IsoFile { get; init; }
+        public required long IsoSize { get; init; }
+        public required string IsoSha256 { get; init; }
+        public required string KeyId { get; init; }
     }
 
     public class CloningIsoDownloader : ICloningIsoDownloader
@@ -28,24 +59,40 @@ namespace VMCreate
         // hiding every 2.0.0-alpha) and pick per the selection policy.
         private const string GitHubReleasesListUrl = "https://api.github.com/repos/moerketh/vmcreate-iso/releases?per_page=20";
         private const int MaxRetries = 3;
+        // The manifest and its signature are tiny (a few hundred bytes);
+        // a response larger than this is not one of ours.
+        private const int MaxManifestBytes = 1024;
         private static readonly TimeSpan HttpTimeout = TimeSpan.FromMinutes(5);
         private static readonly TimeSpan[] RetryDelays = { TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(4) };
 
         private readonly IDownloader _downloader;
-        private readonly IChecksumVerifier _checksumVerifier;
         private readonly IHttpClientFactory _clientFactory;
         private readonly ILogger<CloningIsoDownloader> _logger;
+        private readonly IsoReleaseTrust _trust;
 
         public CloningIsoDownloader(
             IDownloader downloader,
-            IChecksumVerifier checksumVerifier,
             IHttpClientFactory clientFactory,
             ILogger<CloningIsoDownloader> logger)
+            : this(downloader, clientFactory, logger, IsoReleaseTrust.BuiltIn)
+        {
+        }
+
+        /// <summary>
+        /// Test seam: verify against a test key instead of the built-in
+        /// trust store, so no test key ever ships. Internal — production
+        /// code always uses <see cref="IsoReleaseTrust.BuiltIn"/>.
+        /// </summary>
+        internal CloningIsoDownloader(
+            IDownloader downloader,
+            IHttpClientFactory clientFactory,
+            ILogger<CloningIsoDownloader> logger,
+            IsoReleaseTrust trust)
         {
             _downloader = downloader ?? throw new ArgumentNullException(nameof(downloader));
-            _checksumVerifier = checksumVerifier ?? throw new ArgumentNullException(nameof(checksumVerifier));
             _clientFactory = clientFactory ?? throw new ArgumentNullException(nameof(clientFactory));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _trust = trust ?? throw new ArgumentNullException(nameof(trust));
         }
 
         public async Task EnsureIsoAsync(VmDeploymentPlan plan, CancellationToken cancellationToken,
@@ -54,86 +101,113 @@ namespace VMCreate
             if (plan == null) throw new ArgumentNullException(nameof(plan));
             cancellationToken.ThrowIfCancellationRequested();
 
-            // Cache layout: one file (CloningIsoPath) with its .version
-            // sidecar.
+            // Cache layout: the ISO (CloningIsoPath) plus the verified
+            // release manifest and its signature stored next to it.
             string isoPath = plan.CloningIsoPath;
-            string versionPath = GetVersionFilePath(isoPath);
-            bool isoExists = File.Exists(isoPath);
-            string? cachedVersion = isoExists ? TryReadCachedVersion(versionPath) : null;
+            VerifiedIsoManifest? cached = TryVerifyCachedManifest(isoPath, requireIso: true);
 
-            string isoUrl;
-            string? checksumUrl;
-            string version;
-
-            if (cachedVersion != null)
+            SignedRelease? latest;
+            try
             {
-                try
-                {
-                    (isoUrl, checksumUrl, version) = await GetLatestV2ReleaseAsync(cancellationToken);
-                }
-                catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+                latest = await GetLatestSignedReleaseAsync(cancellationToken);
+            }
+            catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                if (cached != null)
                 {
                     _logger.LogWarning(ex,
-                        "Could not check for a newer cloning ISO release. Using cached ISO {Version} at {IsoPath}.",
-                        cachedVersion, isoPath);
+                        "Could not check for a newer cloning ISO release. Using verified cached ISO {Version} at {IsoPath}.",
+                        cached.Version, isoPath);
                     return;
                 }
 
-                if (string.Equals(cachedVersion, version, StringComparison.Ordinal))
-                {
-                    _logger.LogInformation("Cloning ISO {Version} already present at {IsoPath}", cachedVersion, isoPath);
-                    return;
-                }
+                if (File.Exists(isoPath))
+                    throw new InvalidOperationException(
+                        "Could not reach GitHub to verify the cached cloning ISO, and the cache has no valid " +
+                        "signed manifest. The ISO cannot be trusted for boot. Delete " + isoPath +
+                        " and retry while online.", ex);
 
-                _logger.LogInformation(
-                    "Cached cloning ISO at {IsoPath} is version {CachedVersion}, latest is {LatestVersion}. Downloading the updated release.",
-                    isoPath, cachedVersion, version);
+                throw;
             }
-            else
+
+            // Point 6: a release OLDER than the verified cache is refused —
+            // the newest verified ISO already on disk wins. This covers a
+            // newer release being deleted on GitHub (the list then falls
+            // back to an older one).
+            if (cached != null
+                && CompareCandidates(latest.Tag, "", cached.Tag, "") < 0)
             {
-                if (isoExists)
-                    _logger.LogInformation(
-                        "Cloning ISO found at {IsoPath} without a readable version file. Treating it as outdated and fetching the latest release.",
-                        isoPath);
-                else
-                    _logger.LogInformation("Cloning ISO not found at {IsoPath}. Fetching latest release from GitHub.", isoPath);
-
-                (isoUrl, checksumUrl, version) = await GetLatestV2ReleaseAsync(cancellationToken);
+                _logger.LogWarning(
+                    "The newest signed vmcreate-iso release is {LatestVersion}, older than the verified cached {CachedVersion}. Keeping the cached ISO.",
+                    latest.Version, cached.Version);
+                return;
             }
+
+            if (cached != null && string.Equals(cached.Version, latest.Version, StringComparison.Ordinal))
+            {
+                _logger.LogInformation("Cloning ISO {Version} already present at {IsoPath}", cached.Version, isoPath);
+                return;
+            }
+
+            if (cached != null)
+                _logger.LogInformation(
+                    "Cached cloning ISO at {IsoPath} is version {CachedVersion}, latest signed release is {LatestVersion}. Downloading the updated release.",
+                    isoPath, cached.Version, latest.Version);
+            else if (File.Exists(isoPath))
+                _logger.LogInformation(
+                    "Cloning ISO found at {IsoPath} without a valid signed manifest. Treating it as outdated and fetching the latest signed release.",
+                    isoPath);
+            else
+                _logger.LogInformation("Cloning ISO not found at {IsoPath}. Fetching latest signed release from GitHub.", isoPath);
 
             progress?.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.DownloadCloningIso));
 
-            string tempPath = await _downloader.DownloadFileAsync(isoUrl, cancellationToken, progress, useCache: false);
+            // 1. Manifest and signature first (both tiny): the signature is
+            //    checked BEFORE any field of the manifest is trusted.
+            byte[] manifestBytes = await DownloadSmallFileAsync(latest.ManifestUrl, cancellationToken);
+            byte[] signatureBytes = await DownloadSmallFileAsync(latest.SignatureUrl, cancellationToken);
+
+            if (_trust.VerifyManifestSignature(manifestBytes, signatureBytes) == null)
+                throw new InvalidOperationException(
+                    $"The vmcreate-iso release {latest.Version} publishes a manifest whose signature does not " +
+                    "verify against any key built into VMCreate. Refusing to install it.");
+
+            // 2. Only now are the manifest's fields read and bound to the
+            //    release it was downloaded from.
+            VerifiedIsoManifest manifest = ParseVerifiedManifest(manifestBytes, signatureBytes);
+            if (manifest.Schema != 1 || manifest.Name != "vmcreate-iso")
+                throw new InvalidOperationException(
+                    $"The vmcreate-iso release {latest.Version} publishes an unsupported manifest " +
+                    $"(schema '{manifest.Schema}', name '{manifest.Name}'). Refusing to install it.");
+            if (!string.Equals(manifest.Version, latest.Version, StringComparison.Ordinal)
+                || !string.Equals(manifest.Tag, latest.Tag, StringComparison.Ordinal))
+                throw new InvalidOperationException(
+                    $"The vmcreate-iso release {latest.Version} publishes a manifest for version " +
+                    $"'{manifest.Version}' (tag '{manifest.Tag}') that does not match the release. Refusing to install it.");
+            string isoFileName = Path.GetFileName(new Uri(latest.IsoUrl).LocalPath);
+            if (!string.Equals(manifest.IsoFile, isoFileName, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException(
+                    $"The vmcreate-iso release {latest.Version} publishes a manifest naming ISO file " +
+                    $"'{manifest.IsoFile}' but the release ISO is '{isoFileName}'. Refusing to install it.");
+
+            // 3. The ISO itself — size and SHA-256 must match the signed
+            //    manifest before it goes into the cache.
+            string tempPath = await _downloader.DownloadFileAsync(latest.IsoUrl, cancellationToken, progress, useCache: false);
 
             try
             {
-                if (checksumUrl != null)
-                {
-                    string isoFileName = Path.GetFileName(new Uri(isoUrl).LocalPath);
-                    await _checksumVerifier.VerifyAsync(tempPath, checksumUrl, "sha256",
-                        cancellationToken, progress, expectedFileName: isoFileName);
-                }
-                else
-                {
-                    // Fail closed: this ISO is the deployment's most privileged
-                    // artifact — it boots in the created VM and drives root-level
-                    // automation. A release without a .sha256 asset cannot be
-                    // integrity-checked before boot, so it must not be installed.
-                    _logger.LogError(
-                        "vmcreate-iso release {Version} has no .sha256 asset — refusing to install the unverified ISO.",
-                        version);
-                    throw new InvalidOperationException(
-                        $"The vmcreate-iso release {version} does not publish a .sha256 checksum asset, " +
-                        "so its integrity cannot be verified before boot. Refusing to install it.");
-                }
+                await VerifyIsoFileAsync(tempPath, manifest, cancellationToken);
 
                 string? directory = Path.GetDirectoryName(isoPath);
                 if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
                     Directory.CreateDirectory(directory);
 
                 File.Move(tempPath, isoPath, overwrite: true);
-                await File.WriteAllTextAsync(versionPath, version, cancellationToken);
-                _logger.LogInformation("Cloning ISO {Version} saved to {IsoPath}", version, isoPath);
+                await File.WriteAllBytesAsync(GetManifestPath(isoPath), manifest.ManifestBytes, cancellationToken);
+                await File.WriteAllBytesAsync(GetSignaturePath(isoPath), manifest.SignatureBytes, cancellationToken);
+                TryDeleteLegacyVersionFile(isoPath);
+                _logger.LogInformation("Cloning ISO {Version} (key {KeyId}) saved to {IsoPath}",
+                    manifest.Version, manifest.KeyId, isoPath);
             }
             catch
             {
@@ -143,34 +217,185 @@ namespace VMCreate
             }
         }
 
-        private static string GetVersionFilePath(string isoPath)
-            => isoPath + ".version";
+        public async Task VerifyCachedIsoAsync(VmDeploymentPlan plan, CancellationToken cancellationToken)
+        {
+            if (plan == null) throw new ArgumentNullException(nameof(plan));
+            cancellationToken.ThrowIfCancellationRequested();
 
-        private static string? TryReadCachedVersion(string versionPath)
+            string isoPath = plan.CloningIsoPath;
+            VerifiedIsoManifest? manifest = TryVerifyCachedManifest(isoPath, requireIso: true);
+            if (manifest == null)
+                throw new InvalidOperationException(
+                    $"The cached cloning ISO at {isoPath} has no valid signed manifest — it cannot be trusted for boot. " +
+                    "Delete it and deploy again while online.");
+
+            await VerifyIsoFileAsync(isoPath, manifest, cancellationToken);
+            _logger.LogInformation("Pre-boot check passed for cloning ISO {Version} at {IsoPath}",
+                manifest.Version, isoPath);
+        }
+
+        /// <summary>
+        /// Verifies a cached ISO's size and SHA-256 against its already
+        /// signature-verified manifest.
+        /// </summary>
+        private async Task VerifyIsoFileAsync(string isoPath, VerifiedIsoManifest manifest,
+                                               CancellationToken cancellationToken)
+        {
+            if (!File.Exists(isoPath))
+                throw new InvalidOperationException(
+                    $"The cloning ISO is missing at {isoPath}.");
+
+            var file = new FileInfo(isoPath);
+            if (file.Length != manifest.IsoSize)
+                throw new InvalidOperationException(
+                    $"The cloning ISO '{Path.GetFileName(isoPath)}' has size {file.Length:N0} bytes, but its signed " +
+                    $"manifest records {manifest.IsoSize:N0} bytes. The file has been changed since verification — " +
+                    "refusing to boot it.");
+
+            string actualSha = await ComputeSha256Async(isoPath, cancellationToken);
+            if (!string.Equals(actualSha, manifest.IsoSha256, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException(
+                    $"The cloning ISO '{Path.GetFileName(isoPath)}' has SHA-256 {actualSha}, but its signed manifest " +
+                    $"records {manifest.IsoSha256}. The file has been changed since verification — refusing to boot it.");
+        }
+
+        /// <summary>
+        /// Reads and signature-verifies the cached manifest next to the ISO.
+        /// Returns null when any part of the cache is missing or fails
+        /// verification; callers decide what that means (redownload vs.
+        /// fail the deploy).
+        /// </summary>
+        private VerifiedIsoManifest? TryVerifyCachedManifest(string isoPath, bool requireIso)
         {
             try
             {
-                if (!File.Exists(versionPath))
+                string manifestPath = GetManifestPath(isoPath);
+                string signaturePath = GetSignaturePath(isoPath);
+                if (!File.Exists(manifestPath) || !File.Exists(signaturePath))
+                    return null;
+                if (requireIso && !File.Exists(isoPath))
                     return null;
 
-                string? version = File.ReadAllText(versionPath).Trim();
-                return string.IsNullOrEmpty(version) ? null : version;
+                byte[] manifestBytes = File.ReadAllBytes(manifestPath);
+                byte[] signatureBytes = File.ReadAllBytes(signaturePath);
+
+                if (_trust.VerifyManifestSignature(manifestBytes, signatureBytes) == null)
+                {
+                    _logger.LogWarning(
+                        "The cached manifest at {ManifestPath} does not verify against any built-in key — the cache is untrusted.",
+                        manifestPath);
+                    return null;
+                }
+
+                return ParseVerifiedManifest(manifestBytes, signatureBytes);
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException
+                                      or FormatException or CryptographicException)
             {
+                _logger.LogWarning(ex, "Could not read the cached manifest for {IsoPath}", isoPath);
                 return null;
             }
         }
 
+        internal static string GetManifestPath(string isoPath)
+            => isoPath + ".manifest.json";
+
+        internal static string GetSignaturePath(string isoPath)
+            => isoPath + ".manifest.json.sig";
+
+        /// <summary>
+        /// Parses a manifest whose signature already verified. Field
+        /// validation beyond schema/name/version/tag/iso_file happens in
+        /// <see cref="EnsureIsoAsync"/>, where the release is known.
+        /// </summary>
+        private static VerifiedIsoManifest ParseVerifiedManifest(byte[] manifestBytes, byte[] signatureBytes)
+        {
+            using JsonDocument doc = JsonDocument.Parse(manifestBytes);
+            JsonElement root = doc.RootElement;
+
+            long ReadLong(string name)
+            {
+                if (root.TryGetProperty(name, out JsonElement el) && el.ValueKind == JsonValueKind.Number)
+                    return el.GetInt64();
+                return -1;
+            }
+
+            return new VerifiedIsoManifest
+            {
+                ManifestBytes = manifestBytes,
+                SignatureBytes = signatureBytes,
+                Version = root.TryGetProperty("version", out JsonElement v) ? v.GetString() ?? "" : "",
+                Tag = root.TryGetProperty("tag", out JsonElement t) ? t.GetString() ?? "" : "",
+                IsoFile = root.TryGetProperty("iso_file", out JsonElement f) ? f.GetString() ?? "" : "",
+                IsoSize = ReadLong("iso_size"),
+                IsoSha256 = root.TryGetProperty("iso_sha256", out JsonElement s) ? s.GetString() ?? "" : "",
+                KeyId = root.TryGetProperty("key_id", out JsonElement k) ? k.GetString() ?? "" : "",
+                Schema = ReadLong("schema"),
+                Name = root.TryGetProperty("name", out JsonElement n) ? n.GetString() ?? "" : "",
+            };
+        }
+
+        private static void TryDeleteLegacyVersionFile(string isoPath)
+        {
+            try
+            {
+                string legacy = isoPath + ".version";
+                if (File.Exists(legacy))
+                    File.Delete(legacy);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // A leftover .version file is inert — the manifest is the
+                // only source of truth now.
+            }
+        }
+
+        private static async Task<string> ComputeSha256Async(string filePath, CancellationToken cancellationToken)
+        {
+            await using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read,
+                FileShare.Read, 81920, useAsync: true);
+            byte[] hash = await SHA256.HashDataAsync(stream, cancellationToken);
+            return Convert.ToHexString(hash).ToLowerInvariant();
+        }
+
+        /// <summary>
+        /// Downloads the manifest or signature (both under 1 KB). The size
+        /// cap bounds what an attacker controlling the network can make
+        /// VMCreate read from one URL.
+        /// </summary>
+        private async Task<byte[]> DownloadSmallFileAsync(string url, CancellationToken cancellationToken)
+        {
+            using var client = _clientFactory.CreateClient();
+            client.Timeout = HttpTimeout;
+            client.DefaultRequestHeaders.Add("User-Agent", ProductInfo.UserAgent);
+
+            using var response = await client.GetAsync(url, cancellationToken);
+            response.EnsureSuccessStatusCode();
+            long? length = response.Content.Headers.ContentLength;
+            if (length > MaxManifestBytes)
+                throw new InvalidOperationException(
+                    $"The file at {url} is {length} bytes — far larger than a release manifest. Refusing it.");
+
+            byte[] bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+            if (bytes.Length > MaxManifestBytes)
+                throw new InvalidOperationException(
+                    $"The file at {url} exceeds {MaxManifestBytes} bytes — far larger than a release manifest. Refusing it.");
+            return bytes;
+        }
+
         /// <summary>
         /// v2 channel: lists vmcreate-iso releases and picks per policy —
-        /// the NEWEST STABLE release wins; a prerelease is only picked when
-        /// no stable release exists yet (the alpha period). Array order is
-        /// never trusted: candidates sort by semver with published_at as
-        /// the tiebreak. The repo is public: no authentication is needed
-        /// for the releases API or the asset downloads.
+        /// the NEWEST STABLE SIGNED release wins; a prerelease is only
+        /// picked when no stable signed release exists yet. A release only
+        /// counts when it publishes the ISO plus
+        /// vmcreate-&lt;ver&gt;.manifest.json and its .sig — unsigned
+        /// releases are skipped entirely (v2.0.0 and its .sha256-only
+        /// siblings never qualify). Array order is never trusted:
+        /// candidates sort by semver with published_at as the tiebreak.
+        /// The repo is public: no authentication is needed for the
+        /// releases API or the asset downloads.
         /// </summary>
-        private async Task<(string IsoUrl, string? ChecksumUrl, string Version)> GetLatestV2ReleaseAsync(CancellationToken cancellationToken)
+        private async Task<SignedRelease> GetLatestSignedReleaseAsync(CancellationToken cancellationToken)
         {
             HttpRequestException? lastError = null;
 
@@ -187,10 +412,10 @@ namespace VMCreate
                     string json = await client.GetStringAsync(GitHubReleasesListUrl, cancellationToken);
                     using var doc = JsonDocument.Parse(json);
 
-                    (string Tag, bool Prerelease, string PublishedAt, string? IsoUrl, string? ChecksumUrl) best =
-                        default;
+                    (string Tag, bool Prerelease, string PublishedAt, string IsoUrl, string ManifestUrl, string SignatureUrl)? best = null;
                     bool haveBest = false;
                     bool bestIsStable = false;
+                    int signedCount = 0;
 
                     foreach (var release in doc.RootElement.EnumerateArray())
                     {
@@ -204,7 +429,7 @@ namespace VMCreate
                         string published = release.TryGetProperty("published_at", out var pubEl)
                             ? pubEl.GetString() ?? "" : "";
 
-                        string? isoUrl = null, checksumUrl = null;
+                        string? isoUrl = null, manifestUrl = null, signatureUrl = null;
                         if (release.TryGetProperty("assets", out var assetsEl))
                         {
                             foreach (var asset in assetsEl.EnumerateArray())
@@ -219,42 +444,48 @@ namespace VMCreate
                                 {
                                     isoUrl = url;
                                 }
-                                else if (name.StartsWith("vmcreate-", StringComparison.OrdinalIgnoreCase)
-                                         && name.EndsWith(".sha256", StringComparison.OrdinalIgnoreCase))
-                                    checksumUrl = url;
+                                else if (name.EndsWith(".manifest.json", StringComparison.OrdinalIgnoreCase))
+                                    manifestUrl = url;
+                                else if (name.EndsWith(".manifest.json.sig", StringComparison.OrdinalIgnoreCase))
+                                    signatureUrl = url;
                             }
                         }
-                        if (isoUrl == null) continue; // no matching asset (e.g. draft)
+                        // A release without ALL THREE assets is not a
+                        // signed release: it cannot be verified before
+                        // boot, so it never qualifies.
+                        if (isoUrl == null || manifestUrl == null || signatureUrl == null) continue;
+                        signedCount++;
 
                         // Policy: stable beats prerelease at equal-or-any rank;
                         // within the same class, newest semver (published_at
                         // tiebreak) wins.
                         bool candidateIsStable = !prerelease;
-                        int cmp = haveBest
-                            ? CompareCandidates(tag, published, best.Tag, best.PublishedAt)
-                            : 1;
                         bool take;
-                        if (!haveBest) take = true;
-                        else if (candidateIsStable != bestIsStable) take = candidateIsStable;
-                        else take = cmp > 0;
+                        if (!haveBest)
+                            take = true;
+                        else if (candidateIsStable != bestIsStable)
+                            take = candidateIsStable;
+                        else
+                            take = CompareCandidates(tag, published, best!.Value.Tag, best.Value.PublishedAt) > 0;
 
                         if (take)
                         {
-                            best = (tag, prerelease, published, isoUrl, checksumUrl);
+                            best = (tag, prerelease, published, isoUrl, manifestUrl, signatureUrl);
                             haveBest = true;
                             bestIsStable = candidateIsStable;
                         }
                     }
 
-                    if (!haveBest || best.IsoUrl == null)
+                    if (!haveBest || best is not { } bestValue)
                         throw new InvalidOperationException(
-                            "No vmcreate-*.iso asset found in any vmcreate-iso release. " +
+                            "No signed vmcreate-iso release found (a release needs the ISO plus " +
+                            "vmcreate-<ver>.manifest.json and .manifest.json.sig). " +
                             "Check https://github.com/moerketh/vmcreate-iso/releases");
 
-                    string version = best.Tag.StartsWith("v", StringComparison.OrdinalIgnoreCase) ? best.Tag[1..] : best.Tag;
-                    _logger.LogInformation("Selected vmcreate-iso release {Version} (stable={Stable}): {IsoUrl}",
-                        version, bestIsStable, best.IsoUrl);
-                    return (best.IsoUrl, best.ChecksumUrl, version);
+                    string version = bestValue.Tag.StartsWith("v", StringComparison.OrdinalIgnoreCase) ? bestValue.Tag[1..] : bestValue.Tag;
+                    _logger.LogInformation("Selected vmcreate-iso release {Version} (stable={Stable}, signed releases seen: {Count}): {IsoUrl}",
+                        version, bestIsStable, signedCount, bestValue.IsoUrl);
+                    return new SignedRelease(bestValue.Tag, version, bestValue.IsoUrl, bestValue.ManifestUrl, bestValue.SignatureUrl);
                 }
                 catch (HttpRequestException ex)
                 {
@@ -268,6 +499,10 @@ namespace VMCreate
 
             throw new Exception($"Failed to query vmcreate-iso releases after {MaxRetries} attempts: {lastError?.Message}", lastError);
         }
+
+        /// <summary>A release that publishes the three assets VMCreate
+        /// needs to verify an ISO before boot.</summary>
+        private sealed record SignedRelease(string Tag, string Version, string IsoUrl, string ManifestUrl, string SignatureUrl);
 
         /// <summary>
         /// Orders two release tags: semver-aware on the numeric core

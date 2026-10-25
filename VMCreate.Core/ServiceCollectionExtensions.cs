@@ -57,6 +57,7 @@ namespace VMCreate
             services.AddTransient<IStreamCopierWithProgress, StreamCopierWithProgress>();
             services.AddTransient<IDownloader, HttpFileDownloader>();
             services.AddTransient<IChecksumVerifier, ChecksumVerifier>();
+            services.AddSingleton<IsoReleaseTrust>(IsoReleaseTrust.BuiltIn);
             services.AddTransient<ICloningIsoDownloader, CloningIsoDownloader>();
 
             // ── Hyper-V / VM plumbing ───────────────────────────────────────
