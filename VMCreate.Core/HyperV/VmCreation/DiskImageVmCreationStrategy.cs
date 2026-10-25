@@ -63,7 +63,8 @@ namespace VMCreate.HyperV.VmCreation
             IHostNetworkService hostNetworkService,
             ILogger<DiskImageVmCreationStrategy> logger,
             IVmPathService pathService,
-            IIsoBootCycleRunner isoBootRunner)
+            IIsoBootCycleRunner isoBootRunner,
+            ICloningIsoDownloader cloningIsoDownloader)
         {
             _lifecycleManager = lifecycleManager ?? throw new ArgumentNullException(nameof(lifecycleManager));
             _diskManager = diskManager ?? throw new ArgumentNullException(nameof(diskManager));
@@ -80,7 +81,10 @@ namespace VMCreate.HyperV.VmCreation
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _pathService = pathService ?? throw new ArgumentNullException(nameof(pathService));
             _isoBootRunner = isoBootRunner ?? throw new ArgumentNullException(nameof(isoBootRunner));
+            _cloningIsoDownloader = cloningIsoDownloader ?? throw new ArgumentNullException(nameof(cloningIsoDownloader));
         }
+
+        private readonly ICloningIsoDownloader _cloningIsoDownloader;
 
         public bool CanHandle(GalleryItem item, DiskImageFormat actualFileType)
         {
@@ -105,7 +109,11 @@ namespace VMCreate.HyperV.VmCreation
             // are customized by a NoCloud seed ISO instead of the cloning ISO.
             bool isCloudInit = item.HasTag("cloud-init");
             string? seedIsoPath = null;
-
+            // Held while the VM boots from the cloning ISO: the pre-boot
+            // verification's read guard, disposed when this deployment ends.
+            IIsoReadGuard? isoReadGuard = null;
+            try
+            {
             int detectedGeneration = ctx.MediaResult.VmGeneration;
             // Like every VMCreate deployment, the VM is Generation 2. A source
             // disk classified "BIOS" (no ESP) is handled by the stock cloning
@@ -171,6 +179,14 @@ namespace VMCreate.HyperV.VmCreation
 
                     if (needsIsoBoot)
                     {
+                        // The ISO is about to boot in this VM and drive
+                        // root-level automation: re-verify the cached
+                        // manifest's signature and the ISO's size and
+                        // SHA-256 first, then HOLD a read handle so
+                        // nothing can replace the verified bytes while
+                        // the boot cycle runs. This runs offline too — a
+                        // cache that fails the check never boots.
+                        isoReadGuard = await _cloningIsoDownloader.VerifyCachedIsoGuardedAsync(plan, cancellationToken);
                         progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.AttachBootDvd));
                         await _bootManager.AddBootDvd(plan, cloningIsoPath, cancellationToken);
                         progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.SetBootOrder));
@@ -199,6 +215,9 @@ namespace VMCreate.HyperV.VmCreation
                 await _diskManager.AddExistingHardDrive(plan, mediaPath, cancellationToken);
                 _logger.LogInformation("Attached MBR disk as secondary for cloning: {MediaPath}", mediaPath);
 
+                // Same pre-boot check on the MBR-clone path: the ISO is
+                // about to boot and run the clone as root.
+                isoReadGuard = await _cloningIsoDownloader.VerifyCachedIsoGuardedAsync(plan, cancellationToken);
                 progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.AttachBootDvd));
                 await _bootManager.AddBootDvd(plan, cloningIsoPath, cancellationToken);
 
@@ -495,6 +514,13 @@ namespace VMCreate.HyperV.VmCreation
                 // ignores it on subsequent boots.
                 _logger.LogInformation("Cloud-init seed ISO left attached to VM {VMName} (no post-boot steps)", plan.VmName);
             }
+        }
+        finally
+        {
+            // The boot cycle is over (the runner removed the clone DVD);
+            // release the read guard on the verified ISO.
+            isoReadGuard?.Dispose();
+        }
         }
 
         private IEnumerable<ICustomizationStep?> GetPostBootSteps(GalleryItem item, VmCustomizations customizations)

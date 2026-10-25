@@ -32,6 +32,22 @@ namespace VMCreate
         /// or no longer matches — offline included; an unverified cache never boots.
         /// </summary>
         Task VerifyCachedIsoAsync(VmDeploymentPlan plan, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Like <see cref="VerifyCachedIsoAsync"/>, but returns a disposable guard
+        /// holding a <c>FileShare.Read</c> handle on the ISO until it is disposed —
+        /// nothing can replace the verified bytes while the boot cycle runs.
+        /// </summary>
+        Task<IIsoReadGuard> VerifyCachedIsoGuardedAsync(VmDeploymentPlan plan, CancellationToken cancellationToken);
+    }
+
+    /// <summary>
+    /// A held <c>FileShare.Read</c> handle on the verified cloning ISO. Dispose
+    /// when the ISO boot cycle ends — the file cannot be replaced while the
+    /// guard lives (Hyper-V opens the DVD with read sharing).
+    /// </summary>
+    public interface IIsoReadGuard : IDisposable
+    {
     }
 
     /// <summary>
@@ -232,6 +248,42 @@ namespace VMCreate
             await VerifyIsoFileAsync(isoPath, manifest, cancellationToken);
             _logger.LogInformation("Pre-boot check passed for cloning ISO {Version} at {IsoPath}",
                 manifest.Version, isoPath);
+        }
+
+        public async Task<IIsoReadGuard> VerifyCachedIsoGuardedAsync(VmDeploymentPlan plan, CancellationToken cancellationToken)
+        {
+            if (plan == null) throw new ArgumentNullException(nameof(plan));
+            cancellationToken.ThrowIfCancellationRequested();
+
+            string isoPath = plan.CloningIsoPath;
+            VerifiedIsoManifest? manifest = TryVerifyCachedManifest(isoPath, requireIso: true);
+            if (manifest == null)
+                throw new InvalidOperationException(
+                    $"The cached cloning ISO at {isoPath} has no valid signed manifest — it cannot be trusted for boot. " +
+                    "Delete it and deploy again while online.");
+
+            await VerifyIsoFileAsync(isoPath, manifest, cancellationToken);
+            _logger.LogInformation("Pre-boot check passed for cloning ISO {Version} at {IsoPath}",
+                manifest.Version, isoPath);
+
+            // Hold the verified bytes until the caller disposes the guard:
+            // a FileShare.Read handle blocks any writer, and Hyper-V opens
+            // the DVD with read sharing so the boot still works.
+            FileStream stream = File.Open(isoPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            return new IsoReadGuard(stream);
+        }
+
+        private sealed class IsoReadGuard : IIsoReadGuard
+        {
+            private FileStream? _stream;
+
+            public IsoReadGuard(FileStream stream) => _stream = stream;
+
+            public void Dispose()
+            {
+                _stream?.Dispose();
+                _stream = null;
+            }
         }
 
         /// <summary>

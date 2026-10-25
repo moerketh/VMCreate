@@ -60,10 +60,10 @@ namespace VMCreate.Tests
                 .ReturnsAsync(CreateDownloadedIso);
 
             _clientFactory = new Mock<IHttpClientFactory>();
+#pragma warning disable CS8604 // Moq's It.IsAny<string?> matches the null name production passes
             _clientFactory
                 .Setup(f => f.CreateClient(It.IsAny<string?>()))
                 .Returns(() => new HttpClient(new StubHttpHandler(RequestAsync)));
-#pragma warning disable CS8604 // Moq's It.IsAny<string?> matches the null name production passes
         }
 
         [TestCleanup]
@@ -458,6 +458,25 @@ namespace VMCreate.Tests
 
             await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
                 downloader.VerifyCachedIsoAsync(_plan, CancellationToken.None));
+        }
+
+        [TestMethod]
+        public async Task VerifyCachedIsoGuardedAsync_HoldsReadHandleUntilDisposed()
+        {
+            await SeedCacheAsync();
+            var downloader = CreateDownloader();
+
+            using (IIsoReadGuard guard = await downloader.VerifyCachedIsoGuardedAsync(_plan, CancellationToken.None))
+            {
+                Assert.Throws<IOException>(() =>
+                    File.Open(_isoPath, FileMode.Open, FileAccess.Write, FileShare.Read),
+                    "while the guard is held, no writer can replace the ISO");
+            }
+
+            // Released: writers can open the file again.
+            using (FileStream writer = File.Open(_isoPath, FileMode.Open, FileAccess.Write, FileShare.Read))
+            {
+            }
         }
 
         [TestMethod]

@@ -30,6 +30,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
         private Mock<IPostBootStepPlanner> _stepPlanner = null!;
         private Mock<IHostNetworkService> _hostNetworkService = null!;
         private Mock<IIsoBootCycleRunner> _isoBootRunner = null!;
+        private Mock<ICloningIsoDownloader> _cloningIsoDownloader = null!;
         private Mock<IGuestShell> _shell = null!;
         private DiskImageVmCreationStrategy _strategy = null!;
         private VmSettings _vmSettings = null!;
@@ -63,6 +64,10 @@ namespace VMCreate.Tests.HyperV.VmCreation
                     || _postBootService.Object.HasLinuxPostBootSteps(item!, c!));
             _hostNetworkService = new Mock<IHostNetworkService>();
             _isoBootRunner = new Mock<IIsoBootCycleRunner>();
+            _cloningIsoDownloader = new Mock<ICloningIsoDownloader>();
+            _cloningIsoDownloader.Setup(d => d.VerifyCachedIsoGuardedAsync(
+                It.IsAny<VmDeploymentPlan>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Mock.Of<IIsoReadGuard>());
 
             _vmSettings = new VmSettings
             {
@@ -120,7 +125,8 @@ namespace VMCreate.Tests.HyperV.VmCreation
                 _hostNetworkService.Object,
                 new Mock<ILogger<DiskImageVmCreationStrategy>>().Object,
                 Mock.Of<IVmPathService>(s => s.DefaultVmPath == @"C:\Hyper-V" && s.DefaultVhdxPath == @"C:\Hyper-V\Virtual hard disks"),
-                _isoBootRunner.Object);
+                _isoBootRunner.Object,
+                _cloningIsoDownloader.Object);
         }
 
         [TestCleanup]
@@ -614,6 +620,63 @@ namespace VMCreate.Tests.HyperV.VmCreation
                 It.IsAny<VmDeploymentPlan>(), It.IsAny<string>(), It.IsAny<int>(),
                 It.IsAny<CancellationToken>()), Times.Once,
                 "a passing pre-flight must not block the deployment");
+        }
+
+        [TestMethod]
+        public async Task CreateVMAsync_UnverifiedIso_FailsBeforeBootDvdAttach()
+        {
+            // The pre-boot check: the cached manifest's signature and the
+            // ISO's hash are re-verified right before the VM boots from
+            // the ISO. A failure must stop the deploy before the DVD is
+            // attached or the VM started.
+            _cloningIsoDownloader.Setup(d => d.VerifyCachedIsoGuardedAsync(
+                    It.IsAny<VmDeploymentPlan>(), It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new InvalidOperationException(
+                    "The cloning ISO has no valid signed manifest — it cannot be trusted for boot."));
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() => ExecuteAsync(generation: 2));
+
+            _bootManager.Verify(m => m.AddBootDvd(
+                It.IsAny<VmDeploymentPlan>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never,
+                "an unverified ISO must never be attached");
+            _lifecycleManager.Verify(m => m.StartVM(
+                It.IsAny<VmDeploymentPlan>(), It.IsAny<CancellationToken>()), Times.Never,
+                "an unverified ISO must never boot");
+        }
+
+        [TestMethod]
+        public async Task CreateVMAsync_IsoBootCycle_HoldsReadGuardUntilTheEnd()
+        {
+            // The verification returns a read guard; the strategy must hold
+            // it for the whole deployment (the ISO stays attached during
+            // the boot cycle and post-boot) and dispose it at the end.
+            var guard = new Mock<IIsoReadGuard>();
+            _cloningIsoDownloader.Setup(d => d.VerifyCachedIsoGuardedAsync(
+                    It.IsAny<VmDeploymentPlan>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(guard.Object);
+
+            await ExecuteAsync(generation: 1);
+
+            guard.Verify(g => g.Dispose(), Times.Once, "the read guard must be released when the deployment ends");
+        }
+
+        [TestMethod]
+        public async Task CreateVMAsync_IsoBootCycle_VerifiesBeforeAttach()
+        {
+            // The check runs on the Gen-1 clone path too, ordered before
+            // the DVD attach.
+            var order = new List<string>();
+            _cloningIsoDownloader.Setup(d => d.VerifyCachedIsoGuardedAsync(
+                    It.IsAny<VmDeploymentPlan>(), It.IsAny<CancellationToken>()))
+                .Callback(() => order.Add("Verify")).ReturnsAsync(Mock.Of<IIsoReadGuard>());
+            _bootManager.Setup(m => m.AddBootDvd(
+                    It.IsAny<VmDeploymentPlan>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Callback(() => order.Add("AddBootDvd")).Returns(Task.CompletedTask);
+
+            await ExecuteAsync(generation: 1);
+
+            CollectionAssert.Contains(order, "Verify");
+            Assert.AreEqual("Verify", order[0], "verification must happen before the ISO is attached");
         }
 
         private async Task ExecuteAsync(int generation)
