@@ -212,6 +212,31 @@ namespace VMCreate.Tests.Cidata
         }
 
         [TestMethod]
+        public void BuildNoCloudMetaData_NamesTheInstanceAfterTheHost()
+        {
+            Assert.AreEqual("instance-id: target\n", CidataSeedBuilder.BuildNoCloudMetaData(CreateOptions()));
+        }
+
+        [TestMethod]
+        public void BuildNoCloudUserData_HoldsVsock3389InTheLiveSessionOnly()
+        {
+            string userData = CidataSeedBuilder.BuildNoCloudUserData();
+
+            Assert.IsTrue(userData.StartsWith("#cloud-config\n"), "cloud-init ignores user-data without the header");
+            Assert.IsFalse(userData.Contains('\r'), "LF only");
+            // bootcmd runs before the installer's tty1 autologin; the hold is a
+            // transient unit, so nothing is written to the target disk.
+            StringAssert.Contains(userData, "bootcmd:");
+            StringAssert.Contains(userData, "systemd-run, --unit=vmcreate-esm-hold");
+            StringAssert.Contains(userData, @"s.bind((S.VMADDR_CID_ANY,3389))\ns.listen(8)");
+            StringAssert.Contains(userData, "modprobe hv_sock");
+            // Stock cloud.cfg side effects in the live session stay off.
+            StringAssert.Contains(userData, "users: []");
+            StringAssert.Contains(userData, "preserve_hostname: true");
+            StringAssert.Contains(userData, "ssh_deletekeys: false");
+        }
+
+        [TestMethod]
         public async Task BuildCidataIso_CreatesIsoWithCidataVolume()
         {
             // Skipped when IMAPI2 is unavailable (e.g. CI containers).
@@ -255,6 +280,9 @@ namespace VMCreate.Tests.Cidata
                 Assert.AreEqual(2, all[0x8800], "Joliet SVD type byte");
                 string jolietId = Encoding.BigEndianUnicode.GetString(all, 0x8800 + 40, 32).TrimEnd('\0', ' ');
                 Assert.AreEqual("cidata", jolietId);
+
+                // The ESM hold lives in user-data, which cloud-init must read.
+                NoCloudSeedAssert.IsCloudInitReadable(isoPath);
             }
             finally
             {

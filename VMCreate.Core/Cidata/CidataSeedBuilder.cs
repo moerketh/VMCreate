@@ -56,6 +56,15 @@ public class CidataSeedOptions
 
     /// <summary>Omarchy runtime package substituted into the package list (upstream default).</summary>
     public string OmarchyRuntimePackage { get; set; } = "omarchy";
+
+    /// <summary>
+    /// Adds NoCloud <c>meta-data</c>/<c>user-data</c> that make the live installer
+    /// listen on vsock:3389 until it reboots. Hyper-V only marks Enhanced Session
+    /// available after it sees a listener there, and it stops looking once the
+    /// guest resets without one — which the installer's reboot does, long
+    /// before any RDP server is installed. Once marked available it stays so.
+    /// </summary>
+    public bool HoldEnhancedSessionPort { get; set; } = true;
 }
 
 /// <summary>
@@ -271,6 +280,42 @@ public static class CidataSeedBuilder
     }
 
     /// <summary>
+    /// Renders the NoCloud <c>meta-data</c>. The live ISO's cloud-init needs it
+    /// (with <c>user-data</c>) to accept the cidata drive as its datasource.
+    /// </summary>
+    public static string BuildNoCloudMetaData(CidataSeedOptions options)
+    {
+        Validate(options);
+        return $"instance-id: {options.Hostname}\n";
+    }
+
+    /// <summary>
+    /// Renders the NoCloud <c>user-data</c> for the live installer: a transient
+    /// unit that accepts and closes connections on vsock:3389 (vmms only probes
+    /// for a listener), and the stock cloud.cfg side effects switched off — no
+    /// default user, hostname or host-key changes in the live session. Nothing
+    /// here reaches the installed system.
+    /// </summary>
+    public static string BuildNoCloudUserData()
+    {
+        return """
+            #cloud-config
+            # VMCreate: live installer only. Hold vsock:3389 until the installer
+            # reboots so Hyper-V marks Enhanced Session available (see
+            # CidataSeedOptions.HoldEnhancedSessionPort).
+            users: []
+            preserve_hostname: true
+            manage_etc_hosts: false
+            ssh_deletekeys: false
+            ssh_genkeytypes: []
+            bootcmd:
+              - [sh, -c, "modprobe hv_sock || true"]
+              - [systemd-run, --unit=vmcreate-esm-hold, --collect, python3, -c, "import socket as S\ns=S.socket(S.AF_VSOCK,S.SOCK_STREAM)\ns.bind((S.VMADDR_CID_ANY,3389))\ns.listen(8)\nwhile True: s.accept()[0].close()"]
+
+            """.Replace("\r\n", "\n");
+    }
+
+    /// <summary>
     /// Builds the cidata seed ISO at <paramref name="outputPath"/>. Stages the seed
     /// files in a temp directory, burns them with the in-box IMAPI2 component
     /// (volume label <c>cidata</c>) and always removes the staging directory.
@@ -306,9 +351,22 @@ public static class CidataSeedBuilder
                 File.WriteAllText(Path.Combine(stagingDir, "authorized_keys"), keys);
             }
 
+            if (options.HoldEnhancedSessionPort)
+            {
+                File.WriteAllText(Path.Combine(stagingDir, "meta-data"), BuildNoCloudMetaData(options));
+                File.WriteAllText(Path.Combine(stagingDir, "user-data"), BuildNoCloudUserData());
+            }
+
             logger.LogInformation("Staged Omarchy cidata seed files in {Path}", stagingDir);
 
-            Imapi2Interop.CreateIsoFromDirectory(stagingDir, outputPath, volumeName: "cidata");
+            // ISO9660 + Joliet ONLY. With a UDF descriptor blkid reports
+            // TYPE=udf and cloud-init's NoCloud datasource (which scans only
+            // vfat/iso9660) never reads user-data, so the ESM hold never runs.
+            // omarchy-cidata-load matches by label and would not notice.
+            Imapi2Interop.CreateIsoFromDirectory(
+                stagingDir, outputPath,
+                volumeName: "cidata",
+                FsiFileSystems.ISO9660 | FsiFileSystems.Joliet);
 
             logger.LogInformation("Created Omarchy cidata seed ISO at {Path}", outputPath);
             return outputPath;
