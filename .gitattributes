@@ -3,3 +3,4 @@
 # lint tests and for diffs. Pin them so Windows checkouts never hand bash a
 # CRLF file it renders as full of '\r' commands.
 *.sh text eol=lf
+.githooks/* text eol=lf

@@ -1,0 +1,10 @@
+# gitleaks false positives (fingerprint = commit:file:rule:line).
+# Fake test token "0123456789abcdef" in UserPreferencesStoreTests.
+8e3ddeb1dd309ddff4d4cd805032bddc57eb8ac3:VMCreateTests/VMCreate/UserPreferencesStoreTests.cs:generic-api-key:143
+8abb3a2d836588493690aed4a6fcf0a84e547383:VMCreateTests/VMCreate/UserPreferencesStoreTests.cs:generic-api-key:143
+cef0a1ae7b3d3eddcd0c35544580d1faa78c697f:VMCreateTests/VMCreate/UserPreferencesStoreTests.cs:generic-api-key:143
+ced6f614964604d6e235a4449f80221962718ee5:VMCreateTests/VMCreate/UserPreferencesStoreTests.cs:generic-api-key:146
+c00b6c45ffd1b5c2a8b5393835ade0b1e75349f2:VMCreateTests/VMCreate/UserPreferencesStoreTests.cs:generic-api-key:146
+# Test service GUID next to the fake "C:\tmp\test-key" path in VsockIsoBootCycleRunnerTests.
+e6d225152456d8cb45ac2fd0df4c82394021bed4:VMCreateTests/HyperV/VmCreation/VsockIsoBootCycleRunnerTests.cs:generic-api-key:114
+c00b6c45ffd1b5c2a8b5393835ade0b1e75349f2:VMCreateTests/HyperV/VmCreation/VsockIsoBootCycleRunnerTests.cs:generic-api-key:115

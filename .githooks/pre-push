@@ -1,0 +1,33 @@
+#!/bin/sh
+# Scan the commits about to be pushed for secrets with gitleaks.
+# Enable once per clone:  git config core.hooksPath .githooks
+# Known false positives live in .gitleaksignore (fingerprints from the report).
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+    # winget puts gitleaks on the user PATH, which shells started before the
+    # install (e.g. an IDE's git) don't see yet.
+    for g in "$LOCALAPPDATA"/Microsoft/WinGet/Packages/Gitleaks.Gitleaks_*/gitleaks.exe; do
+        [ -x "$g" ] && PATH="$(dirname "$g"):$PATH" && break
+    done
+fi
+if ! command -v gitleaks >/dev/null 2>&1; then
+    echo "pre-push: gitleaks not found; install it (winget install Gitleaks.Gitleaks) or push with --no-verify" >&2
+    exit 1
+fi
+
+fail=0
+while read -r local_ref local_sha remote_ref remote_sha; do
+    case "$local_sha" in *[!0]*) ;; *) continue ;; esac   # ref deletion
+    case "$remote_sha" in
+        *[!0]*) range="$remote_sha..$local_sha" ;;
+        *)      range="$local_sha --not --remotes" ;;     # new branch/tag
+    esac
+    echo "pre-push: gitleaks scanning $local_ref" >&2
+    gitleaks git --log-opts="$range" --redact --no-banner --exit-code 1 . || fail=1
+done
+
+if [ "$fail" -ne 0 ]; then
+    echo "pre-push: gitleaks found possible secrets; push aborted." >&2
+    echo "  False positive? Add its Fingerprint to .gitleaksignore and commit." >&2
+    exit 1
+fi
