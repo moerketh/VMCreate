@@ -112,11 +112,13 @@ namespace VMCreate.HyperV.VmCreation
                 await _configManager.EnableVirtualization(plan, cancellationToken);
             }
 
-            progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.StartVM));
-            await _lifecycleManager.StartVM(plan, cancellationToken);
-
+            // Before the first start: Hyper-V only polls for the Enhanced
+            // Session listener on a worker started with the HvSocket transport.
             if (vmCustomizations.EnableIntegrationServices)
                 await _configManager.SetEnhancedSession(plan, cancellationToken);
+
+            progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.StartVM));
+            await _lifecycleManager.StartVM(plan, cancellationToken);
 
             if (item.IsWindows)
                 await RunWindowsPostBootAsync(ctx);

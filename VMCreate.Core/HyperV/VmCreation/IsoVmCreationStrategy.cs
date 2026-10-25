@@ -167,11 +167,15 @@ namespace VMCreate.HyperV.VmCreation
                 await _configManager.EnableVirtualization(plan, cancellationToken);
             }
 
-            progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.StartVM));
-            await _lifecycleManager.StartVM(plan, cancellationToken);
-
+            // Set the Enhanced Session transport BEFORE the first start: Hyper-V
+            // only polls the guest's vsock listener on a worker started with
+            // HvSocket. Switching transport on a running VM does not arm the
+            // poller, so Enhanced Session stays unavailable until a host restart.
             if (vmCustomizations.EnableIntegrationServices)
                 await _configManager.SetEnhancedSession(plan, cancellationToken);
+
+            progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.StartVM));
+            await _lifecycleManager.StartVM(plan, cancellationToken);
 
             if (item.IsWindows)
                 await RunWindowsPostBootAsync(ctx);

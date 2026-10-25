@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Moq;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -126,6 +127,25 @@ namespace VMCreate.Tests.HyperV.VmCreation
             await ExecuteAsync();
 
             _bootManager.Verify(h => h.SetFirstBootToHardDrive(_plan, It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [TestMethod]
+        public async Task CreateVMAsync_SetsEnhancedSessionTransportBeforeFirstStart()
+        {
+            // Hyper-V only polls the guest's Enhanced Session listener on a
+            // worker STARTED with the HvSocket transport; setting it on a
+            // running VM leaves Enhanced Session unavailable until a restart.
+            var calls = new List<string>();
+            _configManager.Setup(c => c.SetEnhancedSession(_plan, It.IsAny<CancellationToken>()))
+                .Callback(() => calls.Add("SetEnhancedSession")).Returns(Task.CompletedTask);
+            _lifecycleManager.Setup(l => l.StartVM(_plan, It.IsAny<CancellationToken>()))
+                .Callback(() => calls.Add("StartVM")).Returns(Task.CompletedTask);
+
+            await ExecuteAsync();
+
+            CollectionAssert.Contains(calls, "SetEnhancedSession");
+            Assert.AreEqual("SetEnhancedSession", calls[0],
+                $"the transport must be set before the first StartVM (calls: {string.Join(", ", calls)})");
         }
 
         [TestMethod]

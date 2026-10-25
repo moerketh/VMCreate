@@ -224,6 +224,25 @@ namespace VMCreate.HyperV.VmCreation
                 _logger.LogInformation("Virtualization extensions not enabled for VM: {VMName}", plan.VmName);
             }
 
+            if (vmCustomizations.EnableIntegrationServices)
+            {
+                // Set the transport BEFORE the first start: Hyper-V only polls
+                // the guest's vsock listener on a worker started with HvSocket;
+                // switching a running VM does not arm the poller, so Enhanced
+                // Session would stay unavailable until a host restart.
+                // HvSocket is kept for Lamco: Hyper-V Enhanced Session
+                // (vmconnect) connects through the guest's vsock listener
+                // (CID-allowlisted to the host relay) and terminates TLS/CredSSP
+                // on the host side. Note: Hyper-V's proprietary pre-RDP greeting
+                // may still cause "InvalidContentType" on some client builds —
+                // an IronRDP limitation. The TCP listener binds loopback ONLY
+                // (auth_method=none must never face a network): standard mstsc
+                // reaches it over an SSH port forward, e.g.
+                //   ssh -L 3389:127.0.0.1:3389 <user>@<VM-IP>
+                // then connect mstsc to 127.0.0.1:3389.
+                await _configManager.SetEnhancedSession(plan, cancellationToken);
+            }
+
             progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.StartVM));
             await _lifecycleManager.StartVM(plan, cancellationToken);
 
@@ -247,21 +266,6 @@ namespace VMCreate.HyperV.VmCreation
                 {
                     throw new Exception($"ISO customization failed. {isoResult.ErrorMessage}");
                 }
-            }
-
-            if (vmCustomizations.EnableIntegrationServices)
-            {
-                // Keep HvSocket transport for Lamco. Hyper-V Enhanced Session
-                // (vmconnect) connects through the guest's vsock listener
-                // (CID-allowlisted to the host relay) and terminates TLS/CredSSP
-                // on the host side. Note: Hyper-V's proprietary pre-RDP greeting
-                // may still cause "InvalidContentType" on some client builds —
-                // an IronRDP limitation. The TCP listener binds loopback ONLY
-                // (auth_method=none must never face a network): standard mstsc
-                // reaches it over an SSH port forward, e.g.
-                //   ssh -L 3389:127.0.0.1:3389 <user>@<VM-IP>
-                // then connect mstsc to 127.0.0.1:3389.
-                await _configManager.SetEnhancedSession(plan, cancellationToken);
             }
 
             var postBootSteps = GetPostBootSteps(item, vmCustomizations).ToList();
