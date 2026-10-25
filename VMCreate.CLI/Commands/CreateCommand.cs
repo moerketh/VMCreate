@@ -171,8 +171,8 @@ namespace VMCreate.CLI.Commands
             // ── Distribution-specific ──────────────────────────────────────────
             var optionOpt = new Option<string[]>("--option")
             {
-                Description = "Distribution-specific option in key=value form (repeatable). " +
-                             "E.g. --option pwncloudos-sync=true",
+                Description = "Distribution-specific option in key=value form (repeatable); the key is the " +
+                             "option's name or its lowercase-dashed form. E.g. --option pwncloudos-sync=true",
                 AllowMultipleArgumentsPerToken = false,
                 Arity = ArgumentArity.ZeroOrMore
             };
@@ -186,7 +186,7 @@ namespace VMCreate.CLI.Commands
 
             var quietOpt = new Option<bool>("--quiet")
             {
-                Description = "Suppress progress output. Exit code still reflects success/failure.",
+                Description = "Suppress progress output; on success print only the created VM's name. Exit code still reflects success/failure.",
                 DefaultValueFactory = _ => false
             };
 
@@ -290,6 +290,34 @@ namespace VMCreate.CLI.Commands
         /// CLI deployments exactly as they do in the GUI.
         /// </para>
         /// </summary>
+        /// <summary>
+        /// The --option key form of a step name: lowercase, every run of
+        /// non-alphanumerics a single dash ("Install FLARE VM" → "install-flare-vm").
+        /// </summary>
+        internal static string OptionSlug(string name)
+        {
+            var sb = new System.Text.StringBuilder(name.Length);
+            foreach (char c in name.Trim())
+            {
+                if (char.IsLetterOrDigit(c))
+                    sb.Append(char.ToLowerInvariant(c));
+                else if (sb.Length > 0 && sb[^1] != '-')
+                    sb.Append('-');
+            }
+            return sb.ToString().TrimEnd('-');
+        }
+
+        /// <summary>
+        /// The optional step a --option key names — matched by exact name
+        /// (case-insensitive) or by <see cref="OptionSlug"/> — or null.
+        /// </summary>
+        internal static string? ResolveOptionName(string key, IEnumerable<string> optionalStepNames)
+        {
+            var names = optionalStepNames.ToList();
+            return names.FirstOrDefault(n => string.Equals(n, key, StringComparison.OrdinalIgnoreCase))
+                ?? names.FirstOrDefault(n => OptionSlug(n) == OptionSlug(key));
+        }
+
         private static RdpBackend ResolveRdpBackend(string? rdpBackend, bool noXrdp, bool jsonMode, out bool valid)
         {
             valid = true;
@@ -466,6 +494,13 @@ namespace VMCreate.CLI.Commands
             };
 
             // ── Parse --option key=value pairs ───────────────────────────────
+            // Keys name an optional step of the selected image, by its name or
+            // its slug (--option pwncloudos-sync=true → "PwnCloudOS Sync").
+            var optionalStepNames = services.GetServices<ICustomizationStep>()
+                .OfType<IConfigurableCustomizationStep>()
+                .Where(s => s.IsOptional && s.IsVisibleFor(galleryItem))
+                .Select(s => s.Name)
+                .ToList();
             var distributionOptions = new List<DistributionOptionSelection>();
             foreach (var kv in args.Options)
             {
@@ -477,9 +512,19 @@ namespace VMCreate.CLI.Commands
                 }
                 var key = kv[..eq].Trim();
                 var val = kv[(eq + 1)..].Trim();
+                var stepName = ResolveOptionName(key, optionalStepNames);
+                if (stepName == null)
+                {
+                    PrintError(jsonMode, "validation",
+                        $"Unknown --option '{key}' for {galleryItem.Name}. " +
+                        (optionalStepNames.Count == 0
+                            ? "This image has no distribution options."
+                            : "Valid keys: " + string.Join(", ", optionalStepNames.Select(OptionSlug)) + "."));
+                    return ExitCodes.InvalidArguments;
+                }
                 distributionOptions.Add(new DistributionOptionSelection
                 {
-                    Name = key,
+                    Name = stepName,
                     IsEnabled = val.Equals("true", StringComparison.OrdinalIgnoreCase)
                                 || val.Equals("1", StringComparison.OrdinalIgnoreCase)
                                 || val.Equals("yes", StringComparison.OrdinalIgnoreCase)
@@ -633,27 +678,36 @@ namespace VMCreate.CLI.Commands
             // ── Set up progress reporter ─────────────────────────────────────
             var frontEnd = SelectProgressFrontEnd(args.Quiet, jsonMode, Console.IsOutputRedirected);
 
+            // The created VM's name carries a timestamp suffix
+            // (<name>_yyyyMMddHHmmss) that only CreateVM knows; every front end
+            // reports it so scripts can find the VM.
             if (frontEnd == ProgressFrontEnd.None)
             {
-                return await CreateVmAsync(services, vmSettings, vmCustomizations, galleryItem,
+                var (quietExit, quietName) = await CreateVmAsync(services, vmSettings, vmCustomizations, galleryItem,
                     new NullProgressReporter(), jsonMode, ct);
+                if (quietExit == ExitCodes.Success && quietName != null)
+                    Console.WriteLine(quietName);
+                return quietExit;
             }
 
             if (frontEnd == ProgressFrontEnd.Json)
             {
                 var jsonReporter = new JsonProgressReporter();
-                return await CreateVmAsync(services, vmSettings, vmCustomizations, galleryItem,
+                var (jsonExit, jsonName) = await CreateVmAsync(services, vmSettings, vmCustomizations, galleryItem,
                     jsonReporter, jsonMode, ct);
+                if (jsonExit == ExitCodes.Success && jsonName != null)
+                    Console.WriteLine(JsonProgressReporter.DoneLine(jsonName));
+                return jsonExit;
             }
 
             // Redirected stdout (pipe/file/CI): Spectre's Live display needs a
             // real console handle and crashes with IOException otherwise.
             if (frontEnd == ProgressFrontEnd.PlainText)
             {
-                int plainExit = await CreateVmAsync(services, vmSettings, vmCustomizations, galleryItem,
+                var (plainExit, plainName) = await CreateVmAsync(services, vmSettings, vmCustomizations, galleryItem,
                     new PlainTextProgressReporter(), jsonMode, ct);
                 Console.WriteLine(plainExit == ExitCodes.Success
-                    ? $"[Done] VM '{vmSettings.VMName}' created successfully."
+                    ? $"[Done] VM '{plainName ?? vmSettings.VMName}' created successfully."
                     : "[Done] VM creation failed.");
                 return plainExit;
             }
@@ -669,6 +723,7 @@ namespace VMCreate.CLI.Commands
             AnsiConsole.MarkupLine(string.Empty);
 
             int exitCode = ExitCodes.Success;
+            string? createdName = null;
             ConsoleProgressReporter? consoleReporter = null;
 
             var table = new Table().Border(TableBorder.Rounded);
@@ -679,19 +734,23 @@ namespace VMCreate.CLI.Commands
                 .StartAsync(async liveCtx =>
                 {
                     consoleReporter = new ConsoleProgressReporter(table, liveCtx);
-                    exitCode = await CreateVmAsync(services, vmSettings, vmCustomizations, galleryItem,
+                    (exitCode, createdName) = await CreateVmAsync(services, vmSettings, vmCustomizations, galleryItem,
                         consoleReporter, jsonMode, ct);
                 });
 
             if (exitCode == ExitCodes.Success)
-                AnsiConsole.MarkupLine($"\n[green bold]✓ VM '{Markup.Escape(vmSettings.VMName)}' created successfully.[/]");
+                AnsiConsole.MarkupLine($"\n[green bold]✓ VM '{Markup.Escape(createdName ?? vmSettings.VMName)}' created successfully.[/]");
             else
                 AnsiConsole.MarkupLine($"\n[red bold]✗ VM creation failed.[/]");
 
             return exitCode;
         }
 
-        private static async Task<int> CreateVmAsync(
+        /// <summary>
+        /// Runs the deployment; on success also returns the created VM's
+        /// actual (timestamped) name.
+        /// </summary>
+        private static async Task<(int ExitCode, string? VmName)> CreateVmAsync(
             IServiceProvider services,
             VmSettings vmSettings,
             VmCustomizations vmCustomizations,
@@ -703,23 +762,23 @@ namespace VMCreate.CLI.Commands
             try
             {
                 var creator = services.GetRequiredService<CreateVM>();
-                await creator.StartCreateVMAsync(vmSettings, vmCustomizations, galleryItem, ct, reporter);
-                return ExitCodes.Success;
+                string vmName = await creator.StartCreateVMAsync(vmSettings, vmCustomizations, galleryItem, ct, reporter);
+                return (ExitCodes.Success, vmName);
             }
             catch (OperationCanceledException)
             {
                 PrintError(jsonMode, "Cancelled", "VM creation was cancelled.");
-                return ExitCodes.Cancelled;
+                return (ExitCodes.Cancelled, null);
             }
             catch (Exception ex) when (IsHyperVException(ex))
             {
                 PrintError(jsonMode, "HyperV", ex.Message);
-                return ExitCodes.HyperVError;
+                return (ExitCodes.HyperVError, null);
             }
             catch (Exception ex)
             {
                 PrintError(jsonMode, "Error", ex.Message);
-                return ExitCodes.VmCreationFailed;
+                return (ExitCodes.VmCreationFailed, null);
             }
         }
 
