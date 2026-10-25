@@ -159,6 +159,29 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
+        public async Task ExecuteAsync_ScriptWritesHyprlandStartHook()
+        {
+            // graphical-session.target never activates on Omarchy; without
+            // an exec_on_start hook wayrdp.service sat "inactive (dead)".
+            string? copiedContent = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, path, _) => copiedContent = content)
+                  .Returns(Task.CompletedTask);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+                  .ReturnsAsync("WAYRDP_RESULT=ok\n");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _wayrdpCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(copiedContent);
+            StringAssert.Contains(copiedContent, "vmcreate wayrdp autostart", "marker keeps the hook idempotent");
+            StringAssert.Contains(copiedContent, "o.exec_on_start(\"systemctl --user start wayrdp.service\")");
+            StringAssert.Contains(copiedContent, "dbus-update-activation-environment --systemd WAYLAND_DISPLAY",
+                "the unit's ConditionEnvironment=WAYLAND_DISPLAY needs the session env imported first");
+            StringAssert.Contains(copiedContent, "NOTICE: wayrdp.service not active yet",
+                "no session yet at install time is expected (step 239 starts it) — a NOTICE, not DEGRADED");
+        }
+
+        [TestMethod]
         public async Task ExecuteAsync_MissingResultLineOnZeroExit_Throws()
         {
             // A completely swallowed install (zero exit, no terminal line) must

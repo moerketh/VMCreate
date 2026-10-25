@@ -77,17 +77,38 @@ namespace VMCreate.Tests.HyperV.Steps
                 $"the server's own TCP 3389 listener is the readiness proof; output:{Environment.NewLine}{output}");
         }
 
+        [TestMethod]
+        public void Gate_WayrdpVsockListener_ReportsOk()
+        {
+            // wayrdp serves vsock-only by default (no TCP listener): its own
+            // vsock socket is the readiness proof.
+            var output = RunScenario("wayrdp", "wayrdp.service");
+            StringAssert.Contains(output, "SESSION_START_RESULT=ok",
+                $"wayrdp's own vsock 3389 listener is the readiness proof; output:{Environment.NewLine}{output}");
+        }
+
+        [TestMethod]
+        public void Gate_WayrdpBackend_IgnoresLamcoTcpListener()
+        {
+            // A lamco listener must not satisfy a wayrdp deployment's gate.
+            var output = RunScenario("ready", "wayrdp.service");
+            StringAssert.Contains(output, "SESSION_START_RESULT=degraded",
+                $"only the wayrdp process proves a wayrdp deploy ready; output:{Environment.NewLine}{output}");
+        }
+
         // ── harness ───────────────────────────────────────────────────
 
-        private static string RunScenario(string scenario)
+        private static string RunScenario(string scenario, string? rdpUnit = null)
         {
             if (_wsl is null)
                 Assert.Inconclusive("WSL not available — start_graphical_session gate test skipped");
 
             // The step substitutes the desktop user the same way; root exists
-            // in every WSL distro.
+            // in every WSL distro. Left unsubstituted, the unit defaults to lamco.
             string script = LoadEmbeddedScript("start_graphical_session.sh")
                 .Replace("__AUTOLOGIN_USER__", "root");
+            if (rdpUnit is not null)
+                script = script.Replace("__RDP_SERVER_UNIT__", rdpUnit);
 
             string stage = Path.Combine(Path.GetTempPath(),
                 "vmcreate-session-gate-" + Guid.NewGuid().ToString("N")[..8]);
@@ -151,6 +172,8 @@ cat > ""$ROOT/bin/ss"" <<'STUB'
 #!/bin/bash
 case ""$*"" in
   *-ltnp*) [ ""$SC"" = ready ] && echo 'LISTEN 0 128 127.0.0.1:3389 0.0.0.0:* users:((""lamco-rdp-serve"",pid=1,fd=13))';;
+  *--vsock*-p*) if [ ""$SC"" = wayrdp ]; then echo 'v_str LISTEN 0 0 *:3389 *:* users:((""wayrdp"",pid=2,fd=9))'
+                else echo 'v_str LISTEN 0 0 *:3389 *:* users:((""python3"",pid=3,fd=4))'; fi;;
   *) echo 'v_str LISTEN 0 0 *:3389 *:*';;
 esac
 exit 0

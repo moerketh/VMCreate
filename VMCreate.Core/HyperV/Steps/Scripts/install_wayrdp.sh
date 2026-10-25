@@ -471,6 +471,31 @@ if [ -f "$ORDER_DROPIN" ]; then
 fi
 run_as_user systemctl --user daemon-reload 2>/dev/null || true
 
+# The exec_on_start hook the boot model above relies on. Without it nothing
+# ever starts the unit on Omarchy: graphical-session.target stays inactive and
+# wayrdp.service sat "inactive (dead)" with no journal (observed live,
+# Omarchy 4.0.6, campaign 3). Same shape as install_lamco.sh's hook: import
+# the session env into the user manager first (the unit's
+# ConditionEnvironment=WAYLAND_DISPLAY), then start the unit directly.
+# Idempotent: marker-guarded.
+if command -v Hyprland >/dev/null 2>&1 || [ -d "$USER_HOME/.config/hypr" ]; then
+    AUTO_LUA="$USER_HOME/.config/hypr/autostart.lua"
+    mkdir -p "$USER_HOME/.config/hypr" 2>/dev/null || true
+    if ! grep -q 'vmcreate wayrdp autostart' "$AUTO_LUA" 2>/dev/null; then
+        cat >> "$AUTO_LUA" <<'START_EOF'
+
+-- vmcreate wayrdp autostart (see install_wayrdp.sh): graphical-session.target
+-- never activates on Omarchy (start-hyprland runs outside the uwsm chain), so
+-- import the Wayland env into the systemd user manager and start wayrdp
+-- directly at hyprland.start.
+o.exec_on_start("dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP HYPRLAND_INSTANCE_SIGNATURE")
+o.exec_on_start("systemctl --user start wayrdp.service")
+START_EOF
+        chown "$AUTOLOGIN_USER":"$AUTOLOGIN_USER" "$AUTO_LUA" 2>/dev/null || true
+        echo "Wrote wayrdp start hook to $AUTO_LUA."
+    fi
+fi
+
 # -- Defang Omarchy start-hyprland's silent --safe-mode fallback -----------
 # Omarchy's /usr/bin/start-hyprland forks Hyprland behind a watchdog pipe and,
 # on an UNCLEAN exit ("Hyprland exit not-cleanly, restarting"), relaunches it
@@ -553,10 +578,12 @@ if [ "$WAYRDP_ACTIVE" = "active" ]; then
     echo "wayrdp.service is active."
 elif [ "$WAYRDP_ACTIVE" = "inactive" ] || [ -z "$WAYRDP_ACTIVE" ]; then
     # No session yet — unit is enabled + lingered + autostart-hooked, so it
-    # comes up on login. That is a usable (degraded) state, not a failure.
-    DEGRADED=1
-    echo "WAYRDP DEGRADED: wayrdp.service not active yet (no live Wayland"
-    echo "session); enabled + lingered + autostart-hooked, starts on login."
+    # comes up on login. Expected on every fresh deploy: the session only
+    # starts at step 239, after this install (237), and that step's gate
+    # owns listener readiness. A NOTICE, not DEGRADED (same call as the
+    # lamco consent line).
+    echo "NOTICE: wayrdp.service not active yet (no live Wayland session);"
+    echo "        enabled + lingered + autostart-hooked, starts on login."
 else
     echo "ERROR: wayrdp.service state '$WAYRDP_ACTIVE' after start attempt." >&2
     run_as_user systemctl --user status wayrdp.service --no-pager -l 2>&1 | tail -20 >&2 || true

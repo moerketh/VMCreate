@@ -207,5 +207,28 @@ namespace VMCreate.Tests.HyperV.Steps
             StringAssert.Contains(copiedContent, "SESSION_START_RESULT=", "carries the result-line contract");
             StringAssert.Contains(copiedContent, "'__AUTOLOGIN'", "sentinel built from fragments so the host Replace cannot self-clobber");
         }
+
+        [TestMethod]
+        [DataRow(RdpBackend.Lamco, "lamco-rdp-server.service")]
+        [DataRow(RdpBackend.Wayrdp, "wayrdp.service")]
+        public async Task ExecuteAsync_GateWaitsForTheBackendsOwnUnit(RdpBackend backend, string unit)
+        {
+            // A lamco-only readiness gate timed out for 120 s on every
+            // wayrdp deploy: the gate must poll the unit this backend installed.
+            string? copiedContent = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, path, _) => copiedContent = content)
+                  .Returns(Task.CompletedTask);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+                  .ReturnsAsync("SESSION_START_RESULT=ok");
+
+            await _step.ExecuteAsync(_shell.Object, _item, new VmCustomizations { RdpBackend = backend },
+                _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(copiedContent);
+            StringAssert.Contains(copiedContent, $"RDP_UNIT=\"{unit}\"");
+            Assert.IsFalse(copiedContent.Contains("RDP_UNIT=\"__RDP_SERVER_UNIT__\"", StringComparison.Ordinal),
+                "the unit placeholder must be substituted");
+        }
     }
 }

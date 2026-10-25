@@ -70,10 +70,16 @@ namespace VMCreate
         {
             ct.ThrowIfCancellationRequested();
             logger.LogInformation(
-                "Activating graphical session on VM {VMName} (no-reboot completion for Lamco)...",
-                shell.VmName);
+                "Activating graphical session on VM {VMName} (no-reboot completion for {Backend})...",
+                shell.VmName, customizations.RdpBackend);
 
             string script = ScriptResourceLoader.Load("start_graphical_session.sh");
+
+            // The readiness gate waits for the unit this backend installed;
+            // a lamco-only gate timed out for 120 s on every wayrdp deploy.
+            script = script.Replace(
+                "__RDP_SERVER_UNIT__",
+                customizations.RdpBackend == RdpBackend.Wayrdp ? "wayrdp.service" : "lamco-rdp-server.service");
 
             // Same shared autologin-user resolver contract as
             // InstallLamcoRdpStep/EnableGraphicalAutologinStep: the gallery

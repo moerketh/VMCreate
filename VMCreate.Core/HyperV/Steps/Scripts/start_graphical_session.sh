@@ -29,6 +29,21 @@ DEGRADED=0
 
 USER="__AUTOLOGIN_USER__"
 
+# The RDP server unit this deployment installed (lamco-rdp-server.service or
+# wayrdp.service), substituted by the host step. The readiness gate below
+# checks THAT unit and its listener; a lamco-only gate timed out for 120 s on
+# every wayrdp deploy (observed live, Omarchy + wayrdp, campaign 3).
+RDP_UNIT="__RDP_SERVER_UNIT__"
+_UNIT_PLACEHOLDER='__RDP_SERVER'
+_UNIT_PLACEHOLDER="${_UNIT_PLACEHOLDER}"'_UNIT__'
+if [ "$RDP_UNIT" = "$_UNIT_PLACEHOLDER" ] || [ -z "$RDP_UNIT" ]; then
+    RDP_UNIT="lamco-rdp-server.service"
+fi
+case "$RDP_UNIT" in
+    wayrdp.service) RDP_PROC="wayrdp" ;;
+    *)              RDP_PROC="lamco" ;;
+esac
+
 # Sentinels must be constructed at runtime from string fragments so a
 # host-side string.Replace of __AUTOLOGIN_USER__ across the whole script
 # cannot rewrite this comparison target (the self-clobber bug seen on
@@ -66,9 +81,9 @@ echo "Desktop user resolved as '$USER' (uid $USER_UID)."
 # the listeners.
 SESSION_ACTIVE=$(sudo -u "$USER" XDG_RUNTIME_DIR=/run/user/$USER_UID \
     systemctl --user is-active graphical-session.target 2>/dev/null || true)
-LAMCO_ACTIVE=$(sudo -u "$USER" XDG_RUNTIME_DIR=/run/user/$USER_UID \
-    systemctl --user is-active lamco-rdp-server.service 2>/dev/null || true)
-if [ "$SESSION_ACTIVE" = "active" ] || [ "$LAMCO_ACTIVE" = "active" ]; then
+SERVER_ACTIVE=$(sudo -u "$USER" XDG_RUNTIME_DIR=/run/user/$USER_UID \
+    systemctl --user is-active "$RDP_UNIT" 2>/dev/null || true)
+if [ "$SESSION_ACTIVE" = "active" ] || [ "$SERVER_ACTIVE" = "active" ]; then
     echo "Graphical session already active for '$USER' — no DM restart needed."
 else
     # -- Resolve the display manager ----------------------------------------
@@ -131,16 +146,23 @@ for r in $(seq 1 12); do
     #     chain) and autostart.lua starts the units directly instead.
     SESS=$(sudo -u "$USER" XDG_RUNTIME_DIR=/run/user/$USER_UID \
         systemctl --user is-active graphical-session.target 2>/dev/null || true)
-    LAMCO=$(sudo -u "$USER" XDG_RUNTIME_DIR=/run/user/$USER_UID \
-        systemctl --user is-active lamco-rdp-server.service 2>/dev/null || true)
-    if [ "$SESS" = "active" ] || [ "$LAMCO" = "active" ]; then
+    SERVER=$(sudo -u "$USER" XDG_RUNTIME_DIR=/run/user/$USER_UID \
+        systemctl --user is-active "$RDP_UNIT" 2>/dev/null || true)
+    if [ "$SESS" = "active" ] || [ "$SERVER" = "active" ]; then
         # Listeners bound = the server's own loopback TCP 3389 listener.
         # Not `ss -l | grep :3389`: that also matched the early vsock hold
         # (lamco-vsock-hold.py, vsock only), reporting "listeners bound"
         # while the server itself sat blocked on the consent dialog. The
         # fork does not log "Accept dispatcher started" at INFO, so the
         # socket is the proof. (grep without -q: see below.)
-        if ss -H -ltnp 'sport = :3389' 2>/dev/null | grep -a 'lamco' >/dev/null; then
+        if ss -H -ltnp 'sport = :3389' 2>/dev/null | grep -a "$RDP_PROC" >/dev/null; then
+            RDY_OUTCOME="ready"
+            break
+        fi
+        # wayrdp has no vsock hold to confuse, and serves vsock-only when its
+        # TCP listener is not opted in: its own vsock socket is proof too.
+        if [ "$RDP_PROC" = "wayrdp" ] \
+            && ss -H -l --vsock -p 2>/dev/null | grep -a ':3389' | grep -a 'wayrdp' >/dev/null; then
             RDY_OUTCOME="ready"
             break
         fi
@@ -165,13 +187,13 @@ done
 
 case "$RDY_OUTCOME" in
     ready)
-        echo "Graphical session active; lamco listeners bound (TCP/vsock)."
+        echo "Graphical session active; $RDP_PROC listeners bound (TCP/vsock)."
         ;;
     consent)
         echo "NOTICE: graphical session active; one-time portal consent dialog is on the VM console — click Allow once, then the listeners bind."
         ;;
     timeout)
-        echo "DEGRADED: session/listener readiness gate timed out (120s) — graphical-session.target='$SESS' lamco-rdp-server='$LAMCO'."
+        echo "DEGRADED: session/listener readiness gate timed out (120s) — graphical-session.target='$SESS' $RDP_UNIT='$SERVER'."
         echo "Diagnose with: journalctl _UID=$USER_UID -b --no-pager | tail -n 50"
         DEGRADED=1
         ;;
