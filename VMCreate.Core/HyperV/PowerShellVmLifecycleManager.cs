@@ -66,11 +66,37 @@ namespace VMCreate
                 }, cancellationToken);
         }
 
-        public Task StartVM(VmDeploymentPlan plan, CancellationToken cancellationToken)
-            => _executor.RunCommandAsync("Start-VM",
+        /// <summary>
+        /// Starts the VM and fails fast with Hyper-V's own reason when it does
+        /// not start. Start-VM reports failures such as "not enough memory"
+        /// (0x8007000E) on the error stream rather than throwing; ignoring it
+        /// left the deployment waiting minutes for a VM that never ran and
+        /// then reporting only a generic start timeout.
+        /// </summary>
+        public async Task StartVM(VmDeploymentPlan plan, CancellationToken cancellationToken)
+        {
+            var result = await _executor.RunCommandAsync("Start-VM",
                 new System.Collections.Generic.Dictionary<string, object?> { ["Name"] = plan.VmName },
-                cancellationToken)
-                .ContinueWith(t => { _ = t.Result; }, cancellationToken);
+                cancellationToken);
+
+            if (!result.HadErrors)
+                return;
+
+            _logger.LogError("Start-VM returned errors for {VMName}: {Errors}", plan.VmName, result.ErrorSummary);
+
+            // An error alongside a running VM (a race with another start) is
+            // not a failed start; only a VM that is not Running is.
+            var state = await _executor.RunScriptAsync(
+                $"(Get-VM -Name '{plan.VmName.Replace("'", "''")}').State.ToString()", cancellationToken);
+            string? vmState = state.Output.FirstOrDefault()?.BaseObject?.ToString();
+            if (string.Equals(vmState, "Running", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning("VM {VMName} is running despite the Start-VM error stream — continuing.", plan.VmName);
+                return;
+            }
+
+            throw new Exception($"Failed to start virtual machine '{plan.VmName}' (state: {vmState ?? "unknown"}): {result.ErrorSummary}");
+        }
 
         public async Task StopVMAsync(string vmName, CancellationToken cancellationToken)
         {

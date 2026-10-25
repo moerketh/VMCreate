@@ -39,15 +39,18 @@ namespace VMCreate
         /// today's file has not been written yet (the sink creates it on
         /// first write, so the fallback is short-lived at worst).
         /// </summary>
-        internal static string CurrentLogFilePath
+        internal static string CurrentLogFilePath => ResolveRollingLogFile(LogFilePath, DateTime.Now);
+
+        /// <summary>
+        /// The rolling file Serilog writes for <paramref name="templatePath"/> on
+        /// <paramref name="now"/>'s date, or the template when it doesn't exist yet.
+        /// </summary>
+        internal static string ResolveRollingLogFile(string templatePath, DateTime now)
         {
-            get
-            {
-                string dir = Path.GetDirectoryName(LogFilePath) ?? "";
-                string today = $"{Path.GetFileNameWithoutExtension(LogFilePath)}{DateTime.Now:yyyyMMdd}{Path.GetExtension(LogFilePath)}";
-                string todayFull = Path.Combine(dir, today);
-                return File.Exists(todayFull) ? todayFull : LogFilePath;
-            }
+            string dir = Path.GetDirectoryName(templatePath) ?? "";
+            string today = $"{Path.GetFileNameWithoutExtension(templatePath)}{now:yyyyMMdd}{Path.GetExtension(templatePath)}";
+            string todayFull = Path.Combine(dir, today);
+            return File.Exists(todayFull) ? todayFull : templatePath;
         }
 
         // ── Startup timing (permanent, always-on) ─────────────────────────
