@@ -182,6 +182,30 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
+        public async Task ExecuteAsync_ShmPluginDropIn_EnablesClientDrawnCursor()
+        {
+            // The cursor painted into the video trails the hand by the whole
+            // frame pipeline; with the plugin path the client draws it locally.
+            string? copiedContent = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, path, _) => copiedContent = content)
+                  .Returns(Task.CompletedTask);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+                  .ReturnsAsync("WAYRDP_RESULT=ok\n");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _wayrdpCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(copiedContent);
+            var start = copiedContent.IndexOf("cat > \"$DROPIN_DIR/shm.conf\" <<'SHM_EOF'", StringComparison.Ordinal);
+            var end = copiedContent.IndexOf("\nSHM_EOF", start, StringComparison.Ordinal);
+            Assert.IsTrue(start >= 0 && end > start, "shm-plugin drop-in heredoc not found");
+            var dropIn = copiedContent.Substring(start, end - start);
+            StringAssert.Contains(dropIn, "\nEnvironment=WAYRDP_CAPTURE=shm-plugin\n");
+            StringAssert.Contains(dropIn, "\nEnvironment=WAYRDP_CLIENT_CURSOR=1",
+                "client-drawn cursor is only wired for the plugin path, inside its drop-in");
+        }
+
+        [TestMethod]
         public async Task ExecuteAsync_MissingResultLineOnZeroExit_Throws()
         {
             // A completely swallowed install (zero exit, no terminal line) must

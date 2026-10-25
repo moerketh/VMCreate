@@ -273,8 +273,12 @@ if [ -d "$PLUGIN_SRC_DIR" ] && command -v hyprctl >/dev/null 2>&1; then
 # is per-monitor (/dev/shm/wayrdp-capture-<output>) so concurrent sessions
 # cannot race one buffer; if the plugin is missing the pump waits for its
 # output's shm. Only install this drop-in with a successfully built plugin.
+# WAYRDP_CLIENT_CURSOR: the RDP client draws the pointer locally and the
+# plugin leaves Hyprland's cursor out of the video (no cursor lag). A plugin
+# without that support keeps the cursor painted, as before.
 [Service]
 Environment=WAYRDP_CAPTURE=shm-plugin
+Environment=WAYRDP_CLIENT_CURSOR=1
 SHM_EOF
             chown -R "$PLUGIN_USER":"$PLUGIN_USER" "$DROPIN_DIR" 2>/dev/null || true
             echo "shm-plugin drop-in written ($DROPIN_DIR/shm.conf)."
