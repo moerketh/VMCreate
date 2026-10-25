@@ -46,19 +46,6 @@ namespace VMCreate
             // derived property so existing callers (and tests) that pass a
             // custom CloningIsoPath keep working.
             CloningIsoPath = cloningIsoPath ?? DefaultCloningIsoPath;
-            // Resolve the VMCREATE_ISO_PATH dev override ONCE, at plan
-            // creation: every consumer (downloader, attach/detach) then
-            // sees the same path for the whole deployment instead of
-            // re-reading the environment.
-            IsoPathOverride = ResolveIsoPathOverride();
-        }
-
-        private static string? ResolveIsoPathOverride()
-        {
-            string? overridePath = Environment.GetEnvironmentVariable("VMCREATE_ISO_PATH");
-            return !string.IsNullOrWhiteSpace(overridePath) && File.Exists(overridePath)
-                ? overridePath
-                : null;
         }
 
         /// <summary>
@@ -154,25 +141,5 @@ namespace VMCreate
         public string SecureBootTemplate { get; init; }
         public bool ReplacePreviousVm { get; init; }
         public string CloningIsoPath { get; init; }
-
-        /// <summary>
-        /// The ISO path this deployment actually attaches/detaches/downloads
-        /// (the vmcreate-iso cache). The <c>VMCREATE_ISO_PATH</c> environment
-        /// variable overrides it (dev lever: point a deploy at a locally
-        /// built ISO — must exist). Resolved once at plan creation; see
-        /// <see cref="IsoPathOverride"/>.
-        /// </summary>
-        public string EffectiveCloningIsoPath
-            => IsoPathOverride ?? CloningIsoPath;
-
-        /// <summary>
-        /// The resolved <c>VMCREATE_ISO_PATH</c> override, or null when the
-        /// variable is unset or stale (file missing). Frozen at plan creation
-        /// so one deployment never sees two different ISO paths.
-        /// </summary>
-        public string? IsoPathOverride { get; init; }
-
-        /// <summary>True when the dev override is active for this plan.</summary>
-        public bool IsIsoPathOverridden => IsoPathOverride != null;
     }
 }

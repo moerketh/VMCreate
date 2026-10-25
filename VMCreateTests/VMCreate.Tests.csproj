@@ -21,4 +21,8 @@
     <ProjectReference Include="..\VMCreate.Gallery.Security\VMCreate.Gallery.Security.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="Downloaders\Fixtures\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

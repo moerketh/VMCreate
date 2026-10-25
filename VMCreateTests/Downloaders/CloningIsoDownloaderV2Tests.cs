@@ -1,17 +1,14 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
-using System.IO;
 
 namespace VMCreate.Tests.Downloaders
 {
     /// <summary>
     /// W4 tests: the v2 release-selection policy (semver order, stable
-    /// beats prerelease, array order never trusted) and the split cache
-    /// paths. Network-free: the comparator is pure and the path logic is
-    /// plan-level.
+    /// beats prerelease, array order never trusted). Network-free: the
+    /// comparator is pure.
     /// </summary>
     [TestClass]
-    [DoNotParallelize] // sets VMCREATE_ISO_PATH; plan construction resolves it
     public class CloningIsoDownloaderV2Tests
     {
         #region Semver / candidate ordering
@@ -80,50 +77,6 @@ namespace VMCreate.Tests.Downloaders
         public void Compare_IdenticalStableTags_Tie()
         {
             Assert.AreEqual(0, CloningIsoDownloader.CompareCandidates("v2.0.0", "a", "v2.0.0", "b"));
-        }
-
-        #endregion
-
-        #region Plan-level ISO path resolution
-
-        [TestMethod]
-        public void EffectiveIsoPath_IsTheCachePath()
-        {
-            var plan = VmDeploymentPlan.FromSettings(new VmSettings { VMName = "t" });
-            Assert.AreEqual(plan.CloningIsoPath, plan.EffectiveCloningIsoPath);
-        }
-
-        [TestMethod]
-        public void EnvOverride_Wins_WhenFileExists()
-        {
-            string overridePath = Path.Combine(Path.GetTempPath(), $"vmcreate-test-override-{Guid.NewGuid():N}.iso");
-            File.WriteAllText(overridePath, "x");
-            try
-            {
-                Environment.SetEnvironmentVariable("VMCREATE_ISO_PATH", overridePath);
-                var plan = VmDeploymentPlan.FromSettings(new VmSettings { VMName = "t" });
-                Assert.AreEqual(overridePath, plan.EffectiveCloningIsoPath, "dev override must win over the cache path");
-            }
-            finally
-            {
-                Environment.SetEnvironmentVariable("VMCREATE_ISO_PATH", null);
-                File.Delete(overridePath);
-            }
-        }
-
-        [TestMethod]
-        public void EnvOverride_Ignored_WhenFileMissing()
-        {
-            Environment.SetEnvironmentVariable("VMCREATE_ISO_PATH", @"C:\definitely\not\here.iso");
-            try
-            {
-                var plan = VmDeploymentPlan.FromSettings(new VmSettings { VMName = "t" });
-                Assert.AreEqual(plan.CloningIsoPath, plan.EffectiveCloningIsoPath, "a stale override must not break deploys");
-            }
-            finally
-            {
-                Environment.SetEnvironmentVariable("VMCREATE_ISO_PATH", null);
-            }
         }
 
         #endregion

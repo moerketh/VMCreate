@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "name": "vmcreate-iso",
+  "version": "2.1.0",
+  "tag": "v2.1.0",
+  "commit": "62484c1a14fe7e0133c7e8da5924419e3476a1de",
+  "iso_file": "vmcreate-2.1.0.iso",
+  "iso_size": 86165504,
+  "iso_sha256": "3fab5ec511a073edc9bd06b3def01ce08b70699fdd81224b305808b82660813b",
+  "key_id": "354c516cfd23698f"
+}

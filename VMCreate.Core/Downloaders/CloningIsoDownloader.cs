@@ -54,23 +54,9 @@ namespace VMCreate
             if (plan == null) throw new ArgumentNullException(nameof(plan));
             cancellationToken.ThrowIfCancellationRequested();
 
-            // Dev override (VMCREATE_ISO_PATH): the plan points at a locally
-            // built ISO. It is NOT this downloader's cache to manage — a
-            // missing sidecar would read as "outdated" and the download
-            // below would either fail the deploy (no release published yet)
-            // or REPLACE the dev's build with the published one and write a
-            // sidecar next to it. Use it exactly as-is.
-            if (plan.IsIsoPathOverridden)
-            {
-                _logger.LogInformation(
-                    "VMCREATE_ISO_PATH override active: using {IsoPath} as-is (no version check, no download).",
-                    plan.EffectiveCloningIsoPath);
-                return;
-            }
-
             // Cache layout: one file (CloningIsoPath) with its .version
             // sidecar.
-            string isoPath = plan.EffectiveCloningIsoPath;
+            string isoPath = plan.CloningIsoPath;
             string versionPath = GetVersionFilePath(isoPath);
             bool isoExists = File.Exists(isoPath);
             string? cachedVersion = isoExists ? TryReadCachedVersion(versionPath) : null;

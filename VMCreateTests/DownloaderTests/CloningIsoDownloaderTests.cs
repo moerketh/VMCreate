@@ -8,7 +8,6 @@ using System.Threading.Tasks;
 namespace VMCreate.Tests
 {
     [TestClass]
-    [DoNotParallelize] // sets VMCREATE_ISO_PATH; plan construction resolves it
     public class CloningIsoDownloaderTests
     {
         // Fixture fields — assigned in [TestInitialize] Setup() before every test.
@@ -159,39 +158,6 @@ namespace VMCreate.Tests
             Assert.AreEqual("downloaded iso bytes", File.ReadAllText(_isoPath));
             Assert.AreEqual("2.0.0-alpha.1", File.ReadAllText(_versionPath));
             VerifyDownloaded(Times.Once());
-        }
-
-        [TestMethod]
-        public async Task EnsureIsoAsync_EnvOverride_UsesIsoAsIs_NoNetworkNoOverwrite()
-        {
-            // A locally built ISO behind VMCREATE_ISO_PATH is NOT the
-            // downloader's cache: no sidecar exists (would read as
-            // "outdated"), and the download path would either fail the
-            // deploy (no release published) or REPLACE the dev's build with
-            // the published one. The override must short-circuit before any
-            // of that.
-            string localIso = Path.Combine(_tempDir, "local-build.iso");
-            const string localBytes = "locally built iso bytes";
-            File.WriteAllText(localIso, localBytes);
-            Environment.SetEnvironmentVariable("VMCREATE_ISO_PATH", localIso);
-            try
-            {
-                var overriddenPlan = new VmDeploymentPlan("TestVM", cloningIsoPath: _isoPath);
-                Assert.IsTrue(overriddenPlan.IsIsoPathOverridden, "fixture sanity: override must be active");
-                var downloader = CreateDownloader();
-
-                await downloader.EnsureIsoAsync(overriddenPlan, CancellationToken.None, new Progress<CreateVMProgressInfo>());
-
-                Assert.AreEqual(localBytes, File.ReadAllText(localIso), "the local ISO must be untouched");
-                Assert.IsFalse(File.Exists(localIso + ".version"), "no sidecar may be written next to it");
-                VerifyDownloaded(Times.Never());
-                _clientFactory.Verify(f => f.CreateClient(It.IsAny<string?>()), Times.Never,
-                    "no GitHub API call may happen under the override");
-            }
-            finally
-            {
-                Environment.SetEnvironmentVariable("VMCREATE_ISO_PATH", null);
-            }
         }
 
         [TestMethod]

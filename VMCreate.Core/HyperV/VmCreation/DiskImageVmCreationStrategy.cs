@@ -97,7 +97,7 @@ namespace VMCreate.HyperV.VmCreation
             VmCustomizations vmCustomizations = ctx.Customizations;
             GalleryItem item = ctx.GalleryItem;
             string mediaPath = ctx.MediaResult.FinalMediaPath;
-            string cloningIsoPath = plan.EffectiveCloningIsoPath;
+            string cloningIsoPath = plan.CloningIsoPath;
             var cancellationToken = ctx.CancellationToken;
             var progress = ctx.Progress;
 
