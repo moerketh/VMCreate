@@ -40,9 +40,9 @@ set -o pipefail
 # version-numbered, so a `releases/latest` that no longer carries this
 # exact asset 404s loudly instead of silently installing a different one.
 WAYRDP_REPO="moerketh/wayrdp"
-WAYRDP_VERSION="0.1.0"
+WAYRDP_VERSION="0.2.0"
 WAYRDP_TARBALL="wayrdp-${WAYRDP_VERSION}-linux-x86_64.tar.gz"
-WAYRDP_TARBALL_SHA256="b7d88525dad6e7542865a6b389d1ff91c685d9c2cae035f80928a4bc7bcaa9d0"
+WAYRDP_TARBALL_SHA256="80fb69f28539f8e96b4718cbe3feb9062ebfa949a7086a233ccda161155f0ac4"
 WAYRDP_TARBALL_URL="https://github.com/${WAYRDP_REPO}/releases/latest/download/${WAYRDP_TARBALL}"
 
 DEGRADED=0
@@ -269,10 +269,12 @@ if [ -d "$PLUGIN_SRC_DIR" ] && command -v hyprctl >/dev/null 2>&1; then
             mkdir -p "$DROPIN_DIR" 2>/dev/null || true
             cat > "$DROPIN_DIR/shm.conf" <<'SHM_EOF'
 # Enable the Hyprland plugin shm capture path (wayrdp backend-wlroots).
-# The plugin is loaded separately via the Hyprland autostart hook. The shm
-# is per-monitor (/dev/shm/wayrdp-capture-<output>) so concurrent sessions
-# cannot race one buffer; if the plugin is missing the pump waits for its
-# output's shm. Only install this drop-in with a successfully built plugin.
+# The plugin is loaded separately via the Hyprland autostart hook. The
+# segment is per-monitor ($XDG_RUNTIME_DIR/wayrdp-capture-<output>, a 0700
+# user-owned tmpfs since wayrdp 0.2.0 — no other local user can pre-create
+# the name) so concurrent sessions cannot race one buffer; if the plugin is
+# missing the pump waits for its output's segment. Only install this
+# drop-in with a successfully built plugin.
 # WAYRDP_CLIENT_CURSOR: the RDP client draws the pointer locally and the
 # plugin leaves Hyprland's cursor out of the video (no cursor lag). A plugin
 # without that support keeps the cursor painted, as before.
@@ -308,7 +310,8 @@ SHM_EOF
                 if ! grep -q "hyprland-capture.so" "$AUTO_LUA" 2>/dev/null; then
                     cat >> "$AUTO_LUA" <<'PLUG_EOF'
 -- wayrdp shm-capture plugin (added by VMCreate install_wayrdp.sh): loads the
--- compositor plugin that feeds /dev/shm/wayrdp-capture-<output>. Runs during
+-- compositor plugin that feeds $XDG_RUNTIME_DIR/wayrdp-capture-<output>
+-- (moved out of /dev/shm in wayrdp 0.2.0). Runs during
 -- config parse, before the Hyprland IPC socket necessarily exists, so a
 -- bare load races the socket (observed live: "no plugins loaded" after
 -- login). Retry in a backgrounded shell for up to ~15s. If it ultimately
