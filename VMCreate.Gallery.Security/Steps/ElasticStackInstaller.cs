@@ -130,7 +130,13 @@ else
   apt-get update -y || fail ""apt-get update""
   apt-get install -y curl gnupg apt-transport-https ca-certificates openssl || fail ""prerequisites""
   curl -fsSL https://artifacts.elastic.co/GPG-KEY-elasticsearch | gpg --dearmor --yes -o /usr/share/keyrings/elasticsearch-keyring.gpg || fail ""GPG key""
+  # umask 077 (set above) leaves the dearmored key 0600 root:root; apt
+  # verifies signatures as the unprivileged _apt user, which then warns
+  # (""not readable by user '_apt'"") and rejects the repo as unsigned.
+  # Keyring and sources list must be world-readable.
+  chmod 0644 /usr/share/keyrings/elasticsearch-keyring.gpg
   echo ""deb [signed-by=/usr/share/keyrings/elasticsearch-keyring.gpg] https://artifacts.elastic.co/packages/9.x/apt stable main"" > /etc/apt/sources.list.d/elastic-9.x.list
+  chmod 0644 /etc/apt/sources.list.d/elastic-9.x.list
   apt-get update -y || fail ""apt-get update (elastic repo)""
 fi
 
