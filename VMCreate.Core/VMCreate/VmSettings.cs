@@ -20,5 +20,11 @@ namespace VMCreate
         public string SecureBootTemplate { get; set; } = "MicrosoftUEFICertificateAuthority";
         public bool ReplacePreviousVm { get; set; }
         public string CloningIsoPath { get; set; } = DefaultCloningIsoPath;
+
+        /// <summary>
+        /// Hyper-V virtual switch to connect the VM's NIC to. Null (default)
+        /// keeps the deployment's stock target — the Default Switch.
+        /// </summary>
+        public string? SwitchName { get; set; }
     }
 }

@@ -30,8 +30,9 @@ namespace VMCreate
 
         private const string AutomationUser = "vmcreate";
         private readonly string _username;
-        // Connection target in vsock mode: fixed for the shell's lifetime
-        // (the VM GUID is stable). Null in IP mode, where the target is the
+        // Connection target in vsock or pinned-IP mode: fixed for the
+        // shell's lifetime (the VM GUID is stable; a static address is
+        // user-guaranteed). Null in discovery mode, where the target is the
         // lazily discovered _vmIpAddress.
         private readonly SshConnectionTarget? _fixedTarget;
         // 2026-08-29: 180s proved too tight for the FIRST boot of a freshly
@@ -65,12 +66,14 @@ namespace VMCreate
         }
 
         /// <summary>
-        /// Creates a shell bound to a FIXED connection target — the vsock
-        /// mode used by the ISO boot-cycle: the host string is the VM GUID
-        /// and ssh reaches it through hvc.exe (see
-        /// <see cref="SshConnectionTarget.ForVsock"/>). No IP discovery, no
-        /// re-discovery on transport errors (the GUID cannot change), and
-        /// readiness is probed over vsock itself.
+        /// Creates a shell bound to a FIXED connection target — either the
+        /// vsock mode used by the ISO boot-cycle (the host string is the VM
+        /// GUID, reached via hvc.exe; see
+        /// <see cref="SshConnectionTarget.ForVsock"/>) or a pinned guest
+        /// IPv4 (<see cref="SshConnectionTarget.ForIp"/>; the static-IP
+        /// deploy path). No IP discovery, no re-discovery on transport
+        /// errors (the target cannot change), and readiness is probed over
+        /// the target itself.
         /// </summary>
         public SshGuestShell(ILogger logger, string vmName, string privateKeyPath, string username, SshConnectionTarget fixedTarget)
             : this(logger, vmName, privateKeyPath, username)
@@ -89,6 +92,9 @@ namespace VMCreate
             ?? (string.IsNullOrEmpty(_vmIpAddress)
                 ? throw new InvalidOperationException("VM IP address not discovered yet. Call WaitForReadyAsync first.")
                 : SshConnectionTarget.ForIp(_vmIpAddress!));
+
+        /// <summary>Test seam over <see cref="CurrentTarget"/> (internal via InternalsVisibleTo).</summary>
+        internal SshConnectionTarget CurrentTargetForTests => CurrentTarget;
 
         /// <summary>
         /// Creates a shell that connects as an explicit user. Used when the guest's
@@ -146,7 +152,19 @@ namespace VMCreate
         {
             if (_fixedTarget is not null)
             {
-                await WaitForVsockReadyAsync(ct);
+                if (_fixedTarget.Kind == SshConnectionTarget.TargetKind.Vsock)
+                {
+                    await WaitForVsockReadyAsync(ct);
+                }
+                else
+                {
+                    // Fixed IP target: the deployment pinned a statically
+                    // configured guest address (CLI --static-ip). Hyper-V's
+                    // IP discovery leans on DHCP leases and neighbor-table
+                    // ARP learning and may never see such a guest, so the
+                    // address is probed directly and never re-discovered.
+                    await WaitForPinnedIpReadyAsync(ct);
+                }
                 return;
             }
 
@@ -204,6 +222,54 @@ namespace VMCreate
             throw new TimeoutException(
                 $"SSH did not become available on VM '{VmName}' within {ReadyTimeout.TotalSeconds}s. " +
                 $"Last error: {lastError?.Message}");
+        }
+
+        /// <summary>
+        /// Pinned-IP readiness: the target address is fixed for the shell's
+        /// lifetime, so the probe simply connects to it. Uses the full
+        /// <see cref="ReadyTimeout"/> budget (a freshly cloned guest's first
+        /// boot can take minutes before sshd answers) and never falls back to
+        /// discovery — a pinned address that does not answer is a deployment
+        /// error to report, not an address to re-derive.
+        /// </summary>
+        private async Task WaitForPinnedIpReadyAsync(CancellationToken ct)
+        {
+            _logger.LogInformation("Waiting for SSH on VM {VMName} at pinned address {IP}...", VmName, _fixedTarget!.Host);
+
+            ResetHostKeyPinning();
+
+            var deadline = DateTime.UtcNow + ReadyTimeout;
+            Exception? lastError = null;
+
+            while (DateTime.UtcNow < deadline)
+            {
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    string? result = await RunCommandInternalAsync("echo 'ssh-ready'", TimeSpan.FromSeconds(15), ct);
+                    if (result != null && result.Contains("ssh-ready"))
+                    {
+                        _logger.LogInformation("SSH is ready on VM {VMName} at pinned address {IP}", VmName, _fixedTarget!.Host);
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    lastError = ex;
+                    // Same non-pinning rationale as the IP-discovery wait:
+                    // the pin is armed once, and a failed connect just means
+                    // sshd is not up yet. The pinned address cannot change,
+                    // so there is nothing to re-discover.
+                    _logger.LogDebug("SSH not ready at pinned address: {Message}", ex.Message);
+                }
+
+                await Task.Delay(TimeSpan.FromSeconds(5), ct);
+            }
+
+            throw new TimeoutException(
+                $"SSH did not become available on VM '{VmName}' at the pinned address {_fixedTarget!.Host} within " +
+                $"{ReadyTimeout.TotalSeconds}s. Verify --static-ip: the guest must be configured with this exact address " +
+                $"(NoCloud network-config) and the host must be able to reach it. Last error: {lastError?.Message}");
         }
 
         /// <summary>
@@ -594,6 +660,26 @@ namespace VMCreate
                         throw;
                     }
                 }
+                catch (Exception ex) when (attempt < MaxRetries
+                    && _fixedTarget is { Kind: SshConnectionTarget.TargetKind.IpAddress }
+                    && IsSshTransportError(ex) && ex is not TimeoutException)
+                {
+                    // Pinned-IP mode (CLI --static-ip): the address cannot
+                    // change, so there is nothing to re-discover — but the
+                    // session CAN drop mid-pipeline (NetworkManager restarts
+                    // for a VPN plugin install breaks the connection, not the
+                    // address). A transport failure (reset/refused/broken
+                    // pipe) therefore retries against the same pinned target;
+                    // a host-side TIMEOUT does not — the guest may merely be
+                    // busy, and re-running a merely slow command could
+                    // duplicate guest-side side effects (the same discipline
+                    // discovery mode enforces via the changed-IP gate).
+                    lastEx = ex;
+                    _logger.LogWarning(
+                        "SSH transport error at the pinned address on attempt {Attempt}/{Max}, retrying in {Delay}s: {Message}",
+                        attempt, MaxRetries, RetryDelay.TotalSeconds, ex.Message);
+                    await Task.Delay(RetryDelay, ct);
+                }
             }
             throw lastEx!;
         }
@@ -625,14 +711,19 @@ namespace VMCreate
             return false;
         }
 
-        private async Task<string> RunCommandInternalAsync(string linuxCommand, TimeSpan timeout, CancellationToken ct)
+        // NOTE: never log the full ssh argument list. The remote command
+        // can embed guest payload (CopyContentAsync chunks are base64
+        // script/secret material on the command line), and the plaintext
+        // rolling log lives in %TEMP%. Log the transport options only.
+        /// <summary>
+        /// One ssh exec against the current target. Protected virtual as the
+        /// test seam for the retry loops (RunWithRetryAsync and the chunked
+        /// copies): overrides simulate transport failures without a network.
+        /// </summary>
+        protected virtual async Task<string> RunCommandInternalAsync(string linuxCommand, TimeSpan timeout, CancellationToken ct)
         {
             _ = CurrentTarget; // fails with the actionable not-ready error
 
-            // NOTE: never log the full ssh argument list. The remote command
-            // can embed guest payload (CopyContentAsync chunks are base64
-            // script/secret material on the command line), and the plaintext
-            // rolling log lives in %TEMP%. Log the transport options only.
             _logger.LogDebug("SSH exec on VM {VMName} ({Length} chars)", VmName, linuxCommand.Length);
 
             // Host-key TOFU pinning: the per-VM known_hosts file is created

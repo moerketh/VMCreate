@@ -65,6 +65,16 @@ public class CidataSeedOptions
     /// before any RDP server is installed. Once marked available it stays so.
     /// </summary>
     public bool HoldEnhancedSessionPort { get; set; } = true;
+
+    /// <summary>
+    /// Optional static addressing. When <see cref="StaticNetworkConfig.StaticIp"/>
+    /// is set, the seed also carries a NoCloud <c>network-config</c> (v2) that
+    /// cloud-init applies to the live session's <c>eth0</c>; the installer's
+    /// <c>network_config: {"type": "iso"}</c> then copies that configuration
+    /// into the installed system, so the static address survives the install
+    /// without any post-boot patching.
+    /// </summary>
+    public StaticNetworkConfig? StaticNetwork { get; set; }
 }
 
 /// <summary>
@@ -355,6 +365,22 @@ public static class CidataSeedBuilder
             {
                 File.WriteAllText(Path.Combine(stagingDir, "meta-data"), BuildNoCloudMetaData(options));
                 File.WriteAllText(Path.Combine(stagingDir, "user-data"), BuildNoCloudUserData());
+            }
+
+            if (NoCloudNetworkConfig.IsRequested(options.StaticNetwork))
+            {
+                // Static addressing for the live session's eth0; the
+                // installer copies it into the installed system (see
+                // CidataSeedOptions.StaticNetwork). Requires meta-data +
+                // user-data to be present: cloud-init only treats the drive
+                // as a NoCloud datasource with that pair.
+                if (!options.HoldEnhancedSessionPort)
+                    throw new InvalidOperationException(
+                        "Static network configuration requires the NoCloud meta-data/user-data pair on the seed.");
+
+                File.WriteAllText(
+                    Path.Combine(stagingDir, "network-config"),
+                    NoCloudNetworkConfig.Render(options.StaticNetwork!));
             }
 
             logger.LogInformation("Staged Omarchy cidata seed files in {Path}", stagingDir);

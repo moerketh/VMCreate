@@ -105,6 +105,8 @@ namespace VMCreate.Tests.HyperV.VmCreation
             _shell = new Mock<IGuestShell>();
             _shell.Setup(s => s.WaitForReadyAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
             _guestShellFactory.Setup(f => f.Create(It.IsAny<string>(), It.IsAny<string>())).Returns(_shell.Object);
+            _guestShellFactory.Setup(f => f.CreateWithPinnedIp(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>())).Returns(_shell.Object);
             _sshKeyManager.Setup(s => s.GetPrivateKeyPath(It.IsAny<string>())).Returns("C:\\Users\\Test\\.ssh\\id_rsa");
 
             // KVP heartbeat gate: pass-through default (guest daemon alive).
@@ -342,6 +344,93 @@ namespace VMCreate.Tests.HyperV.VmCreation
                 It.IsAny<IProgress<CreateVMProgressInfo>>(), It.IsAny<CancellationToken>()), Times.Once);
             _bootManager.Verify(h => h.AddBootDvd(_plan, It.Is<string>(p => p.EndsWith("_cidata.iso", StringComparison.OrdinalIgnoreCase)), It.IsAny<CancellationToken>()), Times.Never,
                 "non-cloud-init images never get a seed");
+        }
+
+        // ── Static-IP deploy path (--static-ip) ────────────────────────────────
+
+        [TestMethod]
+        public async Task CreateVMAsync_StaticIp_PostBootShellTargetsThePinnedAddress()
+        {
+            // The subtle requirement: a statically configured guest may never
+            // appear in Hyper-V's DHCP-lease-driven IP discovery, so the
+            // post-boot shell must be built on the PINNED address (host part
+            // of the CIDR), not on the discovery shell. Cloud-init item: the
+            // only disk-image flow whose seed carries the network config.
+            _item = CloudInitItem();
+            _customizations = new VmCustomizations
+            {
+                StaticIp = "192.168.10.50/24",
+                StaticGateway = "192.168.10.1",
+                InstallOpenVpn = true,
+            };
+            _postBootService.Setup(s => s.HasLinuxPostBootSteps(_item, _customizations)).Returns(true);
+
+            await ExecuteAsync(generation: 2);
+
+            _guestShellFactory.Verify(f => f.CreateWithPinnedIp(
+                _plan.VmName, It.IsAny<string>(), It.IsAny<string>(), "192.168.10.50"), Times.Once,
+                "the static address (host part of the CIDR) is the SSH target");
+            _guestShellFactory.Verify(f => f.Create(_plan.VmName, It.IsAny<string>()), Times.Never,
+                "discovery mode must not be used for a statically configured guest");
+        }
+
+        [TestMethod]
+        public async Task CreateVMAsync_StaticIp_OnCloningIsoImage_FailsLoudly()
+        {
+            // A non-cloud-init disk image is customized via the cloning ISO,
+            // which carries no seed: the static address would never reach the
+            // guest while the pinned-SSH wait burns its budget. The deploy
+            // must fail before the VM skeleton exists.
+            _customizations = new VmCustomizations
+            {
+                StaticIp = "192.168.10.50/24",
+                InstallOpenVpn = true,
+            };
+            _postBootService.Setup(s => s.HasLinuxPostBootSteps(_item, _customizations)).Returns(true);
+
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => ExecuteAsync(generation: 2));
+
+            StringAssert.Contains(ex.Message, "--static-ip");
+            _lifecycleManager.Verify(m => m.CreateVMAsync(
+                It.IsAny<VmDeploymentPlan>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<CancellationToken>()), Times.Never,
+                "the unsupported combination must fail before any VM work");
+        }
+
+        [TestMethod]
+        public async Task CreateVMAsync_StaticIp_UnderDiscoveryModeUnchanged()
+        {
+            // Regression pin: without --static-ip the post-boot shell keeps
+            // the discovery mode exactly as before the feature.
+            _customizations = new VmCustomizations { InstallOpenVpn = true };
+            _postBootService.Setup(s => s.HasLinuxPostBootSteps(_item, _customizations)).Returns(true);
+
+            await ExecuteAsync(generation: 2);
+
+            _guestShellFactory.Verify(f => f.Create(_plan.VmName, It.IsAny<string>()), Times.Once);
+            _guestShellFactory.Verify(f => f.CreateWithPinnedIp(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        }
+
+        [TestMethod]
+        public async Task CreateVMAsync_StaticIp_SeedCarriesTheNetworkConfig()
+        {
+            // The cloud-init seed must carry the static addressing (rendered
+            // network-config file) — validated here by the seed-build call
+            // happening at all; byte-level content is pinned in
+            // StaticNetworkSeedTests.
+            _item = CloudInitItem();
+            _customizations = new VmCustomizations
+            {
+                StaticIp = "192.168.10.50/24",
+                InstallOpenVpn = true,
+            };
+            _postBootService.Setup(s => s.HasLinuxPostBootSteps(_item, _customizations)).Returns(true);
+
+            await ExecuteAsync(generation: 2);
+
+            _bootManager.Verify(h => h.AddBootDvd(_plan, It.Is<string>(p => p.EndsWith("_cidata.iso", StringComparison.OrdinalIgnoreCase)), It.IsAny<CancellationToken>()), Times.Once,
+                "the seed with the network config must be attached");
         }
 
         [TestMethod]

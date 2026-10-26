@@ -87,6 +87,9 @@ namespace VMCreate.Tests.HyperV.VmCreation
             _guestShellFactory.Setup(f => f.Create(
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
                 .Returns(shell.Object);
+            _guestShellFactory.Setup(f => f.CreateWithPinnedIp(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+                .Returns(shell.Object);
             _sshKeyManager.Setup(k => k.EnsureKeyPairAsync(It.IsAny<CancellationToken>()))
                 .ReturnsAsync("ssh-ed25519 AAAATESTKEY vmcreate@test");
             _sshKeyManager.Setup(k => k.ReadPublicKeyAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -300,6 +303,43 @@ namespace VMCreate.Tests.HyperV.VmCreation
             _guestShellFactory.Verify(f => f.Create(_plan.VmName, @"C:\Keys\id_ed25519_vmcreate", "omarchy"), Times.Once);
             _bootManager.Verify(b => b.RemoveBootDvd(_plan, seedPath, It.IsAny<CancellationToken>()), Times.Once);
             Assert.IsFalse(File.Exists(seedPath), "cidata seed ISO must be deleted after the wait");
+        }
+
+        [TestMethod]
+        public async Task CreateVMAsync_Omarchy_StaticIp_WaitsOverPinnedAddress()
+        {
+            // The installed Omarchy system is statically configured when the
+            // deployment pinned an address; DHCP-lease-driven discovery may
+            // never see it, so the post-install SSH wait targets the pinned
+            // address (host part of the CIDR) as the seeded user.
+            _item = CreateOmarchyItem();
+            _customizations = new VmCustomizations { StaticIp = "192.168.10.50/24" };
+
+            await ExecuteAsync();
+
+            _guestShellFactory.Verify(f => f.CreateWithPinnedIp(
+                _plan.VmName, @"C:\Keys\id_ed25519_vmcreate", "omarchy", "192.168.10.50"), Times.Once,
+                "the pinned address (host part of the CIDR) is the SSH target for the installed system");
+            _guestShellFactory.Verify(f => f.Create(_plan.VmName, It.IsAny<string>(), It.IsAny<string>()), Times.Never,
+                "discovery mode must not be used for a statically configured guest");
+        }
+
+        [TestMethod]
+        public async Task CreateVMAsync_ManualIso_StaticIp_FailsLoudly()
+        {
+            // Every non-Omarchy ISO deploy is a manual install: no seed ever
+            // carries the static address and no deployment SSH exists to
+            // target it — the flags would be silently ignored. Fail before
+            // the VM skeleton is created.
+            _customizations = new VmCustomizations { StaticIp = "192.168.10.50/24" };
+
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => ExecuteAsync());
+
+            StringAssert.Contains(ex.Message, "--static-ip");
+            _lifecycleManager.Verify(m => m.CreateVMAsync(
+                It.IsAny<VmDeploymentPlan>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<CancellationToken>()), Times.Never,
+                "the unsupported combination must fail before any VM work");
         }
 
         [TestMethod]

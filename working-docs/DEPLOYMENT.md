@@ -12,6 +12,7 @@ This document covers the VMCreate GUI's deployment architecture: the phase card 
 - [Post-Boot Customization Pipeline](#post-boot-customization-pipeline)
 - [Shipping Custom Steps with Gallery Items](#shipping-custom-steps-with-gallery-items)
 - [KVP Today: Heartbeat Gate Only](#kvp-today-heartbeat-gate-only)
+- [Static Addressing (`vmcreate create --switch / --static-ip / --gateway / --dns`)](#static-addressing-vmcreate-create---switch---static-ip---gateway---dns)
 - [Error Monitoring via PowerShell Direct](#error-monitoring-via-powershell-direct)
 - [Technologies](#technologies)
 
@@ -614,6 +615,96 @@ The old progress-oriented poller (`IKvpPoller` / `HyperVKVPPoller`) is gone.
 
 `hyperv-convert.iso*` left in the cache by pre-2.0 installs is orphaned — the
 v2 downloader only manages `vmcreate-iso.iso` — and can be deleted manually.
+
+---
+
+## Static Addressing (`vmcreate create --switch / --static-ip / --gateway / --dns`)
+
+The CLI can deploy a guest onto a chosen Hyper-V switch with a statically
+configured IPv4 address. Both values ride the deployment's existing seed
+mechanisms — no post-boot patching is involved.
+
+### Switch selection
+
+`--switch <name>` flows from `VmSettings.SwitchName` through the immutable
+`VmDeploymentPlan` into `PowerShellVmNetworkManager.ConnectNetworkAdapter`,
+which connects the VM's NIC to `plan.SwitchName` (falling back to the
+Default Switch when null). The **temporary** post-boot SSH NIC
+(`VMCreate Temp`) always stays on the Default Switch: it is deploy plumbing,
+not part of the guest's final network. An unknown switch name fails loudly
+from `Connect-VMNetworkAdapter` itself.
+
+### Static addressing via the NoCloud seed
+
+`--static-ip <cidr>` (with optional `--gateway`/`--dns`) is carried on
+`VmCustomizations` (`StaticIp`/`StaticGateway`/`StaticDns`) and rendered by
+`NoCloudNetworkConfig` into a cloud-init NoCloud `network-config` file
+(version 2) written into the seed ISO next to `user-data`/`meta-data`:
+
+```yaml
+version: 2
+ethernets:
+  eth0:
+    addresses: [192.168.10.50/24]
+    routes:
+      - to: default
+        via: 192.168.10.1
+    nameservers:
+      addresses: [8.8.8.8, 1.1.1.1]
+```
+
+- The interface id is `eth0` with **no `match:` block** — per netplan
+  semantics the id then IS the interface name, matching the Hyper-V
+  `hv_netvsc` NIC after VMCreate's interface-renaming fixups. No MAC
+  pinning: MACs are host-allocated and differ per deploy.
+- The default route uses `routes: [{to: default, via: …}]` (the modern v2
+  form; `gateway4` is deprecated). When `--gateway` is omitted the route
+  section is omitted entirely — the guest reaches only its own subnet.
+- The CIDR prefix is **mandatory**: it is the netmask that decides which
+  destinations the guest treats as on-link. A bare address is rejected at
+  CLI validation rather than guessed `/24`.
+
+Both seed paths carry the file when static addressing is requested —
+`CloudInitSeedBuilder` (cloud-init gallery items, e.g. Elastic SIEM) and
+`CidataSeedBuilder` (Omarchy). On the Omarchy ISO path the file seeds the
+live session's `eth0` via cloud-init, and the installer's
+`network_config: {"type": "iso"}` copies the live configuration into the
+installed system — the address survives the install with no installer
+changes.
+
+### Static IP as the SSH target
+
+Hyper-V's IP discovery (`SshTransport.DiscoverVmIpAsync`) reads DHCP-lease
+KVP data and the host neighbor table's MAC→IPv4 bindings. A statically
+configured guest never gets a DHCP lease and may never appear in either
+source — so when `--static-ip` is set, the post-boot shell is built on the
+pinned address (`IGuestShellFactory.CreateWithPinnedIp`) instead of the
+discovery shell. The target is the CIDR's host part; the seed carries the
+full CIDR (the prefix drives the guest's netmask):
+
+- `SshGuestShell` treats the pinned IP as a fixed target for the shell's
+  lifetime: no discovery, and transport errors retry without re-discovery
+  (the address is user-guaranteed; it cannot change).
+- Mid-pipeline session drops (a VPN plugin install restarting
+  NetworkManager) retry against the same pinned target; host-side command
+  timeouts do not retry at all — the same side-effect discipline discovery
+  mode enforces through its changed-IP gate (re-running a merely slow
+  command could duplicate guest-side effects).
+- Readiness probing connects directly to the pinned address with the full
+  first-boot budget; the timeout error names the address and the
+  `--static-ip` flag to verify.
+- Both Linux post-boot paths use it: `DiskImageVmCreationStrategy`
+  (cloud-init images) and `IsoVmCreationStrategy` (Omarchy, connecting as
+  the seeded user). The vsock ISO boot-cycle path is unchanged — it never
+  used IP discovery.
+
+Unsupported combinations fail loudly before any VM work: `--static-ip` on a
+cloning-ISO image (Kali-class), a manual ISO install, or a native Hyper-V
+(Windows) image — none of those first boots consume a NoCloud seed, so the
+address could never be delivered and the pinned-SSH wait would burn its
+budget on an address the guest never has.
+
+The GUI always deploys with DHCP; these flags are CLI-only.
 
 ---
 

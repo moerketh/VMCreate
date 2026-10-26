@@ -27,6 +27,14 @@ namespace VMCreate
         IGuestShell CreateVsock(string vmName, string privateKeyPath, string vmGuid);
 
         /// <summary>
+        /// Creates a shell that connects to a FIXED guest IPv4 — the
+        /// static-IP deploy path (CLI --static-ip). No IP discovery, no
+        /// re-discovery on transport errors: the address is user-guaranteed
+        /// and pinned for the shell's lifetime.
+        /// </summary>
+        IGuestShell CreateWithPinnedIp(string vmName, string privateKeyPath, string username, string staticIp);
+
+        /// <summary>
         /// Creates a new guest shell connected to the specified Windows VM using
         /// PowerShell Direct (Invoke-Command over VMBus). Does not require network
         /// connectivity or SSH — only needs VM name and Windows credentials.

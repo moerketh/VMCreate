@@ -35,20 +35,28 @@ namespace VMCreate
 
         public async Task ConnectNetworkAdapter(VmDeploymentPlan plan, CancellationToken cancellationToken)
         {
+            // plan.SwitchName selects the target switch (CLI --switch);
+            // null keeps the stock Default Switch the deployment always used.
+            string switchName = plan.SwitchName ?? "Default Switch";
             var result = await _executor.RunCommandAsync("Connect-VMNetworkAdapter",
                 new System.Collections.Generic.Dictionary<string, object?>
                 {
                     ["VMName"] = plan.VmName,
-                    ["SwitchName"] = "Default Switch",
+                    ["SwitchName"] = switchName,
                 }, cancellationToken);
             if (result.HadErrors)
                 throw new Exception($"Failed to connect network adapter: {result.ErrorSummary}");
 
-            _logger.LogInformation("Connected VM to Default Switch for internet access.");
+            _logger.LogInformation("Connected VM to switch '{SwitchName}'.", switchName);
         }
 
         public async Task AddTemporaryNetworkAdapter(VmDeploymentPlan plan, CancellationToken cancellationToken)
         {
+            // The temporary adapter exists solely for host→guest SSH during
+            // the ISO boot cycle. It always rides the Default Switch: it is
+            // deploy plumbing, not part of the guest's final network, and
+            // following plan.SwitchName here would pin post-boot SSH to a
+            // switch whose address pool the guest may not even use.
             var result = await _executor.RunCommandAsync("Add-VMNetworkAdapter",
                 new System.Collections.Generic.Dictionary<string, object?>
                 {

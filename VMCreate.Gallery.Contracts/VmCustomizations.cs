@@ -122,6 +122,42 @@ namespace VMCreate
         public string? CustomNameservers { get; set; }
 
         /// <summary>
+        /// Static guest IPv4 in CIDR form (<c>192.168.10.50/24</c>). When set,
+        /// the guest's first boot applies it from the NoCloud seed's
+        /// <c>network-config</c> (v2) instead of DHCP, and every host-side SSH
+        /// connection targets this address directly — Hyper-V's IP discovery
+        /// leans on DHCP leases and neighbor-table ARP learning and may never
+        /// see a statically configured guest. IPv4 only.
+        /// </summary>
+        public string? StaticIp { get; set; }
+
+        /// <summary>
+        /// Default gateway for <see cref="StaticIp"/> (IPv4). Optional: when
+        /// omitted the seed carries no default route and the guest can only
+        /// reach its own subnet.
+        /// </summary>
+        public string? StaticGateway { get; set; }
+
+        /// <summary>
+        /// One or comma-separated nameserver IPv4 addresses for
+        /// <see cref="StaticIp"/>. Optional. Distinct from
+        /// <see cref="DnsMode"/>/<see cref="CustomNameservers"/>, which drive
+        /// post-boot guest DNS configuration; these ride the NoCloud seed
+        /// alongside the static address.
+        /// </summary>
+        public string? StaticDns { get; set; }
+
+        /// <summary>True when <see cref="StaticIp"/> requests static addressing.</summary>
+        public bool HasStaticNetwork => !string.IsNullOrWhiteSpace(StaticIp);
+
+        /// <summary>
+        /// The host part of <see cref="StaticIp"/> — the address SSH connects
+        /// to. The seed carries the full CIDR (the prefix drives the guest's
+        /// netmask); the connection target carries the address only.
+        /// </summary>
+        public string? StaticIpHost => StaticIp is null ? null : StaticIp.Split('/')[0];
+
+        /// <summary>
         /// When true (default), install OpenVPN and the NetworkManager OpenVPN plugin
         /// on Linux guests. Independent of <see cref="ConfigureHtbVpn"/> so the user can
         /// still install OpenVPN manually later even when no HTB config is supplied.

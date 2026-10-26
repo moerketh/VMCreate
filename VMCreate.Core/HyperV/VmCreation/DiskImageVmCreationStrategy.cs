@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using VMCreate.Cidata;
 using VMCreate.MediaHandlers;
 
 namespace VMCreate.HyperV.VmCreation
@@ -97,6 +98,20 @@ namespace VMCreate.HyperV.VmCreation
             return true;
         }
 
+        /// <summary>
+        /// The deployment's static addressing (CLI --static-ip/--gateway/--dns)
+        /// as the seed builders' input, or null under DHCP.
+        /// </summary>
+        private static StaticNetworkConfig? BuildStaticNetwork(VmCustomizations customizations)
+            => customizations.HasStaticNetwork
+                ? new StaticNetworkConfig
+                {
+                    StaticIp = customizations.StaticIp!,
+                    StaticGateway = customizations.StaticGateway,
+                    StaticDns = customizations.StaticDns,
+                }
+                : null;
+
         public async Task CreateVMAsync(VmCreationContext ctx)
         {
             ctx.Logger.Log($"Starting disk-image VM creation for {ctx.Plan.VmName}");
@@ -134,6 +149,20 @@ namespace VMCreate.HyperV.VmCreation
                 ctx.Logger.Log($"Detected generation {detectedGeneration}, targeting Gen {targetGen} (cloud-init: {isCloudInit})");
 
                 progress.Report(new CreateVMProgressInfo { Phase = VmDeploymentPhase.CreateVM, DetectedGeneration = detectedGeneration });
+
+                // Static addressing (CLI --static-ip) rides the NoCloud seed;
+                // on this path only cloud-init items get one. The cloning-ISO
+                // cycle carries no seed, so a static IP on a non-cloud-init
+                // image would never reach the guest — while the pinned-address
+                // SSH wait then burns its full budget on an address the guest
+                // will never have. Fail loudly before any disk is created.
+                if (vmCustomizations.HasStaticNetwork && !isCloudInit)
+                {
+                    throw new InvalidOperationException(
+                        $"--static-ip requires an image whose first boot consumes a NoCloud seed (cloud-init tagged " +
+                        $"images, e.g. Elastic SIEM). '{item.Name}' is customized via the cloning ISO, which cannot " +
+                        "deliver static addressing; deploy it with DHCP instead.");
+                }
 
                 // Free-space pre-flight on the VM-disk drive, BEFORE any disk is
                 // created: the MBR-clone flow writes a second full disk next to
@@ -309,7 +338,15 @@ namespace VMCreate.HyperV.VmCreation
                     try
                     {
                         string privateKeyPath = _sshKeyManager.GetPrivateKeyPath(vmCustomizations.CustomSshPublicKeyPath);
-                        var shell = _guestShellFactory.Create(plan.VmName, privateKeyPath);
+                        // A statically configured guest (CLI --static-ip) may
+                        // never show up in Hyper-V's DHCP-lease-driven IP
+                        // discovery, so the pinned address is used directly
+                        // as the SSH target. The host part only: ssh connects
+                        // to the address, not the CIDR (the prefix drives the
+                        // guest's netmask on the seed).
+                        var shell = vmCustomizations.HasStaticNetwork
+                            ? _guestShellFactory.CreateWithPinnedIp(plan.VmName, privateKeyPath, "vmcreate", vmCustomizations.StaticIpHost!)
+                            : _guestShellFactory.Create(plan.VmName, privateKeyPath);
 
                         progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.PostBoot, VmDeploymentSubStep.WaitForSsh));
                         await shell.WaitForReadyAsync(cancellationToken);
@@ -554,7 +591,8 @@ namespace VMCreate.HyperV.VmCreation
                 : CloudInitSeedBuilder.LoadUserDataFile(customizations.CloudInitUserDataPath);
 
             string seedIsoPath = Path.Combine(_pathService.DefaultVhdxPath, $"{plan.VmName}_cidata.iso");
-            CloudInitSeedBuilder.BuildSeedIso(seedIsoPath, plan.VmName, publicKey, _logger, customUserData);
+            CloudInitSeedBuilder.BuildSeedIso(seedIsoPath, plan.VmName, publicKey, _logger, customUserData,
+                BuildStaticNetwork(customizations));
             seedPathCaptured(seedIsoPath);
             await _bootManager.AddBootDvd(plan, seedIsoPath, cancellationToken);
         }

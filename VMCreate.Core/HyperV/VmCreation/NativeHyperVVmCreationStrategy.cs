@@ -58,6 +58,14 @@ namespace VMCreate.HyperV.VmCreation
             VmCustomizations vmCustomizations = ctx.Customizations;
             GalleryItem item = ctx.GalleryItem;
             string mediaPath = ctx.MediaResult.FinalMediaPath;
+
+            // Static addressing (CLI --static-ip) rides a NoCloud seed, which
+            // no native-Hyper-V (Windows) deploy carries: the flags would be
+            // silently ignored. Fail loudly before any VM work.
+            if (vmCustomizations.HasStaticNetwork)
+                throw new InvalidOperationException(
+                    $"--static-ip requires a Linux image whose first boot consumes a NoCloud seed. '{item.Name}' " +
+                    "is a native Hyper-V image; VMCreate does not configure its addressing — deploy it with DHCP.");
             int detectedGeneration = ctx.MediaResult.VmGeneration;
             var cancellationToken = ctx.CancellationToken;
             var progress = ctx.Progress;

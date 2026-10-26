@@ -12,6 +12,7 @@ A Windows desktop application that replaces Hyper-V Quick Create with a streamli
 - **Post-boot customization** — SSH-based guest automation for timezone sync, VPN deployment, and Enhanced Session setup (xRDP)
 - **Cloud-init deployments** — the CLI's `--cloud-init <file>` merges a user-data file (shell script, `#cloud-config` document, …) into the NoCloud seed, turning any cloud-init-enabled cloud image into a one-command unattended deploy (`--image-uri <image> --cloud-init <file>`)
 - **Hack The Box integration** — deploy OpenVPN configs from HTB Labs, Starting Point, and Academy directly into the guest
+- **Static addressing from the CLI** — `vmcreate create --switch <name> --static-ip <cidr> [--gateway <ip>] [--dns <ip,...>]`; the guest is configured via a cloud-init NoCloud seed on first boot, and a statically configured guest is reached over SSH at its pinned address (Hyper-V's DHCP-lease-driven discovery may never see it)
 - **SHA-256 checksum verification** on all downloads
 - **Phase-card progress UI** — real-time status for each stage of the deployment pipeline
 

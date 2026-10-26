@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
+using VMCreate.Cidata;
 
 namespace VMCreate
 {
@@ -20,7 +21,9 @@ namespace VMCreate
     public static class CloudInitSeedBuilder
     {
         /// <summary>
-        /// Writes a seed ISO containing <c>user-data</c> + <c>meta-data</c>.
+        /// Writes a seed ISO containing <c>user-data</c> + <c>meta-data</c>,
+        /// plus a NoCloud <c>network-config</c> (v2) when
+        /// <paramref name="staticNetwork"/> requests static addressing.
         /// </summary>
         /// <param name="outputPath">Destination .iso path.</param>
         /// <param name="vmName">VM name — sanitized into the hostname/instance-id.</param>
@@ -32,9 +35,11 @@ namespace VMCreate
         /// built-in block. Null/empty keeps the seed a plain single-document
         /// cloud-config, byte-identical to the pre-<c>--cloud-init</c> seed.
         /// </param>
+        /// <param name="staticNetwork">Optional static addressing; null keeps DHCP.</param>
         public static string BuildSeedIso(
             string outputPath, string vmName, string publicKey, ILogger logger,
-            string? customUserData = null)
+            string? customUserData = null,
+            StaticNetworkConfig? staticNetwork = null)
         {
             if (string.IsNullOrWhiteSpace(publicKey))
                 throw new ArgumentException("A public SSH key is required for the cloud-init seed.", nameof(publicKey));
@@ -64,6 +69,18 @@ namespace VMCreate
                         ? BuildUserData(publicKey)
                         : BuildMultipartUserData(publicKey, custom),
                     new UTF8Encoding(false));
+
+                if (NoCloudNetworkConfig.IsRequested(staticNetwork))
+                {
+                    // Static addressing rides the seed, not a post-boot patch:
+                    // cloud-init applies it on first boot, before user-data.
+                    File.WriteAllText(
+                        Path.Combine(stagingDir, "network-config"),
+                        NoCloudNetworkConfig.Render(staticNetwork!),
+                        new UTF8Encoding(false));
+                    logger.LogInformation("Static network config added to the NoCloud seed for VM {VMName}: {Ip}",
+                        vmName, staticNetwork!.StaticIp);
+                }
 
                 // NoCloud requires the filesystem label to be exactly "cidata".
                 // ISO9660 + Joliet ONLY — a UDF descriptor makes blkid report

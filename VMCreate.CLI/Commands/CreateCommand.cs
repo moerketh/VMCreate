@@ -114,6 +114,27 @@ namespace VMCreate.CLI.Commands
                 DefaultValueFactory = _ => false
             };
 
+            var switchOpt = new Option<string>("--switch")
+            {
+                Description = "Hyper-V virtual switch to connect the VM's network adapter to (default: Default Switch)."
+            };
+
+            var staticIpOpt = new Option<string>("--static-ip")
+            {
+                Description = "Configure the guest with a static IPv4 address in CIDR form (e.g. 192.168.10.50/24) instead of DHCP. " +
+                             "Applied via the NoCloud seed on first boot. When set, this address is used directly as the SSH target."
+            };
+
+            var gatewayOpt = new Option<string>("--gateway")
+            {
+                Description = "Default gateway IPv4 for --static-ip (e.g. 192.168.10.1). Optional — without it the guest gets no default route. Requires --static-ip."
+            };
+
+            var staticDnsOpt = new Option<string>("--dns")
+            {
+                Description = "One or comma-separated nameserver IPv4 addresses for --static-ip (e.g. 8.8.8.8 or 8.8.8.8,1.1.1.1). Requires --static-ip."
+            };
+
             var dnsModeOpt = new Option<string>("--dns-mode")
             {
                 Description = "DNS mode: host (auto-detect) or custom.",
@@ -221,6 +242,10 @@ namespace VMCreate.CLI.Commands
             cmd.Options.Add(desktopOpt);
             cmd.Options.Add(releaseOpt);
             cmd.Options.Add(noIntegrationSvcOpt);
+            cmd.Options.Add(switchOpt);
+            cmd.Options.Add(staticIpOpt);
+            cmd.Options.Add(gatewayOpt);
+            cmd.Options.Add(staticDnsOpt);
             cmd.Options.Add(dnsModeOpt);
             cmd.Options.Add(nameserversOpt);
             cmd.Options.Add(sshKeyOpt);
@@ -257,6 +282,10 @@ namespace VMCreate.CLI.Commands
                     Desktop = parseResult.GetValue(desktopOpt),
                     Release = parseResult.GetValue(releaseOpt),
                     NoIntegrationServices = parseResult.GetValue(noIntegrationSvcOpt),
+                    SwitchName = parseResult.GetValue(switchOpt),
+                    StaticIp = parseResult.GetValue(staticIpOpt),
+                    StaticGateway = parseResult.GetValue(gatewayOpt),
+                    StaticDns = parseResult.GetValue(staticDnsOpt),
                     DnsMode = parseResult.GetValue(dnsModeOpt),
                     Nameservers = parseResult.GetValue(nameserversOpt),
                     SshKeyPath = parseResult.GetValue(sshKeyOpt),
@@ -352,6 +381,82 @@ namespace VMCreate.CLI.Commands
                 }
             }
             return noXrdp ? RdpBackend.None : RdpBackend.Auto;
+        }
+
+        /// <summary>
+        /// Validates --static-ip/--gateway/--dns and returns the values to
+        /// carry into <see cref="VmCustomizations"/> (trimmed, null when
+        /// absent). Fail-loudly contract (same as --rdp-backend): a typo
+        /// must not silently deploy a guest nobody can reach.
+        /// <para>
+        /// The --static-ip prefix length is mandatory: it is the netmask that
+        /// decides which destinations the guest treats as on-link, so guessing
+        /// /24 would mis-configure every non-/24 subnet. --gateway and --dns
+        /// are meaningless under DHCP, so they require --static-ip.
+        /// </para>
+        /// </summary>
+        internal static bool TryValidateStaticNetwork(
+            CreateArgs args, bool jsonMode, out string? staticIp, out string? staticGateway, out string? staticDns)
+        {
+            staticIp = null;
+            staticGateway = null;
+            staticDns = null;
+
+            if (string.IsNullOrWhiteSpace(args.StaticIp))
+            {
+                if (!string.IsNullOrWhiteSpace(args.StaticGateway) || !string.IsNullOrWhiteSpace(args.StaticDns))
+                {
+                    PrintError(jsonMode, "validation",
+                        "--gateway and --dns require --static-ip (they configure the statically addressed interface).");
+                    return false;
+                }
+                return true;
+            }
+
+            string ip = args.StaticIp.Trim();
+            if (!System.Net.IPAddress.TryParse(ip.Split('/')[0], out var parsed) ||
+                parsed.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork ||
+                ip.Split('/').Length != 2 ||
+                !int.TryParse(ip.Split('/')[1], out int prefix) || prefix < 1 || prefix > 32)
+            {
+                PrintError(jsonMode, "validation",
+                    $"Invalid --static-ip value '{args.StaticIp}'. Expected an IPv4 address in CIDR form with an explicit " +
+                    "prefix length, e.g. 192.168.10.50/24 (the prefix is the netmask the guest uses to decide which " +
+                    "destinations are on-link).");
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(args.StaticGateway))
+            {
+                string gateway = args.StaticGateway.Trim();
+                if (!System.Net.IPAddress.TryParse(gateway, out var gw) ||
+                    gw.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
+                {
+                    PrintError(jsonMode, "validation", $"Invalid --gateway value '{args.StaticGateway}'. Expected an IPv4 address.");
+                    return false;
+                }
+                staticGateway = gateway;
+            }
+
+            if (!string.IsNullOrWhiteSpace(args.StaticDns))
+            {
+                foreach (string entry in args.StaticDns.Split(new[] { ',', ' ', ';' },
+                    StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    if (!System.Net.IPAddress.TryParse(entry, out var ns) ||
+                        ns.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
+                    {
+                        PrintError(jsonMode, "validation",
+                            $"Invalid --dns value '{entry}'. Expected one or comma-separated IPv4 addresses (e.g. 8.8.8.8 or 8.8.8.8,1.1.1.1).");
+                        return false;
+                    }
+                }
+                staticDns = string.Join(",", args.StaticDns.Split(new[] { ',', ' ', ';' },
+                    StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+            }
+
+            staticIp = ip;
+            return true;
         }
 
         /// <summary>
@@ -544,6 +649,7 @@ namespace VMCreate.CLI.Commands
                 EnhancedSessionTransportType = galleryItem.EnhancedSessionTransportType,
                 // SecureBoot defaults to false; HyperVVmCreator applies SecureBootTemplate from the gallery item
                 SecureBootTemplate = galleryItem.SecureBoot ?? "MicrosoftUEFICertificateAuthority",
+                SwitchName = args.SwitchName,
             };
 
             // ── Parse --option key=value pairs ───────────────────────────────
@@ -645,6 +751,15 @@ namespace VMCreate.CLI.Commands
                     desktopEnvironmentId = desktopOption.Id;
             }
 
+            // ── Validate static addressing ────────────────────────────────────
+            // Fail-loudly contract (same as --rdp-backend/--desktop): a typo
+            // must not silently deploy a guest nobody can reach. The CIDR
+            // prefix is part of the address contract — it is the netmask that
+            // decides which destinations the guest treats as on-link — so a
+            // bare address is rejected rather than guessing /24.
+            if (!TryValidateStaticNetwork(args, jsonMode, out string? staticIp, out string? staticGateway, out string? staticDns))
+                return ExitCodes.InvalidArguments;
+
             var vmCustomizations = new VmCustomizations
             {
                 RdpBackend = rdpBackend,
@@ -654,6 +769,9 @@ namespace VMCreate.CLI.Commands
                     ? DnsMode.Custom
                     : DnsMode.Host,
                 CustomNameservers = args.Nameservers,
+                StaticIp = staticIp,
+                StaticGateway = staticGateway,
+                StaticDns = staticDns,
                 CustomSshPublicKeyPath = args.SshKeyPath,
                 // Non-null only when the validation above passed; the strategy
                 // re-reads the file when building the seed.
@@ -776,6 +894,17 @@ namespace VMCreate.CLI.Commands
                     : $" ({Markup.Escape(galleryItem.Version)})"));
             AnsiConsole.MarkupLine($"  Memory   : {vmSettings.MemoryInMB} MB");
             AnsiConsole.MarkupLine($"  CPUs     : {vmSettings.CPUCount}");
+            if (!string.IsNullOrEmpty(vmSettings.SwitchName))
+                AnsiConsole.MarkupLine($"  Switch   : {Markup.Escape(vmSettings.SwitchName)}");
+            if (vmCustomizations.HasStaticNetwork)
+            {
+                string network = vmCustomizations.StaticIp!;
+                if (!string.IsNullOrEmpty(vmCustomizations.StaticGateway))
+                    network += $" gw {vmCustomizations.StaticGateway}";
+                if (!string.IsNullOrEmpty(vmCustomizations.StaticDns))
+                    network += $" dns {vmCustomizations.StaticDns}";
+                AnsiConsole.MarkupLine($"  Network  : {Markup.Escape(network)} (static)");
+            }
             AnsiConsole.MarkupLine(string.Empty);
 
             int exitCode = ExitCodes.Success;
@@ -959,6 +1088,10 @@ namespace VMCreate.CLI.Commands
         public string? Desktop { get; set; }
         public string? Release { get; set; }
         public bool NoIntegrationServices { get; set; }
+        public string? SwitchName { get; set; }
+        public string? StaticIp { get; set; }
+        public string? StaticGateway { get; set; }
+        public string? StaticDns { get; set; }
         public string? DnsMode { get; set; }
         public string? Nameservers { get; set; }
         public string? SshKeyPath { get; set; }

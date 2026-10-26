@@ -26,7 +26,8 @@ namespace VMCreate
             bool secureBoot = false,
             string? secureBootTemplate = "MicrosoftUEFICertificateAuthority",
             bool replacePreviousVm = false,
-            string? cloningIsoPath = null)
+            string? cloningIsoPath = null,
+            string? switchName = null)
         {
             if (string.IsNullOrWhiteSpace(vmName))
                 throw new ArgumentException("VM name cannot be empty.", nameof(vmName));
@@ -46,6 +47,7 @@ namespace VMCreate
             // derived property so existing callers (and tests) that pass a
             // custom CloningIsoPath keep working.
             CloningIsoPath = cloningIsoPath ?? DefaultCloningIsoPath;
+            SwitchName = string.IsNullOrWhiteSpace(switchName) ? null : switchName;
         }
 
         /// <summary>
@@ -66,7 +68,8 @@ namespace VMCreate
                 settings.SecureBoot,
                 settings.SecureBootTemplate,
                 settings.ReplacePreviousVm,
-                settings.CloningIsoPath);
+                settings.CloningIsoPath,
+                settings.SwitchName);
         }
 
         /// <summary>
@@ -141,5 +144,11 @@ namespace VMCreate
         public string SecureBootTemplate { get; init; }
         public bool ReplacePreviousVm { get; init; }
         public string CloningIsoPath { get; init; }
+
+        /// <summary>
+        /// Hyper-V virtual switch to connect the VM's NIC to. Null keeps the
+        /// deployment's stock target — the Default Switch.
+        /// </summary>
+        public string? SwitchName { get; init; }
     }
 }

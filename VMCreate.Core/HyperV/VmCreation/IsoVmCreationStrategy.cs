@@ -71,6 +71,19 @@ namespace VMCreate.HyperV.VmCreation
 
             string defaultVmPath = _pathService.DefaultVmPath;
 
+            // Static addressing (CLI --static-ip) rides the Omarchy cidata
+            // seed. Every OTHER ISO deploy is a manual install — no seed, no
+            // deployment SSH at all — so the address would never be applied
+            // and the flags would be silently ignored. Fail loudly before the
+            // VM skeleton is created.
+            if (vmCustomizations.HasStaticNetwork && !item.HasTag(EnablePasswordlessSudoStep.OmarchyTag))
+            {
+                throw new InvalidOperationException(
+                    $"--static-ip requires the unattended Omarchy install (a NoCloud seed drives it). '{item.Name}' " +
+                    "is a manual ISO install — VMCreate never configures its network, so a static address cannot be " +
+                    "delivered; deploy it with DHCP and configure the address inside the installer.");
+            }
+
             progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.CreateVMSkeleton));
             await _lifecycleManager.CreateVMAsync(plan, defaultVmPath, detectedGeneration, cancellationToken);
 
@@ -216,6 +229,18 @@ namespace VMCreate.HyperV.VmCreation
                 Hostname = plan.VmName,
                 AuthorizedKeys = publicKey,
                 DiskSizeBytes = (long)plan.NewDriveSizeInGB * 1024 * 1024 * 1024,
+                // CLI --static-ip/--gateway/--dns: static addressing rides the
+                // seed (cloud-init applies it to the live session; the
+                // installer copies it into the installed system). Null under
+                // DHCP keeps the seed free of a network-config file.
+                StaticNetwork = customizations.HasStaticNetwork
+                    ? new StaticNetworkConfig
+                    {
+                        StaticIp = customizations.StaticIp!,
+                        StaticGateway = customizations.StaticGateway,
+                        StaticDns = customizations.StaticDns,
+                    }
+                    : null,
             };
         }
 
@@ -236,7 +261,14 @@ namespace VMCreate.HyperV.VmCreation
             {
                 string privateKeyPath = _sshKeyManager.GetPrivateKeyPath(ctx.Customizations.CustomSshPublicKeyPath);
                 string username = ctx.GalleryItem.InitialUsername ?? "omarchy";
-                var shell = _guestShellFactory.Create(ctx.Plan.VmName, privateKeyPath, username);
+                // The installed system's address is known statically when the
+                // deployment pinned one (CLI --static-ip): Hyper-V's DHCP-
+                // lease-driven discovery may never see it, so the pinned
+                // address is the SSH target. The host part only — the seed
+                // carries the full CIDR.
+                var shell = ctx.Customizations.HasStaticNetwork
+                    ? _guestShellFactory.CreateWithPinnedIp(ctx.Plan.VmName, privateKeyPath, username, ctx.Customizations.StaticIpHost!)
+                    : _guestShellFactory.Create(ctx.Plan.VmName, privateKeyPath, username);
 
                 const int maxAttempts = 4; // 4 × 10 min covers a full cold-mirror package download on a reasonably fast link
                 for (int attempt = 1; ; attempt++)
