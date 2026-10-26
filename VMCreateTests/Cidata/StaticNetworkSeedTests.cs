@@ -21,6 +21,7 @@ namespace VMCreate.Tests.Cidata
             StaticIp = "192.168.10.50/24",
             StaticGateway = "192.168.10.1",
             StaticDns = "8.8.8.8,1.1.1.1",
+            PrimaryNicMacAddress = "00155D01173E",
         };
 
         /// <summary>
@@ -100,6 +101,8 @@ namespace VMCreate.Tests.Cidata
             {
                 Assert.IsTrue(IsoContainsAscii(isoPath, "version: 2"), "network-config (v2) must be on the seed");
                 Assert.IsTrue(IsoContainsAscii(isoPath, "addresses: [192.168.10.50/24]"));
+                Assert.IsTrue(IsoContainsAscii(isoPath, "macaddress: \"00:15:5d:01:17:3e\""),
+                    "the config matches the primary NIC by MAC");
                 Assert.IsTrue(IsoContainsAscii(isoPath, "via: 192.168.10.1"));
                 Assert.IsTrue(IsoContainsAscii(isoPath, "8.8.8.8"));
                 NoCloudSeedAssert.IsCloudInitReadable(isoPath);

@@ -90,6 +90,11 @@ namespace VMCreate.Tests.HyperV.VmCreation
             _guestShellFactory.Setup(f => f.CreateWithPinnedIp(
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
                 .Returns(shell.Object);
+            // Static-addressing seeds match the primary NIC by MAC; the
+            // adapter exists from skeleton time so a fixed test MAC is fine.
+            _networkManager.Setup(n => n.GetPrimaryAdapterMacAddressAsync(
+                It.IsAny<VmDeploymentPlan>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync("00155D01173E");
             _sshKeyManager.Setup(k => k.EnsureKeyPairAsync(It.IsAny<CancellationToken>()))
                 .ReturnsAsync("ssh-ed25519 AAAATESTKEY vmcreate@test");
             _sshKeyManager.Setup(k => k.ReadPublicKeyAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))

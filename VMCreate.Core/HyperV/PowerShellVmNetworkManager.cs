@@ -97,5 +97,34 @@ namespace VMCreate
                 }, cancellationToken);
             return !result.HadErrors && result.Output.Count > 0;
         }
+
+        /// <summary>
+        /// The primary adapter's MAC from Get-VMNetworkAdapter. Hyper-V
+        /// assigns the dynamic MAC when the adapter is created (New-VM), so
+        /// the value exists from VM-skeleton time — before any seed is built.
+        /// </summary>
+        public async Task<string> GetPrimaryAdapterMacAddressAsync(VmDeploymentPlan plan, CancellationToken cancellationToken)
+        {
+            var result = await _executor.RunCommandAsync("Get-VMNetworkAdapter",
+                new System.Collections.Generic.Dictionary<string, object?>
+                {
+                    ["VMName"] = plan.VmName,
+                    ["Name"] = "Network Adapter",
+                    ["ErrorAction"] = "SilentlyContinue",
+                }, cancellationToken);
+
+            string? mac = result.Output.Count > 0
+                ? result.Output[0].Properties["MacAddress"]?.Value?.ToString()
+                : null;
+
+            if (string.IsNullOrWhiteSpace(mac) || mac == "000000000000")
+                throw new InvalidOperationException(
+                    $"Could not read the MAC address of VM '{plan.VmName}'s primary network adapter. " +
+                    "Static addressing matches the interface by MAC; without it the address could land on a " +
+                    "deploy-plumbing NIC. Verify the adapter exists on the VM.");
+
+            _logger.LogInformation("Primary adapter MAC for {VMName}: {Mac}", plan.VmName, mac);
+            return mac;
+        }
     }
 }

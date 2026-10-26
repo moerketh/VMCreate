@@ -222,6 +222,12 @@ namespace VMCreate.HyperV.VmCreation
                 ? await _sshKeyManager.ReadPublicKeyAsync(customizations.CustomSshPublicKeyPath, ct)
                 : await _sshKeyManager.EnsureKeyPairAsync(ct);
 
+            // Static addressing matches the live session's single NIC by MAC;
+            // the adapter exists from skeleton time (New-VM assigned it).
+            string? primaryMac = customizations.HasStaticNetwork
+                ? await _networkManager.GetPrimaryAdapterMacAddressAsync(plan, ct)
+                : null;
+
             return new CidataSeedOptions
             {
                 Username = item.InitialUsername ?? "omarchy",
@@ -235,7 +241,7 @@ namespace VMCreate.HyperV.VmCreation
                 // DHCP keeps the seed free of a network-config file. Validated
                 // and normalized in one place — StaticNetworkConfig.Create.
                 StaticNetwork = customizations.HasStaticNetwork
-                    ? StaticNetworkConfig.Create(customizations.StaticIp, customizations.StaticGateway, customizations.StaticDns)
+                    ? StaticNetworkConfig.Create(customizations.StaticIp, customizations.StaticGateway, customizations.StaticDns, primaryMac)
                     : null,
             };
         }

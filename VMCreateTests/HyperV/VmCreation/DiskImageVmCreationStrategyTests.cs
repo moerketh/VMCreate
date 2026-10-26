@@ -108,6 +108,11 @@ namespace VMCreate.Tests.HyperV.VmCreation
             _guestShellFactory.Setup(f => f.Create(It.IsAny<string>(), It.IsAny<string>())).Returns(_shell.Object);
             _guestShellFactory.Setup(f => f.CreateWithPinnedIp(
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>())).Returns(_shell.Object);
+            // Static-addressing seeds match the primary NIC by MAC; the
+            // adapter exists from skeleton time so a fixed test MAC is fine.
+            _networkManager.Setup(n => n.GetPrimaryAdapterMacAddressAsync(
+                It.IsAny<VmDeploymentPlan>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync("00155D01173E");
             _sshKeyManager.Setup(s => s.GetPrivateKeyPath(It.IsAny<string>())).Returns("C:\\Users\\Test\\.ssh\\id_rsa");
 
             // KVP heartbeat gate: pass-through default (guest daemon alive).

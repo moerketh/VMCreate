@@ -104,6 +104,50 @@ namespace VMCreate.Tests.HyperV
             Assert.IsFalse(await _manager.SwitchExistsAsync("Nope", CancellationToken.None));
         }
 
+        [TestMethod]
+        public async Task GetPrimaryAdapterMac_ReturnsHyperVsBareDigitForm()
+        {
+            _executor
+                .Setup(e => e.RunCommandAsync("Get-VMNetworkAdapter", It.IsAny<IEnumerable<KeyValuePair<string, object?>>?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new PowerShellResult
+                {
+                    Output = new() { System.Management.Automation.PSObject.AsPSObject(new { MacAddress = "00155D01173E" }) }
+                });
+
+            Assert.AreEqual("00155D01173E", await _manager.GetPrimaryAdapterMacAddressAsync(Plan(), CancellationToken.None));
+        }
+
+        [TestMethod]
+        public async Task GetPrimaryAdapterMac_NoAdapter_ThrowsActionably()
+        {
+            // Static addressing cannot be pinned to a NIC without the MAC;
+            // silence here would strand the deploy at pinned-IP SSH.
+            _executor
+                .Setup(e => e.RunCommandAsync("Get-VMNetworkAdapter", It.IsAny<IEnumerable<KeyValuePair<string, object?>>?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new PowerShellResult());
+
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                _manager.GetPrimaryAdapterMacAddressAsync(Plan(), CancellationToken.None));
+            StringAssert.Contains(ex.Message, "MAC");
+        }
+
+        [TestMethod]
+        public async Task GetPrimaryAdapterMac_ZeroMac_ThrowsActionably()
+        {
+            // 00:00:00:00:00:00 is the placeholder a guest driver never
+            // initialized reports — pinning a static address to it would
+            // match nothing.
+            _executor
+                .Setup(e => e.RunCommandAsync("Get-VMNetworkAdapter", It.IsAny<IEnumerable<KeyValuePair<string, object?>>?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new PowerShellResult
+                {
+                    Output = new() { System.Management.Automation.PSObject.AsPSObject(new { MacAddress = "000000000000" }) }
+                });
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                _manager.GetPrimaryAdapterMacAddressAsync(Plan(), CancellationToken.None));
+        }
+
         private static object? Value(IEnumerable<KeyValuePair<string, object?>> parameters, string key)
         {
             foreach (var pair in parameters)

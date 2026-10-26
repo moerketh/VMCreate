@@ -656,7 +656,7 @@ version: 2
 ethernets:
   eth0:
     match:
-      driver: hv_netvsc
+      macaddress: "00:15:5d:01:17:3e"
     addresses: [192.168.10.50/24]
     routes:
       - to: default
@@ -665,15 +665,19 @@ ethernets:
       addresses: [8.8.8.8, 1.1.1.1]
 ```
 
-- The interface is selected by **driver match** (`hv_netvsc`), not by name:
-  the NoCloud seed path never runs the cloning ISO's interface-renaming
-  fixups, so a cloud image naming its NIC `ens*`/`enp*` would never see a
-  bare-`eth0` config apply — and supplying any network-config also turns
-  off cloud-init's DHCP fallback, leaving the guest offline. A driver match
-  covers every name the device can take; renderers without match support
-  (e.g. sysconfig) fall back to the id, `eth0` — the name Hyper-V cloud
-  images use. No `set-name:` (cloud-init only renames when a MAC is pinned,
-  and MACs are host-allocated) and no MAC pinning.
+- The interface is selected by **the primary adapter's MAC address** —
+  `IVmNetworkManager.GetPrimaryAdapterMacAddressAsync` reads it from Hyper-V
+  when the seed is built (the MAC exists from skeleton time; New-VM assigns
+  it). A name match would never apply on an image naming its NIC
+  `ens*`/`enp*` (the NoCloud seed path never runs the cloning ISO's
+  interface-renaming fixups), and a driver match would catch EVERY
+  `hv_netvsc` NIC — on a Gen-1 source the cloning cycle's temporary deploy
+  adapter is attached while the seed is consumed, and would receive the same
+  static address on the wrong switch. The MAC matches exactly one NIC by
+  construction; cloud-init resolves it to the interface's current name, so
+  the config follows the device whatever it is called. Renderers without
+  match support fall back to the id, `eth0` — the name Hyper-V cloud images
+  use.
 - The default route uses `routes: [{to: default, via: …}]` (the modern v2
   form; `gateway4` is deprecated). When `--gateway` is omitted the route
   section is omitted entirely — the guest reaches only its own subnet.

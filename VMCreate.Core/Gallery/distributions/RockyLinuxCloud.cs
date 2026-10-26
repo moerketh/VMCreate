@@ -50,8 +50,9 @@ namespace VMCreate.Gallery
         // The LVM (disk-layout) and GenericCloud (KVM-flavour) twins must not
         // leak into the Azure-Base version scrape. One regex parameterized by
         // the major — the 9 and 10 patterns differed only in that digit.
+        // Interpreted, not Compiled: built per gallery load, used once each.
         private static Regex VersionedFileRegexFor(int major) => new(
-            $@"Rocky-{major}-Azure-Base-(\d+\.\d+-\d{{8}}\.\d+)\.x86_64\.vhdfixed\.xz", RegexOptions.Compiled);
+            $@"Rocky-{major}-Azure-Base-(\d+\.\d+-\d{{8}}\.\d+)\.x86_64\.vhdfixed\.xz");
 
         private readonly IHttpClientFactory _clientFactory;
 
@@ -145,11 +146,14 @@ namespace VMCreate.Gallery
                 // Numeric-aware ordering, NOT ordinal: once a major reaches
                 // .10, ordinal sort puts "9.8" above "9.10" ('8' > '1') and
                 // the card would advertise a stale build as current.
-                string version = versionedFileRegex.Matches(html)
+                List<string> versions = versionedFileRegex.Matches(html)
                     .Select(m => m.Groups[1].Value)
                     .Distinct()
-                    .OrderByDescending(v => v, BuildIdComparer.Instance)
-                    .First();
+                    .ToList();
+                if (versions.Count == 0)
+                    return new ScrapedBuild("unknown", null);
+
+                string version = versions.OrderByDescending(v => v, BuildIdComparer.Instance).First();
                 var datePart = version.Split('-').LastOrDefault() ?? "";
                 if (datePart.Length >= 8 && DateTime.TryParseExact(
                         datePart[..8], "yyyyMMdd",

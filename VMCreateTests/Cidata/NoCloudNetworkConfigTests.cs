@@ -14,12 +14,66 @@ namespace VMCreate.Tests.Cidata
     public sealed class NoCloudNetworkConfigTests
     {
         private static StaticNetworkConfig Config(
-            string ip = "192.168.10.50/24", string? gateway = null, string? dns = null) => new()
+            string ip = "192.168.10.50/24", string? gateway = null, string? dns = null,
+            string? mac = "00155D01173E") => new()
         {
             StaticIp = ip,
             StaticGateway = gateway,
             StaticDns = dns,
+            PrimaryNicMacAddress = mac,
         };
+
+        [TestMethod]
+        public void Render_MatchesThePrimaryNicByMac_NotByDriverOrName()
+        {
+            // The network-config matches the PRIMARY adapter by MAC: a driver
+            // match would catch every hv_netvsc NIC — on a Gen-1 source the
+            // cloning cycle's temp deploy NIC is attached while the seed is
+            // consumed, and would get the same static address on the wrong
+            // switch. A name match would never apply on an image naming its
+            // NIC ens*/enp*. The MAC matches exactly one NIC by construction.
+            string yaml = NoCloudNetworkConfig.Render(Config());
+            StringAssert.Contains(yaml, "    match:\n      macaddress: \"00:15:5d:01:17:3e\"\n");
+            Assert.IsFalse(yaml.Contains("driver:", StringComparison.Ordinal),
+                "a driver match would also hit the temp deploy NIC");
+        }
+
+        [TestMethod]
+        public void Render_WithoutMac_Throws()
+        {
+            // The MAC is not optional at render time: strategies fetch it
+            // from Hyper-V when they build the seed, and a config without it
+            // would have to fall back to a name/driver match — reintroducing
+            // the very NIC-selection bug the MAC exists to prevent.
+            var ex = Assert.Throws<InvalidOperationException>(() =>
+                NoCloudNetworkConfig.Render(Config(mac: "  ")));
+            StringAssert.Contains(ex.Message, "MAC");
+        }
+
+        [TestMethod]
+        [DataRow("00155D01173E", DisplayName = "Hyper-V bare digits")]
+        [DataRow("00:15:5D:01:17:3E", DisplayName = "colon form, uppercase")]
+        [DataRow("00-15-5d-01-17-3e", DisplayName = "dash form")]
+        public void NormalizeMacAddress_NormalizesToLowercaseColons(string input, string expected = "00:15:5d:01:17:3e")
+        {
+            Assert.AreEqual(expected, NoCloudNetworkConfig.NormalizeMacAddress(input));
+        }
+
+        [TestMethod]
+        [DataRow("00155D01173", DisplayName = "11 digits")]
+        [DataRow("00155D01173EE", DisplayName = "13 digits")]
+        [DataRow("00:15:5d:01:17:zz", DisplayName = "non-hex")]
+        public void NormalizeMacAddress_Malformed_Throws(string input)
+        {
+            Assert.Throws<ArgumentException>(() => NoCloudNetworkConfig.NormalizeMacAddress(input));
+        }
+
+        [TestMethod]
+        public void NormalizeMacAddress_Empty_ReturnsNull()
+        {
+            Assert.IsNull(NoCloudNetworkConfig.NormalizeMacAddress(null));
+            Assert.IsNull(NoCloudNetworkConfig.NormalizeMacAddress("  "));
+        }
 
         [TestMethod]
         public void Render_FullConfig_UsesV2Eth0WithDefaultRouteAndDns()
@@ -59,26 +113,14 @@ namespace VMCreate.Tests.Cidata
         }
 
         [TestMethod]
-        public void Render_MatchesTheHypervNicDriver_NotTheInterfaceName()
-        {
-            // The NoCloud seed path never runs the cloning ISO's
-            // interface-renaming fixups, so a bare-eth0 config would never
-            // apply on an image naming its NIC ens*/enp* — and supplying any
-            // network-config also turns off cloud-init's DHCP fallback,
-            // leaving the guest offline. A driver match covers every name
-            // hv_netvsc can take; renderers without match support fall back
-            // to the id (eth0 — the Hyper-V cloud-image name).
-            string yaml = NoCloudNetworkConfig.Render(Config());
-            StringAssert.Contains(yaml, "    match:\n      driver: hv_netvsc\n");
-        }
-
-        [TestMethod]
         public void Create_NormalizesAndValidates_InOnePlace()
         {
-            var config = StaticNetworkConfig.Create(" 192.168.10.50/24 ", " 192.168.10.1 ", " 8.8.8.8 , 1.1.1.1 ");
+            var config = StaticNetworkConfig.Create(" 192.168.10.50/24 ", " 192.168.10.1 ", " 8.8.8.8 , 1.1.1.1 ", "00155D01173E");
             Assert.AreEqual("192.168.10.50/24", config!.StaticIp);
             Assert.AreEqual("192.168.10.1", config.StaticGateway);
             Assert.AreEqual("8.8.8.8,1.1.1.1", config.StaticDns);
+            Assert.AreEqual("00:15:5d:01:17:3e", config.PrimaryNicMacAddress,
+                "the MAC is normalized with everything else");
 
             Assert.IsNull(StaticNetworkConfig.Create(null, "1.2.3.4", "5.6.7.8"),
                 "no static IP — DHCP, gateway/dns ignored");

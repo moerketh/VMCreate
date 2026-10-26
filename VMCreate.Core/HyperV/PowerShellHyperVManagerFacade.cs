@@ -98,6 +98,9 @@ namespace VMCreate
         public Task<bool> SwitchExistsAsync(string switchName, CancellationToken cancellationToken)
             => _network.SwitchExistsAsync(switchName, cancellationToken);
 
+        public Task<string> GetPrimaryAdapterMacAddressAsync(VmDeploymentPlan plan, CancellationToken cancellationToken)
+            => _network.GetPrimaryAdapterMacAddressAsync(plan, cancellationToken);
+
         public Task SetCpuCount(VmDeploymentPlan plan, CancellationToken cancellationToken)
             => _config.SetCpuCount(plan, cancellationToken);
 

@@ -101,11 +101,12 @@ namespace VMCreate.HyperV.VmCreation
         /// <summary>
         /// The deployment's static addressing (CLI --static-ip/--gateway/--dns)
         /// as the seed builders' input, or null under DHCP. Validated and
-        /// normalized in one place — <see cref="StaticNetworkConfig.Create"/>.
+        /// normalized in one place — <see cref="StaticNetworkConfig.Create"/> —
+        /// including the primary NIC's MAC the network-config matches on.
         /// </summary>
-        internal static StaticNetworkConfig? BuildStaticNetwork(VmCustomizations customizations)
+        internal static StaticNetworkConfig? BuildStaticNetwork(VmCustomizations customizations, string? primaryNicMacAddress)
             => customizations.HasStaticNetwork
-                ? StaticNetworkConfig.Create(customizations.StaticIp, customizations.StaticGateway, customizations.StaticDns)
+                ? StaticNetworkConfig.Create(customizations.StaticIp, customizations.StaticGateway, customizations.StaticDns, primaryNicMacAddress)
                 : null;
 
         public async Task CreateVMAsync(VmCreationContext ctx)
@@ -586,9 +587,16 @@ namespace VMCreate.HyperV.VmCreation
                 ? null
                 : CloudInitSeedBuilder.LoadUserDataFile(customizations.CloudInitUserDataPath);
 
+            // Static addressing matches the primary NIC by MAC: the adapter
+            // exists from skeleton time (New-VM assigns its dynamic MAC), so
+            // this is fetched right where the seed consumes it.
+            string? primaryMac = customizations.HasStaticNetwork
+                ? await _networkManager.GetPrimaryAdapterMacAddressAsync(plan, cancellationToken)
+                : null;
+
             string seedIsoPath = Path.Combine(_pathService.DefaultVhdxPath, $"{plan.VmName}_cidata.iso");
             CloudInitSeedBuilder.BuildSeedIso(seedIsoPath, plan.VmName, publicKey, _logger, customUserData,
-                BuildStaticNetwork(customizations));
+                BuildStaticNetwork(customizations, primaryMac));
             seedPathCaptured(seedIsoPath);
             await _bootManager.AddBootDvd(plan, seedIsoPath, cancellationToken);
         }

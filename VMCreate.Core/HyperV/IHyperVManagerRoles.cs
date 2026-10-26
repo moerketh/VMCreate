@@ -70,6 +70,15 @@ namespace VMCreate
         /// fails as InvalidArguments instead of after the VM skeleton exists.
         /// </summary>
         Task<bool> SwitchExistsAsync(string switchName, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// The primary ("Network Adapter") NIC's MAC address as Hyper-V
+        /// reports it (12 hex digits, no separators). Static-addressing seeds
+        /// match the interface by this MAC so the address lands on exactly
+        /// that NIC — never on a deploy-plumbing adapter. Throws when the
+        /// adapter or its MAC is missing.
+        /// </summary>
+        Task<string> GetPrimaryAdapterMacAddressAsync(VmDeploymentPlan plan, CancellationToken cancellationToken);
     }
 
     /// <summary>

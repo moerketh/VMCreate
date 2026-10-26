@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Net.Sockets;
 using System.Text;
 
@@ -28,13 +29,24 @@ public sealed class StaticNetworkConfig
     public string? StaticDns { get; init; }
 
     /// <summary>
+    /// MAC address of the VM's primary network adapter, in any of the common
+    /// forms ("00155D01173E" as Hyper-V reports it, or "00:15:5d:01:17:3e").
+    /// The rendered <c>network-config</c> matches the interface by MAC so the
+    /// static address lands on exactly that NIC — deploy plumbing NICs (the
+    /// Gen-1 cloning cycle's "VMCreate Temp" adapter, also hv_netvsc) are
+    /// never matched, on any renderer that supports match rules.
+    /// </summary>
+    public string? PrimaryNicMacAddress { get; init; }
+
+    /// <summary>
     /// The single construction point for deploy code: null under DHCP, a
     /// validated and normalized instance otherwise. Validation lives here so
     /// the CLI, the seed renderers and the strategies cannot drift apart on
     /// what a "valid" static address is. Throws <see cref="ArgumentException"/>
     /// with the same message the CLI surfaces.
     /// </summary>
-    public static StaticNetworkConfig? Create(string? staticIp, string? staticGateway, string? staticDns)
+    public static StaticNetworkConfig? Create(
+        string? staticIp, string? staticGateway, string? staticDns, string? primaryNicMacAddress = null)
     {
         if (!NoCloudNetworkConfig.TryParseCidrIpv4(staticIp, out string? ip))
         {
@@ -64,7 +76,13 @@ public sealed class StaticNetworkConfig
             dns = string.Join(",", entries);
         }
 
-        return new StaticNetworkConfig { StaticIp = ip, StaticGateway = gateway, StaticDns = dns };
+        return new StaticNetworkConfig
+        {
+            StaticIp = ip,
+            StaticGateway = gateway,
+            StaticDns = dns,
+            PrimaryNicMacAddress = NoCloudNetworkConfig.NormalizeMacAddress(primaryNicMacAddress),
+        };
     }
 }
 
@@ -75,18 +93,18 @@ public sealed class StaticNetworkConfig
 /// before any <c>user-data</c> runs.
 /// </summary>
 /// <remarks>
-/// Interface selection matches the Hyper-V network driver
-/// (<c>match: {driver: hv_netvsc}</c>) rather than asserting a name: the
-/// NoCloud seed path never runs the cloning ISO's interface-renaming fixups,
-/// so a cloud image that names its NIC <c>ens*</c>/<c>enp*</c> would never
-/// see a bare-<c>eth0</c> config apply — and supplying any network-config
-/// also disables cloud-init's DHCP fallback, leaving the guest offline. With
-/// a match block the id is an opaque label (netplan semantics): the networkd
-/// and netplan renderers emit <c>[Match] Driver=hv_netvsc</c>, which covers
-/// every name the device can take. Renderers without match support (RHEL
-/// sysconfig) fall back to the id, so it stays <c>eth0</c> — the name
-/// Hyper-V cloud images use. No <c>set-name:</c>: cloud-init performs
-/// renames only when a MAC is pinned, and the MAC is host-allocated.
+/// Interface selection matches the PRIMARY adapter's MAC address
+/// (<c>match: {macaddress: …}</c>) rather than a name or a driver: the NoCloud
+/// seed path never runs the cloning ISO's interface-renaming fixups (so a
+/// bare-<c>eth0</c> id would never apply on an image naming its NIC
+/// <c>ens*</c>/<c>enp*</c>), and a driver match would catch EVERY
+/// <c>hv_netvsc</c> NIC — on a Gen-1 source the cloning cycle's temporary
+/// deploy adapter is attached while the seed is consumed, and a driver match
+/// would hand it the same static address on the wrong switch. The MAC matches
+/// exactly one NIC by construction. cloud-init resolves the MAC to the
+/// interface's current name, so the config follows the device whatever it is
+/// called. Renderers without match support fall back to the id, which stays
+/// <c>eth0</c> — the name Hyper-V cloud images use.
 /// The default route uses the modern
 /// <c>routes: [{to: default, via: …}]</c> form; cloud-init normalizes
 /// <c>to: default</c> to <c>0.0.0.0/0</c> and the networkd renderer emits a
@@ -108,11 +126,20 @@ public static class NoCloudNetworkConfig
         string? gateway = null;
         if (!string.IsNullOrWhiteSpace(config.StaticGateway))
             gateway = RequireIpv4(config.StaticGateway, nameof(config.StaticGateway));
+        if (string.IsNullOrWhiteSpace(config.PrimaryNicMacAddress))
+            throw new InvalidOperationException(
+                "Static addressing requires the primary network adapter's MAC address (see " +
+                $"{nameof(StaticNetworkConfig.PrimaryNicMacAddress)}): the network-config matches the interface " +
+                "by MAC so the address never lands on a deploy-plumbing NIC. Strategies fetch it from Hyper-V " +
+                "when they build the seed.");
+        // Normalized at the render boundary too: Create normalizes, but a
+        // library caller can set the property directly, and netplan expects
+        // lowercase colon-separated (its own guidance is to quote it).
+        string mac = NormalizeMacAddress(config.PrimaryNicMacAddress)!;
 
         var sb = new StringBuilder();
         sb.Append("version: 2\nethernets:\n  eth0:\n");
-        // Driver match over name match: see the class remarks.
-        sb.Append("    match:\n      driver: hv_netvsc\n");
+        sb.Append("    match:\n      macaddress: \"").Append(mac).Append("\"\n");
         sb.Append($"    addresses: [{ip}]\n");
         if (gateway is not null)
         {
@@ -205,6 +232,30 @@ public static class NoCloudNetworkConfig
     internal static ArgumentException InvalidIpv4(string? value, string what) => new(
         $"'{value}' is not a valid IPv4 {what}; expected four dotted-decimal octets (e.g. 192.168.10.1).",
         nameof(StaticNetworkConfig.StaticIp));
+
+    /// <summary>
+    /// Normalizes a MAC address to netplan's lowercase colon-separated form
+    /// ("00155D01173E" and "00-15-5D-01-17-3E" both become
+    /// "00:15:5d:01:17:3e"), or null when absent. Anything that is not 12
+    /// hex digits (after separator removal) throws — a malformed MAC would
+    /// match no interface and silently leave the guest offline.
+    /// </summary>
+    internal static string? NormalizeMacAddress(string? value)
+    {
+        string digits = (value ?? string.Empty)
+            .Replace(":", "", StringComparison.Ordinal)
+            .Replace("-", "", StringComparison.Ordinal)
+            .Trim();
+        if (digits.Length == 0)
+            return null;
+        if (digits.Length != 12 || digits.Any(c => !Uri.IsHexDigit(c)))
+            throw new ArgumentException(
+                $"'{value}' is not a valid MAC address; expected 12 hex digits, optionally colon- or dash-separated.",
+                nameof(StaticNetworkConfig.PrimaryNicMacAddress));
+
+        return string.Concat(Enumerable.Range(0, 6)
+            .Select(i => digits.Substring(i * 2, 2).ToLowerInvariant() + (i < 5 ? ":" : "")));
+    }
 
     private static string RequireCidrIpv4(string? value, string paramName)
         => TryParseCidrIpv4(value, out string normalized)
