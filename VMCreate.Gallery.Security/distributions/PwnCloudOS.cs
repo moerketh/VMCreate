@@ -68,7 +68,11 @@ namespace VMCreate.Gallery.distributions
 
                 if (match.Success)
                 {
-                    galleryItem.Checksum = match.Groups[1].Value.ToLowerInvariant();
+                    // Publisher-page digest scraped at runtime: transport
+                    // consistency only — a page compromise controls the image
+                    // and its hash. Never badge as source-pinned (Checksum
+                    // stays null; see GalleryItem.RuntimeChecksum).
+                    galleryItem.RuntimeChecksum = match.Groups[1].Value.ToLowerInvariant();
                     galleryItem.ChecksumAlgorithm = "SHA256";
                 }
             }

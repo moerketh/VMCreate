@@ -104,11 +104,22 @@ namespace VMCreate
                 filename = await _downloader.DownloadFileAsync(galleryItem.DiskUri, cancellationToken, createVmProgressInfo, _useCache);
                 _logger.LogInformation("Downloaded file {FileName}", filename);
 
-                // Verify checksum if configured (inline hash takes precedence over URI)
+                // Verify checksum if configured (inline pin takes precedence
+                // over URI; a runtime digest from publisher metadata is used
+                // only when no pin exists and never badges as verified)
                 if (!string.IsNullOrEmpty(galleryItem.Checksum))
                 {
                     await _checksumVerifier.VerifyInlineAsync(
                         filename, galleryItem.Checksum, galleryItem.ChecksumAlgorithm,
+                        cancellationToken, createVmProgressInfo);
+                }
+                else if (!string.IsNullOrEmpty(galleryItem.RuntimeChecksum))
+                {
+                    _logger.LogInformation(
+                        "Verifying {Name} against a digest fetched from the publisher's page at gallery load (transport consistency; not pinned in VMCreate's source).",
+                        galleryItem.Name);
+                    await _checksumVerifier.VerifyInlineAsync(
+                        filename, galleryItem.RuntimeChecksum, galleryItem.ChecksumAlgorithm,
                         cancellationToken, createVmProgressInfo);
                 }
                 else if (!string.IsNullOrEmpty(galleryItem.ChecksumUri))

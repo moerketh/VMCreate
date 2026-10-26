@@ -323,6 +323,11 @@ namespace VMCreate
             _wizardData.Settings.VirtualizationEnabled = _virtualizationEnabled;
             _wizardData.Settings.ReplacePreviousVm = _replacePreviousVm;
             _wizardData.Settings.EnhancedSessionTransportType = _wizardData.SelectedItem?.EnhancedSessionTransportType;
+            // Honor the gallery item's SecureBoot metadata: without this copy
+            // every VM is created with EnableSecureBoot=Off even when the item
+            // declares SecureBoot "true" (e.g. FLARE VM).
+            _wizardData.Settings.SecureBoot = string.Equals(
+                _wizardData.SelectedItem?.SecureBoot, "true", StringComparison.OrdinalIgnoreCase);
 
             // Persist the release choice; the default variant normalizes to
             // null so the wizard data always describes the item itself.

@@ -156,5 +156,38 @@ namespace VMCreate.Tests.HyperV
 
             Assert.IsFalse(_captured.ContainsKey("Set-VMDvdDrive"));
         }
+
+        [TestMethod]
+        public async Task SetSecureBoot_WhenPlanRequestsSecureBoot_EmitsOnWithTemplate()
+        {
+            // Regression pin for the metadata-to-firmware gap: gallery items
+            // declare SecureBoot "true" (e.g. FLARE VM), and the plan carries
+            // the parsed boolean — the sink must emit EnableSecureBoot=On
+            // with the declared template, never a silent Off.
+            var plan = VmDeploymentPlan.FromSettings(new VmSettings
+            {
+                VMName = "SecureBootTestVM",
+                SecureBoot = true,
+                SecureBootTemplate = "MicrosoftWindows"
+            });
+
+            await _bootManager.SetSecureBoot(plan, "MicrosoftWindows", CancellationToken.None);
+
+            var firmware = _captured["Set-VMFirmware"];
+            Assert.AreEqual("On", firmware.Single(p => p.Key == "EnableSecureBoot").Value,
+                "a plan built with SecureBoot=true must reach the firmware sink as On");
+            Assert.AreEqual("MicrosoftWindows", firmware.Single(p => p.Key == "SecureBootTemplate").Value);
+        }
+
+        [TestMethod]
+        public async Task SetSecureBoot_WhenPlanDoesNotRequestSecureBoot_EmitsOff()
+        {
+            var plan = VmDeploymentPlan.FromSettings(new VmSettings { VMName = "PlainVm" });
+
+            await _bootManager.SetSecureBoot(plan, null, CancellationToken.None);
+
+            var firmware = _captured["Set-VMFirmware"];
+            Assert.AreEqual("Off", firmware.Single(p => p.Key == "EnableSecureBoot").Value);
+        }
     }
 }

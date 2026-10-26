@@ -45,26 +45,23 @@ namespace VMCreate
             // Every branch neutralises its exit status: the SSH automation
             // path treats non-zero guest exits as fatal for the deployment,
             // and a missing optional package must not abort a VM build.
-            // pacman: OMARCHY_ALLOW_DIRECT_PACMAN=1 passes Omarchy's
-            // 00-omarchy-update-guard hook, which aborts any direct -Syu
-            // (live: Omarchy 4.0.6 refused this install); `sudo env` because
-            // sudo resets the environment. Other Arch guests ignore it.
+            // No repo-trust changes and no system upgrades are performed:
+            // only the requested packages are installed, and if they are
+            // unavailable the branch degrades to an owner-visible warning.
             string installCmd = @"
                 if command -v apt-get >/dev/null 2>&1; then
                     sudo DEBIAN_FRONTEND=noninteractive apt-get update -y -qq 2>&1 || echo 'WARNING: apt update failed'
                     sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openvpn network-manager-openvpn network-manager-openvpn-gnome 2>&1 || echo 'WARNING: openvpn packages unavailable via apt'
                 elif command -v dnf >/dev/null 2>&1; then
-                    sudo dnf install -y -q epel-release 2>/dev/null && sudo dnf config-manager --set-enabled epel 2>/dev/null || true
                     sudo dnf install -y -q openvpn NetworkManager-openvpn NetworkManager-openvpn-gnome 2>&1 \
                         || sudo dnf install -y -q openvpn NetworkManager-openvpn 2>&1 \
                         || echo 'WARNING: openvpn packages unavailable in enabled dnf repos (EPEL may be required on this distro)'
                 elif command -v yum >/dev/null 2>&1; then
-                    sudo yum install -y -q epel-release 2>/dev/null || true
                     sudo yum install -y -q openvpn NetworkManager-openvpn NetworkManager-openvpn-gnome 2>&1 \
                         || sudo yum install -y -q openvpn NetworkManager-openvpn 2>&1 \
                         || echo 'WARNING: openvpn packages unavailable in enabled yum repos (EPEL may be required on this distro)'
                 elif command -v pacman >/dev/null 2>&1; then
-                    sudo env OMARCHY_ALLOW_DIRECT_PACMAN=1 pacman -Syu --noconfirm openvpn networkmanager-openvpn 2>&1 || echo 'WARNING: openvpn packages unavailable via pacman'
+                    sudo pacman -S --needed --noconfirm openvpn networkmanager-openvpn 2>&1 || echo 'WARNING: openvpn packages unavailable via pacman (refreshed DBs may be required)'
                 elif command -v zypper >/dev/null 2>&1; then
                     sudo zypper --non-interactive install openvpn NetworkManager-openvpn 2>&1 || echo 'WARNING: openvpn packages unavailable via zypper'
                 else
@@ -83,9 +80,22 @@ namespace VMCreate
                 await shell.RunCommandAsync("sudo systemctl restart NetworkManager 2>&1 || true", ct);
             }
 
-            // Verify (also neutralised: the transport throws on non-zero exits)
+            // Verify the artifact the pipeline actually needs — the
+            // NetworkManager OpenVPN plugin (what a later 'nmcli connection
+            // import type openvpn' requires) — not just the binary: a
+            // preinstalled openvpn binary must not mask a failed plugin
+            // transaction. (Neutralised: the transport throws on non-zero.)
             string verify = await shell.RunCommandAsync(@"
-                if command -v openvpn >/dev/null 2>&1; then
+                plugin=''
+                for d in /usr/lib /usr/lib64 /usr/local/lib; do
+                    if compgen -G ""$d/NetworkManager/lib*openvpn*.so*"" >/dev/null 2>&1; then
+                        plugin=found
+                    fi
+                done
+                if [ -n ""$plugin"" ]; then
+                    echo 'OpenVPN plugin present for NetworkManager'
+                elif command -v openvpn >/dev/null 2>&1; then
+                    echo 'WARNING: openvpn binary present but the NetworkManager OpenVPN plugin was not found - VPN imports will fail'
                     openvpn --version 2>&1 | head -1
                 else
                     echo 'WARNING: openvpn binary not present after install'

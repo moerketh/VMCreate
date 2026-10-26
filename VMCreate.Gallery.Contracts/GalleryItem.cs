@@ -119,6 +119,17 @@ namespace VMCreate
         public string? Checksum { get; set; }
 
         /// <summary>
+        /// Digest fetched from publisher metadata (docs page, release JSON) at
+        /// gallery-load time. Proves transport consistency between the
+        /// publisher's metadata and the downloaded bytes, but a compromise of
+        /// that metadata controls both — it must never surface as
+        /// "verified against a digest pinned in VMCreate's source" (see
+        /// <see cref="HasChecksum"/>). <see cref="Checksum"/> stays null for
+        /// runtime-digested items so the verified badge keys only on pins.
+        /// </summary>
+        public string? RuntimeChecksum { get; set; }
+
+        /// <summary>
         /// Hash algorithm used for verification: "sha256" (default) or "sha512".
         /// Applies to both <see cref="ChecksumUri"/> and <see cref="Checksum"/>.
         /// </summary>
@@ -243,8 +254,9 @@ namespace VMCreate
         /// download mirror cannot alter — a hash pinned in this application's
         /// source (<see cref="Checksum"/>). Drives the verified/unverified
         /// badge on gallery cards: a <see cref="ChecksumUri"/> fetched from the
-        /// same mirror as the image only proves transport consistency, never
-        /// publisher authenticity, so it must not surface as "verified".
+        /// same mirror as the image, or a <see cref="RuntimeChecksum"/> scraped
+        /// from publisher pages, only proves transport consistency, never
+        /// publisher authenticity, so neither may surface as "verified".
         /// </summary>
         public bool HasChecksum => !string.IsNullOrEmpty(Checksum);
 

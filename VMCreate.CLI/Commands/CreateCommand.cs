@@ -647,8 +647,10 @@ namespace VMCreate.CLI.Commands
                 NewDriveSizeInGB = args.DiskSizeGb > 0 ? args.DiskSizeGb : 150,
                 ReplacePreviousVm = args.Replace,
                 EnhancedSessionTransportType = galleryItem.EnhancedSessionTransportType,
-                // SecureBoot defaults to false; HyperVVmCreator applies SecureBootTemplate from the gallery item
-                SecureBootTemplate = galleryItem.SecureBoot ?? "MicrosoftUEFICertificateAuthority",
+                // Honor the item's SecureBoot metadata; the template is a
+                // separate field (SecureBootTemplate), not the "true"/"false" flag.
+                SecureBoot = string.Equals(galleryItem.SecureBoot, "true", StringComparison.OrdinalIgnoreCase),
+                SecureBootTemplate = galleryItem.SecureBootTemplate ?? "MicrosoftUEFICertificateAuthority",
                 SwitchName = args.SwitchName,
             };
 

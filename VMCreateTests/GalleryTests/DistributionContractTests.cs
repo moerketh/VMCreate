@@ -432,9 +432,13 @@ namespace VMCreate.Tests.GalleryTests
             Assert.AreEqual(1, items.Count);
             StringAssert.EndsWith(items[0].DiskUri, ".img", StringComparison.OrdinalIgnoreCase);
 
-            // The API is the publisher's own metadata: its inline sha256
-            // must flow into the item so downloads verify.
-            Assert.AreEqual("abc123", items[0].Checksum);
+            // The API is publisher metadata fetched at runtime: its inline
+            // sha256 proves transport consistency only (a compromise of the
+            // API controls both URL and digest), so it must land in
+            // RuntimeChecksum and never badge as source-pinned.
+            Assert.AreEqual("abc123", items[0].RuntimeChecksum);
+            Assert.IsNull(items[0].Checksum, "a runtime API digest must never occupy the pinned Checksum field");
+            Assert.IsFalse(items[0].HasChecksum, "runtime-API digest must not badge as verified");
             Assert.AreEqual("SHA256", items[0].ChecksumAlgorithm);
         }
 

@@ -70,10 +70,11 @@ namespace VMCreate.Tests.GalleryTests
 
             var item = (await new PwnCloudOS(FactoryReturning(html)).LoadGalleryItems()).Single();
 
-            Assert.AreEqual(CurrentHash, item.Checksum,
+            Assert.AreEqual(CurrentHash, item.RuntimeChecksum,
                 "the VM image hash (not the ISO's) must be scraped from the styled live page");
             Assert.AreEqual("SHA256", item.ChecksumAlgorithm);
-            Assert.IsTrue(item.HasChecksum, "the gallery card must badge as verified");
+            Assert.IsNull(item.Checksum, "a publisher-page digest must never occupy the pinned Checksum field");
+            Assert.IsFalse(item.HasChecksum, "a runtime-scraped digest must not badge as verified");
         }
 
         [TestMethod]
@@ -86,8 +87,9 @@ namespace VMCreate.Tests.GalleryTests
 
             var item = (await new PwnCloudOS(FactoryReturning(html)).LoadGalleryItems()).Single();
 
-            Assert.AreEqual(CurrentHash, item.Checksum);
+            Assert.AreEqual(CurrentHash, item.RuntimeChecksum);
             Assert.AreEqual("SHA256", item.ChecksumAlgorithm);
+            Assert.IsNull(item.Checksum, "a publisher-page digest must never occupy the pinned Checksum field");
         }
 
         [TestMethod]

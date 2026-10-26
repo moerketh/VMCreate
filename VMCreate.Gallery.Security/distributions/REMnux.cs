@@ -86,7 +86,7 @@ namespace VMCreate.Gallery
 
         public async Task<List<GalleryItem>> LoadGalleryItems(CancellationToken cancellationToken = default)
         {
-            var (ovaUrl, sha256, version, isPinned) = await ResolveCurrentOvaAsync(cancellationToken);
+            var (ovaUrl, sha256, version, _, usePinnedChecksum) = await ResolveCurrentOvaAsync(cancellationToken);
 
             var logoUri = await GalleryIcons.ResolveLogoUriAsync(typeof(REMnux).Assembly, "remnux-logo.svg");
             var item = new GalleryItem
@@ -98,7 +98,10 @@ namespace VMCreate.Gallery
                 SymbolUri    = logoUri,
                 DiskUri      = ovaUrl,
                 ChecksumAlgorithm = "SHA256",
-                Checksum     = sha256,
+                // Only the source-pinned pair badges as verified; the live
+                // docs digest is transport-consistency only (RuntimeChecksum).
+                Checksum     = usePinnedChecksum ? sha256 : null,
+                RuntimeChecksum = usePinnedChecksum ? null : sha256,
                 SecureBoot   = "false",
                 EnhancedSessionTransportType = "HvSocket",
                 Version      = version,
@@ -115,7 +118,7 @@ namespace VMCreate.Gallery
         /// docs page. Returns the pinned fallback pair when the scrape fails or
         /// yields anything malformed.
         /// </summary>
-        private async Task<(string OvaUrl, string Sha256, string Version, bool IsPinned)> ResolveCurrentOvaAsync(
+        private async Task<(string OvaUrl, string Sha256, string Version, bool IsPinned, bool UsePinnedChecksum)> ResolveCurrentOvaAsync(
             CancellationToken cancellationToken)
         {
             try
@@ -133,7 +136,7 @@ namespace VMCreate.Gallery
                     _logger.LogWarning(
                         "REMnux docs no longer contain the general OVA link pattern — using pinned {PinnedOvaUrl}.",
                         PinnedOvaUrl);
-                    return (PinnedOvaUrl, PinnedSha256, PinnedVersion, IsPinned: true);
+                    return (PinnedOvaUrl, PinnedSha256, PinnedVersion, IsPinned: true, UsePinnedChecksum: true);
                 }
                 var ovaUrl = linkMatch.Groups[1].Value;
 
@@ -146,7 +149,7 @@ namespace VMCreate.Gallery
                 {
                     _logger.LogWarning(
                         "REMnux docs page has no SHA-256 for the general OVA — using pinned fallback.");
-                    return (PinnedOvaUrl, PinnedSha256, PinnedVersion, IsPinned: true);
+                    return (PinnedOvaUrl, PinnedSha256, PinnedVersion, IsPinned: true, UsePinnedChecksum: true);
                 }
                 var sha256 = hashMatch.Groups[1].Value.ToLowerInvariant();
 
@@ -162,28 +165,37 @@ namespace VMCreate.Gallery
                     _logger.LogWarning(
                         "REMnux docs scrape inconsistent (url pinned: {UrlIsPinned}, hash pinned: {HashIsPinned}) — using pinned fallback.",
                         urlIsPinned, hashIsPinned);
-                    return (PinnedOvaUrl, PinnedSha256, PinnedVersion, IsPinned: true);
+                    return (PinnedOvaUrl, PinnedSha256, PinnedVersion, IsPinned: true, UsePinnedChecksum: true);
                 }
 
                 var version = ExtractVersion(ovaUrl);
                 _logger.LogInformation(
                     "REMnux: using {Source} OVA {OvaUrl} (sha256 {Sha256}, version {Version}).",
                     urlIsPinned ? "pinned (matches live docs)" : "live-scraped", ovaUrl, sha256, version);
-                return (ovaUrl, sha256, version, IsPinned: urlIsPinned);
+
+                // Only a pair that matches the source pin may surface as
+                // "verified"; a new live release is runtime-verified only
+                // (publisher-page digest — transport consistency, not a pin).
+                if (urlIsPinned)
+                    return (ovaUrl, sha256, version, IsPinned: true, UsePinnedChecksum: true);
+                _logger.LogInformation(
+                    "REMnux {Version} is not pinned in VMCreate's source — the live docs digest will be used for transport verification only (unverified badge). Pin the new pair in REMnux.cs to restore the verified badge.",
+                    version);
+                return (ovaUrl, sha256, version, IsPinned: false, UsePinnedChecksum: false);
             }
             catch (OperationCanceledException)
             {
                 // The pinned fallback is synchronous and instant, so even a
                 // cancelled scrape can still resolve without delay — the
                 // static-loader contract requires results, not cancellation.
-                return (PinnedOvaUrl, PinnedSha256, PinnedVersion, IsPinned: true);
+                return (PinnedOvaUrl, PinnedSha256, PinnedVersion, IsPinned: true, UsePinnedChecksum: true);
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex,
                     "Failed to scrape REMnux docs at {DocsUrl} — using pinned {PinnedOvaUrl}.",
                     DocsUrl, PinnedOvaUrl);
-                return (PinnedOvaUrl, PinnedSha256, PinnedVersion, IsPinned: true);
+                return (PinnedOvaUrl, PinnedSha256, PinnedVersion, IsPinned: true, UsePinnedChecksum: true);
             }
         }
 

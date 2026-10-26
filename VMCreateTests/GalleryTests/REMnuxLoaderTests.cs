@@ -83,7 +83,9 @@ namespace VMCreate.Tests.GalleryTests
 
             var item = items.Single();
             Assert.AreEqual(liveUrl, item.DiskUri, "must use the scraped URL for a new release");
-            Assert.AreEqual(liveHash, item.Checksum, "must use the scraped hash for a new release");
+            Assert.AreEqual(liveHash, item.RuntimeChecksum, "must use the scraped hash for a new release");
+            Assert.IsNull(item.Checksum, "an unpinned live release must not occupy the pinned Checksum field");
+            Assert.IsFalse(item.HasChecksum, "an unpinned live release must not badge as verified");
             Assert.AreEqual("noble-202610", item.Version, "version must be derived from the scraped URL");
         }
 
@@ -98,6 +100,8 @@ namespace VMCreate.Tests.GalleryTests
 
             Assert.AreEqual(PinnedOvaUrl, item.DiskUri);
             Assert.AreEqual(PinnedSha256, item.Checksum);
+            Assert.IsNull(item.RuntimeChecksum, "a pinned pair must not need a runtime digest");
+            Assert.IsTrue(item.HasChecksum, "a pair matching the source pin badges as verified");
             Assert.AreEqual("noble-202602", item.Version);
         }
 

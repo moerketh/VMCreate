@@ -106,10 +106,12 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
-        public async Task ExecuteAsync_PacmanBranch_BypassesOmarchyUpdateGuard()
+        public async Task ExecuteAsync_PacmanBranch_InstallsOnlyRequestedPackages_WithoutGuardBypassOrUpgrade()
         {
-            // Live (Omarchy 4.0.6): the 00-omarchy-update-guard hook aborts any
-            // direct -Syu. The env must survive sudo, so `sudo env VAR=1`.
+            // The distro author's 00-omarchy-update-guard hook deliberately
+            // aborts direct -Syu transactions; the step must not bypass it or
+            // silently upgrade the whole system. It installs only the two
+            // requested packages against the existing sync DBs.
             _shellMock.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync("");
 
@@ -121,8 +123,11 @@ namespace VMCreate.Tests.HyperV.Steps
                 CancellationToken.None);
 
             _shellMock.Verify(s => s.RunCommandAsync(
-                It.Is<string>(cmd => cmd.Contains("sudo env OMARCHY_ALLOW_DIRECT_PACMAN=1 pacman -Syu --noconfirm openvpn")),
+                It.Is<string>(cmd => cmd.Contains("sudo pacman -S --needed --noconfirm openvpn networkmanager-openvpn")),
                 It.IsAny<CancellationToken>()), Times.Once);
+            _shellMock.Verify(s => s.RunCommandAsync(
+                It.Is<string>(cmd => cmd.Contains("-Syu") || cmd.Contains("OMARCHY_ALLOW_DIRECT_PACMAN")),
+                It.IsAny<CancellationToken>()), Times.Never);
         }
 
         [TestMethod]
@@ -158,6 +163,61 @@ namespace VMCreate.Tests.HyperV.Steps
                     It.IsAny<Exception?>(),
                     It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
                 Times.Once);
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_InstallCommand_PerformsNoRepoTrustChangesOrSystemUpgrades()
+        {
+            // Regression: the install command must not silently enable EPEL
+            // (a new signing authority for the guest's VM life) and must not
+            // bypass the distro's update guard with a full pacman -Syu
+            // upgrade. It only installs the requested packages and degrades
+            // to an owner-visible warning when unavailable.
+            string? firstCommand = null;
+            _shellMock
+                .Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Callback<string, CancellationToken>((cmd, _) => firstCommand ??= cmd)
+                .ReturnsAsync("OpenVPN plugin present for NetworkManager");
+
+            await _step.ExecuteAsync(
+                _shellMock.Object,
+                new GalleryItem(),
+                new VmCustomizations { InstallOpenVpn = true },
+                _loggerMock.Object,
+                CancellationToken.None);
+
+            Assert.IsNotNull(firstCommand, "the install command must be the first guest command");
+            Assert.IsFalse(firstCommand.Contains("epel-release"), "must not install EPEL as a side effect");
+            Assert.IsFalse(firstCommand.Contains("--set-enabled"), "must not enable repositories as a side effect");
+            Assert.IsFalse(firstCommand.Contains("-Syu"), "must not perform a full system upgrade");
+            Assert.IsFalse(firstCommand.Contains("OMARCHY_ALLOW_DIRECT_PACMAN"), "must not bypass the distro update guard");
+            Assert.IsTrue(firstCommand.Contains("pacman -S --needed"), "pacman branch must be a plain install");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_VerifyChecksNetworkManagerPlugin_NotJustTheBinary()
+        {
+            // Regression: a preinstalled openvpn binary must not mask a failed
+            // plugin transaction — the verify step must look for the
+            // NetworkManager plugin artifact the later nmcli import requires.
+            string? verifyCommand = null;
+            _shellMock
+                .Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Callback<string, CancellationToken>((cmd, _) =>
+                {
+                    if (cmd.Contains("compgen")) verifyCommand = cmd;
+                })
+                .ReturnsAsync("OpenVPN plugin present for NetworkManager");
+
+            await _step.ExecuteAsync(
+                _shellMock.Object,
+                new GalleryItem(),
+                new VmCustomizations { InstallOpenVpn = true },
+                _loggerMock.Object,
+                CancellationToken.None);
+
+            Assert.IsNotNull(verifyCommand, "a plugin-presence verify must run");
+            StringAssert.Contains(verifyCommand, "lib*openvpn*.so*", "the verify must probe the NM plugin library");
         }
     }
 }

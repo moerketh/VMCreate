@@ -921,23 +921,33 @@ install_hyperv_packages() {
     local _kver
     _kver=$(ls "$root/lib/modules/" 2>/dev/null | sort -V | tail -1)
 
+    # The kernel-version directory name comes from the (untrusted) source
+    # image's filesystem. It is only used to compose a package name, so
+    # anything outside the kernel-version character set is rejected outright
+    # rather than interpolated into the root chroot command below.
+    case "$_kver" in
+        ''|[!A-Za-z0-9._+-]*|*[!A-Za-z0-9._+-]*) _kver='' ;;
+    esac
+
     echo "Installing Hyper-V guest optimizations..."
 
-    if chroot "$root" /bin/bash -c "
+    # _kver is passed as a positional argument to a single-quoted script body,
+    # so the chroot's bash receives it as data - never as command text.
+    if chroot "$root" /bin/bash -c '
         export DEBIAN_FRONTEND=noninteractive
+        KVER="$1"
         if command -v apt-get >/dev/null 2>&1; then
             apt-get update -y -qq
-            KVER=\"${_kver}\"
-            # Try Ubuntu packages first, fall back to Debian's hyperv-daemons
+            # Try Ubuntu packages first, fall back to the Debian hyperv-daemons
             if apt-get install -y -qq linux-cloud-tools-common 2>&1; then
-                echo 'Installed linux-cloud-tools-common (Ubuntu)'
-                if [ -n \"\$KVER\" ]; then
-                    apt-get install -y -qq \"linux-cloud-tools-\${KVER}\" 2>&1 || true
+                echo "Installed linux-cloud-tools-common (Ubuntu)"
+                if [ -n "$KVER" ]; then
+                    apt-get install -y -qq "linux-cloud-tools-${KVER}" 2>&1 || true
                 fi
             elif apt-get install -y -qq hyperv-daemons 2>&1; then
-                echo 'Installed hyperv-daemons (Debian/Parrot)'
+                echo "Installed hyperv-daemons (Debian/Parrot)"
             else
-                echo 'WARNING: Could not install Hyper-V integration packages'
+                echo "WARNING: Could not install Hyper-V integration packages"
             fi
             apt-get install -y -qq openssh-server 2>&1
         elif command -v dnf >/dev/null 2>&1; then
@@ -948,15 +958,15 @@ install_hyperv_packages() {
             pacman-key --init 2>&1 && pacman-key --populate archlinux 2>&1 || true
             pacman -Sy --noconfirm hyperv openssh sudo 2>&1
         else
-            echo 'Unknown package manager — skipping Hyper-V optimization'
+            echo "Unknown package manager - skipping Hyper-V optimization"
             exit 1
         fi
         # Try enabling services in chroot (unreliable but harmless)
         for svc in hv-kvp-daemon hv_kvp_daemon hv-vss-daemon hv_vss_daemon hv-fcopy-daemon hv_fcopy_daemon; do
-            systemctl enable \"\${svc}.service\" 2>/dev/null || true
+            systemctl enable "${svc}.service" 2>/dev/null || true
         done
         systemctl enable ssh.service 2>/dev/null || systemctl enable sshd.service 2>/dev/null || true
-    "; then
+    ' bash "$_kver"; then
         echo "Hyper-V guest optimization completed successfully"
     else
         report_progress "HYPERV_OPTIMIZE_WARNING" "Hyper-V optimization partially failed (non-fatal)"

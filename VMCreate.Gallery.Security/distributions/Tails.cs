@@ -61,6 +61,18 @@ namespace VMCreate.Gallery
             if (string.IsNullOrWhiteSpace(imgUrl))
                 throw new Exception($"Tails API: could not find .img URL for version {version}.");
 
+            // The API is publisher metadata fetched at runtime: a compromise of
+            // it controls both URL and digest, so the digest can only prove
+            // transport consistency (RuntimeChecksum), never a source pin.
+            // Constrain the URL to the publisher's HTTPS hosts so the
+            // metadata cannot redirect the download to an arbitrary origin.
+            if (!Uri.TryCreate(imgUrl, UriKind.Absolute, out var imgUri)
+                || imgUri.Scheme != Uri.UriSchemeHttps
+                || (imgUri.Host != "tails.net" && imgUri.Host != "download.tails.net"))
+            {
+                throw new Exception($"Tails API: refusing non-tails.net or non-HTTPS image URL '{imgUrl}'.");
+            }
+
             var item = new GalleryItem
             {
                 Name = $"Tails {version}",
@@ -71,7 +83,7 @@ namespace VMCreate.Gallery
                 SymbolUri = logoUri,
                 DiskUri = imgUrl,
                 ChecksumAlgorithm = "SHA256",
-                Checksum = imgSha256,
+                RuntimeChecksum = imgSha256,
                 EnhancedSessionTransportType = "HvSocket",
                 Version = version,
                 LastUpdated = DateTime.UtcNow.ToString("o"),
