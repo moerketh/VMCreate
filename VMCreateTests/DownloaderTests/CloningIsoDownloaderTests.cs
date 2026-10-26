@@ -365,6 +365,31 @@ namespace VMCreate.Tests
             VerifyDownloaded(Times.Once());
         }
 
+        [TestMethod]
+        public async Task EnsureIsoAsync_CorruptedIsoWithValidManifest_RedownloadsAndRepairs()
+        {
+            // The manifest still verifies and matches the latest release,
+            // but the ISO itself was corrupted or replaced after it was
+            // cached. Without the size/hash check this would log "already
+            // present" and every deploy would then fail at the pre-boot
+            // check until the file was deleted by hand.
+            await SeedCacheAsync();
+            File.WriteAllText(_isoPath, "corrupted iso bytes");
+            var downloader = CreateDownloader();
+
+            await downloader.EnsureIsoAsync(_plan, CancellationToken.None, new Progress<CreateVMProgressInfo>());
+
+            Assert.AreEqual("downloaded iso bytes", File.ReadAllText(_isoPath),
+                "the damaged ISO must be replaced by a fresh download");
+            Assert.AreEqual("2.1.0", CachedManifest().Version);
+            VerifyDownloaded(Times.Once());
+
+            // And the repaired cache passes the pre-boot check again.
+            using (await downloader.VerifyCachedIsoGuardedAsync(_plan, CancellationToken.None))
+            {
+            }
+        }
+
         #endregion
 
         #region Offline behavior
@@ -418,27 +443,29 @@ namespace VMCreate.Tests
         #region Pre-boot verification
 
         [TestMethod]
-        public async Task VerifyCachedIsoAsync_ValidCache_Passes()
+        public async Task VerifyCachedIsoGuardedAsync_ValidCache_Passes()
         {
             await SeedCacheAsync();
             var downloader = CreateDownloader();
 
-            await downloader.VerifyCachedIsoAsync(_plan, CancellationToken.None);
+            using (await downloader.VerifyCachedIsoGuardedAsync(_plan, CancellationToken.None))
+            {
+            }
         }
 
         [TestMethod]
-        public async Task VerifyCachedIsoAsync_TamperedIso_Throws()
+        public async Task VerifyCachedIsoGuardedAsync_TamperedIso_Throws()
         {
             await SeedCacheAsync();
             File.WriteAllText(_isoPath, "tampered iso bytes");
             var downloader = CreateDownloader();
 
             await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
-                downloader.VerifyCachedIsoAsync(_plan, CancellationToken.None));
+                downloader.VerifyCachedIsoGuardedAsync(_plan, CancellationToken.None));
         }
 
         [TestMethod]
-        public async Task VerifyCachedIsoAsync_TamperedManifest_Throws()
+        public async Task VerifyCachedIsoGuardedAsync_TamperedManifest_Throws()
         {
             await SeedCacheAsync();
             byte[] manifest = CachedManifest().ManifestBytes;
@@ -448,16 +475,34 @@ namespace VMCreate.Tests
             var downloader = CreateDownloader();
 
             await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
-                downloader.VerifyCachedIsoAsync(_plan, CancellationToken.None));
+                downloader.VerifyCachedIsoGuardedAsync(_plan, CancellationToken.None));
         }
 
         [TestMethod]
-        public async Task VerifyCachedIsoAsync_MissingCache_Throws()
+        public async Task VerifyCachedIsoGuardedAsync_MissingCache_Throws()
         {
             var downloader = CreateDownloader();
 
             await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
-                downloader.VerifyCachedIsoAsync(_plan, CancellationToken.None));
+                downloader.VerifyCachedIsoGuardedAsync(_plan, CancellationToken.None));
+        }
+
+        [TestMethod]
+        public async Task VerifyCachedIsoGuardedAsync_FailedCheck_ReleasesTheHandle()
+        {
+            // The lock handle opened for the check must be closed when the
+            // check fails, or a failed pre-boot check would keep the ISO
+            // locked (and its repair re-download unwritable).
+            await SeedCacheAsync();
+            File.WriteAllText(_isoPath, "tampered iso bytes");
+            var downloader = CreateDownloader();
+
+            await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
+                downloader.VerifyCachedIsoGuardedAsync(_plan, CancellationToken.None));
+
+            using (FileStream writer = File.Open(_isoPath, FileMode.Open, FileAccess.Write, FileShare.Read))
+            {
+            }
         }
 
         [TestMethod]
@@ -480,7 +525,7 @@ namespace VMCreate.Tests
         }
 
         [TestMethod]
-        public async Task VerifyCachedIsoAsync_UnsignedCache_Throws()
+        public async Task VerifyCachedIsoGuardedAsync_UnsignedCache_Throws()
         {
             // The .version-only legacy cache is not a verified cache.
             File.WriteAllText(_isoPath, "stale legacy iso");
@@ -488,7 +533,7 @@ namespace VMCreate.Tests
             var downloader = CreateDownloader();
 
             await Assert.ThrowsExactlyAsync<InvalidOperationException>(() =>
-                downloader.VerifyCachedIsoAsync(_plan, CancellationToken.None));
+                downloader.VerifyCachedIsoGuardedAsync(_plan, CancellationToken.None));
         }
 
         #endregion

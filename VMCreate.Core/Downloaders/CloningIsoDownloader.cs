@@ -27,16 +27,11 @@ namespace VMCreate
 
         /// <summary>
         /// Re-checks the cached ISO against its cached manifest right before the VM
-        /// boots from it: the manifest signature must verify again and the ISO's size
-        /// and SHA-256 must match it again. Throws when the cache is missing, unsigned,
-        /// or no longer matches — offline included; an unverified cache never boots.
-        /// </summary>
-        Task VerifyCachedIsoAsync(VmDeploymentPlan plan, CancellationToken cancellationToken);
-
-        /// <summary>
-        /// Like <see cref="VerifyCachedIsoAsync"/>, but returns a disposable guard
-        /// holding a <c>FileShare.Read</c> handle on the ISO until it is disposed —
-        /// nothing can replace the verified bytes while the boot cycle runs.
+        /// boots from it, and returns a disposable guard that holds a
+        /// <c>FileShare.Read</c> handle on the verified ISO — nothing can replace
+        /// the verified bytes while the boot cycle runs. Throws when the cache is
+        /// missing, unsigned, or no longer matches — offline included; an
+        /// unverified cache never boots.
         /// </summary>
         Task<IIsoReadGuard> VerifyCachedIsoGuardedAsync(VmDeploymentPlan plan, CancellationToken cancellationToken);
     }
@@ -121,6 +116,19 @@ namespace VMCreate
             // release manifest and its signature stored next to it.
             string isoPath = plan.CloningIsoPath;
             VerifiedIsoManifest? cached = TryVerifyCachedManifest(isoPath, requireIso: true);
+            if (cached != null && !await CachedIsoMatchesManifestAsync(isoPath, cached, cancellationToken))
+            {
+                // A signed manifest whose ISO no longer matches means the
+                // ISO was corrupted or replaced after verification. Treat
+                // it as no cache: re-download the release so a damaged
+                // cache repairs itself instead of failing every deploy
+                // at the pre-boot check ("delete it by hand").
+                _logger.LogWarning(
+                    "The cached cloning ISO at {IsoPath} does not match its signed manifest (size or SHA-256 changed). " +
+                    "Re-downloading the release to repair the cache.",
+                    isoPath);
+                cached = null;
+            }
 
             SignedRelease? latest;
             try
@@ -233,23 +241,6 @@ namespace VMCreate
             }
         }
 
-        public async Task VerifyCachedIsoAsync(VmDeploymentPlan plan, CancellationToken cancellationToken)
-        {
-            if (plan == null) throw new ArgumentNullException(nameof(plan));
-            cancellationToken.ThrowIfCancellationRequested();
-
-            string isoPath = plan.CloningIsoPath;
-            VerifiedIsoManifest? manifest = TryVerifyCachedManifest(isoPath, requireIso: true);
-            if (manifest == null)
-                throw new InvalidOperationException(
-                    $"The cached cloning ISO at {isoPath} has no valid signed manifest — it cannot be trusted for boot. " +
-                    "Delete it and deploy again while online.");
-
-            await VerifyIsoFileAsync(isoPath, manifest, cancellationToken);
-            _logger.LogInformation("Pre-boot check passed for cloning ISO {Version} at {IsoPath}",
-                manifest.Version, isoPath);
-        }
-
         public async Task<IIsoReadGuard> VerifyCachedIsoGuardedAsync(VmDeploymentPlan plan, CancellationToken cancellationToken)
         {
             if (plan == null) throw new ArgumentNullException(nameof(plan));
@@ -262,15 +253,47 @@ namespace VMCreate
                     $"The cached cloning ISO at {isoPath} has no valid signed manifest — it cannot be trusted for boot. " +
                     "Delete it and deploy again while online.");
 
-            await VerifyIsoFileAsync(isoPath, manifest, cancellationToken);
-            _logger.LogInformation("Pre-boot check passed for cloning ISO {Version} at {IsoPath}",
-                manifest.Version, isoPath);
+            // Open the lock FIRST and verify through THAT handle: opening
+            // a second handle after hashing would leave a window in which
+            // the file could be swapped between check and lock. Holding
+            // FileShare.Read blocks any writer, and Hyper-V opens the DVD
+            // with read sharing so the boot still works.
+            FileStream stream;
+            try
+            {
+                stream = File.Open(isoPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                throw new InvalidOperationException(
+                    $"Could not open the cached cloning ISO at {isoPath} for the pre-boot check. " +
+                    "It may be in use by another process.", ex);
+            }
 
-            // Hold the verified bytes until the caller disposes the guard:
-            // a FileShare.Read handle blocks any writer, and Hyper-V opens
-            // the DVD with read sharing so the boot still works.
-            FileStream stream = File.Open(isoPath, FileMode.Open, FileAccess.Read, FileShare.Read);
-            return new IsoReadGuard(stream);
+            try
+            {
+                if (stream.Length != manifest.IsoSize)
+                    throw new InvalidOperationException(
+                        $"The cloning ISO '{Path.GetFileName(isoPath)}' has size {stream.Length:N0} bytes, but its signed " +
+                        $"manifest records {manifest.IsoSize:N0} bytes. The file has been changed since verification — " +
+                        "refusing to boot it.");
+
+                byte[] hash = await SHA256.HashDataAsync(stream, cancellationToken);
+                string actualSha = Convert.ToHexString(hash).ToLowerInvariant();
+                if (!string.Equals(actualSha, manifest.IsoSha256, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException(
+                        $"The cloning ISO '{Path.GetFileName(isoPath)}' has SHA-256 {actualSha}, but its signed manifest " +
+                        $"records {manifest.IsoSha256}. The file has been changed since verification — refusing to boot it.");
+
+                _logger.LogInformation("Pre-boot check passed for cloning ISO {Version} at {IsoPath}",
+                    manifest.Version, isoPath);
+                return new IsoReadGuard(stream);
+            }
+            catch
+            {
+                await stream.DisposeAsync();
+                throw;
+            }
         }
 
         private sealed class IsoReadGuard : IIsoReadGuard
@@ -287,17 +310,17 @@ namespace VMCreate
         }
 
         /// <summary>
-        /// Verifies a cached ISO's size and SHA-256 against its already
+        /// Verifies a downloaded ISO's size and SHA-256 against its already
         /// signature-verified manifest.
         /// </summary>
         private async Task VerifyIsoFileAsync(string isoPath, VerifiedIsoManifest manifest,
                                                CancellationToken cancellationToken)
         {
-            if (!File.Exists(isoPath))
+            var file = new FileInfo(isoPath);
+            if (!file.Exists)
                 throw new InvalidOperationException(
                     $"The cloning ISO is missing at {isoPath}.");
 
-            var file = new FileInfo(isoPath);
             if (file.Length != manifest.IsoSize)
                 throw new InvalidOperationException(
                     $"The cloning ISO '{Path.GetFileName(isoPath)}' has size {file.Length:N0} bytes, but its signed " +
@@ -309,6 +332,31 @@ namespace VMCreate
                 throw new InvalidOperationException(
                     $"The cloning ISO '{Path.GetFileName(isoPath)}' has SHA-256 {actualSha}, but its signed manifest " +
                     $"records {manifest.IsoSha256}. The file has been changed since verification — refusing to boot it.");
+        }
+
+        /// <summary>
+        /// Whether the cached ISO still matches its signed manifest's size
+        /// and SHA-256. False means the cache is damaged and must be
+        /// re-downloaded. Read errors count as a mismatch: an unreadable
+        /// cache is not usable.
+        /// </summary>
+        private async Task<bool> CachedIsoMatchesManifestAsync(string isoPath, VerifiedIsoManifest manifest,
+                                                                CancellationToken cancellationToken)
+        {
+            try
+            {
+                await VerifyIsoFileAsync(isoPath, manifest, cancellationToken);
+                return true;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
+            {
+                _logger.LogWarning(ex, "The cached cloning ISO at {IsoPath} does not verify against its manifest.", isoPath);
+                return false;
+            }
         }
 
         /// <summary>
@@ -481,6 +529,15 @@ namespace VMCreate
                         string published = release.TryGetProperty("published_at", out var pubEl)
                             ? pubEl.GetString() ?? "" : "";
 
+                        // The release's tag names its exact assets. Matching
+                        // the full file name (not just any *.manifest.json)
+                        // leaves no room for an extra asset to shadow the
+                        // real one.
+                        string version = tag.StartsWith("v", StringComparison.OrdinalIgnoreCase)
+                            ? tag[1..]
+                            : tag;
+                        string manifestAsset = $"vmcreate-{version}.manifest.json";
+
                         string? isoUrl = null, manifestUrl = null, signatureUrl = null;
                         if (release.TryGetProperty("assets", out var assetsEl))
                         {
@@ -496,9 +553,9 @@ namespace VMCreate
                                 {
                                     isoUrl = url;
                                 }
-                                else if (name.EndsWith(".manifest.json", StringComparison.OrdinalIgnoreCase))
+                                else if (name.Equals(manifestAsset, StringComparison.OrdinalIgnoreCase))
                                     manifestUrl = url;
-                                else if (name.EndsWith(".manifest.json.sig", StringComparison.OrdinalIgnoreCase))
+                                else if (name.Equals(manifestAsset + ".sig", StringComparison.OrdinalIgnoreCase))
                                     signatureUrl = url;
                             }
                         }
@@ -534,10 +591,12 @@ namespace VMCreate
                             "vmcreate-<ver>.manifest.json and .manifest.json.sig). " +
                             "Check https://github.com/moerketh/vmcreate-iso/releases");
 
-                    string version = bestValue.Tag.StartsWith("v", StringComparison.OrdinalIgnoreCase) ? bestValue.Tag[1..] : bestValue.Tag;
+                    string selectedVersion = bestValue.Tag.StartsWith("v", StringComparison.OrdinalIgnoreCase)
+                        ? bestValue.Tag[1..]
+                        : bestValue.Tag;
                     _logger.LogInformation("Selected vmcreate-iso release {Version} (stable={Stable}, signed releases seen: {Count}): {IsoUrl}",
-                        version, bestIsStable, signedCount, bestValue.IsoUrl);
-                    return new SignedRelease(bestValue.Tag, version, bestValue.IsoUrl, bestValue.ManifestUrl, bestValue.SignatureUrl);
+                        selectedVersion, bestIsStable, signedCount, bestValue.IsoUrl);
+                    return new SignedRelease(bestValue.Tag, selectedVersion, bestValue.IsoUrl, bestValue.ManifestUrl, bestValue.SignatureUrl);
                 }
                 catch (HttpRequestException ex)
                 {
