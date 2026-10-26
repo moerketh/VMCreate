@@ -85,7 +85,7 @@ namespace VMCreate.Tests.Cidata
             StringAssert.Contains(yaml, "  eth0:");
             StringAssert.Contains(yaml, "    addresses: [192.168.10.50/24]");
             StringAssert.Contains(yaml, "    routes:");
-            StringAssert.Contains(yaml, "      - to: default");
+            StringAssert.Contains(yaml, "      - to: 0.0.0.0/0");
             StringAssert.Contains(yaml, "        via: 192.168.10.1");
             StringAssert.Contains(yaml, "    nameservers:");
             StringAssert.Contains(yaml, "      addresses: [8.8.8.8, 1.1.1.1]");

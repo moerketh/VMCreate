@@ -105,10 +105,14 @@ public sealed class StaticNetworkConfig
 /// interface's current name, so the config follows the device whatever it is
 /// called. Renderers without match support fall back to the id, which stays
 /// <c>eth0</c> — the name Hyper-V cloud images use.
-/// The default route uses the modern
-/// <c>routes: [{to: default, via: …}]</c> form; cloud-init normalizes
-/// <c>to: default</c> to <c>0.0.0.0/0</c> and the networkd renderer emits a
-/// <c>[Route]</c> section, so no deprecated <c>gateway4</c> is written.
+/// The default route uses the explicit
+/// <c>routes: [{to: 0.0.0.0/0, via: …}]</c> form. The <c>to: default</c>
+/// shorthand looks modern but is NOT accepted by every cloud-init:
+/// Rocky 10's cloud-init rejects it in <c>network_state</c>
+/// ("Address default is not a valid ip network", live-observed) and the
+/// whole network stage then aborts to DHCP fallback. <c>0.0.0.0/0</c> is
+/// valid on every version and renders identically (networkd emits a
+/// <c>[Route]</c> section), so no deprecated <c>gateway4</c> is needed.
 /// IPv4 only.
 /// </remarks>
 public static class NoCloudNetworkConfig
@@ -144,7 +148,7 @@ public static class NoCloudNetworkConfig
         if (gateway is not null)
         {
             sb.Append("    routes:\n");
-            sb.Append("      - to: default\n");
+            sb.Append("      - to: 0.0.0.0/0\n");
             sb.Append($"        via: {gateway}\n");
         }
         if (!string.IsNullOrWhiteSpace(config.StaticDns))
