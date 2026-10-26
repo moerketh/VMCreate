@@ -71,7 +71,11 @@ namespace VMCreate.Tests.HyperV.VmCreation
 
             _vmSettings = new VmSettings
             {
-                VMName = "TestVM",
+                // Unique per test run: the seed ISO and VM paths derive from
+                // the VM name, and the assembly runs test methods in
+                // parallel — a shared "TestVM" means every cloud-init test
+                // builds and reads the SAME seed file concurrently.
+                VMName = "TestVM" + Guid.NewGuid().ToString("N")[..8],
                 MemoryInMB = 4096,
                 CloningIsoPath = Path.Combine(Path.GetTempPath(), $"clone_{Guid.NewGuid():N}.iso")
             };
@@ -110,6 +114,9 @@ namespace VMCreate.Tests.HyperV.VmCreation
                 It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<int>(), It.IsAny<int>()))
                 .ReturnsAsync(true);
 
+            _vhdxPathServiceRoot = Path.Combine(
+                Path.GetTempPath(), "vmcreate-strategy-tests-" + Guid.NewGuid().ToString("N")[..8]);
+            Directory.CreateDirectory(_vhdxPathServiceRoot);
             _strategy = new DiskImageVmCreationStrategy(
                 _lifecycleManager.Object,
                 _diskManager.Object,
@@ -124,16 +131,31 @@ namespace VMCreate.Tests.HyperV.VmCreation
                 _stepPlanner.Object,
                 _hostNetworkService.Object,
                 new Mock<ILogger<DiskImageVmCreationStrategy>>().Object,
-                Mock.Of<IVmPathService>(s => s.DefaultVmPath == @"C:\Hyper-V" && s.DefaultVhdxPath == @"C:\Hyper-V\Virtual hard disks"),
+                // A temp root, NOT the real Hyper-V folders: the strategy
+                // builds and deletes real seed ISOs under DefaultVhdxPath, and
+                // test artifacts must not land in the machine's actual VM
+                // disk directory.
+                Mock.Of<IVmPathService>(
+                    s => s.DefaultVmPath == _vhdxPathServiceRoot
+                         && s.DefaultVhdxPath == _vhdxPathServiceRoot
+                         && s.GetVirtualHardDiskPath(It.IsAny<string>())
+                             == Path.Combine(_vhdxPathServiceRoot, "disks")),
                 _isoBootRunner.Object,
                 _cloningIsoDownloader.Object);
         }
+
+        private string _vhdxPathServiceRoot = null!;
 
         [TestCleanup]
         public void Cleanup()
         {
             try { File.Delete(_mediaPath); } catch { }
             try { File.Delete(_cloningIsoPath); } catch { }
+            try { File.Delete(_customUserDataPath); } catch { }
+            // The temp path-service root holds the built seed ISOs (and the
+            // MBR-clone working files); delete the whole tree so repeated
+            // runs never accumulate artifacts.
+            try { if (_vhdxPathServiceRoot != null) Directory.Delete(_vhdxPathServiceRoot, true); } catch { }
         }
 
         [TestMethod]
@@ -186,7 +208,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
         {
             await ExecuteAsync(generation: 2);
 
-            _lifecycleManager.Verify(h => h.CreateVMAsync(_plan, @"C:\Hyper-V", 2, It.IsAny<CancellationToken>()), Times.Once);
+            _lifecycleManager.Verify(h => h.CreateVMAsync(_plan, _vhdxPathServiceRoot, 2, It.IsAny<CancellationToken>()), Times.Once);
             _diskManager.Verify(h => h.AddExistingHardDrive(_plan, _mediaPath, It.IsAny<CancellationToken>()), Times.Once);
             _bootManager.Verify(h => h.AddBootDvd(_plan, _cloningIsoPath, It.IsAny<CancellationToken>()), Times.Once);
             _isoBootRunner.Verify(r => r.RunAsync(
@@ -234,7 +256,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
         {
             await ExecuteAsync(generation: 1);
 
-            _diskManager.Verify(h => h.AddNewHardDrive(_plan, @"C:\Hyper-V\Virtual hard disks", It.IsAny<CancellationToken>()), Times.Once);
+            _diskManager.Verify(h => h.AddNewHardDrive(_plan, _vhdxPathServiceRoot, It.IsAny<CancellationToken>()), Times.Once);
             _diskManager.Verify(h => h.AddExistingHardDrive(_plan, _mediaPath, It.IsAny<CancellationToken>()), Times.Once);
             _bootManager.Verify(h => h.SetFirstBootToDvd(_plan, It.IsAny<CancellationToken>()), Times.Once);
             _isoBootRunner.Verify(r => r.RunAsync(
@@ -333,7 +355,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
 
             await ExecuteAsync(generation: 1);
 
-            _diskManager.Verify(h => h.AddNewHardDrive(_plan, @"C:\Hyper-V\Virtual hard disks", It.IsAny<CancellationToken>()), Times.Once);
+            _diskManager.Verify(h => h.AddNewHardDrive(_plan, _vhdxPathServiceRoot, It.IsAny<CancellationToken>()), Times.Once);
             _diskManager.Verify(h => h.AddExistingHardDrive(_plan, _mediaPath, It.IsAny<CancellationToken>()), Times.Once);
             _bootManager.Verify(h => h.AddBootDvd(_plan, _cloningIsoPath, It.IsAny<CancellationToken>()), Times.Once);
             _bootManager.Verify(h => h.AddBootDvd(_plan, It.Is<string>(p => p.EndsWith("_cidata.iso", StringComparison.OrdinalIgnoreCase)), It.IsAny<CancellationToken>()), Times.Once);
@@ -341,6 +363,194 @@ namespace VMCreate.Tests.HyperV.VmCreation
             _isoBootRunner.Verify(r => r.RunAsync(
                 It.IsAny<VmCreationContext>(), 1, _mediaPath, _customizations,
                 It.IsAny<IProgress<CreateVMProgressInfo>>(), It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        // ── --cloud-init on untagged images (the raw-cloud-image path) ──────
+
+        // Per-test file: the assembly parallelizes test methods, so tests
+        // cannot share one user-data path (cleanup would delete it while
+        // another test's seed build is still reading it).
+        private string _customUserDataPath = null!;
+
+        private void WriteCustomUserData()
+        {
+            _customUserDataPath = Path.Combine(
+                Path.GetTempPath(), "vmcreate-tests-userdata-" + Guid.NewGuid().ToString("N") + ".yaml");
+            File.WriteAllText(_customUserDataPath, "#cloud-config\npackages: [htop]\n");
+        }
+
+        [TestMethod]
+        public async Task CreateVMAsync_UntaggedGen2WithCloudInitFile_BootsDiskWithSeed_NoCloningIso()
+        {
+            // The headline --cloud-init case: a raw cloud image with NO
+            // gallery tag. The user-data file alone must imply the seed
+            // path — attach the NoCloud seed, boot the disk, never attach
+            // the cloning ISO, never run the clone cycle. This one
+            // condition is what makes any cloud-init-enabled image a
+            // one-command unattended deploy.
+            WriteCustomUserData();
+            _customizations = new VmCustomizations { CloudInitUserDataPath = _customUserDataPath };
+            _postBootService.Setup(s => s.HasLinuxPostBootSteps(_item, _customizations)).Returns(false);
+
+            await ExecuteAsync(generation: 2);
+
+            _diskManager.Verify(h => h.AddExistingHardDrive(_plan, _mediaPath, It.IsAny<CancellationToken>()), Times.Once);
+            _diskManager.Verify(h => h.AddNewHardDrive(_plan, It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+            _bootManager.Verify(h => h.AddBootDvd(_plan, _cloningIsoPath, It.IsAny<CancellationToken>()), Times.Never,
+                "a --cloud-init deploy must never attach the cloning ISO on the Gen-2 path");
+            _bootManager.Verify(h => h.AddBootDvd(_plan, It.Is<string>(p => p.EndsWith("_cidata.iso", StringComparison.OrdinalIgnoreCase)), It.IsAny<CancellationToken>()), Times.Once,
+                "the NoCloud seed must be attached");
+            _bootManager.Verify(h => h.SetFirstBootToHardDrive(_plan, It.IsAny<CancellationToken>()), Times.Once);
+            _isoBootRunner.Verify(r => r.RunAsync(
+                It.IsAny<VmCreationContext>(), It.IsAny<int>(), It.IsAny<string>(), It.IsAny<VmCustomizations>(),
+                It.IsAny<IProgress<CreateVMProgressInfo>>(), It.IsAny<CancellationToken>()), Times.Never,
+                "a --cloud-init deploy must never run the clone cycle on the Gen-2 path");
+        }
+
+        [TestMethod]
+        public async Task CreateVMAsync_UntaggedGen1WithCloudInitFile_ClonesLayoutWithSeed()
+        {
+            // MBR/BIOS-classified source: the --cloud-init deploy still goes
+            // through the clone cycle (layout conversion is mandatory) with
+            // the seed attached as the second DVD for the post-clone first
+            // boot — the same shape as a tagged cloud-init Gen 1 deploy.
+            WriteCustomUserData();
+            _customizations = new VmCustomizations { CloudInitUserDataPath = _customUserDataPath };
+            _postBootService.Setup(s => s.HasLinuxPostBootSteps(_item, _customizations)).Returns(false);
+
+            await ExecuteAsync(generation: 1);
+
+            _diskManager.Verify(h => h.AddNewHardDrive(_plan, _vhdxPathServiceRoot, It.IsAny<CancellationToken>()), Times.Once);
+            _diskManager.Verify(h => h.AddExistingHardDrive(_plan, _mediaPath, It.IsAny<CancellationToken>()), Times.Once);
+            _bootManager.Verify(h => h.AddBootDvd(_plan, _cloningIsoPath, It.IsAny<CancellationToken>()), Times.Once);
+            _bootManager.Verify(h => h.AddBootDvd(_plan, It.Is<string>(p => p.EndsWith("_cidata.iso", StringComparison.OrdinalIgnoreCase)), It.IsAny<CancellationToken>()), Times.Once,
+                "the seed must ride along on the clone path too");
+            _bootManager.Verify(h => h.SetFirstBootToDvd(_plan, It.IsAny<CancellationToken>()), Times.Once);
+            _isoBootRunner.Verify(r => r.RunAsync(
+                It.IsAny<VmCreationContext>(), 1, _mediaPath, It.IsAny<VmCustomizations>(),
+                It.IsAny<IProgress<CreateVMProgressInfo>>(), It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [TestMethod]
+        public async Task CreateVMAsync_UntaggedGen2WithCloudInitFile_EmbedsCustomUserDataInSeed()
+        {
+            // The seed built for a --cloud-init deploy must carry the user's
+            // content merged ahead of the built-in block (multipart), not
+            // just the stock cloud-config.
+            WriteCustomUserData();
+            _customizations = new VmCustomizations { CloudInitUserDataPath = _customUserDataPath };
+            _postBootService.Setup(s => s.HasLinuxPostBootSteps(_item, _customizations)).Returns(false);
+            string? builtSeed = null;
+            _bootManager.Setup(b => b.AddBootDvd(
+                    _plan, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Callback((VmDeploymentPlan _, string iso, CancellationToken _) => builtSeed = iso)
+                .Returns(Task.CompletedTask);
+
+            await ExecuteAsync(generation: 2);
+
+            Assert.IsNotNull(builtSeed, "the seed must have been built and attached");
+            Assert.IsTrue(File.Exists(builtSeed), "the built seed file must exist for inspection");
+            byte[] isoBytes = File.ReadAllBytes(builtSeed);
+            string isoText = System.Text.Encoding.ASCII.GetString(isoBytes);
+            StringAssert.Contains(isoText, "packages: [htop]",
+                "the user's cloud-config content must be inside the seed ISO");
+        }
+
+        [TestMethod]
+        public async Task CreateVMAsync_UntaggedGen2WithoutCloudInitFile_NeverAttachesSeed()
+        {
+            // Regression pin: an untagged image with no --cloud-init file
+            // keeps the stock flow — no seed ISO is ever built or attached.
+            _customizations = new VmCustomizations();
+            _postBootService.Setup(s => s.HasLinuxPostBootSteps(_item, _customizations)).Returns(false);
+
+            await ExecuteAsync(generation: 2);
+
+            _bootManager.Verify(h => h.AddBootDvd(
+                _plan, It.Is<string>(p => p.EndsWith("_cidata.iso", StringComparison.OrdinalIgnoreCase)), It.IsAny<CancellationToken>()), Times.Never,
+                "an untagged image without --cloud-init must not get a seed");
+        }
+
+        [TestMethod]
+        public async Task CreateVMAsync_CloudInitFile_WithCustomSshKey_SeedUsesThatKey()
+        {
+            // --ssh-key + --cloud-init: post-boot SSH connects with the
+            // private key matching the seed's embedded public key, so the
+            // seed must embed the CUSTOM key, not the auto-generated one.
+            WriteCustomUserData();
+            _customizations = new VmCustomizations
+            {
+                CloudInitUserDataPath = _customUserDataPath,
+                CustomSshPublicKeyPath = "C:\\Users\\Test\\.ssh\\custom_key.pub"
+            };
+            _sshKeyManager.Setup(s => s.ReadPublicKeyAsync(
+                    "C:\\Users\\Test\\.ssh\\custom_key.pub", It.IsAny<CancellationToken>()))
+                .ReturnsAsync("ssh-ed25519 AAAACUSTOM custom@test");
+            _postBootService.Setup(s => s.HasLinuxPostBootSteps(_item, _customizations)).Returns(false);
+            string? builtSeed = null;
+            _bootManager.Setup(b => b.AddBootDvd(
+                    _plan, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Callback((VmDeploymentPlan _, string iso, CancellationToken _) => builtSeed = iso)
+                .Returns(Task.CompletedTask);
+
+            await ExecuteAsync(generation: 2);
+
+            Assert.IsNotNull(builtSeed);
+            Assert.IsTrue(File.Exists(builtSeed));
+            byte[] isoBytes = File.ReadAllBytes(builtSeed);
+            string isoText = System.Text.Encoding.ASCII.GetString(isoBytes);
+            StringAssert.Contains(isoText, "ssh-ed25519 AAAACUSTOM custom@test",
+                "the seed must embed the user's custom public key");
+            _sshKeyManager.Verify(s => s.ReadPublicKeyAsync(
+                "C:\\Users\\Test\\.ssh\\custom_key.pub", It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [TestMethod]
+        public async Task CreateVMAsync_TaggedCloudInitItem_WithCustomSshKey_SeedUsesThatKey()
+        {
+            // The same key contract on the tagged appliance path.
+            _item = CloudInitItem();
+            _customizations = new VmCustomizations
+            {
+                CustomSshPublicKeyPath = "C:\\Users\\Test\\.ssh\\custom_key.pub"
+            };
+            _sshKeyManager.Setup(s => s.ReadPublicKeyAsync(
+                    "C:\\Users\\Test\\.ssh\\custom_key.pub", It.IsAny<CancellationToken>()))
+                .ReturnsAsync("ssh-ed25519 AAAACUSTOM custom@test");
+            _postBootService.Setup(s => s.HasLinuxPostBootSteps(_item, _customizations)).Returns(false);
+            string? builtSeed = null;
+            _bootManager.Setup(b => b.AddBootDvd(
+                    _plan, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Callback((VmDeploymentPlan _, string iso, CancellationToken _) => builtSeed = iso)
+                .Returns(Task.CompletedTask);
+
+            await ExecuteAsync(generation: 2);
+
+            Assert.IsNotNull(builtSeed);
+            Assert.IsTrue(File.Exists(builtSeed));
+            byte[] isoBytes = File.ReadAllBytes(builtSeed);
+            string isoText = System.Text.Encoding.ASCII.GetString(isoBytes);
+            StringAssert.Contains(isoText, "ssh-ed25519 AAAACUSTOM custom@test",
+                "the seed must embed the user's custom public key");
+        }
+
+        [TestMethod]
+        public async Task CreateVMAsync_CloudInitFile_MissingFile_FailsLoudly()
+        {
+            // The strategy re-reads the file at seed-build time; a file that
+            // vanished between CLI validation and VM creation must fail the
+            // deployment with the path in the message, not ship a seed
+            // without the user's content.
+            _customizations = new VmCustomizations
+            {
+                CloudInitUserDataPath = Path.Combine(Path.GetTempPath(), "vmcreate-no-such-userdata.yaml")
+            };
+
+            var ex = await Assert.ThrowsAsync<FileNotFoundException>(() => ExecuteAsync(generation: 2));
+            StringAssert.Contains(ex.Message, "vmcreate-no-such-userdata.yaml");
+            _lifecycleManager.Verify(m => m.StartVM(
+                It.IsAny<VmDeploymentPlan>(), It.IsAny<CancellationToken>()), Times.Never,
+                "a missing user-data file must fail before the VM boots");
         }
 
         [TestMethod]
@@ -412,7 +622,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
                 "RHEL/Debian binary name must be named for the fix hint");
             StringAssert.Contains(ex.Message, "hypervkvpd", StringComparison.Ordinal,
                 "RHEL-class unit name must be named for the fix hint");
-            StringAssert.Contains(ex.Message, "TestVM", StringComparison.Ordinal);
+            StringAssert.Contains(ex.Message, _plan.VmName, StringComparison.Ordinal);
             _kvpHeartbeatGate.Verify(g => g.WaitForGuestKvpAsync(
                 It.IsAny<string>(), It.IsAny<CancellationToken>(), It.IsAny<int>(), It.IsAny<int>()), Times.Exactly(2),
                 "the gate probes cheaply once after SSH, then waits the full timeout after post-boot");

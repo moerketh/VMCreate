@@ -192,6 +192,20 @@ namespace VMCreate
         public ElasticAiSettings ElasticAi { get; set; } = new();
 
         /// <summary>
+        /// Optional path to a cloud-init user-data file supplied by the user
+        /// (CLI <c>--cloud-init</c>). When set, the deployment's NoCloud seed
+        /// merges the file's content ahead of the built-in cloud-config block
+        /// via MIME multipart — cloud-init runs both parts, and on conflicting
+        /// top-level cloud-config keys the built-in block (automation user,
+        /// SSH key, passwordless sudo, growpart) wins, so post-boot SSH
+        /// machinery keeps working. Setting this on an image without the
+        /// <c>cloud-init</c> tag still forces the seed path (see
+        /// <c>DiskImageVmCreationStrategy</c>), which is what makes a raw
+        /// cloud image deployable unattended.
+        /// </summary>
+        public string? CloudInitUserDataPath { get; set; }
+
+        /// <summary>
         /// Returns true if any pre-boot customizations are enabled
         /// (i.e. options applied during ISO customization before first boot).
         /// Only xrdp uses the pre-boot (cloning-ISO) path. Lamco installs

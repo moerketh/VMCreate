@@ -10,6 +10,7 @@ A Windows desktop application that replaces Hyper-V Quick Create with a streamli
 - **Multi-format media support** — QCOW2, VMDK, VHD/VHDX, OVA, IMG, 7z, XZ, and Zstandard archives
 - **Gen 1 & Gen 2 Hyper-V VMs** — automatic MBR-to-GPT migration and cloning for Gen 2 UEFI boot
 - **Post-boot customization** — SSH-based guest automation for timezone sync, VPN deployment, and Enhanced Session setup (xRDP)
+- **Cloud-init deployments** — the CLI's `--cloud-init <file>` merges a user-data file (shell script, `#cloud-config` document, …) into the NoCloud seed, turning any cloud-init-enabled cloud image into a one-command unattended deploy (`--image-uri <image> --cloud-init <file>`)
 - **Hack The Box integration** — deploy OpenVPN configs from HTB Labs, Starting Point, and Academy directly into the guest
 - **SHA-256 checksum verification** on all downloads
 - **Phase-card progress UI** — real-time status for each stage of the deployment pipeline

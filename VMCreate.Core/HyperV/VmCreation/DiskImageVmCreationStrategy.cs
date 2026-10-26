@@ -15,6 +15,10 @@ namespace VMCreate.HyperV.VmCreation
     /// (Gen2) and MBR (Gen1) partition schemes by booting a customization ISO that
     /// installs packages, clones MBR to GPT if necessary, and injects an SSH key.
     /// After the ISO cycle, optional Linux post-boot steps run over SSH.
+    /// Deployments carrying the gallery <c>cloud-init</c> tag or a user-supplied
+    /// cloud-init user-data file (<c>--cloud-init</c>) attach a NoCloud seed ISO
+    /// instead — cloud-init provisions the automation user on first boot and the
+    /// cloning-ISO cycle is skipped entirely on the Gen-2 path.
     /// </summary>
     public class DiskImageVmCreationStrategy : IVmCreationStrategy
     {
@@ -107,7 +111,12 @@ namespace VMCreate.HyperV.VmCreation
 
             // Cloud-init gallery items (tag "cloud-init", e.g. Elastic SIEM)
             // are customized by a NoCloud seed ISO instead of the cloning ISO.
-            bool isCloudInit = item.HasTag("cloud-init");
+            // A user-supplied --cloud-init file implies the seed path too,
+            // which is what lets an untagged cloud image (--image-uri) deploy
+            // unattended: the seed provisions the automation user instead of
+            // the cloning ISO's SSH-key injection.
+            bool isCloudInit = item.HasTag("cloud-init")
+                               || !string.IsNullOrEmpty(vmCustomizations.CloudInitUserDataPath);
             string? seedIsoPath = null;
             // Held while the VM boots from the cloning ISO: the pre-boot
             // verification's read guard, disposed when this deployment ends.
@@ -166,10 +175,7 @@ namespace VMCreate.HyperV.VmCreation
                     if (isCloudInit)
                     {
                         progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.AttachBootDvd));
-                        string publicKey = await _sshKeyManager.EnsureKeyPairAsync(cancellationToken);
-                        seedIsoPath = Path.Combine(_pathService.DefaultVhdxPath, $"{plan.VmName}_cidata.iso");
-                        CloudInitSeedBuilder.BuildSeedIso(seedIsoPath, plan.VmName, publicKey, _logger);
-                        await _bootManager.AddBootDvd(plan, seedIsoPath, cancellationToken);
+                        await BuildAndAttachSeedAsync(plan, vmCustomizations, d => seedIsoPath = d, cancellationToken);
                         progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.SetBootOrder));
                         await _bootManager.SetFirstBootToHardDrive(plan, cancellationToken);
                     }
@@ -223,10 +229,7 @@ namespace VMCreate.HyperV.VmCreation
 
                     if (isCloudInit)
                     {
-                        string publicKey = await _sshKeyManager.EnsureKeyPairAsync(cancellationToken);
-                        seedIsoPath = Path.Combine(_pathService.DefaultVhdxPath, $"{plan.VmName}_cidata.iso");
-                        CloudInitSeedBuilder.BuildSeedIso(seedIsoPath, plan.VmName, publicKey, _logger);
-                        await _bootManager.AddBootDvd(plan, seedIsoPath, cancellationToken);
+                        await BuildAndAttachSeedAsync(plan, vmCustomizations, d => seedIsoPath = d, cancellationToken);
                     }
 
                     progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.SetBootOrder));
@@ -521,6 +524,39 @@ namespace VMCreate.HyperV.VmCreation
                 // release the read guard on the verified ISO.
                 isoReadGuard?.Dispose();
             }
+        }
+
+        /// <summary>
+        /// Builds the NoCloud seed ISO for this deployment and attaches it as
+        /// a DVD. Single source for both generation paths (direct boot and
+        /// clone-alongside). The embedded SSH key honors
+        /// <see cref="VmCustomizations.CustomSshPublicKeyPath"/>: post-boot SSH
+        /// connects with the private key matching the seed's public key, so a
+        /// seed that always embedded the auto-generated key would strand
+        /// deployments launched with <c>--ssh-key</c>.
+        /// </summary>
+        private async Task BuildAndAttachSeedAsync(
+            VmDeploymentPlan plan,
+            VmCustomizations customizations,
+            Action<string> seedPathCaptured,
+            CancellationToken cancellationToken)
+        {
+            string publicKey = !string.IsNullOrEmpty(customizations.CustomSshPublicKeyPath)
+                ? await _sshKeyManager.ReadPublicKeyAsync(customizations.CustomSshPublicKeyPath, cancellationToken)
+                : await _sshKeyManager.EnsureKeyPairAsync(cancellationToken);
+
+            // --cloud-init content is validated in the CLI before the download
+            // starts; read here keeps the seed self-contained on the one path
+            // that also runs without CLI validation (GUI-tagged items can
+            // set it through the same customizations contract).
+            string? customUserData = string.IsNullOrEmpty(customizations.CloudInitUserDataPath)
+                ? null
+                : CloudInitSeedBuilder.LoadUserDataFile(customizations.CloudInitUserDataPath);
+
+            string seedIsoPath = Path.Combine(_pathService.DefaultVhdxPath, $"{plan.VmName}_cidata.iso");
+            CloudInitSeedBuilder.BuildSeedIso(seedIsoPath, plan.VmName, publicKey, _logger, customUserData);
+            seedPathCaptured(seedIsoPath);
+            await _bootManager.AddBootDvd(plan, seedIsoPath, cancellationToken);
         }
 
         private IEnumerable<ICustomizationStep?> GetPostBootSteps(GalleryItem item, VmCustomizations customizations)

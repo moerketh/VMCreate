@@ -8,6 +8,7 @@ This document covers the VMCreate GUI's deployment architecture: the phase card 
 - [Phase Card System](#phase-card-system)
 - [Progress Reporting](#progress-reporting)
 - [VM Creation Orchestrator](#vm-creation-orchestrator)
+- [NoCloud Seed Deployments](#nocloud-seed-deployments)
 - [Post-Boot Customization Pipeline](#post-boot-customization-pipeline)
 - [Shipping Custom Steps with Gallery Items](#shipping-custom-steps-with-gallery-items)
 - [KVP Today: Heartbeat Gate Only](#kvp-today-heartbeat-gate-only)
@@ -216,6 +217,59 @@ bool needsIsoBootCycle = detectedGeneration == 1
 ```
 
 The ISO cycle runs whenever xRDP is configured or any Linux post-boot step applies — post-boot steps need the automation-SSH path the ISO stage provisions, and chroot-capable steps execute inside the ISO stage itself. Only a Gen 2 image with no xRDP and no applicable Linux steps boots directly from its disk.
+
+---
+
+## NoCloud Seed Deployments
+
+Deployments carrying the gallery `cloud-init` tag or a user-supplied user-data
+file (`--cloud-init <file>` on the CLI) are customized by a **NoCloud seed ISO**
+instead of the cloning-ISO cycle. `DiskImageVmCreationStrategy` triggers the
+seed path on either condition:
+
+```csharp
+bool isCloudInit = item.HasTag("cloud-init")
+                   || !string.IsNullOrEmpty(vmCustomizations.CloudInitUserDataPath);
+```
+
+The trigger is what makes a raw cloud image deployable unattended: with
+`--cloud-init` set, an untagged `--image-uri` deployment attaches the seed and
+boots the disk directly — no cloning ISO, no temp-NIC dance — because cloud-init
+provisions the automation user on first boot instead of the cloning ISO's
+SSH-key injection.
+
+### Seed construction (`CloudInitSeedBuilder`)
+
+- **Volume label `cidata`**, ISO9660 + Joliet only. A UDF descriptor makes
+  blkid report `TYPE=udf` and ds-identify skips the seed entirely.
+- **`user-data`** is a plain `#cloud-config` document when no custom content is
+  supplied, and a MIME multipart document when `--cloud-init` is used:
+  - Part 1 — the user's content, emitted as `text/plain` so cloud-init re-sniffs
+    its type from the leading marker (`#!`, `#cloud-config`, `#include`,
+    `#part-handler`, `#cloud-boothook`, `#cloud-config-archive`, jinja).
+  - Part 2 — the built-in `#cloud-config` block: the `vmcreate` automation
+    user, the deployment's SSH public key, passwordless sudo, and growpart.
+  - Order is load-bearing: cloud-init merges cloud-config parts in document
+    order with `dict(replace)`, so the built-in block **wins any conflicting
+    top-level key** — the user's content is strictly additive. Post-boot SSH
+    machinery depends on the built-in block, which is why it is
+    non-negotiable.
+- **`meta-data`** carries a per-deploy unique `instance-id` (cloud-init treats
+  every deploy as a first boot) and the sanitized hostname.
+
+### Key contract
+
+The seed embeds the SSH public key matching
+`VmCustomizations.CustomSshPublicKeyPath` when set (`--ssh-key`), otherwise the
+auto-generated per-user key. Post-boot SSH connects with the corresponding
+private key — a seed that ignored `--ssh-key` would strand the deployment with
+an unreachable guest.
+
+### Cleanup
+
+The seed ISO is detached (and the file deleted) when post-boot steps run; when
+no post-boot steps apply, it stays attached — it is a tiny read-only DVD that
+cloud-init ignores on subsequent boots.
 
 ---
 

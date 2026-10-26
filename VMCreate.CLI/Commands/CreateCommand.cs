@@ -130,6 +130,14 @@ namespace VMCreate.CLI.Commands
                 Description = "Path to a custom SSH public key (.pub). Defaults to auto-generated key."
             };
 
+            var cloudInitOpt = new Option<string>("--cloud-init")
+            {
+                Description = "Path to a cloud-init user-data file (e.g. a #! shell script or a #cloud-config document) " +
+                             "merged into the NoCloud seed for unattended cloud-image deployments. Additive: on conflicting " +
+                             "cloud-config keys the built-in automation user/SSH key/sudo/growpart block wins. Implies the " +
+                             "seed path for --image-uri deployments (works with any cloud-init-enabled disk image)."
+            };
+
             var noTimezoneOpt = new Option<bool>("--no-timezone-sync")
             {
                 Description = "Disable guest timezone synchronization.",
@@ -216,6 +224,7 @@ namespace VMCreate.CLI.Commands
             cmd.Options.Add(dnsModeOpt);
             cmd.Options.Add(nameserversOpt);
             cmd.Options.Add(sshKeyOpt);
+            cmd.Options.Add(cloudInitOpt);
             cmd.Options.Add(noTimezoneOpt);
             cmd.Options.Add(htbTokenOpt);
             cmd.Options.Add(htbVpnOpt);
@@ -251,6 +260,7 @@ namespace VMCreate.CLI.Commands
                     DnsMode = parseResult.GetValue(dnsModeOpt),
                     Nameservers = parseResult.GetValue(nameserversOpt),
                     SshKeyPath = parseResult.GetValue(sshKeyOpt),
+                    CloudInitUserDataPath = parseResult.GetValue(cloudInitOpt),
                     NoTimezoneSync = parseResult.GetValue(noTimezoneOpt),
                     HtbToken = parseResult.GetValue(htbTokenOpt),
                     HtbVpn = parseResult.GetValue(htbVpnOpt),
@@ -414,6 +424,49 @@ namespace VMCreate.CLI.Commands
             {
                 PrintError(jsonMode, "validation", "Either --image or --image-uri is required.");
                 return ExitCodes.InvalidArguments;
+            }
+
+            // ── --cloud-init: validate the file and the deployment shape ──
+            // Both checks run BEFORE the download starts: a bad user-data file
+            // must fail as InvalidArguments, not as a multi-gigabyte download
+            // that dies at VM creation. LoadUserDataFile is the same loader
+            // the seed builder uses, so what was validated is exactly what
+            // the seed embeds.
+            if (!string.IsNullOrEmpty(args.CloudInitUserDataPath))
+            {
+                if (galleryItem.IsWindows)
+                {
+                    PrintError(jsonMode, "validation",
+                        "--cloud-init is only valid for Linux cloud images (cloud-init user-data).");
+                    return ExitCodes.InvalidArguments;
+                }
+
+                if (galleryItem.IsNativeHyperV)
+                {
+                    PrintError(jsonMode, "validation",
+                        "--cloud-init cannot be combined with a native Hyper-V image — native images attach no seed and run no post-boot cloud-init.");
+                    return ExitCodes.InvalidArguments;
+                }
+
+                if (!galleryItem.IsPreInstalled)
+                {
+                    PrintError(jsonMode, "validation",
+                        "--cloud-init is only valid for pre-installed disk images, not ISO installers.");
+                    return ExitCodes.InvalidArguments;
+                }
+
+                try
+                {
+                    // Validate now; the strategy re-reads the file when it
+                    // builds the seed. The read is cheap and catches missing
+                    // files before the multi-gigabyte download starts.
+                    _ = CloudInitSeedBuilder.LoadUserDataFile(args.CloudInitUserDataPath);
+                }
+                catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException)
+                {
+                    PrintError(jsonMode, "validation", ex.Message);
+                    return ExitCodes.InvalidArguments;
+                }
             }
 
             // ── PowerShell warmup (overlaps download/extract) ────────────────
@@ -602,6 +655,9 @@ namespace VMCreate.CLI.Commands
                     : DnsMode.Host,
                 CustomNameservers = args.Nameservers,
                 CustomSshPublicKeyPath = args.SshKeyPath,
+                // Non-null only when the validation above passed; the strategy
+                // re-reads the file when building the seed.
+                CloudInitUserDataPath = args.CloudInitUserDataPath,
                 SyncTimezone = !args.NoTimezoneSync,
                 InstallOpenVpn = !args.NoOpenVpn,
                 ConfigureHtbVpn = hasHtbVpn,
@@ -906,6 +962,7 @@ namespace VMCreate.CLI.Commands
         public string? DnsMode { get; set; }
         public string? Nameservers { get; set; }
         public string? SshKeyPath { get; set; }
+        public string? CloudInitUserDataPath { get; set; }
         public bool NoTimezoneSync { get; set; }
         public string? HtbToken { get; set; }
         public string? HtbVpn { get; set; }
