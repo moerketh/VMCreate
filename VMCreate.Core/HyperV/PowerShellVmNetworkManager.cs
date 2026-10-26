@@ -1,6 +1,7 @@
 using CreateVM;
 using Microsoft.Extensions.Logging;
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using VMCreate.HyperV;
@@ -100,22 +101,35 @@ namespace VMCreate
 
         /// <summary>
         /// The primary adapter's MAC from Get-VMNetworkAdapter. Hyper-V
-        /// assigns the dynamic MAC when the adapter is created (New-VM), so
-        /// the value exists from VM-skeleton time — before any seed is built.
+        /// normally assigns the dynamic MAC at adapter-creation time, but a
+        /// never-started VM skeleton can report the placeholder
+        /// 000000000000 until first power-on (observed on a live host). The
+        /// cloud-init seed's match-by-MAC rule needs a real address
+        /// <em>pre-boot</em>, so in that case a deterministic
+        /// locally-administered static MAC (02-…) is pinned onto the adapter
+        /// first — 02-… stays clear of Hyper-V's 00-15-5D dynamic pool, and
+        /// deriving it from the VM name keeps --replace re-deploys on the
+        /// same address.
         /// </summary>
         public async Task<string> GetPrimaryAdapterMacAddressAsync(VmDeploymentPlan plan, CancellationToken cancellationToken)
         {
-            var result = await _executor.RunCommandAsync("Get-VMNetworkAdapter",
-                new System.Collections.Generic.Dictionary<string, object?>
-                {
-                    ["VMName"] = plan.VmName,
-                    ["Name"] = "Network Adapter",
-                    ["ErrorAction"] = "SilentlyContinue",
-                }, cancellationToken);
+            string? mac = await TryReadPrimaryMacAsync(plan, cancellationToken);
 
-            string? mac = result.Output.Count > 0
-                ? result.Output[0].Properties["MacAddress"]?.Value?.ToString()
-                : null;
+            if (string.IsNullOrWhiteSpace(mac) || mac == "000000000000")
+            {
+                string pinned = LocallyAdministeredMacFor(plan.VmName);
+                var set = await _executor.RunCommandAsync("Set-VMNetworkAdapter",
+                    new System.Collections.Generic.Dictionary<string, object?>
+                    {
+                        ["VMName"] = plan.VmName,
+                        ["Name"] = "Network Adapter",
+                        ["StaticMacAddress"] = pinned,
+                    }, cancellationToken);
+                if (set.HadErrors)
+                    throw new InvalidOperationException(
+                        $"Primary NIC of VM '{plan.VmName}' has no assigned MAC, and pinning static MAC '{pinned}' failed: {set.ErrorSummary}");
+                mac = await TryReadPrimaryMacAsync(plan, cancellationToken);
+            }
 
             if (string.IsNullOrWhiteSpace(mac) || mac == "000000000000")
                 throw new InvalidOperationException(
@@ -125,6 +139,32 @@ namespace VMCreate
 
             _logger.LogInformation("Primary adapter MAC for {VMName}: {Mac}", plan.VmName, mac);
             return mac;
+        }
+
+        private async Task<string?> TryReadPrimaryMacAsync(VmDeploymentPlan plan, CancellationToken cancellationToken)
+        {
+            var result = await _executor.RunCommandAsync("Get-VMNetworkAdapter",
+                new System.Collections.Generic.Dictionary<string, object?>
+                {
+                    ["VMName"] = plan.VmName,
+                    ["Name"] = "Network Adapter",
+                    ["ErrorAction"] = "SilentlyContinue",
+                }, cancellationToken);
+
+            return result.Output.Count > 0
+                ? result.Output[0].Properties["MacAddress"]?.Value?.ToString()
+                : null;
+        }
+
+        /// <summary>Deterministic 02-XX-XX-XX-XX-XX (locally administered, unicast) MAC derived from the VM name.</summary>
+        internal static string LocallyAdministeredMacFor(string vmName)
+        {
+            using var sha = System.Security.Cryptography.SHA256.Create();
+            byte[] hash = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes("vmcreate-primary-nic:" + vmName));
+            byte[] mac = new byte[6];
+            mac[0] = 0x02;
+            Array.Copy(hash, 0, mac, 1, 5);
+            return string.Join("-", mac.Select(b => b.ToString("X2")));
         }
     }
 }

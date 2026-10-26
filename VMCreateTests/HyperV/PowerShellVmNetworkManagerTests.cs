@@ -148,6 +148,46 @@ namespace VMCreate.Tests.HyperV
                 _manager.GetPrimaryAdapterMacAddressAsync(Plan(), CancellationToken.None));
         }
 
+        [TestMethod]
+        public async Task GetPrimaryAdapterMac_ZeroMac_PinsLocallyAdministeredStatic_AndReturnsItOnReread()
+        {
+            // Never-started skeletons report 000000000000 until first
+            // power-on (live-observed); the manager must pin a
+            // deterministic 02-… static MAC and succeed when the re-read
+            // returns it.
+            _executor
+                .SetupSequence(e => e.RunCommandAsync("Get-VMNetworkAdapter", It.IsAny<IEnumerable<KeyValuePair<string, object?>>?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new PowerShellResult
+                {
+                    Output = new() { System.Management.Automation.PSObject.AsPSObject(new { MacAddress = "000000000000" }) }
+                })
+                .ReturnsAsync(new PowerShellResult
+                {
+                    Output = new() { System.Management.Automation.PSObject.AsPSObject(new { MacAddress = "021B210E0A0B" }) }
+                });
+
+            string mac = await _manager.GetPrimaryAdapterMacAddressAsync(Plan(), CancellationToken.None);
+
+            Assert.AreEqual("021B210E0A0B", mac);
+            _executor.Verify(e => e.RunCommandAsync("Set-VMNetworkAdapter",
+                It.Is<IEnumerable<KeyValuePair<string, object?>>>(p =>
+                    (Value(p, "StaticMacAddress") ?? string.Empty).ToString().StartsWith("02-")),
+                It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        [TestMethod]
+        public void LocallyAdministeredMac_IsDeterministicAndLocallyAdministered()
+        {
+            string a = PowerShellVmNetworkManager.LocallyAdministeredMacFor("lab-siem");
+            string b = PowerShellVmNetworkManager.LocallyAdministeredMacFor("lab-siem");
+            string c = PowerShellVmNetworkManager.LocallyAdministeredMacFor("lab-kvm-host");
+
+            Assert.AreEqual(a, b, "same VM name must yield the same MAC (stable across --replace)");
+            Assert.AreNotEqual(a, c, "different VM names must yield different MACs");
+            StringAssert.StartsWith(a, "02-");
+            Assert.AreEqual(17, a.Length, "XX-XX-XX-XX-XX-XX");
+        }
+
         private static object? Value(IEnumerable<KeyValuePair<string, object?>> parameters, string key)
         {
             foreach (var pair in parameters)
