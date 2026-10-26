@@ -34,6 +34,18 @@ namespace VMCreate.Tests.GalleryTests
             })
         { Timeout = TimeSpan.FromSeconds(30) };
 
+        // Mirrors are third-party infrastructure: a single HEAD can fail
+        // transiently (connection reset, timeout, 5xx, 429) while the
+        // artifact is perfectly healthy. Redirectors like
+        // download.fedoraproject.org pick a different mirror per request,
+        // so a retry re-rolls the dice instead of hitting the same dead node.
+        private const int MaxAttempts = 3;
+        private static readonly TimeSpan[] RetryDelays =
+        {
+            TimeSpan.FromSeconds(1),
+            TimeSpan.FromSeconds(2)
+        };
+
         [ClassInitialize]
         public static void ClassInit(TestContext _)
         {
@@ -59,6 +71,12 @@ namespace VMCreate.Tests.GalleryTests
         /// Issues a HEAD request and asserts the server returns a success or redirect
         /// status (< 400). Empty / null URIs are silently skipped.
         /// For file:// URIs, checks that the local file exists instead.
+        /// Transient failures (connection errors, timeouts, 5xx, 429) are
+        /// retried up to <see cref="MaxAttempts"/> times; a URI that fails
+        /// every attempt fails the test with the last observed status.
+        /// An exhausted rate-limit quota (GitHub-style
+        /// <c>X-RateLimit-Remaining: 0</c>) fails immediately: retrying
+        /// seconds later cannot succeed and only burns more quota.
         /// </summary>
         private static async Task AssertUriRespondsAsync(string? uri, string context)
         {
@@ -75,11 +93,52 @@ namespace VMCreate.Tests.GalleryTests
                 return;
             }
 
-            using var req = new HttpRequestMessage(HttpMethod.Head, uri);
-            var resp = await _http.SendAsync(req);
+            for (int attempt = 1; ; attempt++)
+            {
+                int? status = null;
+                Exception? requestError = null;
+                string? rateLimitHint = null;
+                try
+                {
+                    using var req = new HttpRequestMessage(HttpMethod.Head, uri);
+                    using var resp = await _http.SendAsync(req);
+                    status = (int)resp.StatusCode;
 
-            Assert.IsTrue((int)resp.StatusCode < 400,
-                $"{context}: HEAD returned {(int)resp.StatusCode} {resp.StatusCode} for\n  {uri}");
+                    if (status is 403 or 429
+                        && resp.Headers.TryGetValues("X-RateLimit-Remaining", out var remaining)
+                        && remaining.FirstOrDefault() == "0")
+                    {
+                        if (resp.Headers.TryGetValues("Retry-After", out var retryAfter)
+                            && retryAfter.FirstOrDefault() is { Length: > 0 } after)
+                            rateLimitHint = $"Retry-After: {after}";
+                        else if (resp.Headers.TryGetValues("X-RateLimit-Reset", out var reset)
+                                 && long.TryParse(reset.FirstOrDefault(), out long resetUnix))
+                            rateLimitHint = $"quota resets {DateTimeOffset.FromUnixTimeSeconds(resetUnix):u}";
+                        rateLimitHint ??= "quota exhausted";
+                    }
+                }
+                catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+                {
+                    requestError = ex;
+                }
+
+                if (rateLimitHint is not null)
+                    Assert.Fail($"{context}: HEAD to\n  {uri}\n  was rate limited ({rateLimitHint}). " +
+                        "That is a quota, not a broken link — rerun later.");
+
+                bool transientFailure = status is >= 500 or 429 || requestError is not null;
+                if (status is < 400)
+                    return;
+                if (transientFailure && attempt < MaxAttempts)
+                {
+                    await Task.Delay(RetryDelays[attempt - 1]);
+                    continue;
+                }
+
+                Assert.Fail(requestError is null
+                    ? $"{context}: HEAD returned {status} {(HttpStatusCode)status!} for\n  {uri} (after {attempt} attempt(s))"
+                    : $"{context}: HEAD failed after {attempt} attempt(s) for\n  {uri}\n  {requestError.GetType().Name}: {requestError.Message}");
+            }
         }
 
         /// <summary>
