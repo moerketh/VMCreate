@@ -154,6 +154,12 @@ else
 fi
 mkdir -p /etc/elasticsearch/jvm.options.d
 printf '%s\n' ""-Xms${HEAP_MB}m"" ""-Xmx${HEAP_MB}m"" > /etc/elasticsearch/jvm.options.d/vmcreate.options
+# umask 077 (set above) leaves this 0600 root:root, which the elasticsearch
+# user cannot read — ES dies at boot with AccessDeniedException, exit 74
+# (live-observed). It must be group-readable like the
+# rpm-shipped files: root:elasticsearch 0640.
+chown root:elasticsearch /etc/elasticsearch/jvm.options.d/vmcreate.options
+chmod 0640 /etc/elasticsearch/jvm.options.d/vmcreate.options
 
 systemctl daemon-reload
 systemctl enable elasticsearch.service kibana.service >/dev/null 2>&1

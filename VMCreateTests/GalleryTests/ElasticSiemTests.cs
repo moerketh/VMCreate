@@ -284,6 +284,20 @@ namespace VMCreate.Tests.GalleryTests
         }
 
         [TestMethod]
+        public void BuildScript_JvmOptionsDFileReadableByElasticsearchUser()
+        {
+            // The script runs under umask 077, so the heap-sizing file lands
+            // 0600 root:root — the elasticsearch service user cannot read it
+            // and ES dies at boot (exit 74). Like the rpm-shipped files in
+            // that directory it must be root:elasticsearch 0640.
+            var script = ElasticStackInstaller.BuildScriptForTest(false, false, "", "", "");
+
+            StringAssert.Contains(script, "/etc/elasticsearch/jvm.options.d/vmcreate.options", StringComparison.Ordinal);
+            StringAssert.Contains(script, "chown root:elasticsearch /etc/elasticsearch/jvm.options.d/vmcreate.options", StringComparison.Ordinal);
+            StringAssert.Contains(script, "chmod 0640 /etc/elasticsearch/jvm.options.d/vmcreate.options", StringComparison.Ordinal);
+        }
+
+        [TestMethod]
         public void BuildScript_HeapOptionsUseSafePrintfForm()
         {
             // `printf "-Xms${X}m\n…"` treats the leading-dash format string
