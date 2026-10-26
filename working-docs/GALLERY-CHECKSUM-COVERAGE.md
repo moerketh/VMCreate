@@ -30,6 +30,7 @@ verifies whenever a `GalleryItem` carries `Checksum` (inline) or
 | PwnCloudOS | inline `Checksum` (scraped) | |
 | REMnux | inline `Checksum` (scraped live, pinned fallback) | Live-scrapes URL + SHA-256 from docs.remnux.org; falls back to the pinned known-good pair; mixed provenance (new URL + stale hash) is rejected |
 | RockyLinux | `ChecksumUri` | |
+| RockyLinuxCloud | `ChecksumUri` (.CHECKSUM) | Per-major sidecar; each `ReleaseVariant` carries its own major's file |
 | SecurityOnion | none | download.securityonion.net returns an SPA for .sha256 URLs — no usable sidecar |
 | Tails | inline `Checksum` (SHA-256) | Added; the Tails JSON API ships the hash per target file |
 | Tsurugi | none | No checksums published |

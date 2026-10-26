@@ -105,6 +105,22 @@ namespace VMCreate.Tests.Gallery
         }
 
         [TestMethod]
+        public void NonDefaultClone_KeepsFileTypeOverride()
+        {
+            // A variant can download from a filename whose extension does not
+            // reveal the disk format (Rocky's .vhdfixed.xz latest-aliases). The
+            // clone must carry the loader's declared override, or media-handler
+            // selection falls back to extension inference and picks the wrong
+            // handler for the non-default release only.
+            var item = MultiReleaseItem();
+            item.FileTypeOverride = "VHD";
+
+            var resolved = item.ResolveRelease("weekly")!;
+
+            Assert.AreEqual("VHD", resolved.FileTypeOverride);
+        }
+
+        [TestMethod]
         public void UnknownId_ReturnsNull()
         {
             Assert.IsNull(MultiReleaseItem().ResolveRelease("rolling"));

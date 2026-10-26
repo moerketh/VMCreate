@@ -95,6 +95,12 @@ namespace VMCreate
                 SecureBootTemplate = item.SecureBootTemplate,
                 Tags = item.Tags,
                 IsWindows = item.IsWindows,
+                // A variant may download from a filename whose extension does
+                // not reveal the disk format (e.g. Rocky's .vhdfixed.xz
+                // latest-aliases) — the loader's declared override must
+                // survive resolution or the media-handler selection falls
+                // back to extension inference and picks the wrong handler.
+                FileTypeOverride = item.FileTypeOverride,
                 ReleaseVariants = null,
             };
         }
