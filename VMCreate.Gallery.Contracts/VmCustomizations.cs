@@ -153,9 +153,11 @@ namespace VMCreate
         /// <summary>
         /// The host part of <see cref="StaticIp"/> — the address SSH connects
         /// to. The seed carries the full CIDR (the prefix drives the guest's
-        /// netmask); the connection target carries the address only.
+        /// netmask); the connection target carries the address only. Trimmed,
+        /// matching the renderer's normalization, so a caller passing padded
+        /// input gets an SSH target that matches the seeded address.
         /// </summary>
-        public string? StaticIpHost => StaticIp is null ? null : StaticIp.Split('/')[0];
+        public string? StaticIpHost => StaticIp is null ? null : StaticIp.Split('/')[0].Trim();
 
         /// <summary>
         /// When true (default), install OpenVPN and the NetworkManager OpenVPN plugin

@@ -8,6 +8,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using VMCreate.CLI.Progress;
+using VMCreate.Cidata;
 using VMCreate.Gallery;
 
 namespace VMCreate.CLI.Commands
@@ -389,10 +390,15 @@ namespace VMCreate.CLI.Commands
         /// absent). Fail-loudly contract (same as --rdp-backend): a typo
         /// must not silently deploy a guest nobody can reach.
         /// <para>
-        /// The --static-ip prefix length is mandatory: it is the netmask that
-        /// decides which destinations the guest treats as on-link, so guessing
-        /// /24 would mis-configure every non-/24 subnet. --gateway and --dns
-        /// are meaningless under DHCP, so they require --static-ip.
+        /// The parsing itself lives in one place —
+        /// <see cref="StaticNetworkConfig.Create"/> — because the shorthand
+        /// forms <c>IPAddress.TryParse</c> accepts (<c>192.168.1</c>,
+        /// <c>10</c>, <c>0x0a000001</c>) pass loose validation, land in the
+        /// network-config and leave the guest with no address. The
+        /// <c>--static-ip</c> prefix length is mandatory (it is the netmask
+        /// that decides which destinations the guest treats as on-link);
+        /// --gateway and --dns are meaningless under DHCP, so they require
+        /// --static-ip.
         /// </para>
         /// </summary>
         internal static bool TryValidateStaticNetwork(
@@ -413,50 +419,23 @@ namespace VMCreate.CLI.Commands
                 return true;
             }
 
-            string ip = args.StaticIp.Trim();
-            if (!System.Net.IPAddress.TryParse(ip.Split('/')[0], out var parsed) ||
-                parsed.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork ||
-                ip.Split('/').Length != 2 ||
-                !int.TryParse(ip.Split('/')[1], out int prefix) || prefix < 1 || prefix > 32)
+            try
             {
+                StaticNetworkConfig parsed = StaticNetworkConfig.Create(args.StaticIp, args.StaticGateway, args.StaticDns)!;
+                staticIp = parsed.StaticIp;
+                staticGateway = parsed.StaticGateway;
+                staticDns = parsed.StaticDns;
+                return true;
+            }
+            catch (ArgumentException ex)
+            {
+                string flag = ex.ParamName == nameof(StaticNetworkConfig.StaticIp) && ex.Message.Contains("CIDR")
+                    ? "--static-ip"
+                    : ex.Message.Contains("dns entry") ? "--dns" : "--gateway";
                 PrintError(jsonMode, "validation",
-                    $"Invalid --static-ip value '{args.StaticIp}'. Expected an IPv4 address in CIDR form with an explicit " +
-                    "prefix length, e.g. 192.168.10.50/24 (the prefix is the netmask the guest uses to decide which " +
-                    "destinations are on-link).");
+                    $"Invalid {flag} value. {ex.Message} Expected dotted-decimal IPv4 (shorthand like 192.168.1 is not valid).");
                 return false;
             }
-
-            if (!string.IsNullOrWhiteSpace(args.StaticGateway))
-            {
-                string gateway = args.StaticGateway.Trim();
-                if (!System.Net.IPAddress.TryParse(gateway, out var gw) ||
-                    gw.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
-                {
-                    PrintError(jsonMode, "validation", $"Invalid --gateway value '{args.StaticGateway}'. Expected an IPv4 address.");
-                    return false;
-                }
-                staticGateway = gateway;
-            }
-
-            if (!string.IsNullOrWhiteSpace(args.StaticDns))
-            {
-                foreach (string entry in args.StaticDns.Split(new[] { ',', ' ', ';' },
-                    StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-                {
-                    if (!System.Net.IPAddress.TryParse(entry, out var ns) ||
-                        ns.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
-                    {
-                        PrintError(jsonMode, "validation",
-                            $"Invalid --dns value '{entry}'. Expected one or comma-separated IPv4 addresses (e.g. 8.8.8.8 or 8.8.8.8,1.1.1.1).");
-                        return false;
-                    }
-                }
-                staticDns = string.Join(",", args.StaticDns.Split(new[] { ',', ' ', ';' },
-                    StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
-            }
-
-            staticIp = ip;
-            return true;
         }
 
         /// <summary>
@@ -570,6 +549,60 @@ namespace VMCreate.CLI.Commands
                 catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException)
                 {
                     PrintError(jsonMode, "validation", ex.Message);
+                    return ExitCodes.InvalidArguments;
+                }
+            }
+
+            // ── Static addressing: validate the deployment shape ─────────
+            // The same gates the strategies enforce (as the library-side
+            // safety net) — evaluated here so an unsupported combination
+            // fails as InvalidArguments BEFORE the multi-gigabyte download,
+            // not at VM creation. Static addressing rides a NoCloud seed;
+            // only cloud-init items, --cloud-init-flagged images and the
+            // unattended Omarchy install consume one.
+            if (!string.IsNullOrWhiteSpace(args.StaticIp))
+            {
+                if (galleryItem.IsNativeHyperV)
+                {
+                    PrintError(jsonMode, "validation",
+                        "--static-ip cannot be combined with a native Hyper-V image — VMCreate does not configure its addressing. " +
+                        "Deploy it with DHCP and set the address inside the guest.");
+                    return ExitCodes.InvalidArguments;
+                }
+
+                if (!galleryItem.IsPreInstalled)
+                {
+                    if (!galleryItem.HasTag(EnablePasswordlessSudoStep.OmarchyTag))
+                    {
+                        PrintError(jsonMode, "validation",
+                            "--static-ip requires an image whose first boot consumes a NoCloud seed (cloud-init images, or " +
+                            $"'--cloud-init' on a cloud image, or the unattended Omarchy install). '{galleryItem.Name}' is a " +
+                            "manual ISO install — VMCreate never configures its network.");
+                        return ExitCodes.InvalidArguments;
+                    }
+                }
+                else if (!galleryItem.HasTag("cloud-init") && string.IsNullOrEmpty(args.CloudInitUserDataPath))
+                {
+                    PrintError(jsonMode, "validation",
+                        $"--static-ip requires an image whose first boot consumes a NoCloud seed (cloud-init tagged images, " +
+                        $"e.g. Elastic SIEM, or any cloud image with '--cloud-init'). '{galleryItem.Name}' is customized via " +
+                        "the cloning ISO, which cannot deliver static addressing; deploy it with DHCP instead.");
+                    return ExitCodes.InvalidArguments;
+                }
+            }
+
+            // ── --switch: fail a mistyped name before the download ────────
+            // Connect-VMNetworkAdapter would reject it much later, after the
+            // VM skeleton exists.
+            if (!string.IsNullOrWhiteSpace(args.SwitchName))
+            {
+                bool switchExists = await services.GetRequiredService<IVmNetworkManager>()
+                    .SwitchExistsAsync(args.SwitchName, ct);
+                if (!switchExists)
+                {
+                    PrintError(jsonMode, "validation",
+                        $"No Hyper-V switch named '{args.SwitchName}' exists on this host. " +
+                        "List switches with Get-VMSwitch.");
                     return ExitCodes.InvalidArguments;
                 }
             }

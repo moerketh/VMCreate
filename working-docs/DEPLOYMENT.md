@@ -255,6 +255,14 @@ SSH-key injection.
     top-level key** — the user's content is strictly additive. Post-boot SSH
     machinery depends on the built-in block, which is why it is
     non-negotiable.
+  - Both parts are **base64 transfer-encoded**. Every cloud-init release
+    shipped in images before 2026-10 decodes an unencoded text part by
+    re-encoding it with raw-unicode-escape (fixed upstream in #7102): `é`
+    arrived as the lone byte `0xE9` and characters at U+0100+ as literal
+    `\uXXXX` text — breaking scripts, YAML and SSH key comments with
+    non-ASCII. The base64 path decodes to exact UTF-8 bytes on every
+    version; cloud-init sniffs each part's type from the first line of the
+    decoded payload, so dispatch is unchanged.
 - **`meta-data`** carries a per-deploy unique `instance-id` (cloud-init treats
   every deploy as a first boot) and the sanitized hostname.
 
@@ -631,8 +639,10 @@ mechanisms — no post-boot patching is involved.
 which connects the VM's NIC to `plan.SwitchName` (falling back to the
 Default Switch when null). The **temporary** post-boot SSH NIC
 (`VMCreate Temp`) always stays on the Default Switch: it is deploy plumbing,
-not part of the guest's final network. An unknown switch name fails loudly
-from `Connect-VMNetworkAdapter` itself.
+not part of the guest's final network. The CLI validates `--switch` against
+`Get-VMSwitch` before the download starts (`IVmNetworkManager.SwitchExistsAsync`),
+so a mistyped name fails as InvalidArguments instead of after the VM skeleton
+exists.
 
 ### Static addressing via the NoCloud seed
 
@@ -645,6 +655,8 @@ from `Connect-VMNetworkAdapter` itself.
 version: 2
 ethernets:
   eth0:
+    match:
+      driver: hv_netvsc
     addresses: [192.168.10.50/24]
     routes:
       - to: default
@@ -653,21 +665,32 @@ ethernets:
       addresses: [8.8.8.8, 1.1.1.1]
 ```
 
-- The interface id is `eth0` with **no `match:` block** — per netplan
-  semantics the id then IS the interface name, matching the Hyper-V
-  `hv_netvsc` NIC after VMCreate's interface-renaming fixups. No MAC
-  pinning: MACs are host-allocated and differ per deploy.
+- The interface is selected by **driver match** (`hv_netvsc`), not by name:
+  the NoCloud seed path never runs the cloning ISO's interface-renaming
+  fixups, so a cloud image naming its NIC `ens*`/`enp*` would never see a
+  bare-`eth0` config apply — and supplying any network-config also turns
+  off cloud-init's DHCP fallback, leaving the guest offline. A driver match
+  covers every name the device can take; renderers without match support
+  (e.g. sysconfig) fall back to the id, `eth0` — the name Hyper-V cloud
+  images use. No `set-name:` (cloud-init only renames when a MAC is pinned,
+  and MACs are host-allocated) and no MAC pinning.
 - The default route uses `routes: [{to: default, via: …}]` (the modern v2
   form; `gateway4` is deprecated). When `--gateway` is omitted the route
   section is omitted entirely — the guest reaches only its own subnet.
 - The CIDR prefix is **mandatory**: it is the netmask that decides which
   destinations the guest treats as on-link. A bare address is rejected at
   CLI validation rather than guessed `/24`.
+- Address parsing lives in one place — `StaticNetworkConfig.Create` — with
+  a **strict dotted-quad** parser. `IPAddress.TryParse` is not used: it
+  accepts the shorthand forms `192.168.1`, `10` and `0x0a000001`, which
+  netplan rejects; such a value would pass validation, land in the
+  network-config and leave the guest with no address (and the pinned-IP
+  SSH wait timing out against a host like `192.168.1`).
 
 Both seed paths carry the file when static addressing is requested —
 `CloudInitSeedBuilder` (cloud-init gallery items, e.g. Elastic SIEM) and
 `CidataSeedBuilder` (Omarchy). On the Omarchy ISO path the file seeds the
-live session's `eth0` via cloud-init, and the installer's
+live session's NIC via cloud-init, and the installer's
 `network_config: {"type": "iso"}` copies the live configuration into the
 installed system — the address survives the install with no installer
 changes.
@@ -698,9 +721,11 @@ full CIDR (the prefix drives the guest's netmask):
   the seeded user). The vsock ISO boot-cycle path is unchanged — it never
   used IP discovery.
 
-Unsupported combinations fail loudly before any VM work: `--static-ip` on a
-cloning-ISO image (Kali-class), a manual ISO install, or a native Hyper-V
-(Windows) image — none of those first boots consume a NoCloud seed, so the
+Unsupported combinations fail loudly — twice: once in the CLI **before the
+download starts** (mirroring `--cloud-init`'s pre-flight: `--static-ip` on a
+cloning-ISO image, a manual ISO install, or a native Hyper-V/Windows image),
+and again in the strategies before any VM work as the library-side safety net
+for non-CLI callers. None of those first boots consume a NoCloud seed, so the
 address could never be delivered and the pinned-SSH wait would burn its
 budget on an address the guest never has.
 

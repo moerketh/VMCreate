@@ -59,14 +59,65 @@ namespace VMCreate.Tests.Cidata
         }
 
         [TestMethod]
-        public void Render_NoMatchBlock_TheIdIsTheInterfaceName()
+        public void Render_MatchesTheHypervNicDriver_NotTheInterfaceName()
         {
-            // Without match:, netplan treats the id as the literal interface
-            // name — the contract that binds the config to the Hyper-V NIC
-            // VMCreate's renaming fixups call eth0. A match block would
-            // re-introduce MAC/driver coupling the deploy cannot promise.
+            // The NoCloud seed path never runs the cloning ISO's
+            // interface-renaming fixups, so a bare-eth0 config would never
+            // apply on an image naming its NIC ens*/enp* — and supplying any
+            // network-config also turns off cloud-init's DHCP fallback,
+            // leaving the guest offline. A driver match covers every name
+            // hv_netvsc can take; renderers without match support fall back
+            // to the id (eth0 — the Hyper-V cloud-image name).
             string yaml = NoCloudNetworkConfig.Render(Config());
-            Assert.IsFalse(yaml.Contains("match:"), "no match block — the id is the interface name");
+            StringAssert.Contains(yaml, "    match:\n      driver: hv_netvsc\n");
+        }
+
+        [TestMethod]
+        public void Create_NormalizesAndValidates_InOnePlace()
+        {
+            var config = StaticNetworkConfig.Create(" 192.168.10.50/24 ", " 192.168.10.1 ", " 8.8.8.8 , 1.1.1.1 ");
+            Assert.AreEqual("192.168.10.50/24", config!.StaticIp);
+            Assert.AreEqual("192.168.10.1", config.StaticGateway);
+            Assert.AreEqual("8.8.8.8,1.1.1.1", config.StaticDns);
+
+            Assert.IsNull(StaticNetworkConfig.Create(null, "1.2.3.4", "5.6.7.8"),
+                "no static IP — DHCP, gateway/dns ignored");
+            Assert.IsNull(StaticNetworkConfig.Create("  ", null, null));
+        }
+
+        [TestMethod]
+        [DataRow("192.168.1/24", DisplayName = "three octets")]
+        [DataRow("10/8", DisplayName = "single octet")]
+        [DataRow("0x0a000001/32", DisplayName = "hexadecimal")]
+        [DataRow("192.168.10.50/ 24", DisplayName = "space in prefix")]
+        [DataRow("192.168.10.50/+24", DisplayName = "signed prefix")]
+        [DataRow("192.168.010.50/24", DisplayName = "leading zero")]
+        [DataRow("192.168.10.256/24", DisplayName = "octet over 255")]
+        public void StrictParsing_RejectsIpNetAccepts_ButNetplanDoesNot(string ip)
+        {
+            // System.Net.IPAddress.TryParse accepts the first five of these;
+            // netplan does not. A shorthand value that passed validation
+            // would land in the network-config, leave the guest without an
+            // address, and strand the pinned-IP SSH wait.
+            Assert.Throws<ArgumentException>(() => StaticNetworkConfig.Create(ip, null, null));
+            Assert.Throws<ArgumentException>(() => NoCloudNetworkConfig.Render(Config(ip: ip)));
+        }
+
+        [TestMethod]
+        [DataRow("192.168.1", DisplayName = "three octets")]
+        [DataRow("10", DisplayName = "single octet")]
+        [DataRow("0x0a000001", DisplayName = "hexadecimal")]
+        public void StrictParsing_RejectsShorthandGateways(string gateway)
+        {
+            Assert.Throws<ArgumentException>(() =>
+                StaticNetworkConfig.Create("192.168.10.50/24", gateway, null));
+        }
+
+        [TestMethod]
+        public void Create_InvalidDnsEntry_Throws()
+        {
+            Assert.Throws<ArgumentException>(() =>
+                StaticNetworkConfig.Create("192.168.10.50/24", null, "8.8.8.8,192.168.1"));
         }
 
         [TestMethod]

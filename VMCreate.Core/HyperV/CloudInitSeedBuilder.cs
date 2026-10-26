@@ -235,34 +235,54 @@ namespace VMCreate
         {
             // A random boundary that is provably absent from both parts: a
             // payload that happens to contain the delimiter string would split
-            // the document early and hand cloud-init truncated parts.
+            // the document early and hand cloud-init truncated parts. (Base64
+            // parts never contain the boundary — it starts with '=' — but the
+            // custom part is checked before encoding, when its bytes are the
+            // user's own.)
             string boundary = NewBoundaryAbsentFrom(customUserData, BuildUserData(publicKey));
 
             var sb = new StringBuilder();
             sb.Append("MIME-Version: 1.0\n");
             sb.Append("Content-Type: multipart/mixed; boundary=\"").Append(boundary).Append("\"\n\n");
 
-            sb.Append("--").Append(boundary).Append('\n');
             // text/plain + the content's own leading marker: cloud-init re-sniffs
-            // the type from the first line when a part declares text/plain (see
-            // TYPE_NEEDED in user_data.py), so shell scripts, cloud-config
-            // documents, includes and part-handlers all dispatch natively.
-            sb.Append("Content-Type: text/plain; charset=\"utf-8\"\n");
-            sb.Append("Content-Transfer-Encoding: 7bit\n");
-            sb.Append("Content-Disposition: attachment; filename=\"user_cloud_init.txt\"\n\n");
-            sb.Append(customUserData);
-            if (!customUserData.EndsWith('\n'))
-                sb.Append('\n');
-
-            sb.Append('\n').Append("--").Append(boundary).Append('\n');
-            sb.Append("Content-Type: text/cloud-config; charset=\"utf-8\"\n");
-            sb.Append("MIME-Version: 1.0\n");
-            sb.Append("Content-Transfer-Encoding: 7bit\n");
-            sb.Append("Content-Disposition: attachment; filename=\"vmcreate_builtin.yaml\"\n\n");
-            sb.Append(BuildUserData(publicKey));
+            // the type from the first line of the DECODED part when it declares
+            // text/plain (see TYPE_NEEDED in user_data.py), so shell scripts,
+            // cloud-config documents, includes and part-handlers all dispatch
+            // natively.
+            AppendBase64Part(sb, boundary, "text/plain; charset=\"utf-8\"", "user_cloud_init.txt", customUserData);
+            AppendBase64Part(sb, boundary, "text/cloud-config; charset=\"utf-8\"", "vmcreate_builtin.yaml", BuildUserData(publicKey));
 
             sb.Append('\n').Append("--").Append(boundary).Append("--\n");
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// Appends one part, base64-encoded. Every cloud-init release shipped
+        /// in images before 2026-10 decodes an UNENCODED text part by
+        /// re-encoding its payload with raw-unicode-escape (cloud-init #7102
+        /// fixed this upstream), so "é" arrived as the lone byte 0xE9 and
+        /// characters at U+0100+ arrived as literal "\uXXXX" text — breaking
+        /// shell scripts, YAML parts and SSH key comments carrying non-ASCII.
+        /// The base64 transfer path has always decoded correctly: the parser
+        /// base64-decodes to exact UTF-8 bytes before the charset decode, on
+        /// every version.
+        /// </summary>
+        private static void AppendBase64Part(StringBuilder sb, string boundary, string contentType, string filename, string content)
+        {
+            sb.Append("--").Append(boundary).Append('\n');
+            sb.Append("Content-Type: ").Append(contentType).Append('\n');
+            sb.Append("Content-Transfer-Encoding: base64\n");
+            sb.Append("Content-Disposition: attachment; filename=\"").Append(filename).Append("\"\n\n");
+            // Trailing newline preserved: cloud-init writes the decoded part
+            // verbatim, and a shell script's last line should stay a complete
+            // line for editors and diffing inside the guest.
+            if (!content.EndsWith('\n'))
+                content += "\n";
+            // 76-column wrapping per RFC 2045 §6.8; Python's email reader
+            // accepts (and its encoder produces) wrapped base64.
+            sb.Append(Convert.ToBase64String(Encoding.UTF8.GetBytes(content), Base64FormattingOptions.InsertLineBreaks));
+            sb.Append('\n');
         }
 
         private static string NewBoundaryAbsentFrom(string customUserData, string builtinUserData)
@@ -274,10 +294,7 @@ namespace VMCreate
             const int length = 28;
             Span<char> chars = stackalloc char[length];
             var bytes = new byte[length];
-            using (var rng = RandomNumberGenerator.Create())
-            {
-                rng.GetBytes(bytes);
-            }
+            RandomNumberGenerator.Fill(bytes);
 
             string boundary;
             do

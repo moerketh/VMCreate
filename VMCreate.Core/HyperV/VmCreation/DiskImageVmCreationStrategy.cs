@@ -100,16 +100,12 @@ namespace VMCreate.HyperV.VmCreation
 
         /// <summary>
         /// The deployment's static addressing (CLI --static-ip/--gateway/--dns)
-        /// as the seed builders' input, or null under DHCP.
+        /// as the seed builders' input, or null under DHCP. Validated and
+        /// normalized in one place — <see cref="StaticNetworkConfig.Create"/>.
         /// </summary>
-        private static StaticNetworkConfig? BuildStaticNetwork(VmCustomizations customizations)
+        internal static StaticNetworkConfig? BuildStaticNetwork(VmCustomizations customizations)
             => customizations.HasStaticNetwork
-                ? new StaticNetworkConfig
-                {
-                    StaticIp = customizations.StaticIp!,
-                    StaticGateway = customizations.StaticGateway,
-                    StaticDns = customizations.StaticDns,
-                }
+                ? StaticNetworkConfig.Create(customizations.StaticIp, customizations.StaticGateway, customizations.StaticDns)
                 : null;
 
         public async Task CreateVMAsync(VmCreationContext ctx)

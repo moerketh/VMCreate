@@ -82,6 +82,28 @@ namespace VMCreate.Tests.HyperV
                 It.IsAny<CancellationToken>()), Times.Once);
         }
 
+        [TestMethod]
+        public async Task SwitchExists_TrueWhenGetVmswitchReturnsARow()
+        {
+            _executor
+                .Setup(e => e.RunCommandAsync("Get-VMSwitch", It.IsAny<IEnumerable<KeyValuePair<string, object?>>?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new PowerShellResult { Output = new() { new System.Management.Automation.PSObject() } });
+
+            Assert.IsTrue(await _manager.SwitchExistsAsync("Lab External", CancellationToken.None));
+        }
+
+        [TestMethod]
+        public async Task SwitchExists_FalseWhenGetVmswitchReturnsNothing()
+        {
+            // A name that matches no switch yields an empty result
+            // (SilentlyContinue), not an error — absence is the answer.
+            _executor
+                .Setup(e => e.RunCommandAsync("Get-VMSwitch", It.IsAny<IEnumerable<KeyValuePair<string, object?>>?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new PowerShellResult());
+
+            Assert.IsFalse(await _manager.SwitchExistsAsync("Nope", CancellationToken.None));
+        }
+
         private static object? Value(IEnumerable<KeyValuePair<string, object?>> parameters, string key)
         {
             foreach (var pair in parameters)

@@ -48,12 +48,10 @@ namespace VMCreate.Gallery
         // Versioned files next to the latest aliases:
         // "Rocky-9-Azure-Base-9.8-20260525.0.x86_64.vhdfixed.xz"
         // The LVM (disk-layout) and GenericCloud (KVM-flavour) twins must not
-        // leak into the Azure-Base version scrape.
-        private static readonly Regex VersionedFileRegex = new(
-            @"Rocky-9-Azure-Base-(\d+\.\d+-\d{8}\.\d+)\.x86_64\.vhdfixed\.xz", RegexOptions.Compiled);
-
-        private static readonly Regex Rocky10VersionedFileRegex = new(
-            @"Rocky-10-Azure-Base-(\d+\.\d+-\d{8}\.\d+)\.x86_64\.vhdfixed\.xz", RegexOptions.Compiled);
+        // leak into the Azure-Base version scrape. One regex parameterized by
+        // the major — the 9 and 10 patterns differed only in that digit.
+        private static Regex VersionedFileRegexFor(int major) => new(
+            $@"Rocky-{major}-Azure-Base-(\d+\.\d+-\d{{8}}\.\d+)\.x86_64\.vhdfixed\.xz", RegexOptions.Compiled);
 
         private readonly IHttpClientFactory _clientFactory;
 
@@ -71,8 +69,13 @@ namespace VMCreate.Gallery
 
             // Best-effort build metadata per major; the download URLs are
             // static latest-aliases, so the card works with defaults alone.
-            var rocky9  = await TryScrapeBuildAsync(client, Rocky9IndexUrl,  VersionedFileRegex, cancellationToken);
-            var rocky10 = await TryScrapeBuildAsync(client, Rocky10IndexUrl, Rocky10VersionedFileRegex, cancellationToken);
+            // Both majors scrape in parallel — two sequential round-trips to
+            // the same mirror doubled the card's load latency for nothing.
+            var rocky9Task  = TryScrapeBuildAsync(client, Rocky9IndexUrl,  VersionedFileRegexFor(9),  cancellationToken);
+            var rocky10Task = TryScrapeBuildAsync(client, Rocky10IndexUrl, VersionedFileRegexFor(10), cancellationToken);
+            await Task.WhenAll(rocky9Task, rocky10Task);
+            var rocky9 = rocky9Task.Result;
+            var rocky10 = rocky10Task.Result;
 
             var variants = new List<ReleaseVariant>
             {
@@ -139,15 +142,14 @@ namespace VMCreate.Gallery
                 var html = await response.Content.ReadAsStringAsync(cancellationToken);
 
                 // The versioned twin of the latest alias carries the real build id.
-                var versions = versionedFileRegex.Matches(html)
+                // Numeric-aware ordering, NOT ordinal: once a major reaches
+                // .10, ordinal sort puts "9.8" above "9.10" ('8' > '1') and
+                // the card would advertise a stale build as current.
+                string version = versionedFileRegex.Matches(html)
                     .Select(m => m.Groups[1].Value)
                     .Distinct()
-                    .OrderByDescending(s => s, StringComparer.Ordinal)
-                    .ToList();
-                if (versions.Count == 0)
-                    return new ScrapedBuild("unknown", null);
-
-                string version = versions[0];
+                    .OrderByDescending(v => v, BuildIdComparer.Instance)
+                    .First();
                 var datePart = version.Split('-').LastOrDefault() ?? "";
                 if (datePart.Length >= 8 && DateTime.TryParseExact(
                         datePart[..8], "yyyyMMdd",
@@ -168,6 +170,57 @@ namespace VMCreate.Gallery
                 // Metadata is decorative — the card still works with defaults.
                 return new ScrapedBuild("unknown", null);
             }
+        }
+
+        /// <summary>
+        /// Orders Rocky build ids (<c>9.8-20260525.0</c>) by (major, minor,
+        /// date, build) numerically. Falls back to ordinal for anything that
+        /// does not match the expected shape, so a renamed file degrades to
+        /// the old ordering instead of throwing.
+        /// </summary>
+        internal sealed class BuildIdComparer : IComparer<string>
+        {
+            public static readonly BuildIdComparer Instance = new();
+
+            public int Compare(string? x, string? y)
+            {
+                if (ReferenceEquals(x, y)) return 0;
+                if (x is null) return -1;
+                if (y is null) return 1;
+
+                int result = CompareDottedPrefix(x, y);
+                if (result != 0) return result;
+
+                // Same major.minor → the newer dated build wins.
+                string xTail = x.Substring(x.IndexOf('-') + 1);
+                string yTail = y.Substring(y.IndexOf('-') + 1);
+                int xDate = DatePart(xTail), yDate = DatePart(yTail);
+                if (xDate != yDate) return xDate.CompareTo(yDate);
+                return string.CompareOrdinal(xTail, yTail);
+            }
+
+            /// <summary>Compares the "9.8" head of each id segment by segment.</summary>
+            private static int CompareDottedPrefix(string x, string y)
+            {
+                string xHead = x.Split('-')[0];
+                string yHead = y.Split('-')[0];
+                var xParts = xHead.Split('.');
+                var yParts = yHead.Split('.');
+                int count = Math.Min(xParts.Length, yParts.Length);
+                for (int i = 0; i < count; i++)
+                {
+                    if (!int.TryParse(xParts[i], out int xn) || !int.TryParse(yParts[i], out int yn))
+                        return string.CompareOrdinal(xHead, yHead);
+                    if (xn != yn) return xn.CompareTo(yn);
+                }
+                return xParts.Length != yParts.Length
+                    ? xParts.Length.CompareTo(yParts.Length)
+                    : 0;
+            }
+
+            /// <summary>The leading yyyyMMdd of a "20260525.0" tail, or 0 when absent.</summary>
+            private static int DatePart(string tail)
+                => tail.Length >= 8 && int.TryParse(tail[..8], out int date) ? date : 0;
         }
     }
 }

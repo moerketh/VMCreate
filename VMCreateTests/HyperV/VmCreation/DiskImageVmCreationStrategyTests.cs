@@ -5,6 +5,7 @@ using Moq;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using VMCreate;
@@ -541,8 +542,8 @@ namespace VMCreate.Tests.HyperV.VmCreation
             Assert.IsTrue(File.Exists(builtSeed), "the built seed file must exist for inspection");
             byte[] isoBytes = File.ReadAllBytes(builtSeed);
             string isoText = System.Text.Encoding.ASCII.GetString(isoBytes);
-            StringAssert.Contains(isoText, "packages: [htop]",
-                "the user's cloud-config content must be inside the seed ISO");
+            Assert.IsTrue(ContainsDecoded(isoText, "packages: [htop]"),
+                "the user's cloud-config content must be inside the seed ISO (base64 part — see ContainsDecoded)");
         }
 
         [TestMethod]
@@ -588,10 +589,53 @@ namespace VMCreate.Tests.HyperV.VmCreation
             Assert.IsTrue(File.Exists(builtSeed));
             byte[] isoBytes = File.ReadAllBytes(builtSeed);
             string isoText = System.Text.Encoding.ASCII.GetString(isoBytes);
-            StringAssert.Contains(isoText, "ssh-ed25519 AAAACUSTOM custom@test",
+            // The custom user-data path embeds the key inside a base64 MIME
+            // part (see CloudInitSeedBuilderTests.PartsAreBase64Encoded);
+            // assert on what cloud-init will decode, not the raw bytes.
+            Assert.IsTrue(ContainsDecoded(isoText, "ssh-ed25519 AAAACUSTOM custom@test"),
                 "the seed must embed the user's custom public key");
             _sshKeyManager.Verify(s => s.ReadPublicKeyAsync(
                 "C:\\Users\\Test\\.ssh\\custom_key.pub", It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        /// <summary>
+        /// True when the needle appears in <paramref name="text"/> or in any
+        /// decodable base64 block inside it — the seed's MIME parts are
+        /// base64-encoded, so their content only exists decoded.
+        /// </summary>
+        private static bool ContainsDecoded(string text, string needle)
+        {
+            if (text.Contains(needle, StringComparison.Ordinal))
+                return true;
+
+            // Consecutive non-empty base64-alphabet lines form one block
+            // (RFC 2045 wrapping); decode the whole block, not each line.
+            var block = new System.Text.StringBuilder();
+            foreach (string line in text.Split('\n'))
+            {
+                string trimmed = line.TrimEnd('\r');
+                bool isBase64Line = trimmed.Length >= 4
+                    && trimmed.Length % 4 == 0
+                    && trimmed.All(c => char.IsAsciiLetterOrDigit(c) || c == '+' || c == '/' || c == '=');
+                if (isBase64Line)
+                {
+                    block.Append(trimmed);
+                    continue;
+                }
+
+                if (block.Length > 0)
+                {
+                    try
+                    {
+                        string decoded = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(block.ToString()));
+                        if (decoded.Contains(needle, StringComparison.Ordinal))
+                            return true;
+                    }
+                    catch (FormatException) { /* not base64 — ignore */ }
+                    block.Clear();
+                }
+            }
+            return false;
         }
 
         [TestMethod]

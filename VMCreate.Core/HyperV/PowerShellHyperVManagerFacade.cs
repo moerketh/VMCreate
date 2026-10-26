@@ -95,6 +95,9 @@ namespace VMCreate
         public Task RemoveTemporaryNetworkAdapter(VmDeploymentPlan plan, CancellationToken cancellationToken)
             => _network.RemoveTemporaryNetworkAdapter(plan, cancellationToken);
 
+        public Task<bool> SwitchExistsAsync(string switchName, CancellationToken cancellationToken)
+            => _network.SwitchExistsAsync(switchName, cancellationToken);
+
         public Task SetCpuCount(VmDeploymentPlan plan, CancellationToken cancellationToken)
             => _config.SetCpuCount(plan, cancellationToken);
 

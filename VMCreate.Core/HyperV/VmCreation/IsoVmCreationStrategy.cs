@@ -232,14 +232,10 @@ namespace VMCreate.HyperV.VmCreation
                 // CLI --static-ip/--gateway/--dns: static addressing rides the
                 // seed (cloud-init applies it to the live session; the
                 // installer copies it into the installed system). Null under
-                // DHCP keeps the seed free of a network-config file.
+                // DHCP keeps the seed free of a network-config file. Validated
+                // and normalized in one place — StaticNetworkConfig.Create.
                 StaticNetwork = customizations.HasStaticNetwork
-                    ? new StaticNetworkConfig
-                    {
-                        StaticIp = customizations.StaticIp!,
-                        StaticGateway = customizations.StaticGateway,
-                        StaticDns = customizations.StaticDns,
-                    }
+                    ? StaticNetworkConfig.Create(customizations.StaticIp, customizations.StaticGateway, customizations.StaticDns)
                     : null,
             };
         }

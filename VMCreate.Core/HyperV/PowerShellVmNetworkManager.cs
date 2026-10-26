@@ -81,5 +81,21 @@ namespace VMCreate
             await _executor.RunScriptAsync(script, cancellationToken);
             _logger.LogInformation("Removed temporary network adapter 'VMCreate Temp' (if present).");
         }
+
+        /// <summary>
+        /// Get-VMSwitch by exact name: any output row means the switch exists.
+        /// A name that matches nothing yields an empty result (SilentlyContinue),
+        /// not an error — absence is the answer, not a failure.
+        /// </summary>
+        public async Task<bool> SwitchExistsAsync(string switchName, CancellationToken cancellationToken)
+        {
+            var result = await _executor.RunCommandAsync("Get-VMSwitch",
+                new System.Collections.Generic.Dictionary<string, object?>
+                {
+                    ["Name"] = switchName,
+                    ["ErrorAction"] = "SilentlyContinue",
+                }, cancellationToken);
+            return !result.HadErrors && result.Output.Count > 0;
+        }
     }
 }

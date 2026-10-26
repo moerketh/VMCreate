@@ -139,8 +139,9 @@ namespace VMCreate.Tests.GalleryTests
             var nine = NineListing(
                 "Rocky-9-Azure-Base-9.7-20260101.0.x86_64.vhdfixed.xz",
                 "Rocky-9-Azure-Base-9.8-20260525.0.x86_64.vhdfixed.xz",
-                "Rocky-9-Azure-LVM-9.8-20260525.0.x86_64.vhdfixed.xz",
-                "Rocky-9-GenericCloud-Base-9.8-20260525.0.x86_64.qcow2");
+                "Rocky-9-Azure-Base-9.10-20260701.0.x86_64.vhdfixed.xz",
+                "Rocky-9-Azure-LVM-9.10-20260701.0.x86_64.vhdfixed.xz",
+                "Rocky-9-GenericCloud-Base-9.10-20260701.0.x86_64.qcow2");
             var ten = NineListing(
                 "Rocky-10-Azure-Base-10.2-20260401.0.x86_64.vhdfixed.xz",
                 "Rocky-10-Azure-Base-10.2-20260525.0.x86_64.vhdfixed.xz",
@@ -149,14 +150,35 @@ namespace VMCreate.Tests.GalleryTests
 
             var item = (await new RockyLinuxCloud(FactoryReturning(nine, ten)).LoadGalleryItems())[0];
 
-            StringAssert.Contains(item.Version, "9.8-20260525.0",
-                "the newest Rocky 9 Azure-Base build wins");
+            StringAssert.Contains(item.Version, "9.10-20260701.0",
+                "the newest Rocky 9 Azure-Base build wins — numerically: ordinal sort would rank 9.8 above 9.10 ('8' > '1')");
             var rocky10 = item.ReleaseVariants!.Single(v => v.Id == "rocky-10");
             StringAssert.Contains(rocky10.Version, "10.2-20260525.0",
                 "the newest Rocky 10 Azure-Base build wins");
             // LVM (disk-layout) and GenericCloud (KVM-flavour) twins must not
             // leak into the Azure-Base scrape of either major.
             StringAssert.DoesNotMatch(item.Version, new System.Text.RegularExpressions.Regex(@"LVM|GenericCloud"));
+        }
+
+        [TestMethod]
+        public void BuildIdComparer_OrdersNumerically_AcrossTheShapesRockyPublishes()
+        {
+            // (lower, higher) pairs: each row's higher value must sort first.
+            (string lower, string higher)[] cases =
+            {
+                ("9.8-20260101.0", "9.10-20260701.0"),   // the .10 trap
+                ("9.9-20260101.0", "9.10-20260101.0"),   // same date, minor tiebreak
+                ("9.10-20260101.0", "9.10-20260101.1"),  // build-suffix tiebreak
+                ("9.9-20260101.0", "10.0-20200101.0"),   // major wins regardless of date
+                ("9.10-20251231.0", "9.10-20260101.0"),  // date within same minor
+            };
+            foreach (var (lower, higher) in cases)
+            {
+                Assert.AreEqual(-1, RockyLinuxCloud.BuildIdComparer.Instance.Compare(lower, higher),
+                    $"expected '{higher}' to sort above '{lower}'");
+                Assert.AreEqual(1, RockyLinuxCloud.BuildIdComparer.Instance.Compare(higher, lower),
+                    $"comparer must be antisymmetric for '{lower}' / '{higher}'");
+            }
         }
 
         [TestMethod]

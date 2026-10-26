@@ -84,6 +84,10 @@ namespace VMCreate.Tests
         [DataRow("192.168.10.50/abc", DisplayName = "non-numeric prefix")]
         [DataRow("192.168.10.50/0", DisplayName = "zero prefix")]
         [DataRow("192.168.10.50/33", DisplayName = "prefix over 32")]
+        [DataRow("192.168.1/24", DisplayName = "three octets (IPAddress shorthand)")]
+        [DataRow("10/8", DisplayName = "single octet (IPAddress shorthand)")]
+        [DataRow("0x0a000001/32", DisplayName = "hexadecimal (IPAddress shorthand)")]
+        [DataRow("192.168.10.50/ 24", DisplayName = "space in prefix")]
         public void StaticIpWithoutExplicitPrefix_Fails(string ip)
         {
             var (valid, _, _, _) = Validate(Args(ip));
@@ -103,6 +107,8 @@ namespace VMCreate.Tests
         [TestMethod]
         [DataRow("2001:db8::1", DisplayName = "IPv6")]
         [DataRow("gateway", DisplayName = "garbage")]
+        [DataRow("192.168.1", DisplayName = "three octets (IPAddress shorthand)")]
+        [DataRow("0x0a000001", DisplayName = "hexadecimal (IPAddress shorthand)")]
         public void GatewayNotIpv4_Fails(string gateway)
         {
             var (valid, _, _, _) = Validate(Args("192.168.10.50/24", gateway));

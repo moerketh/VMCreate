@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
 
@@ -108,9 +109,78 @@ namespace VMCreate.Tests.Cidata
             Assert.IsTrue(userPart >= 0 && builtinPart > userPart,
                 "the user part must precede the built-in cloud-config part");
 
-            // Both parts' payloads survive intact.
-            StringAssert.Contains(multipart, "packages: [htop]");
-            StringAssert.Contains(multipart, "name: vmcreate");
+            // Both parts' payloads survive intact through the transfer
+            // encoding: the decoded bodies carry what was written.
+            var parts = DecodeParts(multipart);
+            Assert.AreEqual(2, parts.Count);
+            StringAssert.Contains(parts[0], "packages: [htop]");
+            StringAssert.Contains(parts[1], "name: vmcreate");
+        }
+
+        [TestMethod]
+        public void CustomUserData_PartsAreBase64Encoded()
+        {
+            // Every cloud-init release shipped in images before 2026-10
+            // decodes an UNENCODED text part via raw-unicode-escape
+            // (upstream #7102 fixed it): "é" became the lone byte 0xE9 and
+            // U+0100+ became literal "\uXXXX" text, breaking scripts, YAML
+            // and SSH key comments. The base64 transfer path decodes
+            // correctly everywhere, so the parts must declare and use it.
+            string multipart = CloudInitSeedBuilder.BuildMultipartUserData(
+                "ssh-ed25519 AAAAtest vmcreate",
+                "#!/bin/sh\necho café 中\n");
+
+            int partHeaders = 0;
+            int base64Headers = 0;
+            foreach (string line in multipart.Split('\n'))
+            {
+                if (line.StartsWith("Content-Transfer-Encoding:", StringComparison.Ordinal))
+                {
+                    partHeaders++;
+                    if (line.Contains("base64", StringComparison.Ordinal))
+                        base64Headers++;
+                }
+            }
+            Assert.AreEqual(partHeaders, base64Headers, "every part must use base64 transfer encoding");
+            Assert.AreEqual(2, partHeaders);
+            Assert.IsFalse(multipart.Contains("café", StringComparison.Ordinal),
+                "raw non-ASCII must not appear in the document — only its base64 form");
+
+            // What cloud-init will decode matches the input bytes exactly.
+            var parts = DecodeParts(multipart);
+            StringAssert.Contains(parts[0], "echo café 中\n");
+        }
+
+        /// <summary>
+        /// Extracts each part's base64 body and decodes it — the same
+        /// transform cloud-init's MIME reader applies to a
+        /// Content-Transfer-Encoding: base64 part.
+        /// </summary>
+        private static List<string> DecodeParts(string multipart)
+        {
+            int bidx = multipart.IndexOf("boundary=\"", StringComparison.Ordinal) + "boundary=\"".Length;
+            string boundary = multipart[bidx..multipart.IndexOf('"', bidx)];
+
+            var parts = new List<string>();
+            string delimiter = "--" + boundary;
+            string closing = delimiter + "--";
+            int search = 0;
+            while (true)
+            {
+                int start = multipart.IndexOf(delimiter, search, StringComparison.Ordinal);
+                if (start < 0 || string.CompareOrdinal(multipart, start, closing, 0, closing.Length) == 0)
+                    break;
+                int bodyStart = multipart.IndexOf("\n\n", start, StringComparison.Ordinal);
+                if (bodyStart < 0)
+                    break;
+                int end = multipart.IndexOf("\n" + delimiter, bodyStart, StringComparison.Ordinal);
+                if (end < 0)
+                    break;
+                string body = multipart[(bodyStart + 2)..end].Replace("\n", "", StringComparison.Ordinal);
+                parts.Add(Encoding.UTF8.GetString(Convert.FromBase64String(body)));
+                search = end;
+            }
+            return parts;
         }
 
         [TestMethod]
@@ -118,10 +188,12 @@ namespace VMCreate.Tests.Cidata
         {
             // A part whose payload does not end with a newline must get one:
             // the closing delimiter must be on its own line or the payload
-            // would swallow it into the last command.
+            // would swallow it into the last command. (The base64 body is
+            // newline-safe regardless; the guarantee is pinned on the DECODED
+            // part, which is what cloud-init executes.)
             string multipart = CloudInitSeedBuilder.BuildMultipartUserData(
                 "ssh-ed25519 AAAAtest vmcreate", "#!/bin/sh\necho no-trailing-newline");
-            StringAssert.Contains(multipart, "echo no-trailing-newline\n");
+            StringAssert.Contains(DecodeParts(multipart)[0], "echo no-trailing-newline\n");
             Assert.IsTrue(multipart.EndsWith("--\n", StringComparison.Ordinal),
                 "the document ends with the closing delimiter");
         }
@@ -167,10 +239,11 @@ namespace VMCreate.Tests.Cidata
                 Assert.IsFalse(content.Contains('\r'),
                     "the seed must not carry CR bytes into the guest");
 
-                // And the multipart envelope wraps the normalized payload.
+                // And the multipart envelope wraps the normalized payload —
+                // the decoded part carries LF-only bytes.
                 string multipart = CloudInitSeedBuilder.BuildMultipartUserData(
                     "ssh-ed25519 AAAAtest vmcreate", content);
-                StringAssert.Contains(multipart, "#!/bin/sh\necho hi\n");
+                StringAssert.Contains(DecodeParts(multipart)[0], "#!/bin/sh\necho hi\n");
             }
             finally
             {

@@ -63,6 +63,13 @@ namespace VMCreate
         Task ConnectNetworkAdapter(VmDeploymentPlan plan, CancellationToken cancellationToken);
         Task AddTemporaryNetworkAdapter(VmDeploymentPlan plan, CancellationToken cancellationToken);
         Task RemoveTemporaryNetworkAdapter(VmDeploymentPlan plan, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// True when a virtual switch with the given name exists on this host.
+        /// Used by the CLI's pre-download validation so a mistyped --switch
+        /// fails as InvalidArguments instead of after the VM skeleton exists.
+        /// </summary>
+        Task<bool> SwitchExistsAsync(string switchName, CancellationToken cancellationToken);
     }
 
     /// <summary>
