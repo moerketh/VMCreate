@@ -31,7 +31,7 @@ namespace VMCreate
         /// <summary>
         /// pacman-family distributions (Arch, Athena Arch, Manjaro and other
         /// ID_LIKE=arch derivatives). Lamco-capable via the fork pipeline's
-        /// amd64 Arch pacman package (lamco-rdp-server-1.4.5-hyperv6-1),
+        /// amd64 Arch pacman package (lamco-rdp-server-1.4.5-hyperv7-1),
         /// which Omarchy (Arch + Hyprland) and Athena Arch install through
         /// pacman -U.
         /// </summary>

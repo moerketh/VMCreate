@@ -127,7 +127,7 @@ namespace VMCreate.Tests.HyperV.Steps
         {
             // Omarchy installs Arch + Hyprland (Wayland). Since the fork
             // pipeline ships the amd64 pacman package
-            // (lamco-rdp-server-1.4.5-hyperv6-1, built from the same tag as
+            // (lamco-rdp-server-1.4.5-hyperv7-1, built from the same tag as
             // the deb), Arch is Lamco-capable: Wayland + Arch → Lamco.
             _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                   .ReturnsAsync("ID=omarchy\nID_LIKE=arch\n");

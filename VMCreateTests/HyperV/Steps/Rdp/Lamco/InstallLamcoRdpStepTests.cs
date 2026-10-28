@@ -345,13 +345,13 @@ namespace VMCreate.Tests.HyperV.Steps
             Assert.IsTrue(System.Text.RegularExpressions.Regex.IsMatch(
                     captured, "LAMCO_FORK_TAG=\"v[^\"]+\""),
                 "fork deb tag pinned in the script");
-            StringAssert.Contains(captured, "LAMCO_FORK_TAG=\"v1.4.5-hyperv.6\"",
-                "current fork lineage at v1.4.5-hyperv.6 (in-place KWin mode change)");
+            StringAssert.Contains(captured, "LAMCO_FORK_TAG=\"v1.4.5-hyperv.7\"",
+                "current fork lineage at v1.4.5-hyperv.7 (clipboard reliability round)");
             Assert.IsTrue(captured.Contains("LAMCO_FORK_DEB_SHA256=\"") && !captured.Contains("LAMCO_FORK_DEB_SHA256=\"PENDING"),
                 "fork deb sha256 pinned — whoever can push a release asset must not get root on every VM");
             StringAssert.Contains(captured, "sha256sum \"$FORK_DEB_TMP\"",
                 "digest verified before dpkg -i");
-            // Fork identity comes from the dpkg database: the -hyperv6 marker
+            // Fork identity comes from the dpkg database: the -hyperv7 marker
             // lives in the deb's Package Version field, NOT in the binary.
             // Fork policy pins Cargo.toml at the upstream base version, so the
             // binary's --version prints bare 1.4.5 forever (verified on the
@@ -367,7 +367,7 @@ namespace VMCreate.Tests.HyperV.Steps
             // Arch/pacman lineage: the same fork tag ships an amd64 pacman
             // package; install_lamco.sh branches on is_arch_family and
             // installs the sha256-verified download via pacman -U.
-            StringAssert.Contains(captured, "LAMCO_FORK_PKG_VERSION=\"1.4.5.hyperv6-1\"",
+            StringAssert.Contains(captured, "LAMCO_FORK_PKG_VERSION=\"1.4.5.hyperv7-1\"",
                 "fork pacman pkgver pinned in the script (dot, not hyphen — Arch pkgver grammar)");
             Assert.IsTrue(captured.Contains("LAMCO_FORK_PKG_SHA256=\"") && !captured.Contains("LAMCO_FORK_PKG_SHA256=\"PENDING"),
                 "fork pacman package sha256 pinned");

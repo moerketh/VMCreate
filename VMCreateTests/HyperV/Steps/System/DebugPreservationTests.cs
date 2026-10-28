@@ -12,7 +12,9 @@ namespace VMCreate.Tests.HyperV.Steps
     /// enabled (a Debug CLI deploy keeps the VM reachable); Release
     /// builds enable it via an attached debugger or
     /// <c>VMCREATE_DEBUG_PRESERVE=1</c>. Tests pin both sides through the
-    /// internal override (tests themselves compile as Debug).
+    /// internal override; the build-default test compiles only under
+    /// DEBUG (the Release CI run would otherwise assert the Release
+    /// default against a Debug expectation).
     /// Not parallelized: the switch is process-wide state.
     /// </summary>
     [TestClass]
@@ -33,13 +35,17 @@ namespace VMCreate.Tests.HyperV.Steps
             Environment.SetEnvironmentVariable(DebugPreservation.EnvironmentVariable, null);
         }
 
+#if DEBUG
         [TestMethod]
         public void IsEnabled_DebugBuildsAlwaysEnabled()
         {
-            // Tests compile as Debug: the default state must be ENABLED —
-            // every debug-build deployment preserves the VM.
+            // Valid only when the test assembly compiles as Debug: the
+            // default state must be ENABLED — every debug-build deployment
+            // preserves the VM. (A Release run pins the same behavior via
+            // TestOverride in the tests below.)
             Assert.IsTrue(DebugPreservation.IsEnabled);
         }
+#endif
 
         [TestMethod]
         public void IsEnabled_ReleaseBuild_EnableViaEnvironmentVariable()

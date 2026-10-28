@@ -38,7 +38,7 @@ namespace VMCreate.Tests.GalleryTests
             // NixOs (incl. Athena Nix / NixOS): declarative distro — no
             // package-manager install path possible. Arch-family distros
             // ARE supported since the fork pipeline ships an amd64 pacman
-            // package (lamco-rdp-server-1.4.5-hyperv6-1; Omarchy Phase D).
+            // package (lamco-rdp-server-1.4.5-hyperv7-1; Omarchy Phase D).
             Assert.IsFalse(LinuxDistro.NixOs.SupportsLamco());
         }
 
