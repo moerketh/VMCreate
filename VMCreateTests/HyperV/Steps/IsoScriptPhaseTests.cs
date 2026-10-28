@@ -33,7 +33,7 @@ namespace VMCreate.Tests.HyperV.Steps
             // decision logic that made "Force X11" a no-op rewrite on
             // X11-only desktops like PwnCloudOS.
             string? bash = FindWsl();
-            if (bash is null)
+            if (bash is null || !UbuntuWslUsable(bash))
             {
                 Assert.Inconclusive("WSL not available — force_x11.sh fast-path test skipped");
                 return;
@@ -129,7 +129,7 @@ restored=0 x11_session=x bash {wslStage}/block.sh $S
         public void CloneDisk_Finalize_Completes_WithoutEmptyDiskDetection()
         {
             string? bash = FindWsl();
-            if (bash is null)
+            if (bash is null || !UbuntuWslUsable(bash))
             {
                 Assert.Inconclusive("WSL not available — clone_disk.sh phase test skipped");
                 return;
@@ -172,6 +172,48 @@ bash /opt/vmcreate/clone_disk.sh finalize
                 try { Directory.Delete(stage, recursive: true); } catch (IOException) { }
                 RunInWsl(bash, "umount -lf /mnt/new 2>/dev/null; rm -rf /mnt/new /opt/vmcreate; true");
             }
+        }
+
+        /// <summary>
+        /// Probes the exact WSL invocation these tests use
+        /// (<c>-d Ubuntu -u root</c>). <c>wsl.exe</c> ships with Windows, so
+        /// the binary's existence proves nothing: GitHub runners have it but
+        /// no distro, and the run then exits non-zero — indistinguishable
+        /// from a script failure without a preflight. Unusable maps to
+        /// Inconclusive, preserving the behavioral checks on dev machines.
+        /// </summary>
+        private static bool? _ubuntuWslUsable;
+
+        private static bool UbuntuWslUsable(string wslExe)
+        {
+            if (_ubuntuWslUsable.HasValue)
+                return _ubuntuWslUsable.Value;
+            if (!OperatingSystem.IsWindows())
+            {
+                _ubuntuWslUsable = false;
+                return false;
+            }
+            try
+            {
+                var probe = new ProcessStartInfo
+                {
+                    FileName = wslExe,
+                    Arguments = "-d Ubuntu -u root -e echo ok",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                };
+                using var p = Process.Start(probe)!;
+                p.StandardOutput.ReadToEnd();
+                p.WaitForExit(15000);
+                _ubuntuWslUsable = p.ExitCode == 0;
+            }
+            catch (System.ComponentModel.Win32Exception)
+            {
+                _ubuntuWslUsable = false;
+            }
+            return _ubuntuWslUsable.Value;
         }
 
         private static (int Exit, string Output, string Error) RunInWsl(string wslExe, string script)
