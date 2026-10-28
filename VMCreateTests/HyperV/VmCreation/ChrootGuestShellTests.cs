@@ -199,6 +199,8 @@ namespace VMCreate.Tests.HyperV.VmCreation
         /// </summary>
         private static string RunHeartbeatPipeProbe(string wslExe, string innerScript)
         {
+            if (!UbuntuWslUsable())
+                Assert.Inconclusive("WSL Ubuntu not usable — heartbeat pipe probe skipped");
             string wrapperPath = System.IO.Path.Combine(
                 System.IO.Path.GetTempPath(), "vmcreate-hb-wrapper-" + Guid.NewGuid().ToString("N")[..8] + ".sh");
             System.IO.File.WriteAllText(wrapperPath, innerScript.Replace("\r\n", "\n"), new System.Text.UTF8Encoding(false));
@@ -328,8 +330,53 @@ echo ""EOF_AFTER_MS=$((rend-rstart)) READER_RC=$rrc WRAPPER_RAN=$saw""
             Assert.AreEqual(expected, result.Trim(), $"[{string.Join(" ", args)}] {because}");
         }
 
+        /// <summary>
+        /// Probes the exact WSL invocation the behavioral tests use
+        /// (<c>-d Ubuntu -u root</c>). <c>wsl.exe</c> ships with Windows, so
+        /// the binary's existence proves nothing: GitHub runners have it but
+        /// no distro, and the run then exits non-zero with empty stderr —
+        /// indistinguishable from a script failure without a preflight.
+        /// Unusable maps to Inconclusive, preserving the behavioral checks
+        /// on dev machines (the a4e845e precedent).
+        /// </summary>
+        private static bool? _ubuntuWslUsable;
+
+        private static bool UbuntuWslUsable()
+        {
+            if (_ubuntuWslUsable.HasValue)
+                return _ubuntuWslUsable.Value;
+            if (!OperatingSystem.IsWindows())
+            {
+                _ubuntuWslUsable = false;
+                return false;
+            }
+            try
+            {
+                var probe = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "wsl",
+                    Arguments = "-d Ubuntu -u root -e echo ok",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                };
+                using var p = System.Diagnostics.Process.Start(probe)!;
+                p.StandardOutput.ReadToEnd();
+                p.WaitForExit(15000);
+                _ubuntuWslUsable = p.ExitCode == 0;
+            }
+            catch (System.ComponentModel.Win32Exception)
+            {
+                _ubuntuWslUsable = false;
+            }
+            return _ubuntuWslUsable.Value;
+        }
+
         private static string RunBash(string script, string[] args)
         {
+            if (!UbuntuWslUsable())
+                Assert.Inconclusive("WSL Ubuntu not usable — behavioral shim check skipped");
             // Script rides stdin (bash -s): no Windows→WSL path translation.
             var psi = new System.Diagnostics.ProcessStartInfo
             {
