@@ -77,7 +77,12 @@
 
             <ui:InfoBar Title="Conversion required" Severity="Warning"
                         Message="The selected VM is not in VHDX format. It will be converted to VHDX using QEMU. If the disk is MBR partitioned it will be cloned to a new GPT partitioned disk using a converter DVD on first VM boot."
-                        IsOpen="{Binding IsNotVhdx, Mode=OneWay}" IsClosable="False" Margin="0,0,0,8"/>
+                        IsOpen="{Binding ShowConversionNotice, Mode=OneWay}" IsClosable="False" Margin="0,0,0,8"/>
+
+            <!-- Diskless / RAM-boot notice -->
+            <ui:InfoBar Title="Runs entirely in RAM" Severity="Informational"
+                       Message="This live system boots into memory: no virtual hard disk is created, and every change vanishes when the VM powers off. Decline any save-file prompt at shutdown to stay stateless."
+                       IsOpen="{Binding IsDiskless, Mode=OneWay}" IsClosable="False" Margin="0,0,0,8"/>
 
             <!-- Inline validation error -->
             <TextBlock Text="{Binding ValidationError}" Foreground="{DynamicResource SystemFillColorCriticalBrush}"
@@ -162,8 +167,8 @@
                                    HorizontalAlignment="Center" Margin="0,2,0,0"/>
                     </Grid>
 
-                    <!-- New Drive Size (only for non-VHDX) -->
-                    <StackPanel Visibility="{Binding IsNotVhdx, Converter={StaticResource BoolToVis}}" Margin="0,8,0,0">
+                    <!-- New Drive Size (hidden for diskless RAM-boot images) -->
+                    <StackPanel Visibility="{Binding ShowDiskSizeSection, Converter={StaticResource BoolToVis}}" Margin="0,8,0,0">
                         <TextBlock Text="New Drive Size (GB)" FontSize="14" FontWeight="SemiBold"
                                    Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,0,6"/>
                         <CheckBox Content="Auto-detect from source image"

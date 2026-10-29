@@ -309,5 +309,57 @@ namespace VMCreate.Tests.GalleryTests
                     $"ThumbnailUri (embedded athena-logo.svg) missing on '{item.Name}'");
             }
         }
+
+        // ── Fatdog64 (RAM-boot) ───────────────────────────────────────────────────
+
+        [TestMethod]
+        public async Task Fatdog64_LoadGalleryItems_ReturnsSingleItem()
+        {
+            var result = await new Fatdog64().LoadGalleryItems();
+
+            Assert.AreEqual(1, result.Count);
+        }
+
+        [TestMethod]
+        public async Task Fatdog64_LoadGalleryItems_ItemHasRequiredFields()
+        {
+            var item = (await new Fatdog64().LoadGalleryItems())[0];
+
+            Assert.IsFalse(string.IsNullOrEmpty(item.Name));
+            Assert.IsFalse(string.IsNullOrEmpty(item.DiskUri), "DiskUri must not be empty");
+            Assert.AreEqual("false", item.SecureBoot);
+            Assert.AreEqual("HvSocket", item.EnhancedSessionTransportType);
+        }
+
+        [TestMethod]
+        public async Task Fatdog64_LoadGalleryItems_IsDiskless()
+        {
+            // The IsDiskless flag selects RamBootVmCreationStrategy: no VHDX,
+            // boots straight from the attached ISO into guest RAM.
+            var item = (await new Fatdog64().LoadGalleryItems())[0];
+
+            Assert.IsTrue(item.IsDiskless, "Fatdog64 must set IsDiskless to boot without a hard disk");
+        }
+
+        [TestMethod]
+        public async Task Fatdog64_LoadGalleryItems_DiskUriIsIso()
+        {
+            var item = (await new Fatdog64().LoadGalleryItems())[0];
+
+            Assert.IsTrue(item.DiskUri.EndsWith(".iso", StringComparison.OrdinalIgnoreCase),
+                $"Expected .iso URI, got: {item.DiskUri}");
+        }
+
+        [TestMethod]
+        public async Task Fatdog64_LoadGalleryItems_UsesMd5Checksum()
+        {
+            // Fatdog ships GNU-format .md5sum.txt files; the verifier needs the
+            // algorithm hint to compute an MD5 digest.
+            var item = (await new Fatdog64().LoadGalleryItems())[0];
+
+            Assert.AreEqual("md5", item.ChecksumAlgorithm);
+            Assert.IsNotNull(item.ChecksumUri);
+            StringAssert.Contains(item.ChecksumUri, ".md5sum.txt");
+        }
     }
 }

@@ -96,6 +96,10 @@ namespace VMCreate
             services.AddTransient<VsockIsoBootCycleRunner>();
             services.AddTransient<IVsockGuestScriptRunner, EmbeddedIsoScriptRunner>();
             services.AddTransient<IIsoBootCycleRunner, VsockIsoBootCycleRunner>();
+            // Registered before IsoVmCreationStrategy: the orchestrator picks the
+            // first strategy whose CanHandle returns true, and diskless items are
+            // also ISOs.
+            services.AddTransient<IVmCreationStrategy, RamBootVmCreationStrategy>();
             services.AddTransient<IVmCreationStrategy, IsoVmCreationStrategy>();
             services.AddTransient<IVmCreationStrategy, NativeHyperVVmCreationStrategy>();
             services.AddTransient<IVmCreationStrategy, DiskImageVmCreationStrategy>();

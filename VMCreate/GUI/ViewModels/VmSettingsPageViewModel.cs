@@ -215,8 +215,17 @@ namespace VMCreate
             IsNotVhdx
             && DetectFormat() != DiskImageFormat.Iso;
 
+        /// <summary>True when the selected item boots entirely into RAM and no disk size applies.</summary>
+        public bool IsDiskless => _wizardData.SelectedItem?.IsDiskless == true;
+
+        /// <summary>Show the disk-size section unless the image is already VHDX/native or boots diskless into RAM.</summary>
+        public bool ShowDiskSizeSection => IsNotVhdx && !IsDiskless;
+
+        /// <summary>Show the VHDX conversion warning only when a disk will actually be created.</summary>
+        public bool ShowConversionNotice => IsNotVhdx && !IsDiskless;
+
         /// <summary>Show the manual textbox when the user opts out of auto-detection, or for ISO installs.</summary>
-        public bool ShowManualDiskSize => IsNotVhdx && !_autoDetectDiskSize;
+        public bool ShowManualDiskSize => ShowDiskSizeSection && !_autoDetectDiskSize;
 
         /// <summary>Show the auto-size hint when auto-detect is enabled for disk images.</summary>
         public bool ShowAutoSizeHint => IsDiskImage && _autoDetectDiskSize;
@@ -298,7 +307,7 @@ namespace VMCreate
                 return;
             }
 
-            if (IsNotVhdx)
+            if (ShowDiskSizeSection)
             {
                 if (_autoDetectDiskSize && IsDiskImage)
                 {
