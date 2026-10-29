@@ -295,5 +295,11 @@ namespace VMCreate.Tests.GalleryTests
             => await VerifyAllUrisAsync(
                 await new RockyLinux().LoadGalleryItems(),
                 nameof(RockyLinux));
+
+        [TestMethod, Timeout(120_000)]
+        public async Task Fatdog64_AllUrisResolve()
+            => await VerifyAllUrisAsync(
+                await new Fatdog64().LoadGalleryItems(),
+                nameof(Fatdog64));
     }
 }

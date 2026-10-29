@@ -756,6 +756,7 @@ namespace VMCreate
         {
             bool nestedVirt = wizardData.Settings?.VirtualizationEnabled ?? true;
             bool isIso = DiskFileDetector.DetectFileType(wizardData.SelectedItem?.DiskUri) == DiskImageFormat.Iso;
+            bool isDiskless = wizardData.SelectedItem?.IsDiskless == true;
 
             Phases.Add(new DeploymentPhase(SubCreateVMSkeleton, "Create Hyper-V VM",
                 "Creating the virtual machine shell", SymbolRegular.Desktop24) { IndentLevel = 1, IsVisible = false });
@@ -763,9 +764,12 @@ namespace VMCreate
                 "Connecting VM to Default Switch", SymbolRegular.PlugConnected24) { IndentLevel = 1, IsVisible = false });
             Phases.Add(new DeploymentPhase(SubConfigureHardware, "Configure Hardware",
                 "Setting CPU count, memory, secure boot, and integration services", SymbolRegular.Board24) { IndentLevel = 1, IsVisible = false });
-            Phases.Add(new DeploymentPhase(SubAttachDisk, isIso ? "Create Boot Disk" : "Attach Disk",
-                isIso ? "Creating empty VHDX for the OS installer" : "Attaching converted disk image",
-                SymbolRegular.HardDrive24) { IndentLevel = 1, IsVisible = false });
+            if (!isDiskless)
+            {
+                Phases.Add(new DeploymentPhase(SubAttachDisk, isIso ? "Create Boot Disk" : "Attach Disk",
+                    isIso ? "Creating empty VHDX for the OS installer" : "Attaching converted disk image",
+                    SymbolRegular.HardDrive24) { IndentLevel = 1, IsVisible = false });
+            }
             // AttachCloneDisk and AttachBootDvd are inserted dynamically when DetectedGeneration arrives,
             // or statically for ISO flows
             if (isIso)

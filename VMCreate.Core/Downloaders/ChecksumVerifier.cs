@@ -247,6 +247,7 @@ namespace VMCreate
         {
             using var hashAlgorithm = algorithm.ToLowerInvariant() switch
             {
+                "md5" => (HashAlgorithm)MD5.Create(),
                 "sha256" => (HashAlgorithm)SHA256.Create(),
                 "sha512" => SHA512.Create(),
                 _ => throw new NotSupportedException($"Unsupported checksum algorithm: {algorithm}")

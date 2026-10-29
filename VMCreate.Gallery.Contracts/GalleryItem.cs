@@ -173,6 +173,14 @@ namespace VMCreate
         }
 
         /// <summary>
+        /// True when the item boots entirely into guest RAM (live ISO) and no virtual
+        /// hard disk should be created or attached. The VM boots straight from the
+        /// attached DVD and is stateless: powering off discards every change made
+        /// during the session. Selects <c>RamBootVmCreationStrategy</c>.
+        /// </summary>
+        public bool IsDiskless { get; set; }
+
+        /// <summary>
         /// True when the downloaded file is wrapped in a compression or archive
         /// format that must be extracted before the disk can be used.
         /// Unlike <see cref="FileType"/> (which reports the inner disk type),

@@ -204,6 +204,37 @@ namespace VMCreate.Tests
         }
 
         [TestMethod]
+        public async Task VerifyAsync_Md5_MatchingChecksum_Passes()
+        {
+            // Fatdog64 ships GNU-format .md5sum.txt files; the md5 algorithm
+            // must hash (32 hex chars) and parse end to end.
+            var tempFile = Path.GetTempFileName();
+            try
+            {
+                var content = Encoding.UTF8.GetBytes("Hello md5 verification!");
+                await File.WriteAllBytesAsync(tempFile, content);
+
+                var expectedHash = Convert.ToHexString(MD5.HashData(content)).ToLowerInvariant();
+                var fileName = Path.GetFileName(tempFile);
+                var checksumFileContent = $"{expectedHash}  {fileName}\n";
+
+                var handler = new MockChecksumHttpHandler(checksumFileContent);
+                var factory = new MockHttpClientFactory(handler);
+                var logger = new Mock<ILogger<ChecksumVerifier>>();
+                var verifier = new ChecksumVerifier(factory, logger.Object);
+
+                await verifier.VerifyAsync(tempFile, "http://example.com/md5sum.txt", "md5",
+                    CancellationToken.None, (IProgress<CreateVMProgressInfo>?)null);
+
+                Assert.IsTrue(File.Exists(tempFile), "File should still exist after successful verification");
+            }
+            finally
+            {
+                if (File.Exists(tempFile)) File.Delete(tempFile);
+            }
+        }
+
+        [TestMethod]
         public async Task VerifyAsync_MismatchedChecksum_ThrowsAndDeletesFile()
         {
             var tempFile = Path.GetTempFileName();

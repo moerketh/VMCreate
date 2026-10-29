@@ -118,6 +118,7 @@ namespace VMCreate.Tests.GalleryTests
             new object[] { new LinuxMint(),          nameof(LinuxMint) },
             new object[] { new AlpineLinux(),        nameof(AlpineLinux) },
             new object[] { new RockyLinux(),         nameof(RockyLinux) },
+            new object[] { new Fatdog64(),           nameof(Fatdog64) },
         };
 
         [TestMethod]
