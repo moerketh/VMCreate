@@ -46,6 +46,8 @@ It replaces Hyper-V **Quick Create** with a gallery you'll actually want to use.
 
 **Also available** (ISO installers, hidden by default): Alpine, Athena OS, CAINE, Debian, Fedora, Linux Mint, NixOS, openSUSE, Pentoo, Rocky Linux, Security Onion, Tsurugi.
 
+**Boot-only live systems:** Tails boots from its DVD and runs entirely in RAM. No disk is created, the guest is never modified, and each session starts fresh (amnesic).
+
 **Bring your own:** load images from the Microsoft gallery, a local JSON gallery, registry entries, or any cloud image URL.
 
 ## Get started

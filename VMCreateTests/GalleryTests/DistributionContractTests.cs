@@ -430,16 +430,43 @@ namespace VMCreate.Tests.GalleryTests
 
             AssertContractInvariants(items, nameof(Tails));
             Assert.AreEqual(1, items.Count);
-            StringAssert.EndsWith(items[0].DiskUri, ".img", StringComparison.OrdinalIgnoreCase);
+            // The API lists the .img target first — the loader must pick the
+            // .iso (live-DVD boot), not just take the first entry.
+            StringAssert.EndsWith(items[0].DiskUri, ".iso", StringComparison.OrdinalIgnoreCase);
 
             // The API is publisher metadata fetched at runtime: its inline
             // sha256 proves transport consistency only (a compromise of the
             // API controls both URL and digest), so it must land in
             // RuntimeChecksum and never badge as source-pinned.
-            Assert.AreEqual("abc123", items[0].RuntimeChecksum);
+            Assert.AreEqual("def456", items[0].RuntimeChecksum, "must carry the selected .iso target file's digest");
             Assert.IsNull(items[0].Checksum, "a runtime API digest must never occupy the pinned Checksum field");
             Assert.IsFalse(items[0].HasChecksum, "runtime-API digest must not badge as verified");
             Assert.AreEqual("SHA256", items[0].ChecksumAlgorithm);
+            Assert.AreEqual("false", items[0].SecureBoot, "live Tails boots with Secure Boot disabled");
+        }
+
+        [TestMethod]
+        public async Task LoadTails_MetadataRedirectsToForeignHost_Throws()
+        {
+            // A compromised publisher API must not be able to point the
+            // download at an arbitrary origin via either target type.
+            const string json = """
+                {
+                    "installations": [{
+                        "version": "7.5",
+                        "installation-paths": [{
+                            "type": "iso",
+                            "target-files": [{
+                                "url": "https://evil.example.net/tails.iso",
+                                "sha256": "abc123"
+                            }]
+                        }]
+                    }]
+                }
+                """;
+
+            await Assert.ThrowsAsync<Exception>(
+                () => new Tails(FactoryFor(json)).LoadGalleryItems());
         }
 
         [TestMethod]
