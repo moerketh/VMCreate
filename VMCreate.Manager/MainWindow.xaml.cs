@@ -1,5 +1,7 @@
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using VMCreate.Manager.ViewModels;
@@ -20,7 +22,139 @@ namespace VMCreate.Manager
             InitializeComponent();
             _vm = viewModel;
             DataContext = viewModel;
+            VmGrid.PreviewMouseRightButtonDown += VmGrid_PreviewMouseRightButtonDown;
+            BuildColumnChooser();
+            RestoreLayout(UiSettings.Load());
+            Closing += (_, _) => SaveLayout();
             Closed += (_, _) => _vm.Dispose();
+        }
+
+        /// <summary>Brings the window to the front; used when a second instance is started.</summary>
+        public void BringToFront()
+        {
+            if (WindowState == WindowState.Minimized)
+                WindowState = WindowState.Normal;
+            Show();
+            Activate();
+            // Activate alone may only flash the taskbar button; a Topmost toggle reliably raises it.
+            Topmost = true;
+            Topmost = false;
+            Focus();
+        }
+
+        // ── layout persistence ───────────────────────────────────────────
+
+        private void RestoreLayout(UiSettings s)
+        {
+            if (s.Width is double w && s.Height is double h && s.Left is double l && s.Top is double t)
+            {
+                // Only restore a position that is still on a connected screen.
+                var screen = new Rect(SystemParameters.VirtualScreenLeft, SystemParameters.VirtualScreenTop,
+                    SystemParameters.VirtualScreenWidth, SystemParameters.VirtualScreenHeight);
+                if (screen.IntersectsWith(new Rect(l, t, w, h)) && w >= MinWidth && h >= MinHeight)
+                {
+                    WindowStartupLocation = WindowStartupLocation.Manual;
+                    Left = l;
+                    Top = t;
+                    Width = w;
+                    Height = h;
+                }
+            }
+            if (s.Maximized)
+                WindowState = WindowState.Maximized;
+            if (s.NavigationWidth is double nav && nav >= NavColumn.MinWidth)
+                NavColumn.Width = new GridLength(nav);
+            if (s.DetailsWidth is double det && det >= DetailsColumn.MinWidth)
+                DetailsColumn.Width = new GridLength(det);
+
+            foreach (var cs in s.Columns)
+            {
+                var col = VmGrid.Columns.FirstOrDefault(c => HeaderOf(c) == cs.Header);
+                if (col == null)
+                    continue;
+                if (cs.Width > 0)
+                    col.Width = cs.IsStar ? new DataGridLength(cs.Width, DataGridLengthUnitType.Star) : new DataGridLength(cs.Width);
+                col.Visibility = cs.Visible || IsNameColumn(col) ? Visibility.Visible : Visibility.Collapsed;
+            }
+            // Apply display order lowest first so indexes don't fight each other.
+            foreach (var cs in s.Columns.OrderBy(c => c.DisplayIndex))
+            {
+                var col = VmGrid.Columns.FirstOrDefault(c => HeaderOf(c) == cs.Header);
+                if (col != null && cs.DisplayIndex >= 0 && cs.DisplayIndex < VmGrid.Columns.Count)
+                    col.DisplayIndex = cs.DisplayIndex;
+            }
+
+            var sortCol = VmGrid.Columns.FirstOrDefault(c => HeaderOf(c) == s.SortColumn);
+            if (sortCol != null)
+            {
+                var direction = s.SortDescending ? ListSortDirection.Descending : ListSortDirection.Ascending;
+                sortCol.SortDirection = direction;
+                _vm.VmsView.SortDescriptions.Clear();
+                _vm.VmsView.SortDescriptions.Add(new SortDescription(sortCol.SortMemberPath, direction));
+            }
+        }
+
+        private void SaveLayout()
+        {
+            var bounds = WindowState == WindowState.Normal ? new Rect(Left, Top, Width, Height) : RestoreBounds;
+            var sorted = VmGrid.Columns.FirstOrDefault(c => c.SortDirection != null);
+            new UiSettings
+            {
+                Left = bounds.Left,
+                Top = bounds.Top,
+                Width = bounds.Width,
+                Height = bounds.Height,
+                Maximized = WindowState == WindowState.Maximized,
+                NavigationWidth = NavColumn.ActualWidth,
+                DetailsWidth = DetailsColumn.ActualWidth,
+                SortColumn = sorted == null ? null : HeaderOf(sorted),
+                SortDescending = sorted?.SortDirection == ListSortDirection.Descending,
+                Columns = VmGrid.Columns.Select(c => new UiSettings.ColumnSetting
+                {
+                    Header = HeaderOf(c),
+                    Width = c.Width.IsStar ? c.Width.Value : c.ActualWidth,
+                    IsStar = c.Width.IsStar,
+                    DisplayIndex = c.DisplayIndex,
+                    Visible = c.Visibility == Visibility.Visible,
+                }).ToList(),
+            }.Save();
+        }
+
+        /// <summary>Right-click on a column header: tick columns on or off. Name always stays.</summary>
+        private void BuildColumnChooser()
+        {
+            var menu = new ContextMenu();
+            foreach (var col in VmGrid.Columns.Where(c => !IsNameColumn(c)))
+            {
+                var item = new MenuItem { Header = HeaderOf(col), IsCheckable = true, StaysOpenOnClick = true };
+                item.IsChecked = col.Visibility == Visibility.Visible;
+                item.Checked += (_, _) => col.Visibility = Visibility.Visible;
+                item.Unchecked += (_, _) => col.Visibility = Visibility.Collapsed;
+                menu.Items.Add(item);
+            }
+            menu.Opened += (_, _) =>
+            {
+                foreach (MenuItem item in menu.Items)
+                    item.IsChecked = VmGrid.Columns.First(c => HeaderOf(c) == (string)item.Header).Visibility == Visibility.Visible;
+            };
+            var baseStyle = TryFindResource(typeof(DataGridColumnHeader)) as Style;
+            var style = new Style(typeof(DataGridColumnHeader), baseStyle);
+            style.Setters.Add(new Setter(ContextMenuProperty, menu));
+            VmGrid.ColumnHeaderStyle = style;
+        }
+
+        private static string HeaderOf(DataGridColumn column) => column.Header as string ?? "";
+
+        private static bool IsNameColumn(DataGridColumn column) => HeaderOf(column) == "Name";
+
+        /// <summary>Right-click on an unselected row selects just that row, so the menu acts on what was clicked.</summary>
+        private void VmGrid_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (FindAncestor<DataGridRow>(e.OriginalSource as DependencyObject) is { IsSelected: false } row)
+            {
+                VmGrid.SelectedItems.Clear();
+                row.IsSelected = true;
+            }
         }
 
         // ── selection ────────────────────────────────────────────────────

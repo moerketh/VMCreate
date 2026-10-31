@@ -11,6 +11,7 @@ using Microsoft.Extensions.Logging;
 using VMCreate.Manager.HyperV;
 using VMCreate.Manager.Inventory;
 using VMCreate.Manager.Metadata;
+using VMCreate.Manager.Ssh;
 using VMCreate.Metadata;
 
 namespace VMCreate.Manager.ViewModels
@@ -93,6 +94,12 @@ namespace VMCreate.Manager.ViewModels
                 () => SelectedVms.Any(v => v.State == VmState.Paused));
             ConnectCommand = new RelayCommand(Connect, () => SelectedVm != null);
             CopyIpCommand = new RelayCommand(() => Clipboard.SetText(SelectedVm!.PrimaryIp!), () => SelectedVm?.PrimaryIp != null);
+            SshCommand = new AsyncRelayCommand(() => OpenSshAsync(null), () => SelectedVm?.Summary.IsRunning == true);
+            SshNetworkCommand = new AsyncRelayCommand(() => OpenSshAsync(SshTransport.Network), () => SelectedVm?.PrimaryIp != null);
+            SshVsockCommand = new AsyncRelayCommand(() => OpenSshAsync(SshTransport.Vsock), () => SelectedVm?.Summary.IsRunning == true);
+            MoveSelectedToFolderCommand = new RelayCommand<FolderOption>(
+                f => _ = MoveVmsToFolderAsync(SelectedVms.Select(v => v.Id).ToList(), f?.Id),
+                f => f != null && SelectedVms.Count > 0);
 
             NewFolderCommand = new AsyncRelayCommand(NewFolderAsync);
             RenameFolderCommand = new AsyncRelayCommand(RenameFolderAsync, () => SelectedNode?.Kind == NavNodeKind.Folder);
@@ -221,6 +228,10 @@ namespace VMCreate.Manager.ViewModels
         public ICommand ResumeCommand { get; }
         public ICommand ConnectCommand { get; }
         public ICommand CopyIpCommand { get; }
+        public ICommand SshCommand { get; }
+        public ICommand SshNetworkCommand { get; }
+        public ICommand SshVsockCommand { get; }
+        public ICommand MoveSelectedToFolderCommand { get; }
         public ICommand NewFolderCommand { get; }
         public ICommand RenameFolderCommand { get; }
         public ICommand DeleteFolderCommand { get; }
@@ -616,6 +627,45 @@ namespace VMCreate.Manager.ViewModels
             catch (Exception ex)
             {
                 ErrorMessage = "Could not start vmconnect.exe: " + ex.Message;
+            }
+        }
+
+        /// <summary>
+        /// Opens ssh in a new console window. The user name comes from the
+        /// stored credential; when there is none the user is asked once and the
+        /// answer is remembered (user name only, no password).
+        /// </summary>
+        private async Task OpenSshAsync(SshTransport? transport)
+        {
+            var vm = SelectedVm;
+            if (vm == null)
+                return;
+
+            string? user = vm.Metadata?.Credential?.Username;
+            if (string.IsNullOrWhiteSpace(user))
+            {
+                user = _dialogs.Prompt("SSH", $"User name for '{vm.Name}':", "");
+                if (string.IsNullOrWhiteSpace(user))
+                    return;
+                string remembered = user;
+                await _sync.UpdateVmAsync(vm.Id, (_, m) => m.Credential ??= new StoredCredential { Username = remembered });
+                await RefreshAsync();
+            }
+
+            try
+            {
+                var cmd = SshCommandBuilder.Build(vm.Summary, user, transport ?? SshCommandBuilder.DefaultTransport(vm.Summary));
+                // UseShellExecute=false from a GUI process gives ssh a fresh
+                // console, hosted by the user's default terminal app.
+                var psi = new ProcessStartInfo(cmd.FileName) { UseShellExecute = false };
+                foreach (var arg in cmd.Arguments)
+                    psi.ArgumentList.Add(arg);
+                Process.Start(psi);
+                StatusMessage = $"Opened SSH to {vm.Name} as {user}.";
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or ArgumentException)
+            {
+                ErrorMessage = ex.Message;
             }
         }
 

@@ -18,8 +18,55 @@ namespace VMCreate.Manager
         /// <summary>Rolling plaintext log; Serilog adds the date to the file name.</summary>
         internal static readonly string LogFilePath = Path.Combine(Path.GetTempPath(), "VMCreate.Manager.log");
 
+        private const string InstanceMutexName = @"Local\VMCreate.Manager.SingleInstance";
+        private const string ActivateEventName = @"Local\VMCreate.Manager.Activate";
+        private Mutex? _instanceMutex;
+        private EventWaitHandle? _activateEvent;
+        private RegisteredWaitHandle? _activateWait;
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool AllowSetForegroundWindow(int processId);
+        private const int ASFW_ANY = -1;
+
+        /// <summary>
+        /// One Manager per session: two instances would fight over refreshes
+        /// and the log file. A second start signals the first to come to the
+        /// front and exits.
+        /// </summary>
+        private bool TryBecomeSingleInstance()
+        {
+            _instanceMutex = new Mutex(initiallyOwned: true, InstanceMutexName, out bool createdNew);
+            if (!createdNew)
+            {
+                try
+                {
+                    using var existing = EventWaitHandle.OpenExisting(ActivateEventName);
+                    // The running instance is in the background; let it take the foreground.
+                    AllowSetForegroundWindow(ASFW_ANY);
+                    existing.Set();
+                }
+                catch (WaitHandleCannotBeOpenedException)
+                {
+                    // First instance is still starting up; nothing to activate yet.
+                }
+                return false;
+            }
+
+            _activateEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ActivateEventName);
+            _activateWait = ThreadPool.RegisterWaitForSingleObject(_activateEvent,
+                (_, _) => Dispatcher.BeginInvoke(() => (MainWindow as MainWindow)?.BringToFront()),
+                null, Timeout.Infinite, executeOnlyOnce: false);
+            return true;
+        }
+
         private async void App_OnStartup(object sender, StartupEventArgs e)
         {
+            if (!TryBecomeSingleInstance())
+            {
+                Shutdown();
+                return;
+            }
+
             Log.Logger = new LoggerConfiguration()
                 .MinimumLevel.Information()
                 .WriteTo.File(LogFilePath, rollingInterval: RollingInterval.Day, retainedFileCountLimit: 7)
@@ -58,6 +105,9 @@ namespace VMCreate.Manager
         private void App_OnExit(object sender, ExitEventArgs e)
         {
             _services?.Dispose();
+            _activateWait?.Unregister(null);
+            _activateEvent?.Dispose();
+            _instanceMutex?.Dispose();
             Log.CloseAndFlush();
         }
     }

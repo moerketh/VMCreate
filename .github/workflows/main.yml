@@ -68,6 +68,15 @@ jobs:
           -p:DebugType=none -p:DebugSymbols=false
           -o publish-cli
 
+      - name: Publish Manager self-contained executable
+        run: >
+          dotnet publish VMCreate.Manager/VMCreate.Manager.csproj
+          -c Release
+          -r win-x64
+          --self-contained
+          -p:DebugType=none -p:DebugSymbols=false
+          -o publish-manager
+
       - name: Package CLI for distribution
         shell: pwsh
         run: |
@@ -79,6 +88,7 @@ jobs:
           -c Release
           -p:ProductVersion=${{ steps.version.outputs.msi_version }}
           -p:PublishDir=${{ github.workspace }}/publish/
+          -p:ManagerPublishDir=${{ github.workspace }}/publish-manager/
           -p:SolutionDir=${{ github.workspace }}/
 
       - name: Generate checksums
@@ -89,12 +99,15 @@ jobs:
           if (-not $msi) { throw "MSI not found under VMCreate.Installer/bin" }
           $exe = "publish/VMCreate.exe"
           $cliZip = "vmcreate-cli-$ver.zip"
+          $mgrExe = "publish-manager/VMCreate.Manager.exe"
           $msiHash = (Get-FileHash $msi.FullName -Algorithm SHA256).Hash
           $exeHash = (Get-FileHash $exe -Algorithm SHA256).Hash
           $cliHash = (Get-FileHash $cliZip -Algorithm SHA256).Hash
-          "$msiHash  vmcreate-$ver.msi"    | Out-File  -Encoding utf8 checksums.sha256
-          "$exeHash  vmcreate-$ver.exe"    | Add-Content -Encoding utf8 checksums.sha256
-          "$cliHash  $cliZip"              | Add-Content -Encoding utf8 checksums.sha256
+          $mgrHash = (Get-FileHash $mgrExe -Algorithm SHA256).Hash
+          "$msiHash  vmcreate-$ver.msi"         | Out-File  -Encoding utf8 checksums.sha256
+          "$exeHash  vmcreate-$ver.exe"         | Add-Content -Encoding utf8 checksums.sha256
+          "$cliHash  $cliZip"                   | Add-Content -Encoding utf8 checksums.sha256
+          "$mgrHash  vmcreate-manager-$ver.exe" | Add-Content -Encoding utf8 checksums.sha256
           Get-Content checksums.sha256
 
       - name: Rename artifacts for release
@@ -105,6 +118,7 @@ jobs:
           if (-not $msi) { throw "MSI not found under VMCreate.Installer/bin" }
           Copy-Item $msi.FullName "vmcreate-$ver.msi"
           Copy-Item "publish/VMCreate.exe" "vmcreate-$ver.exe"
+          Copy-Item "publish-manager/VMCreate.Manager.exe" "vmcreate-manager-$ver.exe"
 
       - name: Delete old artifacts
         if: github.ref_type == 'branch'
@@ -141,6 +155,14 @@ jobs:
           retention-days: 5
           path: vmcreate-${{ steps.version.outputs.clean_version }}.exe
 
+      - name: Upload Manager artifact
+        if: github.ref_type == 'branch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: vmcreate-manager-${{ steps.version.outputs.clean_version }}.exe
+          retention-days: 5
+          path: vmcreate-manager-${{ steps.version.outputs.clean_version }}.exe
+
       - name: Upload CLI artifact
         if: github.ref_type == 'branch'
         uses: actions/upload-artifact@v4
@@ -164,6 +186,7 @@ jobs:
           artifacts: >
             vmcreate-${{ steps.version.outputs.clean_version }}.msi,
             vmcreate-${{ steps.version.outputs.clean_version }}.exe,
+            vmcreate-manager-${{ steps.version.outputs.clean_version }}.exe,
             vmcreate-cli-${{ steps.version.outputs.clean_version }}.zip,
             checksums.sha256
           generateReleaseNotes: true

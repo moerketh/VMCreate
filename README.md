@@ -57,6 +57,7 @@ It replaces Hyper-V **Quick Create** with a gallery you'll actually want to use.
    - **`vmcreate-x.y.z.msi`**: installs VMCreate in place of Hyper-V Quick Create (uninstalling restores Quick Create)
    - **`vmcreate-x.y.z.exe`**: portable, no install needed
    - **`vmcreate-cli-x.y.z.zip`**: command-line version for scripting
+   - **`vmcreate-manager-x.y.z.exe`**: portable [VMCreate Manager](#vmcreate-manager), a replacement for Hyper-V Manager (also included in the MSI)
 3. Verify the downloads against `checksums.sha256`, launch, pick a distro, click **Create**.
 
 ## Automate it from the command line
@@ -79,6 +80,22 @@ vmcreate create --image ubuntu --switch LabNet --static-ip 192.168.10.50/24 --ga
 
 Run `vmcreate create --help` for the full list of options: RDP backend, desktop environment, SSH key, nested virtualization, and more.
 
+## VMCreate Manager
+
+**VMCreate Manager** (`VMCreate.Manager.exe`) replaces the Hyper-V Manager MMC snap-in for day-to-day work:
+
+- **Folders and tags.** Drag VMs into folders, nest folders, and tag VMs. Built-in views show running, protected and expired VMs, and VMs that aren't in any folder.
+- **Purpose, description and expiry date** for each VM, so you remember what a lab box is for and when it can go.
+- **Delete protection.** Mark a VM as protected and VMCreate tools refuse to delete it. This can't stop `Remove-VM` or the old MMC.
+- **Live console preview** of the selected VM, updated every two seconds. Click it to connect.
+- **Search** across name, purpose, tags, description and IP address, plus **bulk actions**: start, shut down, turn off, save, pause, resume.
+- **One-click SSH**, over the network or over vsock. Vsock needs no guest networking, so it works for isolated lab VMs.
+- **Credentials** stored encrypted with Windows DPAPI. Older VMCreate versions wrote them into the VM's Notes in plain text; the Manager offers to move them into the encrypted store.
+
+Your metadata lives in `%LOCALAPPDATA%\VMCreate\Manager\metadata.json`. A copy, without credentials, is kept in each VM's Hyper-V Notes, so folders, tags and descriptions travel with exported VMs and come back if the file is lost. The Manager runs without elevation if your account is a member of **Hyper-V Administrators**.
+
+The MSI installs it next to VMCreate with its own Start menu entry; `vmcreate-manager-x.y.z.exe` is the portable version.
+
 ## Before you start: security & privacy
 
 To make Linux images that were never built for Hyper-V boot and connect, VMCreate **modifies the guest**: network configuration, firewall rules, SSH settings and boot setup. It restores distribution defaults afterwards wherever it can.
@@ -100,6 +117,7 @@ The optional **Lamco RDP Server** backend is downloaded at deploy time and is li
 dotnet build VMCreate.sln
 dotnet test VMCreate.sln
 dotnet publish VMCreate/VMCreate.csproj -c Release -r win-x64 --self-contained
+dotnet publish VMCreate.Manager/VMCreate.Manager.csproj -c Release -r win-x64 --self-contained
 ```
 
 Requires the .NET 10 SDK. Release builds are self-contained.

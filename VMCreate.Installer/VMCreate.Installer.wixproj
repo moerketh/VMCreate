@@ -6,6 +6,8 @@
     <ProductVersion Condition="'$(ProductVersion)' == ''">1.0.0</ProductVersion>
     <!-- Directory containing published VMCreate.exe (set by CI or manual publish) -->
     <PublishDir Condition="'$(PublishDir)' == ''">$(MSBuildThisFileDirectory)..\publish\</PublishDir>
+    <!-- Directory containing published VMCreate.Manager.exe -->
+    <ManagerPublishDir Condition="'$(ManagerPublishDir)' == ''">$(MSBuildThisFileDirectory)..\publish-manager\</ManagerPublishDir>
     <SolutionDir Condition="'$(SolutionDir)' == ''">$(MSBuildThisFileDirectory)..\</SolutionDir>
     <!-- Pass ProductVersion to WiX preprocessor -->
     <DefineConstants>ProductVersion=$(ProductVersion)</DefineConstants>
@@ -13,6 +15,7 @@
 
   <ItemGroup>
     <BindPath Include="$(PublishDir)" />
+    <BindPath Include="$(ManagerPublishDir)" BindName="manager" />
   </ItemGroup>
 
   <ItemGroup>

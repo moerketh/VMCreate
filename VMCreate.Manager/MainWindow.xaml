@@ -43,11 +43,11 @@
 
         <Grid Grid.Row="2" Margin="12,0,12,0">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="250" MinWidth="180"/>
+                <ColumnDefinition x:Name="NavColumn" Width="250" MinWidth="180"/>
                 <ColumnDefinition Width="6"/>
                 <ColumnDefinition Width="*" MinWidth="400"/>
                 <ColumnDefinition Width="6"/>
-                <ColumnDefinition Width="380" MinWidth="280"/>
+                <ColumnDefinition x:Name="DetailsColumn" Width="380" MinWidth="280"/>
             </Grid.ColumnDefinitions>
 
             <!-- ── Left: folders ─────────────────────────────── -->
@@ -93,6 +93,7 @@
                         <ui:Button Icon="{ui:SymbolIcon Pause24}" Command="{Binding PauseCommand}" ToolTip="Pause" Appearance="Transparent" Padding="6"/>
                         <ui:Button Icon="{ui:SymbolIcon Play24}" Command="{Binding ResumeCommand}" ToolTip="Resume" Appearance="Transparent" Padding="6" Content="Resume"/>
                         <ui:Button Icon="{ui:SymbolIcon Desktop24}" Command="{Binding ConnectCommand}" ToolTip="Connect (vmconnect)" Appearance="Transparent" Padding="6"/>
+                        <ui:Button Icon="{ui:SymbolIcon WindowConsole20}" Command="{Binding SshCommand}" ToolTip="Open SSH (over the network when the VM has an IP, otherwise over vsock)" Appearance="Transparent" Padding="6"/>
                         <ui:Button Icon="{ui:SymbolIcon Copy24}" Command="{Binding CopyIpCommand}" ToolTip="Copy IP address" Appearance="Transparent" Padding="6"/>
                         <ui:Button Icon="{ui:SymbolIcon ArrowClockwise24}" Command="{Binding RefreshCommand}" ToolTip="Refresh" Appearance="Transparent" Padding="6"/>
                     </StackPanel>
@@ -111,6 +112,32 @@
                               MouseDoubleClick="VmGrid_MouseDoubleClick"
                               PreviewMouseLeftButtonDown="VmGrid_PreviewMouseLeftButtonDown"
                               PreviewMouseMove="VmGrid_PreviewMouseMove">
+                        <DataGrid.ContextMenu>
+                            <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                <MenuItem Header="Connect" Command="{Binding ConnectCommand}" Icon="{ui:SymbolIcon Desktop24}"/>
+                                <MenuItem Header="SSH" Command="{Binding SshCommand}" Icon="{ui:SymbolIcon WindowConsole20}"/>
+                                <MenuItem Header="SSH over network" Command="{Binding SshNetworkCommand}"/>
+                                <MenuItem Header="SSH over vsock" Command="{Binding SshVsockCommand}"/>
+                                <MenuItem Header="Copy IP address" Command="{Binding CopyIpCommand}" Icon="{ui:SymbolIcon Copy24}"/>
+                                <Separator/>
+                                <MenuItem Header="Start" Command="{Binding StartCommand}" Icon="{ui:SymbolIcon Play24}"/>
+                                <MenuItem Header="Shut down" Command="{Binding ShutdownCommand}" Icon="{ui:SymbolIcon Power24}"/>
+                                <MenuItem Header="Turn off" Command="{Binding TurnOffCommand}" Icon="{ui:SymbolIcon Stop24}"/>
+                                <MenuItem Header="Save state" Command="{Binding SaveStateCommand}" Icon="{ui:SymbolIcon Save24}"/>
+                                <MenuItem Header="Pause" Command="{Binding PauseCommand}" Icon="{ui:SymbolIcon Pause24}"/>
+                                <MenuItem Header="Resume" Command="{Binding ResumeCommand}"/>
+                                <Separator/>
+                                <MenuItem Header="Move to folder" Icon="{ui:SymbolIcon FolderArrowRight24}" ItemsSource="{Binding FolderOptions}">
+                                    <MenuItem.ItemContainerStyle>
+                                        <Style TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}">
+                                            <Setter Property="Header" Value="{Binding Path}"/>
+                                            <Setter Property="Command" Value="{Binding DataContext.MoveSelectedToFolderCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                                            <Setter Property="CommandParameter" Value="{Binding}"/>
+                                        </Style>
+                                    </MenuItem.ItemContainerStyle>
+                                </MenuItem>
+                            </ContextMenu>
+                        </DataGrid.ContextMenu>
                         <DataGrid.Columns>
                             <DataGridTemplateColumn Header="Name" SortMemberPath="Name" Width="2*" MinWidth="160">
                                 <DataGridTemplateColumn.CellTemplate>
