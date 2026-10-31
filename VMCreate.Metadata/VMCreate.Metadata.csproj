@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>VMCreate.Metadata</AssemblyName>
+    <RootNamespace>VMCreate.Metadata</RootNamespace>
+    <!-- Shared between VMCreate and VMCreate.Manager: keep this project free
+         of any reference to VMCreate.Core so it can become a standalone
+         NuGet package when the Manager moves to its own repository. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="VMCreate.Manager.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.5" />
+  </ItemGroup>
+
+</Project>

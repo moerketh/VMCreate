@@ -1,0 +1,278 @@
+<ui:FluentWindow x:Class="VMCreate.Manager.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        xmlns:vm="clr-namespace:VMCreate.Manager.ViewModels"
+        Title="VMCreate Manager" Height="780" Width="1400"
+        MinWidth="980" MinHeight="560"
+        ExtendsContentIntoTitleBar="True"
+        WindowBackdropType="Mica"
+        WindowStartupLocation="CenterScreen">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <ui:TitleBar Grid.Row="0" Title="VMCreate Manager">
+            <ui:TitleBar.Icon>
+                <ui:SymbolIcon Symbol="Server24"/>
+            </ui:TitleBar.Icon>
+        </ui:TitleBar>
+
+        <!-- Messages -->
+        <StackPanel Grid.Row="1" Margin="12,0,12,4">
+            <ui:InfoBar Title="Error" Severity="Error" IsClosable="True"
+                        IsOpen="{Binding IsErrorOpen, Mode=TwoWay}"
+                        Message="{Binding ErrorMessage}"/>
+            <Border Visibility="{Binding LegacyCredentialCount, Converter={StaticResource CountToVis}}"
+                    Background="{DynamicResource ControlFillColorDefaultBrush}" CornerRadius="6" Padding="12,8" Margin="0,4,0,0">
+                <DockPanel>
+                    <ui:Button DockPanel.Dock="Right" Content="Move to encrypted store" Appearance="Primary"
+                               Command="{Binding MigrateLegacyCredentialsCommand}"/>
+                    <ui:SymbolIcon Symbol="Warning24" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                    <TextBlock VerticalAlignment="Center" TextWrapping="Wrap">
+                        <Run Text="{Binding LegacyCredentialCount, Mode=OneWay}"/>
+                        <Run Text="VM(s) have plaintext credentials in their Hyper-V Notes (written by older VMCreate versions)."/>
+                    </TextBlock>
+                </DockPanel>
+            </Border>
+        </StackPanel>
+
+        <Grid Grid.Row="2" Margin="12,0,12,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="250" MinWidth="180"/>
+                <ColumnDefinition Width="6"/>
+                <ColumnDefinition Width="*" MinWidth="400"/>
+                <ColumnDefinition Width="6"/>
+                <ColumnDefinition Width="380" MinWidth="280"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- ── Left: folders ─────────────────────────────── -->
+            <DockPanel Grid.Column="0">
+                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,6">
+                    <ui:Button Icon="{ui:SymbolIcon FolderAdd24}" Command="{Binding NewFolderCommand}" ToolTip="New folder (inside the selected folder)" Appearance="Transparent" Padding="6"/>
+                    <ui:Button Icon="{ui:SymbolIcon Rename24}" Command="{Binding RenameFolderCommand}" ToolTip="Rename folder" Appearance="Transparent" Padding="6"/>
+                    <ui:Button Icon="{ui:SymbolIcon Delete24}" Command="{Binding DeleteFolderCommand}" ToolTip="Delete folder (VMs move up, nothing is deleted)" Appearance="Transparent" Padding="6"/>
+                </StackPanel>
+                <TreeView x:Name="NavTree" ItemsSource="{Binding Navigation}"
+                          SelectedItemChanged="NavTree_SelectedItemChanged"
+                          AllowDrop="True" DragOver="NavTree_DragOver" Drop="NavTree_Drop"
+                          PreviewMouseLeftButtonDown="NavTree_PreviewMouseLeftButtonDown"
+                          PreviewMouseMove="NavTree_PreviewMouseMove">
+                    <TreeView.ItemContainerStyle>
+                        <Style TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}">
+                            <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}"/>
+                            <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}"/>
+                        </Style>
+                    </TreeView.ItemContainerStyle>
+                    <TreeView.ItemTemplate>
+                        <HierarchicalDataTemplate DataType="{x:Type vm:NavNodeViewModel}" ItemsSource="{Binding Children}">
+                            <DockPanel Background="Transparent">
+                                <TextBlock DockPanel.Dock="Right" Text="{Binding Count}" Foreground="{StaticResource SubtleTextBrush}" Margin="8,0,0,0"/>
+                                <ui:SymbolIcon Symbol="{Binding Icon}" Margin="0,0,6,0"/>
+                                <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                            </DockPanel>
+                        </HierarchicalDataTemplate>
+                    </TreeView.ItemTemplate>
+                </TreeView>
+            </DockPanel>
+
+            <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Stretch" Background="Transparent"/>
+
+            <!-- ── Center: VM grid ───────────────────────────── -->
+            <DockPanel Grid.Column="2">
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                        <ui:Button Icon="{ui:SymbolIcon Play24}" Command="{Binding StartCommand}" ToolTip="Start" Appearance="Transparent" Padding="6"/>
+                        <ui:Button Icon="{ui:SymbolIcon Power24}" Command="{Binding ShutdownCommand}" ToolTip="Shut down (guest OS)" Appearance="Transparent" Padding="6"/>
+                        <ui:Button Icon="{ui:SymbolIcon Stop24}" Command="{Binding TurnOffCommand}" ToolTip="Turn off (hard power off)" Appearance="Transparent" Padding="6"/>
+                        <ui:Button Icon="{ui:SymbolIcon Save24}" Command="{Binding SaveStateCommand}" ToolTip="Save state" Appearance="Transparent" Padding="6"/>
+                        <ui:Button Icon="{ui:SymbolIcon Pause24}" Command="{Binding PauseCommand}" ToolTip="Pause" Appearance="Transparent" Padding="6"/>
+                        <ui:Button Icon="{ui:SymbolIcon Play24}" Command="{Binding ResumeCommand}" ToolTip="Resume" Appearance="Transparent" Padding="6" Content="Resume"/>
+                        <ui:Button Icon="{ui:SymbolIcon Desktop24}" Command="{Binding ConnectCommand}" ToolTip="Connect (vmconnect)" Appearance="Transparent" Padding="6"/>
+                        <ui:Button Icon="{ui:SymbolIcon Copy24}" Command="{Binding CopyIpCommand}" ToolTip="Copy IP address" Appearance="Transparent" Padding="6"/>
+                        <ui:Button Icon="{ui:SymbolIcon ArrowClockwise24}" Command="{Binding RefreshCommand}" ToolTip="Refresh" Appearance="Transparent" Padding="6"/>
+                    </StackPanel>
+                    <ui:TextBox PlaceholderText="Search name, purpose, tags, description, IP…"
+                                Icon="{ui:SymbolIcon Search24}"
+                                Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                                Margin="0,0,8,0"/>
+                </DockPanel>
+                <Grid>
+                    <DataGrid x:Name="VmGrid" ItemsSource="{Binding VmsView}"
+                              AutoGenerateColumns="False" IsReadOnly="True"
+                              SelectionMode="Extended" SelectionUnit="FullRow"
+                              HeadersVisibility="Column" GridLinesVisibility="None"
+                              CanUserReorderColumns="True" CanUserResizeColumns="True" CanUserSortColumns="True"
+                              SelectionChanged="VmGrid_SelectionChanged"
+                              MouseDoubleClick="VmGrid_MouseDoubleClick"
+                              PreviewMouseLeftButtonDown="VmGrid_PreviewMouseLeftButtonDown"
+                              PreviewMouseMove="VmGrid_PreviewMouseMove">
+                        <DataGrid.Columns>
+                            <DataGridTemplateColumn Header="Name" SortMemberPath="Name" Width="2*" MinWidth="160">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Grid Width="24" Height="22" Margin="0,0,8,0" ToolTip="{Binding StateText}">
+                                                <ui:SymbolIcon Symbol="{Binding State, Converter={StaticResource StateSymbol}}" FontSize="20"
+                                                               Foreground="{Binding State, Converter={StaticResource StateBrush}}"
+                                                               HorizontalAlignment="Left" VerticalAlignment="Top"/>
+                                                <Border HorizontalAlignment="Right" VerticalAlignment="Bottom" CornerRadius="6" Padding="1"
+                                                        Background="{DynamicResource ApplicationBackgroundBrush}"
+                                                        Visibility="{Binding State, Converter={StaticResource StateSymbol}, ConverterParameter=Badge}">
+                                                    <ui:SymbolIcon Symbol="{Binding State, Converter={StaticResource StateSymbol}, ConverterParameter=Badge}" FontSize="11"
+                                                                   Foreground="{Binding State, Converter={StaticResource StateBrush}}"/>
+                                                </Border>
+                                            </Grid>
+                                            <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"/>
+                                            <ui:SymbolIcon Symbol="ShieldLock16" Margin="6,0,0,0" ToolTip="Delete protection on"
+                                                           Visibility="{Binding Protected, Converter={StaticResource BoolToVis}}"/>
+                                            <ui:SymbolIcon Symbol="CalendarCancel16" Margin="6,0,0,0" ToolTip="Expired" Foreground="#E8B33A"
+                                                           Visibility="{Binding IsExpired, Converter={StaticResource BoolToVis}}"/>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTextColumn Header="State" Binding="{Binding StateText}" Width="90"/>
+                            <DataGridTextColumn Header="CPU" Binding="{Binding CpuText}" Width="55"/>
+                            <DataGridTextColumn Header="Memory" Binding="{Binding MemoryText}" Width="75"/>
+                            <DataGridTextColumn Header="Uptime" Binding="{Binding UptimeText}" Width="85"/>
+                            <DataGridTextColumn Header="IP address" Binding="{Binding PrimaryIp}" Width="115"/>
+                            <DataGridTextColumn Header="Folder" Binding="{Binding FolderPath}" Width="*"/>
+                            <DataGridTextColumn Header="Tags" Binding="{Binding TagsText}" Width="*"/>
+                            <DataGridTextColumn Header="Purpose" Binding="{Binding Purpose}" Width="1.5*"/>
+                            <DataGridTextColumn Header="Checkpoints" Binding="{Binding CheckpointCount}" Width="90"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                    <ui:ProgressRing IsIndeterminate="True" Visibility="{Binding IsLoading, Converter={StaticResource BoolToVis}}"
+                                     HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Grid>
+            </DockPanel>
+
+            <GridSplitter Grid.Column="3" Width="6" HorizontalAlignment="Stretch" Background="Transparent"/>
+
+            <!-- ── Right: details ────────────────────────────── -->
+            <Border Grid.Column="4" Background="{DynamicResource ControlFillColorDefaultBrush}" CornerRadius="8" Padding="14,10">
+                <Grid>
+                    <TextBlock Text="Select one VM to see and edit its details."
+                               Foreground="{StaticResource SubtleTextBrush}" TextWrapping="Wrap"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                               Visibility="{Binding Editor, Converter={StaticResource InverseNullToVis}}"/>
+                    <DockPanel DataContext="{Binding Editor}" Visibility="{Binding Converter={StaticResource NullToVis}}">
+                        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+                            <ui:Button Content="Revert" Command="{Binding DataContext.RevertEditorCommand, RelativeSource={RelativeSource AncestorType=Window}}" Margin="0,0,8,0"/>
+                            <ui:Button Content="Save" Appearance="Primary" Icon="{ui:SymbolIcon Save24}" Command="{Binding DataContext.SaveEditorCommand, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                        </StackPanel>
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel Margin="0,0,6,0">
+                                <!-- Console preview: click to connect -->
+                                <Border CornerRadius="6" ClipToBounds="True" Background="Black" Cursor="Hand" Margin="0,0,0,8"
+                                        ToolTip="Live console preview — click to connect"
+                                        DataContext="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}">
+                                    <Border.InputBindings>
+                                        <MouseBinding Gesture="LeftClick" Command="{Binding ConnectCommand}"/>
+                                    </Border.InputBindings>
+                                    <Grid MinHeight="180">
+                                        <Image Source="{Binding Thumbnail}" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality"/>
+                                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                    Visibility="{Binding ThumbnailMessage, Converter={StaticResource NullToVis}}">
+                                            <ui:SymbolIcon Symbol="{Binding SelectedVm.State, Converter={StaticResource StateSymbol}}" FontSize="40"
+                                                           Foreground="{StaticResource SubtleTextBrush}" HorizontalAlignment="Center"/>
+                                            <TextBlock Text="{Binding ThumbnailMessage}" Foreground="{StaticResource SubtleTextBrush}" Margin="0,6,0,0"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+
+                                <TextBlock Style="{StaticResource FieldLabel}" Text="Name" Margin="0,0,0,2"/>
+                                <ui:TextBox Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}"/>
+
+                                <TextBlock Style="{StaticResource FieldLabel}" Text="Purpose"/>
+                                <ui:TextBox Text="{Binding Purpose, UpdateSourceTrigger=PropertyChanged}" PlaceholderText="What is this VM for?"/>
+
+                                <TextBlock Style="{StaticResource FieldLabel}" Text="Folder"/>
+                                <ComboBox ItemsSource="{Binding DataContext.FolderOptions, RelativeSource={RelativeSource AncestorType=Window}}"
+                                          DisplayMemberPath="Path" SelectedValuePath="Id"
+                                          SelectedValue="{Binding FolderId}"/>
+
+                                <TextBlock Style="{StaticResource FieldLabel}" Text="Tags (comma separated)"/>
+                                <ui:TextBox Text="{Binding TagsText, UpdateSourceTrigger=PropertyChanged}" PlaceholderText="kali, external, acme"/>
+
+                                <TextBlock Style="{StaticResource FieldLabel}" Text="Description"/>
+                                <ui:TextBox Text="{Binding Description, UpdateSourceTrigger=PropertyChanged}"
+                                            AcceptsReturn="True" TextWrapping="Wrap" MinHeight="90" VerticalContentAlignment="Top"/>
+
+                                <Grid Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="Delete protection" Margin="0,0,0,2"/>
+                                        <ui:ToggleSwitch IsChecked="{Binding Protected}" OnContent="Protected" OffContent="Off"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="Expires on" Margin="0,0,0,2"/>
+                                        <DatePicker SelectedDate="{Binding ExpiresOn}"/>
+                                    </StackPanel>
+                                </Grid>
+
+                                <StackPanel Visibility="{Binding HasCredential, Converter={StaticResource BoolToVis}}">
+                                    <TextBlock Style="{StaticResource SectionHeader}" Text="CREDENTIALS"/>
+                                    <TextBlock>
+                                        <Run Text="User:" Foreground="{StaticResource SubtleTextBrush}"/>
+                                        <Run Text="{Binding Username, Mode=OneWay}"/>
+                                    </TextBlock>
+                                    <StackPanel Orientation="Horizontal" Margin="0,4,0,0" Visibility="{Binding HasPassword, Converter={StaticResource BoolToVis}}">
+                                        <TextBlock Text="Password:" Foreground="{StaticResource SubtleTextBrush}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                        <TextBlock Text="{Binding RevealedPassword, TargetNullValue='••••••••'}" VerticalAlignment="Center" FontFamily="Consolas" Margin="0,0,8,0"/>
+                                        <ui:Button Icon="{ui:SymbolIcon Eye24}" Appearance="Transparent" Padding="4" ToolTip="Show / hide"
+                                                   Command="{Binding DataContext.RevealPasswordCommand, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                        <ui:Button Icon="{ui:SymbolIcon Copy24}" Appearance="Transparent" Padding="4" ToolTip="Copy password"
+                                                   Command="{Binding DataContext.CopyPasswordCommand, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                                    </StackPanel>
+                                </StackPanel>
+
+                                <StackPanel Visibility="{Binding Provenance, Converter={StaticResource NullToVis}}">
+                                    <TextBlock Style="{StaticResource SectionHeader}" Text="BUILT BY VMCREATE"/>
+                                    <TextBlock Text="{Binding ProvenanceText}" TextWrapping="Wrap"/>
+                                </StackPanel>
+
+                                <TextBlock Style="{StaticResource SectionHeader}" Text="HARDWARE &amp; NETWORK"/>
+                                <TextBlock TextWrapping="Wrap" LineHeight="20">
+                                    <Run Text="Generation" Foreground="{StaticResource SubtleTextBrush}"/> <Run Text="{Binding Summary.Generation, Mode=OneWay}"/>
+                                    <Run Text="  ·  vCPU" Foreground="{StaticResource SubtleTextBrush}"/> <Run Text="{Binding Summary.ProcessorCount, Mode=OneWay}"/>
+                                    <LineBreak/>
+                                    <Run Text="Memory" Foreground="{StaticResource SubtleTextBrush}"/> <Run Text="{Binding Item.MemoryText, Mode=OneWay}"/>
+                                    <LineBreak/>
+                                    <Run Text="Switch" Foreground="{StaticResource SubtleTextBrush}"/> <Run Text="{Binding Item.SwitchText, Mode=OneWay}"/>
+                                    <LineBreak/>
+                                    <Run Text="IP" Foreground="{StaticResource SubtleTextBrush}"/> <Run Text="{Binding Item.IpText, Mode=OneWay}"/>
+                                    <LineBreak/>
+                                    <Run Text="Guest OS" Foreground="{StaticResource SubtleTextBrush}"/> <Run Text="{Binding Summary.GuestOperatingSystem, Mode=OneWay}"/>
+                                    <LineBreak/>
+                                    <Run Text="Checkpoints" Foreground="{StaticResource SubtleTextBrush}"/> <Run Text="{Binding Summary.CheckpointCount, Mode=OneWay}"/>
+                                </TextBlock>
+
+                                <TextBlock Style="{StaticResource SectionHeader}" Text="LOCATION"/>
+                                <TextBox Text="{Binding Summary.ConfigurationPath, Mode=OneWay}" IsReadOnly="True" BorderThickness="0" Background="Transparent" TextWrapping="Wrap"/>
+                                <TextBox Text="{Binding Summary.Id, Mode=OneWay}" IsReadOnly="True" BorderThickness="0" Background="Transparent" FontFamily="Consolas"
+                                         Foreground="{StaticResource SubtleTextBrush}"/>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </DockPanel>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- Status bar -->
+        <DockPanel Grid.Row="3" Margin="14,6,14,8">
+            <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource SubtleTextBrush}" FontSize="11">
+                <Run Text="Metadata:"/> <Run Text="{Binding MetadataFilePath, Mode=OneWay}"/>
+            </TextBlock>
+            <TextBlock Text="{Binding StatusMessage}" Foreground="{StaticResource SubtleTextBrush}" FontSize="11"/>
+        </DockPanel>
+    </Grid>
+</ui:FluentWindow>
