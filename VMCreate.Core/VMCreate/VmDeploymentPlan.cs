@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 
@@ -72,7 +73,11 @@ namespace VMCreate
                 settings.ReplacePreviousVm,
                 settings.CloningIsoPath,
                 settings.SwitchName,
-                settings.CreateCleanCheckpoint);
+                settings.CreateCleanCheckpoint)
+            {
+                Folder = string.IsNullOrWhiteSpace(settings.Folder) ? null : settings.Folder.Trim(),
+                Tags = settings.Tags,
+            };
         }
 
         /// <summary>
@@ -159,5 +164,11 @@ namespace VMCreate
         /// customizing the guest. See <see cref="VmSettings.CreateCleanCheckpoint"/>.
         /// </summary>
         public bool CreateCleanCheckpoint { get; init; }
+
+        /// <summary>VMCreate Manager folder path, e.g. "Engagements/ACME". Null = no folder.</summary>
+        public string? Folder { get; init; }
+
+        /// <summary>VMCreate Manager tags recorded for the VM.</summary>
+        public IReadOnlyList<string> Tags { get; init; } = Array.Empty<string>();
     }
 }

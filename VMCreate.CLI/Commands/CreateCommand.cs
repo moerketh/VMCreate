@@ -126,6 +126,19 @@ namespace VMCreate.CLI.Commands
                 Description = "Hyper-V virtual switch to connect the VM's network adapter to (default: Default Switch)."
             };
 
+            // ── VMCreate Manager ───────────────────────────────────────────────
+            var folderOpt = new Option<string>("--folder")
+            {
+                Description = "VMCreate Manager folder to file the VM under, e.g. \"Engagements/ACME\". Missing folders are created."
+            };
+
+            var tagOpt = new Option<string[]>("--tag")
+            {
+                Description = "VMCreate Manager tag (repeatable, or comma-separated). E.g. --tag kali --tag acme",
+                AllowMultipleArgumentsPerToken = false,
+                Arity = ArgumentArity.ZeroOrMore
+            };
+
             var staticIpOpt = new Option<string>("--static-ip")
             {
                 Description = "Configure the guest with a static IPv4 address in CIDR form (e.g. 192.168.10.50/24) instead of DHCP. " +
@@ -251,6 +264,8 @@ namespace VMCreate.CLI.Commands
             cmd.Options.Add(releaseOpt);
             cmd.Options.Add(noIntegrationSvcOpt);
             cmd.Options.Add(switchOpt);
+            cmd.Options.Add(folderOpt);
+            cmd.Options.Add(tagOpt);
             cmd.Options.Add(staticIpOpt);
             cmd.Options.Add(gatewayOpt);
             cmd.Options.Add(staticDnsOpt);
@@ -292,6 +307,8 @@ namespace VMCreate.CLI.Commands
                     Release = parseResult.GetValue(releaseOpt),
                     NoIntegrationServices = parseResult.GetValue(noIntegrationSvcOpt),
                     SwitchName = parseResult.GetValue(switchOpt),
+                    Folder = parseResult.GetValue(folderOpt),
+                    Tags = parseResult.GetValue(tagOpt) ?? Array.Empty<string>(),
                     StaticIp = parseResult.GetValue(staticIpOpt),
                     StaticGateway = parseResult.GetValue(gatewayOpt),
                     StaticDns = parseResult.GetValue(staticDnsOpt),
@@ -694,6 +711,8 @@ namespace VMCreate.CLI.Commands
                 SecureBootTemplate = galleryItem.SecureBootTemplate ?? "MicrosoftUEFICertificateAuthority",
                 SwitchName = args.SwitchName,
                 CreateCleanCheckpoint = !args.NoCheckpoint,
+                Folder = string.IsNullOrWhiteSpace(args.Folder) ? null : args.Folder.Trim().Trim('/'),
+                Tags = VMCreate.Metadata.MetadataOperations.ParseTags(string.Join(",", args.Tags)),
             };
 
             // ── Parse --option key=value pairs ───────────────────────────────
@@ -940,6 +959,10 @@ namespace VMCreate.CLI.Commands
             AnsiConsole.MarkupLine($"  CPUs     : {vmSettings.CPUCount}");
             if (!string.IsNullOrEmpty(vmSettings.SwitchName))
                 AnsiConsole.MarkupLine($"  Switch   : {Markup.Escape(vmSettings.SwitchName)}");
+            if (!string.IsNullOrEmpty(vmSettings.Folder))
+                AnsiConsole.MarkupLine($"  Folder   : {Markup.Escape(vmSettings.Folder)}");
+            if (vmSettings.Tags.Count > 0)
+                AnsiConsole.MarkupLine($"  Tags     : {Markup.Escape(string.Join(", ", vmSettings.Tags))}");
             if (vmCustomizations.HasStaticNetwork)
             {
                 string network = vmCustomizations.StaticIp!;
@@ -1134,6 +1157,8 @@ namespace VMCreate.CLI.Commands
         public string? Release { get; set; }
         public bool NoIntegrationServices { get; set; }
         public string? SwitchName { get; set; }
+        public string? Folder { get; set; }
+        public string[] Tags { get; set; } = Array.Empty<string>();
         public string? StaticIp { get; set; }
         public string? StaticGateway { get; set; }
         public string? StaticDns { get; set; }

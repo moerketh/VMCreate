@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\VMCreate.Gallery.Contracts\VMCreate.Gallery.Contracts.csproj" />
+    <ProjectReference Include="..\VMCreate.Metadata\VMCreate.Metadata.csproj" />
   </ItemGroup>
 
   <ItemGroup>

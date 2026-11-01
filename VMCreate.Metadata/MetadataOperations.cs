@@ -142,15 +142,20 @@ namespace VMCreate.Metadata
             return vm;
         }
 
-        public static void SetTags(this VmMetadata vm, IEnumerable<string> tags)
-        {
-            vm.Tags = tags
+        public static void SetTags(this VmMetadata vm, IEnumerable<string> tags) => vm.Tags = NormalizeTags(tags);
+
+        /// <summary>"kali, external; acme" → [acme, external, kali]. Shared by the VMCreate GUI, CLI and Manager.</summary>
+        public static List<string> ParseTags(string? text)
+            => NormalizeTags((text ?? "").Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries));
+
+        /// <summary>Trimmed, non-empty, case-insensitively unique, sorted.</summary>
+        public static List<string> NormalizeTags(IEnumerable<string> tags)
+            => tags
                 .Select(t => t.Trim())
                 .Where(t => t.Length > 0)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(t => t, StringComparer.OrdinalIgnoreCase)
                 .ToList();
-        }
 
         public static bool IsExpired(this VmMetadata vm, DateOnly today) => vm.ExpiresOn is DateOnly d && d < today;
 

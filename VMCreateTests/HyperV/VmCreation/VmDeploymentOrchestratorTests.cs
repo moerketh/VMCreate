@@ -499,6 +499,82 @@ namespace VMCreate.Tests.HyperV.VmCreation
             _strategy.Setup(s => s.CreateVMAsync(It.IsAny<VmCreationContext>())).Returns(createVm);
         }
 
+        [TestMethod]
+        public async Task DeployAsync_Success_RecordsManagerMetadata()
+        {
+            var recorder = UseMetadataRecorder();
+            string baseDir = NewTempDir();
+            try
+            {
+                UseTempPaths(baseDir);
+                SetupStrategy(DiskImageFormat.Vhdx, _ => Task.CompletedTask);
+
+                VmDeploymentResult result = await DeployAsync("TestVM_20250601120000", "disk.vhdx");
+
+                Assert.IsTrue(result.Success);
+                recorder.Verify(r => r.RecordDeploymentAsync(
+                        It.Is<VmDeploymentPlan>(p => p.VmName == "TestVM_20250601120000"),
+                        It.Is<GalleryItem>(g => g.Name == "Test"),
+                        It.IsAny<CancellationToken>()),
+                    Times.Once);
+            }
+            finally { DeleteTempDir(baseDir); }
+        }
+
+        [TestMethod]
+        public async Task DeployAsync_MetadataFailure_KeepsTheDeployment()
+        {
+            var recorder = UseMetadataRecorder();
+            recorder.Setup(r => r.RecordDeploymentAsync(It.IsAny<VmDeploymentPlan>(), It.IsAny<GalleryItem>(), It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new Exception("store locked"));
+            string baseDir = NewTempDir();
+            try
+            {
+                UseTempPaths(baseDir);
+                SetupStrategy(DiskImageFormat.Vhdx, _ => Task.CompletedTask);
+
+                VmDeploymentResult result = await DeployAsync("TestVM_20250601120000", "disk.vhdx");
+
+                Assert.IsTrue(result.Success, "bookkeeping must not fail (and delete) a finished VM");
+                _hyperVManager.Verify(h => h.RemoveVMAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+                StringAssert.Contains(result.DeploymentLog, "Could not record folder/tags/provenance");
+            }
+            finally { DeleteTempDir(baseDir); }
+        }
+
+        [TestMethod]
+        public async Task DeployAsync_StrategyThrows_RecordsNoMetadata()
+        {
+            var recorder = UseMetadataRecorder();
+            string baseDir = NewTempDir();
+            try
+            {
+                UseTempPaths(baseDir);
+                SetupStrategy(DiskImageFormat.Vhdx, _ => throw new InvalidOperationException("boom"));
+
+                VmDeploymentResult result = await DeployAsync("TestVM_20250601120000", "disk.vhdx");
+
+                Assert.IsFalse(result.Success);
+                recorder.Verify(r => r.RecordDeploymentAsync(It.IsAny<VmDeploymentPlan>(), It.IsAny<GalleryItem>(), It.IsAny<CancellationToken>()), Times.Never);
+            }
+            finally { DeleteTempDir(baseDir); }
+        }
+
+        /// <summary>Rebuilds the orchestrator with a metadata recorder (the default fixture has none).</summary>
+        private Mock<IVmMetadataRecorder> UseMetadataRecorder()
+        {
+            var recorder = new Mock<IVmMetadataRecorder>();
+            _orchestrator = new VmDeploymentOrchestrator(
+                _logger.Object,
+                _mediaHandlerFactory.Object,
+                _hyperVManager.Object,
+                _cloningIsoDownloader.Object,
+                new[] { _strategy.Object },
+                _pathService.Object,
+                recorder.Object);
+            return recorder;
+        }
+
         private Task<VmDeploymentResult> DeployAsync(string vmName, string sourceFile,
             bool createCleanCheckpoint = true, bool replace = false)
         {

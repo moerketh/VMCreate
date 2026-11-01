@@ -2,8 +2,10 @@ using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows.Input;
 using VMCreate.MediaHandlers;
+using VMCreate.Metadata;
 
 namespace VMCreate
 {
@@ -22,6 +24,8 @@ namespace VMCreate
         private bool _virtualizationEnabled = true;
         private bool _replacePreviousVm;
         private bool _createCleanCheckpoint;
+        private string _folder = "";
+        private string _tagsText = "";
         private string _newDriveSizeText = "";
         private string? _validationError;
         private bool _autoDetectDiskSize;
@@ -72,6 +76,9 @@ namespace VMCreate
             _virtualizationEnabled = _wizardData.Settings.VirtualizationEnabled;
             _replacePreviousVm = _wizardData.Settings.ReplacePreviousVm;
             _createCleanCheckpoint = _wizardData.Settings.CreateCleanCheckpoint;
+            _folder = _wizardData.Settings.Folder ?? "";
+            _tagsText = string.Join(", ", _wizardData.Settings.Tags);
+            _ = LoadFolderSuggestionsAsync();
 
             NextCommand = new RelayCommand(OnNext);
             BackCommand = new RelayCommand(() => RequestNavigateBack?.Invoke());
@@ -196,6 +203,38 @@ namespace VMCreate
         {
             get => _createCleanCheckpoint;
             set => SetProperty(ref _createCleanCheckpoint, value);
+        }
+
+        /// <summary>VMCreate Manager folder path ("Engagements/ACME"); empty = no folder.</summary>
+        public string Folder
+        {
+            get => _folder;
+            set => SetProperty(ref _folder, value);
+        }
+
+        /// <summary>Comma-separated VMCreate Manager tags.</summary>
+        public string TagsText
+        {
+            get => _tagsText;
+            set => SetProperty(ref _tagsText, value);
+        }
+
+        /// <summary>Existing VMCreate Manager folder paths offered in the Folder box.</summary>
+        public ObservableCollection<string> FolderSuggestions { get; } = new();
+
+        private async Task LoadFolderSuggestionsAsync()
+        {
+            try
+            {
+                var doc = await new JsonVmMetadataStore().LoadAsync();
+                foreach (var path in doc.Folders.Select(f => doc.GetFolderPath(f.Id)!).OrderBy(p => p, StringComparer.OrdinalIgnoreCase))
+                    FolderSuggestions.Add(path);
+            }
+            catch (Exception ex)
+            {
+                // Suggestions only: typing a folder path still works without them.
+                _logger.LogWarning(ex, "Could not read VMCreate Manager folders");
+            }
         }
 
         public string NewDriveSizeText
@@ -340,6 +379,8 @@ namespace VMCreate
             _wizardData.Settings.VirtualizationEnabled = _virtualizationEnabled;
             _wizardData.Settings.ReplacePreviousVm = _replacePreviousVm;
             _wizardData.Settings.CreateCleanCheckpoint = _createCleanCheckpoint;
+            _wizardData.Settings.Folder = string.IsNullOrWhiteSpace(_folder) ? null : _folder.Trim().Trim('/');
+            _wizardData.Settings.Tags = MetadataOperations.ParseTags(_tagsText);
             _wizardData.Settings.EnhancedSessionTransportType = _wizardData.SelectedItem?.EnhancedSessionTransportType;
             // Honor the gallery item's SecureBoot metadata: without this copy
             // every VM is created with EnableSecureBoot=Off even when the item

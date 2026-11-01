@@ -218,6 +218,31 @@
                 </StackPanel>
             </Border>
 
+            <!-- Organize card: VMCreate Manager folder and tags -->
+            <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
+                    CornerRadius="8" Padding="20,16" Margin="0,0,0,12"
+                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
+                <StackPanel>
+                    <TextBlock Text="Organize" FontSize="14" FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,0,4"/>
+                    <TextBlock Text="Where the VM shows up in VMCreate Manager. Both are optional."
+                               FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                               TextWrapping="Wrap" Margin="0,0,0,10"/>
+                    <TextBlock Text="Folder" FontSize="13" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,4"/>
+                    <ComboBox IsEditable="True" ItemsSource="{Binding FolderSuggestions}"
+                              Text="{Binding Folder, UpdateSourceTrigger=PropertyChanged}"
+                              MaxWidth="420" HorizontalAlignment="Left" MinWidth="280"
+                              ToolTip="Pick an existing folder or type a new path, e.g. Engagements/ACME. Missing folders are created."
+                              AutomationProperties.Name="VMCreate Manager folder"/>
+                    <TextBlock Text="Tags" FontSize="13" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,10,0,4"/>
+                    <ui:TextBox Text="{Binding TagsText, UpdateSourceTrigger=PropertyChanged}"
+                                PlaceholderText="kali, external, acme"
+                                MaxWidth="420" HorizontalAlignment="Left" MinWidth="280"
+                                ToolTip="Comma-separated tags"
+                                AutomationProperties.Name="VMCreate Manager tags"/>
+                </StackPanel>
+            </Border>
+
         </StackPanel>
         </ScrollViewer>
 

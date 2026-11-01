@@ -80,7 +80,7 @@ namespace VMCreate.HyperV.VmCreation
 
             progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.CreateVMSkeleton));
             await _lifecycleManager.CreateVMAsync(plan, _pathService.DefaultVmPath, detectedGeneration, cancellationToken);
-            await _configManager.SetVMLoginNotes(plan, item.InitialUsername, item.InitialPassword, cancellationToken);
+            await _configManager.RecordLoginCredentials(plan, item.InitialUsername, item.InitialPassword, cancellationToken);
 
             progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.CreateVM, VmDeploymentSubStep.ConnectNic));
             await _networkManager.ConnectNetworkAdapter(plan, cancellationToken);

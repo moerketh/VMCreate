@@ -75,6 +75,11 @@ namespace VMCreate
             services.AddSingleton<IVmBootManager, PowerShellVmBootManager>();
             services.AddSingleton<IVmNetworkManager, PowerShellVmNetworkManager>();
             services.AddSingleton<IVmConfigManager, PowerShellVmConfigManager>();
+            // VMCreate Manager metadata (folders, tags, provenance, encrypted
+            // credentials), shared with VMCreate.Manager through the same file.
+            services.AddSingleton<VMCreate.Metadata.IVmMetadataStore>(_ => new VMCreate.Metadata.JsonVmMetadataStore());
+            services.AddSingleton<VMCreate.Metadata.ICredentialProtector, VMCreate.Metadata.DpapiCredentialProtector>();
+            services.AddSingleton<IVmMetadataRecorder, VmMetadataRecorder>();
             services.AddSingleton<IHyperVManager, PowerShellHyperVManagerFacade>();
             services.AddSingleton<IUnattendInjector, ElevatedUnattendInjector>();
             services.AddTransient<IOfflineRegistryEditor, OfflineRegistryEditor>();

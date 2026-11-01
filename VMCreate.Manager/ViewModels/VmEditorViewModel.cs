@@ -68,7 +68,7 @@ namespace VMCreate.Manager.ViewModels
             set => SetProperty(ref _revealedPassword, value);
         }
 
-        public IEnumerable<string> ParsedTags => TagsText.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        public IEnumerable<string> ParsedTags => MetadataOperations.ParseTags(TagsText);
 
         /// <summary>Copies the edited fields onto the stored entry.</summary>
         public void ApplyTo(VmMetadata vm)
