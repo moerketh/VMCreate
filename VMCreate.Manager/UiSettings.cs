@@ -17,6 +17,8 @@ namespace VMCreate.Manager
         public List<ColumnSetting> Columns { get; set; } = new();
         public string? SortColumn { get; set; }
         public bool SortDescending { get; set; }
+        /// <summary>Folder paths whose group is collapsed in the "All" view ("" = unfiled).</summary>
+        public List<string> CollapsedGroups { get; set; } = new();
 
         public sealed class ColumnSetting
         {

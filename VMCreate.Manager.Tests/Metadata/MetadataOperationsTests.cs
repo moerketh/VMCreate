@@ -31,6 +31,36 @@ namespace VMCreate.Manager.Tests.Metadata
         }
 
         [TestMethod]
+        public void FolderColor_InheritsFromNearestColouredAncestor()
+        {
+            var doc = new MetadataDocument();
+            var top = doc.CreateFolder("Engagements", null);
+            var mid = doc.CreateFolder("ACME", top.Id);
+            var leaf = doc.CreateFolder("Web", mid.Id);
+
+            Assert.IsNull(doc.GetFolderColor(leaf.Id));
+            doc.SetFolderColor(top.Id, "#e5534b");
+            Assert.AreEqual("#E5534B", doc.GetFolderColor(leaf.Id));
+            doc.SetFolderColor(mid.Id, "#5B9BE6");
+            Assert.AreEqual("#5B9BE6", doc.GetFolderColor(leaf.Id));
+            Assert.AreEqual("#E5534B", doc.GetFolderColor(top.Id));
+
+            doc.SetFolderColor(mid.Id, null);
+            Assert.AreEqual("#E5534B", doc.GetFolderColor(leaf.Id));
+            Assert.IsNull(doc.GetFolderColor(null));
+        }
+
+        [TestMethod]
+        public void SetFolderColor_RejectsNonHex()
+        {
+            var doc = new MetadataDocument();
+            var f = doc.CreateFolder("Labs", null);
+            Assert.ThrowsExactly<ArgumentException>(() => doc.SetFolderColor(f.Id, "red"));
+            Assert.ThrowsExactly<ArgumentException>(() => doc.SetFolderColor(f.Id, "#12345"));
+            Assert.ThrowsExactly<ArgumentException>(() => doc.SetFolderColor(Guid.NewGuid(), "#123456"));
+        }
+
+        [TestMethod]
         public void MoveFolder_IntoOwnDescendant_Throws()
         {
             var doc = new MetadataDocument();

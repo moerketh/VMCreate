@@ -19,9 +19,10 @@ namespace VMCreate.Manager.ViewModels
         private bool _isExpanded = true;
         private int _count;
 
-        public NavNodeViewModel(NavNodeKind kind, string name, string icon, Guid? folderId = null, SmartFolderFilter? filter = null)
+        public NavNodeViewModel(NavNodeKind kind, string name, string icon, Guid? folderId = null, SmartFolderFilter? filter = null, string? color = null)
         {
             Kind = kind;
+            Color = color;
             Name = name;
             Icon = icon;
             FolderId = folderId;
@@ -35,6 +36,9 @@ namespace VMCreate.Manager.ViewModels
         public string Icon { get; }
 
         public Guid? FolderId { get; }
+
+        /// <summary>Folder icon colour ("#RRGGBB", own or inherited); null = default.</summary>
+        public string? Color { get; }
         public SmartFolderFilter? Filter { get; }
         public ObservableCollection<NavNodeViewModel> Children { get; } = new();
 

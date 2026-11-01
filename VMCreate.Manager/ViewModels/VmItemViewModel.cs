@@ -6,16 +6,21 @@ namespace VMCreate.Manager.ViewModels
     /// <summary>One grid row: live Hyper-V state joined with stored metadata.</summary>
     public sealed class VmItemViewModel : ObservableObject
     {
-        public VmItemViewModel(VmSummary summary, VmMetadata? metadata, string? folderPath)
+        public VmItemViewModel(VmSummary summary, VmMetadata? metadata, string? folderPath, string? folderColor)
         {
             Summary = summary;
             Metadata = metadata;
             FolderPath = folderPath;
+            FolderColor = folderColor;
         }
 
         public VmSummary Summary { get; private set; }
         public VmMetadata? Metadata { get; private set; }
         public string? FolderPath { get; private set; }
+        /// <summary>Grid group in the "All" view: folder path, empty for unfiled.</summary>
+        public string GroupKey => FolderPath ?? "";
+        /// <summary>Folder icon colour (own or inherited), shown on the group header.</summary>
+        public string? FolderColor { get; private set; }
 
         public Guid Id => Summary.Id;
         public string Name => Summary.Name;
@@ -37,11 +42,12 @@ namespace VMCreate.Manager.ViewModels
         public DateOnly? ExpiresOn => Metadata?.ExpiresOn;
         public bool IsExpired => Metadata?.IsExpired(DateOnly.FromDateTime(DateTime.Today)) ?? false;
 
-        public void Update(VmSummary summary, VmMetadata? metadata, string? folderPath)
+        public void Update(VmSummary summary, VmMetadata? metadata, string? folderPath, string? folderColor)
         {
             Summary = summary;
             Metadata = metadata;
             FolderPath = folderPath;
+            FolderColor = folderColor;
             OnPropertyChanged(string.Empty); // every derived property may have changed
         }
     }

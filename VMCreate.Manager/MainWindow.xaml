@@ -3,11 +3,47 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         xmlns:vm="clr-namespace:VMCreate.Manager.ViewModels"
+        xmlns:local="clr-namespace:VMCreate.Manager"
         Title="VMCreate Manager" Height="780" Width="1400"
         MinWidth="980" MinHeight="560"
         ExtendsContentIntoTitleBar="True"
         WindowBackdropType="Mica"
         WindowStartupLocation="CenterScreen">
+    <ui:FluentWindow.Resources>
+        <!-- Right-click menu of a folder node. Tag of the placement target carries the MainViewModel;
+             right-clicking selects the node first, so the commands act on SelectedNode. -->
+        <ContextMenu x:Key="FolderContextMenu" x:Shared="False">
+            <MenuItem Header="New subfolder…" Icon="{ui:SymbolIcon FolderAdd24}"
+                      Command="{Binding PlacementTarget.Tag.NewFolderCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+            <MenuItem Header="Rename…" Icon="{ui:SymbolIcon Rename24}"
+                      Command="{Binding PlacementTarget.Tag.RenameFolderCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+            <MenuItem Header="Delete folder" Icon="{ui:SymbolIcon Delete24}"
+                      Command="{Binding PlacementTarget.Tag.DeleteFolderCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+            <Separator/>
+            <MenuItem Header="Color" Icon="{ui:SymbolIcon Color24}" ItemsSource="{x:Static local:FolderPalette.Options}">
+                <MenuItem.ItemTemplate>
+                    <DataTemplate DataType="{x:Type local:FolderColorOption}">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse x:Name="Swatch" Width="12" Height="12" VerticalAlignment="Center"
+                                     Fill="{Binding Hex, Converter={StaticResource HexToBrush}}"
+                                     Stroke="{StaticResource SubtleTextBrush}" StrokeThickness="1"/>
+                            <TextBlock Text="{Binding Name}" Margin="10,0,0,0" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <DataTemplate.Triggers>
+                            <DataTrigger Binding="{Binding Hex}" Value="{x:Null}">
+                                <Setter TargetName="Swatch" Property="Fill" Value="Transparent"/>
+                            </DataTrigger>
+                        </DataTemplate.Triggers>
+                    </DataTemplate>
+                </MenuItem.ItemTemplate>
+                <MenuItem.ItemContainerStyle>
+                    <Style TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}">
+                        <EventSetter Event="Click" Handler="FolderColor_Click"/>
+                    </Style>
+                </MenuItem.ItemContainerStyle>
+            </MenuItem>
+        </ContextMenu>
+    </ui:FluentWindow.Resources>
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -61,6 +97,7 @@
                           SelectedItemChanged="NavTree_SelectedItemChanged"
                           AllowDrop="True" DragOver="NavTree_DragOver" Drop="NavTree_Drop"
                           PreviewMouseLeftButtonDown="NavTree_PreviewMouseLeftButtonDown"
+                          PreviewMouseRightButtonDown="NavTree_PreviewMouseRightButtonDown"
                           PreviewMouseMove="NavTree_PreviewMouseMove">
                     <TreeView.ItemContainerStyle>
                         <Style TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}">
@@ -70,9 +107,20 @@
                     </TreeView.ItemContainerStyle>
                     <TreeView.ItemTemplate>
                         <HierarchicalDataTemplate DataType="{x:Type vm:NavNodeViewModel}" ItemsSource="{Binding Children}">
-                            <DockPanel Background="Transparent">
+                            <DockPanel Background="Transparent"
+                                       Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=TreeView}}">
+                                <DockPanel.Style>
+                                    <Style TargetType="DockPanel">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Kind}" Value="{x:Static vm:NavNodeKind.Folder}">
+                                                <Setter Property="ContextMenu" Value="{StaticResource FolderContextMenu}"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </DockPanel.Style>
                                 <TextBlock DockPanel.Dock="Right" Text="{Binding Count}" Foreground="{StaticResource SubtleTextBrush}" Margin="8,0,0,0"/>
-                                <ui:SymbolIcon Symbol="{Binding Icon}" Margin="0,0,6,0"/>
+                                <ui:SymbolIcon Symbol="{Binding Icon}" Margin="0,0,6,0"
+                                               Foreground="{Binding Color, Converter={StaticResource HexToBrush}}"/>
                                 <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
                             </DockPanel>
                         </HierarchicalDataTemplate>
@@ -138,6 +186,56 @@
                                 </MenuItem>
                             </ContextMenu>
                         </DataGrid.ContextMenu>
+                        <!-- Folder groups, only active in "All virtual machines" (see MainViewModel.UpdateGrouping). -->
+                        <DataGrid.GroupStyle>
+                            <GroupStyle>
+                                <GroupStyle.ContainerStyle>
+                                    <Style TargetType="GroupItem">
+                                        <Setter Property="Template">
+                                            <Setter.Value>
+                                                <ControlTemplate TargetType="GroupItem">
+                                                    <StackPanel>
+                                                        <ToggleButton x:Name="GroupToggle" IsChecked="True" Cursor="Hand"
+                                                                      Loaded="GroupToggle_Loaded"
+                                                                      Checked="GroupToggle_Changed" Unchecked="GroupToggle_Changed">
+                                                            <ToggleButton.Template>
+                                                                <ControlTemplate TargetType="ToggleButton">
+                                                                    <Border Background="Transparent" Padding="6,8,6,4"
+                                                                            BorderThickness="0,0,0,1" BorderBrush="{StaticResource ItemBorderBrush}">
+                                                                        <ContentPresenter/>
+                                                                    </Border>
+                                                                </ControlTemplate>
+                                                            </ToggleButton.Template>
+                                                            <StackPanel Orientation="Horizontal">
+                                                                <ui:SymbolIcon x:Name="Chevron" Symbol="ChevronDown16" FontSize="12"
+                                                                               Foreground="{StaticResource SubtleTextBrush}" VerticalAlignment="Center"/>
+                                                                <ui:SymbolIcon x:Name="FolderIcon" Symbol="Folder24" FontSize="16"
+                                                                               Margin="8,0,6,0" VerticalAlignment="Center"
+                                                                               Foreground="{Binding Items[0].FolderColor, Converter={StaticResource HexToBrush}}"/>
+                                                                <TextBlock Text="{Binding Name, Converter={StaticResource FolderGroupName}}"
+                                                                           FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                                                <TextBlock Text="{Binding ItemCount, StringFormat=' ({0})'}"
+                                                                           Foreground="{StaticResource SubtleTextBrush}" VerticalAlignment="Center"/>
+                                                            </StackPanel>
+                                                        </ToggleButton>
+                                                        <ItemsPresenter x:Name="GroupItems"/>
+                                                    </StackPanel>
+                                                    <ControlTemplate.Triggers>
+                                                        <Trigger SourceName="GroupToggle" Property="IsChecked" Value="False">
+                                                            <Setter TargetName="GroupItems" Property="Visibility" Value="Collapsed"/>
+                                                            <Setter TargetName="Chevron" Property="Symbol" Value="ChevronRight16"/>
+                                                        </Trigger>
+                                                        <DataTrigger Binding="{Binding Name}" Value="">
+                                                            <Setter TargetName="FolderIcon" Property="Symbol" Value="FolderProhibited24"/>
+                                                        </DataTrigger>
+                                                    </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </GroupStyle.ContainerStyle>
+                            </GroupStyle>
+                        </DataGrid.GroupStyle>
                         <DataGrid.Columns>
                             <DataGridTemplateColumn Header="Name" SortMemberPath="Name" Width="2*" MinWidth="160">
                                 <DataGridTemplateColumn.CellTemplate>
@@ -167,11 +265,7 @@
                             <DataGridTextColumn Header="CPU" Binding="{Binding CpuText}" Width="55"/>
                             <DataGridTextColumn Header="Memory" Binding="{Binding MemoryText}" Width="75"/>
                             <DataGridTextColumn Header="Uptime" Binding="{Binding UptimeText}" Width="85"/>
-                            <DataGridTextColumn Header="IP address" Binding="{Binding PrimaryIp}" Width="115"/>
-                            <DataGridTextColumn Header="Folder" Binding="{Binding FolderPath}" Width="*"/>
-                            <DataGridTextColumn Header="Tags" Binding="{Binding TagsText}" Width="*"/>
-                            <DataGridTextColumn Header="Purpose" Binding="{Binding Purpose}" Width="1.5*"/>
-                            <DataGridTextColumn Header="Checkpoints" Binding="{Binding CheckpointCount}" Width="90"/>
+                            <DataGridTextColumn Header="IP address" Binding="{Binding PrimaryIp}" Width="*" MinWidth="115"/>
                         </DataGrid.Columns>
                     </DataGrid>
                     <ui:ProgressRing IsIndeterminate="True" Visibility="{Binding IsLoading, Converter={StaticResource BoolToVis}}"

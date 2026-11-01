@@ -18,6 +18,8 @@
             <local:CountToVisibilityConverter x:Key="CountToVis"/>
             <local:VmStateToBrushConverter x:Key="StateBrush"/>
             <local:VmStateToSymbolConverter x:Key="StateSymbol"/>
+            <local:FolderGroupNameConverter x:Key="FolderGroupName"/>
+            <local:HexToBrushConverter x:Key="HexToBrush"/>
 
             <SolidColorBrush x:Key="SubtleTextBrush" Color="{DynamicResource TextFillColorSecondary}"/>
             <SolidColorBrush x:Key="ItemBorderBrush" Color="{DynamicResource ControlStrokeColorDefault}"/>

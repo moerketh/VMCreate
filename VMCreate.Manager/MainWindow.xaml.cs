@@ -1,9 +1,12 @@
+using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 using VMCreate.Manager.ViewModels;
 
 namespace VMCreate.Manager
@@ -16,6 +19,8 @@ namespace VMCreate.Manager
         private readonly MainViewModel _vm;
         private Point? _gridDragStart;
         private Point? _treeDragStart;
+        // Group containers are recreated on every view refresh, so expansion state lives here.
+        private readonly HashSet<string> _collapsedGroups = new(StringComparer.OrdinalIgnoreCase);
 
         public MainWindow(MainViewModel viewModel)
         {
@@ -27,6 +32,11 @@ namespace VMCreate.Manager
             RestoreLayout(UiSettings.Load());
             Closing += (_, _) => SaveLayout();
             Closed += (_, _) => _vm.Dispose();
+            // Switching grouping on rebuilds the rows presenter; WPF redistributes column widths while the
+            // grid's scroll host is momentarily absent (0 px available), squeezing every column to its
+            // minimum, and never gives the space back. Re-assert the intended widths once layout settles.
+            ((INotifyCollectionChanged)_vm.VmsView.GroupDescriptions).CollectionChanged += (_, _) =>
+                Dispatcher.BeginInvoke(ReapplyColumnWidths, DispatcherPriority.ContextIdle);
         }
 
         /// <summary>Brings the window to the front; used when a second instance is started.</summary>
@@ -62,6 +72,7 @@ namespace VMCreate.Manager
             }
             if (s.Maximized)
                 WindowState = WindowState.Maximized;
+            _collapsedGroups.UnionWith(s.CollapsedGroups);
             if (s.NavigationWidth is double nav && nav >= NavColumn.MinWidth)
                 NavColumn.Width = new GridLength(nav);
             if (s.DetailsWidth is double det && det >= DetailsColumn.MinWidth)
@@ -72,7 +83,8 @@ namespace VMCreate.Manager
                 var col = VmGrid.Columns.FirstOrDefault(c => HeaderOf(c) == cs.Header);
                 if (col == null)
                     continue;
-                if (cs.Width > 0)
+                // A star/fixed mismatch means the column definition changed since the save.
+                if (cs.Width > 0 && cs.IsStar == col.Width.IsStar)
                     col.Width = cs.IsStar ? new DataGridLength(cs.Width, DataGridLengthUnitType.Star) : new DataGridLength(cs.Width);
                 col.Visibility = cs.Visible || IsNameColumn(col) ? Visibility.Visible : Visibility.Collapsed;
             }
@@ -109,10 +121,12 @@ namespace VMCreate.Manager
                 DetailsWidth = DetailsColumn.ActualWidth,
                 SortColumn = sorted == null ? null : HeaderOf(sorted),
                 SortDescending = sorted?.SortDirection == ListSortDirection.Descending,
+                CollapsedGroups = _collapsedGroups.Order().ToList(),
                 Columns = VmGrid.Columns.Select(c => new UiSettings.ColumnSetting
                 {
                     Header = HeaderOf(c),
-                    Width = c.Width.IsStar ? c.Width.Value : c.ActualWidth,
+                    // The set width, not ActualWidth: a temporary squeeze (see ReapplyColumnWidths) must not be persisted.
+                    Width = c.Width.IsStar || c.Width.IsAbsolute ? c.Width.Value : c.ActualWidth,
                     IsStar = c.Width.IsStar,
                     DisplayIndex = c.DisplayIndex,
                     Visible = c.Visibility == Visibility.Visible,
@@ -137,13 +151,45 @@ namespace VMCreate.Manager
                 foreach (MenuItem item in menu.Items)
                     item.IsChecked = VmGrid.Columns.First(c => HeaderOf(c) == (string)item.Header).Visibility == Visibility.Visible;
             };
-            var baseStyle = TryFindResource(typeof(DataGridColumnHeader)) as Style;
+            // WPF-UI keys its header style instead of making it implicit; basing on the type
+            // alone falls back to the stock (white) Aero header.
+            var baseStyle = (TryFindResource("DefaultDataGridColumnHeaderStyle")
+                ?? TryFindResource(typeof(DataGridColumnHeader))) as Style;
             var style = new Style(typeof(DataGridColumnHeader), baseStyle);
             style.Setters.Add(new Setter(ContextMenuProperty, menu));
             VmGrid.ColumnHeaderStyle = style;
         }
 
         private static string HeaderOf(DataGridColumn column) => column.Header as string ?? "";
+
+        private void ReapplyColumnWidths()
+        {
+            foreach (var col in VmGrid.Columns)
+            {
+                var width = col.Width;
+                // An equal DataGridLength is not a property change, so bounce through Auto to force a recompute.
+                col.Width = DataGridLength.Auto;
+                col.Width = new DataGridLength(width.Value, width.UnitType);
+            }
+        }
+
+        // ── folder groups ────────────────────────────────────────────────
+
+        private void GroupToggle_Loaded(object sender, RoutedEventArgs e)
+        {
+            if (sender is ToggleButton { DataContext: CollectionViewGroup { Name: string key } } toggle)
+                toggle.IsChecked = !_collapsedGroups.Contains(key);
+        }
+
+        private void GroupToggle_Changed(object sender, RoutedEventArgs e)
+        {
+            if (sender is not ToggleButton { IsLoaded: true, DataContext: CollectionViewGroup { Name: string key } } toggle)
+                return;
+            if (toggle.IsChecked == true)
+                _collapsedGroups.Remove(key);
+            else
+                _collapsedGroups.Add(key);
+        }
 
         private static bool IsNameColumn(DataGridColumn column) => HeaderOf(column) == "Name";
 
@@ -161,6 +207,19 @@ namespace VMCreate.Manager
 
         private void NavTree_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
             => _vm.SelectedNode = e.NewValue as NavNodeViewModel;
+
+        /// <summary>Right-click selects the node first so the folder menu acts on it.</summary>
+        private void NavTree_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (FindAncestor<TreeViewItem>(e.OriginalSource as DependencyObject) is { } item)
+                item.IsSelected = true;
+        }
+
+        private async void FolderColor_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is MenuItem { DataContext: FolderColorOption option } && _vm.SelectedNode?.FolderId is Guid id)
+                await _vm.SetFolderColorAsync(id, option.Hex);
+        }
 
         private void VmGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
             => _vm.SetSelection(VmGrid.SelectedItems.OfType<VmItemViewModel>().ToList());

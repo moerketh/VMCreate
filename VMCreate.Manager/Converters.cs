@@ -34,6 +34,44 @@ namespace VMCreate.Manager
             => throw new NotSupportedException();
     }
 
+    /// <summary>"#RRGGBB" to a brush; null/invalid falls back to the theme's primary text colour.</summary>
+    public sealed class HexToBrushConverter : IValueConverter
+    {
+        private static readonly Dictionary<string, Brush> Cache = new(StringComparer.OrdinalIgnoreCase);
+
+        public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+        {
+            if (value is string hex && hex.Length > 0)
+            {
+                if (Cache.TryGetValue(hex, out var cached))
+                    return cached;
+                try
+                {
+                    var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex));
+                    brush.Freeze();
+                    return Cache[hex] = brush;
+                }
+                catch (FormatException)
+                {
+                }
+            }
+            return Application.Current.TryFindResource("TextFillColorPrimaryBrush") ?? Brushes.White;
+        }
+
+        public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+            => throw new NotSupportedException();
+    }
+
+    /// <summary>Grid group header text for a folder path group; the empty group holds unfiled VMs.</summary>
+    public sealed class FolderGroupNameConverter : IValueConverter
+    {
+        public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+            => value is string path && path.Length > 0 ? path.Replace("/", "  ›  ") : "Not in a folder";
+
+        public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+            => throw new NotSupportedException();
+    }
+
     /// <summary>
     /// Machine icon per VM state. ConverterParameter "Badge" returns the small
     /// overlay symbol instead (saved / paused), or Collapsed visibility when

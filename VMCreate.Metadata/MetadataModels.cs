@@ -92,6 +92,10 @@ namespace VMCreate.Metadata
 
         /// <summary>Parent folder; null means a top-level folder.</summary>
         public Guid? ParentId { get; set; }
+
+        /// <summary>Icon colour as "#RRGGBB"; null inherits the parent's colour (or the default).</summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Color { get; set; }
     }
 
     /// <summary>A saved filter shown alongside the folder tree.</summary>

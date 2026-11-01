@@ -30,6 +30,31 @@ namespace VMCreate.Metadata
             folder.Name = newName;
         }
 
+        /// <summary>Sets a folder's icon colour ("#RRGGBB", any case) or clears it with null.</summary>
+        public static void SetFolderColor(this MetadataDocument doc, Guid folderId, string? color)
+        {
+            var folder = doc.FindFolder(folderId) ?? throw new ArgumentException($"Folder {folderId} does not exist.", nameof(folderId));
+            if (color != null && !System.Text.RegularExpressions.Regex.IsMatch(color, "^#[0-9A-Fa-f]{6}$"))
+                throw new ArgumentException($"'{color}' is not a #RRGGBB colour.", nameof(color));
+            folder.Color = color?.ToUpperInvariant();
+        }
+
+        /// <summary>The folder's own colour, else the nearest ancestor's; null when none is set.</summary>
+        public static string? GetFolderColor(this MetadataDocument doc, Guid? folderId)
+        {
+            var seen = new HashSet<Guid>();
+            for (Guid? cursor = folderId; cursor is Guid c && seen.Add(c); )
+            {
+                var folder = doc.FindFolder(c);
+                if (folder == null)
+                    return null;
+                if (folder.Color != null)
+                    return folder.Color;
+                cursor = folder.ParentId;
+            }
+            return null;
+        }
+
         public static void MoveFolder(this MetadataDocument doc, Guid folderId, Guid? newParentId)
         {
             var folder = doc.FindFolder(folderId) ?? throw new ArgumentException($"Folder {folderId} does not exist.", nameof(folderId));

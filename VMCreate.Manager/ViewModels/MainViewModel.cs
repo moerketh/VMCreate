@@ -129,7 +129,10 @@ namespace VMCreate.Manager.ViewModels
             set
             {
                 if (SetProperty(ref _selectedNode, value))
+                {
+                    UpdateGrouping();
                     VmsView.Refresh();
+                }
             }
         }
 
@@ -312,13 +315,14 @@ namespace VMCreate.Manager.ViewModels
                 seen.Add(summary.Id);
                 var meta = _doc.FindVm(summary.Id);
                 string? path = _doc.GetFolderPath(meta?.FolderId);
+                string? color = _doc.GetFolderColor(meta?.FolderId);
                 if (_itemsById.TryGetValue(summary.Id, out var item))
                 {
-                    item.Update(summary, meta, path);
+                    item.Update(summary, meta, path, color);
                 }
                 else
                 {
-                    item = new VmItemViewModel(summary, meta, path);
+                    item = new VmItemViewModel(summary, meta, path, color);
                     _itemsById[summary.Id] = item;
                     Vms.Add(item);
                 }
@@ -340,11 +344,50 @@ namespace VMCreate.Manager.ViewModels
                 LoadEditor(force: false);
         }
 
+        // ── folder grouping ──────────────────────────────────────────────
+
+        private static readonly PropertyGroupDescription FolderGrouping =
+            new(nameof(VmItemViewModel.GroupKey)) { CustomSort = new FolderGroupComparer() };
+
+        /// <summary>"All virtual machines" shows VMs under their folders; every other view stays a flat list.</summary>
+        private void UpdateGrouping()
+        {
+            bool grouped = SelectedNode?.Kind == NavNodeKind.All;
+            if (grouped == VmsView.GroupDescriptions.Contains(FolderGrouping))
+                return;
+            if (grouped)
+                VmsView.GroupDescriptions.Add(FolderGrouping);
+            else
+                VmsView.GroupDescriptions.Clear();
+        }
+
+        /// <summary>Folders alphabetically by path (a parent directly before its subfolders), unfiled last.</summary>
+        private sealed class FolderGroupComparer : System.Collections.IComparer
+        {
+            public int Compare(object? x, object? y)
+            {
+                string a = (x as CollectionViewGroup)?.Name as string ?? "";
+                string b = (y as CollectionViewGroup)?.Name as string ?? "";
+                if (a.Length == 0 || b.Length == 0)
+                    return (a.Length == 0).CompareTo(b.Length == 0);
+                // Per segment, so "Lab/X" stays right after "Lab" even when a sibling like "Lab 2" exists.
+                string[] pa = a.Split(MetadataOperations.FolderPathSeparator);
+                string[] pb = b.Split(MetadataOperations.FolderPathSeparator);
+                for (int i = 0; i < Math.Min(pa.Length, pb.Length); i++)
+                {
+                    int c = StringComparer.CurrentCultureIgnoreCase.Compare(pa[i], pb[i]);
+                    if (c != 0)
+                        return c;
+                }
+                return pa.Length.CompareTo(pb.Length);
+            }
+        }
+
         // ── navigation tree ──────────────────────────────────────────────
 
         private void RebuildNavigationIfNeeded()
         {
-            string signature = string.Join("|", _doc.Folders.OrderBy(f => f.Id).Select(f => $"{f.Id}:{f.ParentId}:{f.Name}"))
+            string signature = string.Join("|", _doc.Folders.OrderBy(f => f.Id).Select(f => $"{f.Id}:{f.ParentId}:{f.Name}:{f.Color}"))
                 + "#" + string.Join("|", _doc.SmartFolders.Select(s => s.Name));
             if (signature == _folderSignature && Navigation.Count > 0)
                 return;
@@ -386,7 +429,7 @@ namespace VMCreate.Manager.ViewModels
         {
             foreach (var folder in _doc.Folders.Where(f => f.ParentId == parentId).OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase))
             {
-                var node = new NavNodeViewModel(NavNodeKind.Folder, folder.Name, "Folder24", folder.Id);
+                var node = new NavNodeViewModel(NavNodeKind.Folder, folder.Name, "Folder24", folder.Id, color: _doc.GetFolderColor(folder.Id));
                 AddFolderChildren(node, folder.Id);
                 parent.Children.Add(node);
             }
@@ -708,6 +751,10 @@ namespace VMCreate.Manager.ViewModels
                 foreach (var id in vmIds)
                     doc.MoveVmToFolder(id, folderId);
             }, affectsNotes: true, onlyVms: vmIds);
+
+        /// <summary>Folder context menu: sets or (with null) clears the icon colour.</summary>
+        public Task SetFolderColorAsync(Guid folderId, string? color)
+            => RunMetadataChange(doc => doc.SetFolderColor(folderId, color), affectsNotes: false);
 
         /// <summary>Drop handler: re-parents a folder.</summary>
         public Task MoveFolderAsync(Guid folderId, Guid? newParentId)
