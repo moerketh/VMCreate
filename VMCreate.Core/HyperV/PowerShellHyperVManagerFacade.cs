@@ -50,6 +50,12 @@ namespace VMCreate
         public Task RemoveVMAsync(string vmName, CancellationToken cancellationToken)
             => _lifecycle.RemoveVMAsync(vmName, cancellationToken);
 
+        public Task<bool> VmExistsAsync(string vmName, CancellationToken cancellationToken)
+            => _lifecycle.VmExistsAsync(vmName, cancellationToken);
+
+        public Task CreateCheckpointAsync(string vmName, string checkpointName, CancellationToken cancellationToken)
+            => _lifecycle.CreateCheckpointAsync(vmName, checkpointName, cancellationToken);
+
         public Task AddExistingHardDrive(VmDeploymentPlan plan, string mediaPath, CancellationToken cancellationToken)
             => _disk.AddExistingHardDrive(plan, mediaPath, cancellationToken);
 
@@ -64,6 +70,12 @@ namespace VMCreate
 
         public Task<string[]> GetVmHardDiskPathsAsync(string vmName, CancellationToken cancellationToken)
             => _disk.GetVmHardDiskPathsAsync(vmName, cancellationToken);
+
+        public Task<string[]> GetVmDiskChainPathsAsync(string vmName, CancellationToken cancellationToken)
+            => _disk.GetVmDiskChainPathsAsync(vmName, cancellationToken);
+
+        public Task<string[]> GetVmDvdMediaPathsAsync(string vmName, CancellationToken cancellationToken)
+            => _disk.GetVmDvdMediaPathsAsync(vmName, cancellationToken);
 
         public Task AddBootDvd(VmDeploymentPlan plan, string mediaPath, CancellationToken cancellationToken)
             => _boot.AddBootDvd(plan, mediaPath, cancellationToken);

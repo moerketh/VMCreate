@@ -76,6 +76,12 @@ namespace VMCreate.CLI.Commands
                 DefaultValueFactory = _ => false
             };
 
+            var noCheckpointOpt = new Option<bool>("--no-checkpoint")
+            {
+                Description = "Do not take the 'Clean deploy (VMCreate)' checkpoint after a successful deployment.",
+                DefaultValueFactory = _ => false
+            };
+
             var replaceOpt = new Option<bool>("--replace")
             {
                 Description = "Stop and remove an existing VM with the same name before creating.",
@@ -237,6 +243,7 @@ namespace VMCreate.CLI.Commands
             cmd.Options.Add(diskSizeOpt);
             cmd.Options.Add(noAutoDetectDiskOpt);
             cmd.Options.Add(noNestedVirtOpt);
+            cmd.Options.Add(noCheckpointOpt);
             cmd.Options.Add(replaceOpt);
             cmd.Options.Add(noXrdpOpt);
             cmd.Options.Add(rdpBackendOpt);
@@ -277,6 +284,7 @@ namespace VMCreate.CLI.Commands
                     DiskSizeGb = parseResult.GetValue(diskSizeOpt),
                     NoAutoDetectDisk = parseResult.GetValue(noAutoDetectDiskOpt),
                     NoNestedVirt = parseResult.GetValue(noNestedVirtOpt),
+                    NoCheckpoint = parseResult.GetValue(noCheckpointOpt),
                     Replace = parseResult.GetValue(replaceOpt),
                     NoXrdp = parseResult.GetValue(noXrdpOpt),
                     RdpBackend = parseResult.GetValue(rdpBackendOpt),
@@ -685,6 +693,7 @@ namespace VMCreate.CLI.Commands
                 SecureBoot = string.Equals(galleryItem.SecureBoot, "true", StringComparison.OrdinalIgnoreCase),
                 SecureBootTemplate = galleryItem.SecureBootTemplate ?? "MicrosoftUEFICertificateAuthority",
                 SwitchName = args.SwitchName,
+                CreateCleanCheckpoint = !args.NoCheckpoint,
             };
 
             // ── Parse --option key=value pairs ───────────────────────────────
@@ -1117,6 +1126,7 @@ namespace VMCreate.CLI.Commands
         public int DiskSizeGb { get; set; }
         public bool NoAutoDetectDisk { get; set; }
         public bool NoNestedVirt { get; set; }
+        public bool NoCheckpoint { get; set; }
         public bool Replace { get; set; }
         public bool NoXrdp { get; set; }
         public string? RdpBackend { get; set; }

@@ -26,5 +26,12 @@ namespace VMCreate
         /// keeps the deployment's stock target — the Default Switch.
         /// </summary>
         public string? SwitchName { get; set; }
+
+        /// <summary>
+        /// Take a "Clean deploy" checkpoint once the deployment has finished
+        /// customizing the guest, so the VM can be reset to its just-deployed
+        /// state. Automatic (per-start) checkpoints stay disabled regardless.
+        /// </summary>
+        public bool CreateCleanCheckpoint { get; set; } = true;
     }
 }

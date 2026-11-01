@@ -210,6 +210,11 @@
                               FontSize="14" Margin="0,8,0,0"
                               ToolTip="If a VM with the same base name already exists, stop and remove it (including its VHDX) before creating the new one."
                               AutomationProperties.Name="Replace existing VM"/>
+                    <CheckBox Content="Create a checkpoint after deployment"
+                              IsChecked="{Binding CreateCleanCheckpoint}"
+                              FontSize="14" Margin="0,8,0,0"
+                              ToolTip="Once the guest is set up, take a 'Clean deploy (VMCreate)' checkpoint so you can return the VM to its just-deployed state."
+                              AutomationProperties.Name="Create a checkpoint after deployment"/>
                 </StackPanel>
             </Border>
 

@@ -64,5 +64,14 @@ namespace VMCreate.HyperV.VmCreation
         /// chroot executor as steps finish; read by the post-boot service.
         /// </summary>
         public ISet<string> ChrootCompletedSteps { get; } = new HashSet<string>(StringComparer.Ordinal);
+
+        /// <summary>
+        /// Set by the strategy once the deployment waited for the guest and
+        /// ran its customization to completion. Only then is the VM in a
+        /// state worth a "Clean deploy" checkpoint — a VM that was just
+        /// started (a manual-install ISO, a cloud image whose first boot
+        /// nobody waited for) would capture a half-booted guest.
+        /// </summary>
+        public bool GuestReady { get; set; }
     }
 }

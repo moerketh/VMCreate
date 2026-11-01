@@ -27,7 +27,8 @@ namespace VMCreate
             string? secureBootTemplate = "MicrosoftUEFICertificateAuthority",
             bool replacePreviousVm = false,
             string? cloningIsoPath = null,
-            string? switchName = null)
+            string? switchName = null,
+            bool createCleanCheckpoint = true)
         {
             if (string.IsNullOrWhiteSpace(vmName))
                 throw new ArgumentException("VM name cannot be empty.", nameof(vmName));
@@ -48,6 +49,7 @@ namespace VMCreate
             // custom CloningIsoPath keep working.
             CloningIsoPath = cloningIsoPath ?? DefaultCloningIsoPath;
             SwitchName = string.IsNullOrWhiteSpace(switchName) ? null : switchName;
+            CreateCleanCheckpoint = createCleanCheckpoint;
         }
 
         /// <summary>
@@ -69,7 +71,8 @@ namespace VMCreate
                 settings.SecureBootTemplate,
                 settings.ReplacePreviousVm,
                 settings.CloningIsoPath,
-                settings.SwitchName);
+                settings.SwitchName,
+                settings.CreateCleanCheckpoint);
         }
 
         /// <summary>
@@ -150,5 +153,11 @@ namespace VMCreate
         /// deployment's stock target — the Default Switch.
         /// </summary>
         public string? SwitchName { get; init; }
+
+        /// <summary>
+        /// Take a "Clean deploy" checkpoint after a deployment that finished
+        /// customizing the guest. See <see cref="VmSettings.CreateCleanCheckpoint"/>.
+        /// </summary>
+        public bool CreateCleanCheckpoint { get; init; }
     }
 }

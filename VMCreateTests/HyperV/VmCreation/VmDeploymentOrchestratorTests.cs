@@ -266,6 +266,252 @@ namespace VMCreate.Tests.HyperV.VmCreation
             }
         }
 
+        [TestMethod]
+        [DoNotParallelize] // flips the process-wide Debug-preservation switch
+        public async Task DeployAsync_StrategyThrowsAfterNewVm_RemovesTheVmAndItsDisks()
+        {
+            // The stranded-VHDX bug this pins: cleanup used to key off a flag
+            // set only after the strategy RETURNED, so a strategy that threw
+            // after New-VM left the VM registered and its disks on the drive.
+            string baseDir = NewTempDir();
+            string vmName = "TestVM_20250601120000";
+            string diskDir = Directory.CreateDirectory(Path.Combine(baseDir, vmName)).FullName;
+            string disk = Touch(Path.Combine(diskDir, vmName + ".vhdx"));
+            string intermediate = Touch(Path.Combine(diskDir, "Rocky-9-Azure-Base.latest.x86_64.vhdfixed"));
+            string seed = Touch(Path.Combine(baseDir, vmName + "_cidata.iso"));
+            // Debug builds (this test run) preserve failed VMs by design.
+            DebugPreservation.TestOverride = false;
+            try
+            {
+                UseTempPaths(baseDir);
+                _hyperVManager.SetupSequence(h => h.VmExistsAsync(vmName, It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(false)   // pre-flight: the name is free
+                    .ReturnsAsync(true);   // cleanup: the strategy got as far as New-VM
+                _hyperVManager.Setup(h => h.GetVmDiskChainPathsAsync(vmName, It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(new[] { disk });
+                SetupStrategy(DiskImageFormat.Vhdx, _ => throw new InvalidOperationException("boom"));
+
+                VmDeploymentResult result = await DeployAsync(vmName, "disk.vhdx");
+
+                Assert.IsFalse(result.Success);
+                _hyperVManager.Verify(h => h.RemoveVMAsync(vmName, It.IsAny<CancellationToken>()), Times.Once);
+                Assert.IsFalse(File.Exists(disk), "the VM's disk must be deleted");
+                Assert.IsFalse(File.Exists(intermediate), "intermediates in the per-VM directory must be deleted");
+                Assert.IsFalse(Directory.Exists(diskDir), "the per-VM disk directory must be deleted");
+                Assert.IsFalse(File.Exists(seed), "a seed ISO outside the per-VM directory must be deleted");
+            }
+            finally
+            {
+                DebugPreservation.TestOverride = null;
+                DeleteTempDir(baseDir);
+            }
+        }
+
+        [TestMethod]
+        public async Task DeployAsync_VmNameAlreadyExists_FailsWithoutTouchingThatVm()
+        {
+            string baseDir = NewTempDir();
+            string vmName = "TestVM_20250601120000";
+            string diskDir = Directory.CreateDirectory(Path.Combine(baseDir, vmName)).FullName;
+            string disk = Touch(Path.Combine(diskDir, vmName + ".vhdx"));
+            try
+            {
+                UseTempPaths(baseDir);
+                _hyperVManager.Setup(h => h.VmExistsAsync(vmName, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+                SetupStrategy(DiskImageFormat.Vhdx, _ => Task.CompletedTask);
+
+                VmDeploymentResult result = await DeployAsync(vmName, "disk.vhdx");
+
+                Assert.IsFalse(result.Success);
+                StringAssert.Contains(result.ErrorMessage!, "already exists");
+                _strategy.Verify(s => s.CreateVMAsync(It.IsAny<VmCreationContext>()), Times.Never);
+                _hyperVManager.Verify(h => h.StopVMAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+                _hyperVManager.Verify(h => h.RemoveVMAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+                Assert.IsTrue(File.Exists(disk), "another VM's disk must survive");
+            }
+            finally { DeleteTempDir(baseDir); }
+        }
+
+        [TestMethod]
+        public async Task DeployAsync_Success_PrunesUnattachedIntermediatesAndKeepsAttachedMedia()
+        {
+            // The leftover-source bug: an extracted disk that had to be
+            // converted (Rocky's .vhdfixed, Parrot's .qcow2) stayed next to
+            // the converted VHDX after every deployment.
+            string baseDir = NewTempDir();
+            string vmName = "TestVM_20250601120000";
+            string diskDir = Directory.CreateDirectory(Path.Combine(baseDir, vmName)).FullName;
+            string disk = Touch(Path.Combine(diskDir, vmName + ".vhdx"));
+            string dvd = Touch(Path.Combine(diskDir, "installer.iso"));
+            string source = Touch(Path.Combine(diskDir, "Parrot-security-7.2_amd64.qcow2"));
+            string nestedDir = Directory.CreateDirectory(Path.Combine(diskDir, "ova")).FullName;
+            string sideFile = Touch(Path.Combine(nestedDir, "image.ovf"));
+            try
+            {
+                UseTempPaths(baseDir);
+                _hyperVManager.Setup(h => h.GetVmDiskChainPathsAsync(vmName, It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(new[] { disk });
+                _hyperVManager.Setup(h => h.GetVmDvdMediaPathsAsync(vmName, It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(new[] { dvd });
+                SetupStrategy(DiskImageFormat.Vhdx, _ => Task.CompletedTask);
+
+                VmDeploymentResult result = await DeployAsync(vmName, "disk.vhdx");
+
+                Assert.IsTrue(result.Success);
+                Assert.IsTrue(File.Exists(disk), "the attached disk must be kept");
+                Assert.IsTrue(File.Exists(dvd), "attached DVD media must be kept");
+                Assert.IsFalse(File.Exists(source), "the converted-from source must be deleted");
+                Assert.IsFalse(File.Exists(sideFile), "archive side files must be deleted");
+                Assert.IsFalse(Directory.Exists(nestedDir), "emptied subdirectories must be removed");
+            }
+            finally { DeleteTempDir(baseDir); }
+        }
+
+        [TestMethod]
+        public async Task DeployAsync_Success_DoesNotPruneWhenHyperVReportsNoMedia()
+        {
+            // An empty media answer means the query failed; pruning on it
+            // would delete the VM's own disk.
+            string baseDir = NewTempDir();
+            string vmName = "TestVM_20250601120000";
+            string diskDir = Directory.CreateDirectory(Path.Combine(baseDir, vmName)).FullName;
+            string disk = Touch(Path.Combine(diskDir, vmName + ".vhdx"));
+            try
+            {
+                UseTempPaths(baseDir);
+                SetupStrategy(DiskImageFormat.Vhdx, _ => Task.CompletedTask);
+
+                VmDeploymentResult result = await DeployAsync(vmName, "disk.vhdx");
+
+                Assert.IsTrue(result.Success);
+                Assert.IsTrue(File.Exists(disk));
+            }
+            finally { DeleteTempDir(baseDir); }
+        }
+
+        [TestMethod]
+        [DataRow(true, true, true, DisplayName = "enabled + guest ready → checkpoint")]
+        [DataRow(true, false, false, DisplayName = "guest not ready (manual install) → none")]
+        [DataRow(false, true, false, DisplayName = "disabled (--no-checkpoint) → none")]
+        public async Task DeployAsync_CleanCheckpoint_OnlyWhenEnabledAndGuestReady(bool enabled, bool guestReady, bool expected)
+        {
+            string baseDir = NewTempDir();
+            try
+            {
+                UseTempPaths(baseDir);
+                SetupStrategy(DiskImageFormat.Vhdx, ctx =>
+                {
+                    ctx.GuestReady = guestReady;
+                    return Task.CompletedTask;
+                });
+
+                VmDeploymentResult result = await DeployAsync("TestVM_20250601120000", "disk.vhdx",
+                    createCleanCheckpoint: enabled);
+
+                Assert.IsTrue(result.Success);
+                _hyperVManager.Verify(h => h.CreateCheckpointAsync(
+                        "TestVM_20250601120000", VmDeploymentOrchestrator.CleanCheckpointName, It.IsAny<CancellationToken>()),
+                    expected ? Times.Once() : Times.Never());
+            }
+            finally { DeleteTempDir(baseDir); }
+        }
+
+        [TestMethod]
+        public async Task DeployAsync_CheckpointFailure_KeepsTheDeployment()
+        {
+            string baseDir = NewTempDir();
+            try
+            {
+                UseTempPaths(baseDir);
+                _hyperVManager.Setup(h => h.CreateCheckpointAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                    .ThrowsAsync(new Exception("checkpoint failed"));
+                SetupStrategy(DiskImageFormat.Vhdx, ctx =>
+                {
+                    ctx.GuestReady = true;
+                    return Task.CompletedTask;
+                });
+
+                VmDeploymentResult result = await DeployAsync("TestVM_20250601120000", "disk.vhdx");
+
+                Assert.IsTrue(result.Success, "a failed checkpoint must not fail the deployment");
+                _hyperVManager.Verify(h => h.RemoveVMAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+                StringAssert.Contains(result.DeploymentLog, "Could not create checkpoint");
+            }
+            finally { DeleteTempDir(baseDir); }
+        }
+
+        [TestMethod]
+        public async Task DeployAsync_ReplacePreviousVm_DeletesTheWholeCheckpointChain()
+        {
+            // With a checkpoint the attached disk is the .avhdx; the parent
+            // .vhdx underneath used to be stranded on replace.
+            string baseDir = NewTempDir();
+            string oldVmName = "TestVM_20240101000000";
+            string oldDir = Directory.CreateDirectory(Path.Combine(baseDir, oldVmName)).FullName;
+            string parent = Touch(Path.Combine(oldDir, oldVmName + ".vhdx"));
+            string child = Touch(Path.Combine(oldDir, oldVmName + "_8818447A.avhdx"));
+            try
+            {
+                UseTempPaths(baseDir);
+                _hyperVManager.Setup(h => h.FindExistingVmsByBaseNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(new[] { oldVmName });
+                _hyperVManager.Setup(h => h.GetVmDiskChainPathsAsync(oldVmName, It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(new[] { child, parent });
+                SetupStrategy(DiskImageFormat.Vhdx, _ => Task.CompletedTask);
+
+                VmDeploymentResult result = await DeployAsync("TestVM_20250601120000", "disk.vhdx", replace: true);
+
+                Assert.IsTrue(result.Success);
+                Assert.IsFalse(File.Exists(child));
+                Assert.IsFalse(File.Exists(parent), "the checkpoint's parent disk must not be stranded");
+            }
+            finally { DeleteTempDir(baseDir); }
+        }
+
+        private static string NewTempDir() =>
+            Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), $"vmcreate-orch-{Guid.NewGuid():N}")).FullName;
+
+        private static void DeleteTempDir(string dir)
+        {
+            if (Directory.Exists(dir))
+                Directory.Delete(dir, true);
+        }
+
+        private static string Touch(string path)
+        {
+            File.WriteAllText(path, "x");
+            return path;
+        }
+
+        private void UseTempPaths(string baseDir)
+        {
+            _pathService.Setup(s => s.DefaultVmPath).Returns(baseDir);
+            _pathService.Setup(s => s.DefaultVhdxPath).Returns(baseDir);
+            _pathService.Setup(s => s.GetVirtualHardDiskPath(It.IsAny<string>()))
+                .Returns((string vmName) => Path.Combine(baseDir, vmName));
+        }
+
+        private void SetupStrategy(DiskImageFormat format, Func<VmCreationContext, Task> createVm)
+        {
+            _mediaHandlerFactory.Setup(f => f.CreateHandler(It.IsAny<DiskImageFormat>()))
+                .Returns(new FakeMediaHandler(format));
+            _strategy.Setup(s => s.CanHandle(It.IsAny<GalleryItem>(), It.IsAny<DiskImageFormat>())).Returns(true);
+            _strategy.Setup(s => s.CreateVMAsync(It.IsAny<VmCreationContext>())).Returns(createVm);
+        }
+
+        private Task<VmDeploymentResult> DeployAsync(string vmName, string sourceFile,
+            bool createCleanCheckpoint = true, bool replace = false)
+        {
+            var plan = VmDeploymentPlan.FromSettings(new VmSettings
+            {
+                VMName = vmName,
+                CreateCleanCheckpoint = createCleanCheckpoint,
+                ReplacePreviousVm = replace,
+            });
+            var galleryItem = new GalleryItem { Name = "Test", DiskUri = "https://x/" + sourceFile, IsNativeHyperV = false };
+            return _orchestrator.DeployAsync(plan, new VmCustomizations(), galleryItem, CancellationToken.None, null, sourceFile);
+        }
+
         private void VerifyAppLog(LogLevel level, string fragment, Times times) =>
             _logger.Verify(l => l.Log(level, It.IsAny<EventId>(),
                 It.Is<It.IsAnyType>((v, _) => v.ToString()!.Contains(fragment)),

@@ -283,6 +283,9 @@ namespace VMCreate
             if (s.VirtualizationEnabled)
                 SummaryRows.Add(new DeploymentSummaryRow("Nested virtualization", "Enabled"));
 
+            if (s.CreateCleanCheckpoint)
+                SummaryRows.Add(new DeploymentSummaryRow("Checkpoint", "After deployment"));
+
             var c = wizardData.Customizations;
             SummaryRows.Add(new DeploymentSummaryRow("Integration services",
                 c.EnableIntegrationServices ? "Enabled" : "Disabled"));

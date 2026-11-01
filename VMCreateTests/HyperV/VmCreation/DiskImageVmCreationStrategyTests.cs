@@ -333,6 +333,32 @@ namespace VMCreate.Tests.HyperV.VmCreation
         }
 
         [TestMethod]
+        public async Task CreateVMAsync_CloudInitPostBootCompleted_MarksTheGuestReady()
+        {
+            _item = CloudInitItem();
+            _customizations = new VmCustomizations();
+            _postBootService.Setup(s => s.HasLinuxPostBootSteps(_item, _customizations)).Returns(true);
+
+            VmCreationContext ctx = await ExecuteAsync(generation: 2);
+
+            Assert.IsTrue(ctx.GuestReady, "post-boot finished: the VM is worth a clean-deploy checkpoint");
+        }
+
+        [TestMethod]
+        public async Task CreateVMAsync_NothingWaitedForTheGuest_LeavesItNotReady()
+        {
+            // No post-boot work: the VM was started and nobody waited for its
+            // first boot, so a checkpoint would capture a half-booted guest.
+            _customizations.ConfigureXrdp = false;
+            _customizations.InstallOpenVpn = false;
+            _postBootService.Setup(s => s.HasLinuxPostBootSteps(_item, _customizations)).Returns(false);
+
+            VmCreationContext ctx = await ExecuteAsync(generation: 2);
+
+            Assert.IsFalse(ctx.GuestReady);
+        }
+
+        [TestMethod]
         public async Task CreateVMAsync_StockGen2WithPostBoot_StillUsesCloningIso()
         {
             // Regression pin: a NON-cloud-init image with post-boot steps must
@@ -1027,7 +1053,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
             Assert.AreEqual("Verify", order[0], "verification must happen before the ISO is attached");
         }
 
-        private async Task ExecuteAsync(int generation)
+        private async Task<VmCreationContext> ExecuteAsync(int generation)
         {
             var context = new VmCreationContext(
                 _plan,
@@ -1039,6 +1065,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
                 new Progress<CreateVMProgressInfo>());
 
             await _strategy.CreateVMAsync(context);
+            return context;
         }
     }
 }

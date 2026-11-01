@@ -44,6 +44,27 @@ namespace VMCreate.Tests.HyperV
                      .ReturnsAsync(new PowerShellResult { Output = new Collection<PSObject> { new PSObject(state) } });
 
         [TestMethod]
+        public async Task CreateVM_DisablesAutomaticCheckpointsAndUsesProductionCheckpoints()
+        {
+            // Standard checkpoints save the VM's RAM; the clean-deploy
+            // checkpoint must be disk-consistent instead (verified live: the
+            // host default Standard wrote the full memory into it).
+            _executor.Setup(e => e.RunCommandAsync("New-VM", It.IsAny<IEnumerable<KeyValuePair<string, object?>>>(), It.IsAny<CancellationToken>()))
+                     .ReturnsAsync(new PowerShellResult());
+            IEnumerable<KeyValuePair<string, object?>>? setVm = null;
+            _executor.Setup(e => e.RunCommandAsync("Set-VM", It.IsAny<IEnumerable<KeyValuePair<string, object?>>>(), It.IsAny<CancellationToken>()))
+                     .Callback<string, IEnumerable<KeyValuePair<string, object?>>, CancellationToken>((_, p, _) => setVm = p)
+                     .ReturnsAsync(new PowerShellResult());
+
+            await _manager.CreateVMAsync(_plan, @"C:\Hyper-V", 2, CancellationToken.None);
+
+            Assert.IsNotNull(setVm);
+            var args = new Dictionary<string, object?>(setVm);
+            Assert.AreEqual(false, args["AutomaticCheckpointsEnabled"]);
+            Assert.AreEqual("Production", args["CheckpointType"]);
+        }
+
+        [TestMethod]
         public async Task StartVM_Clean_DoesNotQueryState()
         {
             StartVmReturns(new PowerShellResult());

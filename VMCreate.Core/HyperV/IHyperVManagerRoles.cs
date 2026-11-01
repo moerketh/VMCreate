@@ -13,6 +13,20 @@ namespace VMCreate
         Task<string[]> FindExistingVmsByBaseNameAsync(string baseName, CancellationToken cancellationToken);
         Task StopVMAsync(string vmName, CancellationToken cancellationToken);
         Task RemoveVMAsync(string vmName, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// True when a VM with exactly this name is registered with Hyper-V.
+        /// Failure cleanup asks Hyper-V instead of tracking a flag: a strategy
+        /// that throws after New-VM still leaves a registered VM behind.
+        /// </summary>
+        Task<bool> VmExistsAsync(string vmName, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Takes a checkpoint of the VM under the given name, using the VM's
+        /// configured checkpoint type (Production, falling back to Standard
+        /// when the guest cannot quiesce). Throws when Hyper-V reports an error.
+        /// </summary>
+        Task CreateCheckpointAsync(string vmName, string checkpointName, CancellationToken cancellationToken);
     }
 
     /// <summary>
@@ -30,6 +44,19 @@ namespace VMCreate
         Task AddNewHardDrive(VmDeploymentPlan plan, string vmPath, CancellationToken cancellationToken);
         Task RemoveHardDrive(VmDeploymentPlan plan, int location, CancellationToken cancellationToken);
         Task<string[]> GetVmHardDiskPathsAsync(string vmName, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Every disk file the VM depends on: the attached disks, the disks
+        /// of all its checkpoints, and each one's parent chain. With a
+        /// checkpoint, <see cref="GetVmHardDiskPathsAsync"/> returns only the
+        /// newest .avhdx — deleting just that strands the parent .vhdx.
+        /// </summary>
+        Task<string[]> GetVmDiskChainPathsAsync(string vmName, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Paths of the media currently inserted in the VM's DVD drives.
+        /// </summary>
+        Task<string[]> GetVmDvdMediaPathsAsync(string vmName, CancellationToken cancellationToken);
     }
 
     /// <summary>

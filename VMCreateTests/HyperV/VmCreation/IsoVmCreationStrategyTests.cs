@@ -311,6 +311,25 @@ namespace VMCreate.Tests.HyperV.VmCreation
         }
 
         [TestMethod]
+        public async Task CreateVMAsync_ManualInstallIso_LeavesTheGuestNotReady()
+        {
+            // The VM sits in the installer: no state to checkpoint.
+            VmCreationContext ctx = await ExecuteAsync();
+
+            Assert.IsFalse(ctx.GuestReady);
+        }
+
+        [TestMethod]
+        public async Task CreateVMAsync_OmarchyInstallFinished_MarksTheGuestReady()
+        {
+            _item = CreateOmarchyItem();
+
+            VmCreationContext ctx = await ExecuteAsync();
+
+            Assert.IsTrue(ctx.GuestReady);
+        }
+
+        [TestMethod]
         public async Task CreateVMAsync_Omarchy_StaticIp_WaitsOverPinnedAddress()
         {
             // The installed Omarchy system is statically configured when the
@@ -420,7 +439,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
             _guestShellFactory.Verify(f => f.Create(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
         }
 
-        private async Task ExecuteAsync()
+        private async Task<VmCreationContext> ExecuteAsync()
         {
             var context = new VmCreationContext(
                 _plan,
@@ -432,6 +451,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
                 new Progress<CreateVMProgressInfo>());
 
             await _strategy.CreateVMAsync(context);
+            return context;
         }
     }
 }

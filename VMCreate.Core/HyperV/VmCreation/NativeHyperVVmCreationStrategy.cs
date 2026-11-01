@@ -129,7 +129,10 @@ namespace VMCreate.HyperV.VmCreation
             await _lifecycleManager.StartVM(plan, cancellationToken);
 
             if (item.IsWindows)
+            {
                 await RunWindowsPostBootAsync(ctx);
+                ctx.GuestReady = true;
+            }
         }
 
         private async Task RunWindowsPostBootAsync(VmCreationContext ctx)

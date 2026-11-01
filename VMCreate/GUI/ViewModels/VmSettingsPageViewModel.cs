@@ -21,6 +21,7 @@ namespace VMCreate
         private int _cpuCount = 4;
         private bool _virtualizationEnabled = true;
         private bool _replacePreviousVm;
+        private bool _createCleanCheckpoint;
         private string _newDriveSizeText = "";
         private string? _validationError;
         private bool _autoDetectDiskSize;
@@ -70,6 +71,7 @@ namespace VMCreate
             _cpuCount = Math.Clamp(_wizardData.Settings.CPUCount, 1, MaxCpuCount);
             _virtualizationEnabled = _wizardData.Settings.VirtualizationEnabled;
             _replacePreviousVm = _wizardData.Settings.ReplacePreviousVm;
+            _createCleanCheckpoint = _wizardData.Settings.CreateCleanCheckpoint;
 
             NextCommand = new RelayCommand(OnNext);
             BackCommand = new RelayCommand(() => RequestNavigateBack?.Invoke());
@@ -188,6 +190,12 @@ namespace VMCreate
         {
             get => _replacePreviousVm;
             set => SetProperty(ref _replacePreviousVm, value);
+        }
+
+        public bool CreateCleanCheckpoint
+        {
+            get => _createCleanCheckpoint;
+            set => SetProperty(ref _createCleanCheckpoint, value);
         }
 
         public string NewDriveSizeText
@@ -331,6 +339,7 @@ namespace VMCreate
             _wizardData.Settings.CPUCount = _cpuCount;
             _wizardData.Settings.VirtualizationEnabled = _virtualizationEnabled;
             _wizardData.Settings.ReplacePreviousVm = _replacePreviousVm;
+            _wizardData.Settings.CreateCleanCheckpoint = _createCleanCheckpoint;
             _wizardData.Settings.EnhancedSessionTransportType = _wizardData.SelectedItem?.EnhancedSessionTransportType;
             // Honor the gallery item's SecureBoot metadata: without this copy
             // every VM is created with EnableSecureBoot=Off even when the item

@@ -114,5 +114,45 @@ namespace VMCreate
                 .Select(p => p!)
                 .ToArray();
         }
+
+        public async Task<string[]> GetVmDiskChainPathsAsync(string vmName, CancellationToken cancellationToken)
+        {
+            string name = vmName.Replace("'", "''");
+            // Walk each disk's ParentPath: a checkpoint's .avhdx is a child of
+            // the disk underneath, which no drive references directly.
+            string script = $@"
+$vm = Get-VM -Name '{name}' -ErrorAction Stop
+$paths = @($vm | Get-VMHardDiskDrive | ForEach-Object Path) + @(Get-VMSnapshot -VM $vm | Get-VMHardDiskDrive | ForEach-Object Path)
+$seen = @{{}}
+foreach ($p in $paths) {{
+    while ($p -and -not $seen.ContainsKey($p.ToLowerInvariant())) {{
+        $seen[$p.ToLowerInvariant()] = $p
+        $p = (Get-VHD -Path $p -ErrorAction SilentlyContinue).ParentPath
+    }}
+}}
+$seen.Values";
+            var result = await _executor.RunScriptAsync(script, cancellationToken);
+            if (result.HadErrors)
+                throw new Exception($"Failed to read the disk chain of VM {vmName}: {result.ErrorSummary}");
+
+            return result.Output
+                .Select(o => o?.BaseObject?.ToString())
+                .Where(p => !string.IsNullOrEmpty(p))
+                .Select(p => p!)
+                .ToArray();
+        }
+
+        public async Task<string[]> GetVmDvdMediaPathsAsync(string vmName, CancellationToken cancellationToken)
+        {
+            var result = await _executor.RunCommandAsync("Get-VMDvdDrive",
+                new System.Collections.Generic.Dictionary<string, object?> { ["VMName"] = vmName },
+                cancellationToken);
+
+            return result.Output
+                .Select(d => d.Properties["Path"]?.Value?.ToString())
+                .Where(p => !string.IsNullOrEmpty(p))
+                .Select(p => p!)
+                .ToArray();
+        }
     }
 }

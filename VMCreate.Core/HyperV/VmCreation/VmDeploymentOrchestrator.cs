@@ -59,13 +59,20 @@ namespace VMCreate.HyperV.VmCreation
             if (string.IsNullOrWhiteSpace(sourceFileOrUri))
                 throw new ArgumentException("A source file or gallery disk URI must be provided.", nameof(sourceFile));
 
-            bool vmCreated = false;
+            // A VM that already carries this exact name is not ours: failure
+            // cleanup must never remove it or its disks.
+            bool vmPreexisted = false;
             IDeploymentLogger deploymentLogger = new DeploymentLogger(plan.VmName);
             try
             {
                 _logger.LogInformation("Starting VM deployment for {VMName}", plan.VmName);
 
                 cancellationToken.ThrowIfCancellationRequested();
+                if (await _hyperVManager.VmExistsAsync(plan.VmName, cancellationToken))
+                {
+                    vmPreexisted = true;
+                    throw new InvalidOperationException($"A VM named '{plan.VmName}' already exists.");
+                }
                 if (plan.ReplacePreviousVm)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -116,7 +123,12 @@ namespace VMCreate.HyperV.VmCreation
                     deploymentLogger);
 
                 await strategy.CreateVMAsync(strategyContext);
-                vmCreated = true;
+
+                // The VM is deployed: nothing past this point may fail it or
+                // be cancelled into the failure cleanup, which would delete it.
+                await PruneDeploymentIntermediatesAsync(plan.VmName);
+                if (plan.CreateCleanCheckpoint && strategyContext.GuestReady)
+                    await CreateCleanCheckpointAsync(plan.VmName, deploymentLogger);
 
                 WriteDeploymentLog(deploymentLogger, LogLevel.Information);
                 return new VmDeploymentResult(
@@ -130,14 +142,14 @@ namespace VMCreate.HyperV.VmCreation
             {
                 _logger.LogWarning("VM deployment cancelled for {VMName} — cleaning up", plan.VmName);
                 WriteDeploymentLog(deploymentLogger, LogLevel.Warning);
-                await CleanupFailedVmAsync(plan, vmCreated, preserveInDebug: DebugPreservation.IsEnabled);
+                await CleanupFailedVmAsync(plan, vmPreexisted, preserveInDebug: DebugPreservation.IsEnabled);
                 return new VmDeploymentResult(plan.VmName, success: false, errorMessage: "Deployment cancelled.", deploymentLog: deploymentLogger.GetLog());
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error deploying VM: {Message}", ex.Message);
                 WriteDeploymentLog(deploymentLogger, LogLevel.Warning);
-                await CleanupFailedVmAsync(plan, vmCreated, preserveInDebug: DebugPreservation.IsEnabled);
+                await CleanupFailedVmAsync(plan, vmPreexisted, preserveInDebug: DebugPreservation.IsEnabled);
                 return new VmDeploymentResult(plan.VmName, success: false, errorMessage: ex.Message, deploymentLog: deploymentLogger.GetLog());
             }
         }
@@ -165,7 +177,7 @@ namespace VMCreate.HyperV.VmCreation
             await _cloningIsoDownloader.EnsureIsoAsync(plan, cancellationToken, progress);
         }
 
-        private async Task CleanupFailedVmAsync(VmDeploymentPlan plan, bool vmCreated, bool preserveInDebug)
+        private async Task CleanupFailedVmAsync(VmDeploymentPlan plan, bool vmPreexisted, bool preserveInDebug)
         {
             if (preserveInDebug)
             {
@@ -174,20 +186,29 @@ namespace VMCreate.HyperV.VmCreation
             }
 
             string vmName = plan.VmName;
+            if (vmPreexisted)
+            {
+                _logger.LogWarning("Skipping cleanup for {VMName}: the VM existed before this deployment", vmName);
+                return;
+            }
+
             _logger.LogInformation("Cleaning up after failed/cancelled deployment: {VMName}", vmName);
             try
             {
-                if (vmCreated)
+                // Ask Hyper-V rather than trusting a flag: a strategy that
+                // throws after New-VM leaves a registered VM behind, and that
+                // is exactly the case this cleanup exists for.
+                bool vmExists;
+                try { vmExists = await _hyperVManager.VmExistsAsync(vmName, CancellationToken.None); }
+                catch (Exception ex)
                 {
-                    string[] vhdxPaths;
-                    try
-                    {
-                        vhdxPaths = await _hyperVManager.GetVmHardDiskPathsAsync(vmName, CancellationToken.None);
-                    }
-                    catch
-                    {
-                        vhdxPaths = Array.Empty<string>();
-                    }
+                    _logger.LogWarning(ex, "Cleanup: could not query Hyper-V for {VMName}", vmName);
+                    vmExists = false;
+                }
+
+                if (vmExists)
+                {
+                    string[] diskPaths = await GetDiskChainBestEffortAsync(vmName);
 
                     try { await _hyperVManager.StopVMAsync(vmName, CancellationToken.None); }
                     catch (Exception ex) { _logger.LogDebug(ex, "Stop VM during cleanup (may not be running)"); }
@@ -195,52 +216,145 @@ namespace VMCreate.HyperV.VmCreation
                     try { await _hyperVManager.RemoveVMAsync(vmName, CancellationToken.None); }
                     catch (Exception ex) { _logger.LogWarning(ex, "Failed to remove VM {VMName} during cleanup", vmName); }
 
-                    foreach (string vhdxPath in vhdxPaths)
-                    {
-                        TryDismountVhdx(vhdxPath);
-                    }
-
-                    foreach (string vhdxPath in vhdxPaths)
-                    {
-                        try
-                        {
-                            if (File.Exists(vhdxPath))
-                            {
-                                File.Delete(vhdxPath);
-                                _logger.LogInformation("Cleanup: deleted VHDX {Path}", vhdxPath);
-                            }
-                        }
-                        catch (Exception ex) { _logger.LogWarning(ex, "Cleanup: failed to delete {Path}", vhdxPath); }
-                    }
+                    DeleteDisks(diskPaths, "Cleanup");
                 }
 
-                string convertedVhdx = Path.Combine(_pathService.DefaultVhdxPath, vmName + ".vhdx");
-                TryDismountVhdx(convertedVhdx);
-                try
+                // Media that lives outside the per-VM directory: the legacy
+                // converted-disk location, the MBR-clone target disk and the
+                // NoCloud/cidata seed. Any of them can exist unattached when
+                // the failure struck between creating and attaching it.
+                DeleteDisks(new[]
                 {
-                    if (File.Exists(convertedVhdx))
-                    {
-                        File.Delete(convertedVhdx);
-                        _logger.LogInformation("Cleanup: deleted converted VHDX {Path}", convertedVhdx);
-                    }
-                }
-                catch (Exception ex) { _logger.LogWarning(ex, "Cleanup: failed to delete {Path}", convertedVhdx); }
+                    Path.Combine(_pathService.DefaultVhdxPath, vmName + ".vhdx"),
+                    Path.Combine(_pathService.DefaultVhdxPath, vmName + "_boot.vhdx"),
+                    Path.Combine(_pathService.DefaultVhdxPath, vmName + "_cidata.iso"),
+                }, "Cleanup");
 
-                string vmConfigFolder = Path.Combine(_pathService.DefaultVmPath, vmName);
-                try
-                {
-                    if (Directory.Exists(vmConfigFolder))
-                    {
-                        Directory.Delete(vmConfigFolder, true);
-                        _logger.LogInformation("Cleanup: deleted VM config folder {Path}", vmConfigFolder);
-                    }
-                }
-                catch (Exception ex) { _logger.LogWarning(ex, "Cleanup: failed to delete folder {Path}", vmConfigFolder); }
+                DeleteDirectory(_pathService.GetVirtualHardDiskPath(vmName), "Cleanup: deleted VM disk directory");
+                DeleteDirectory(Path.Combine(_pathService.DefaultVmPath, vmName), "Cleanup: deleted VM config folder");
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Cleanup encountered an unexpected error for {VMName}", vmName);
             }
+        }
+
+        /// <summary>
+        /// After a successful deployment, deletes everything in the per-VM
+        /// disk directory that the VM does not use: the extracted source of a
+        /// converted disk (Rocky's 10 GB .vhdfixed, Parrot's .qcow2), the
+        /// detached source of an MBR clone, archive side files. The directory
+        /// is created for this deployment's (timestamped) VM name, so anything
+        /// in it that is not attached is a leftover.
+        /// </summary>
+        private async Task PruneDeploymentIntermediatesAsync(string vmName)
+        {
+            string diskDirectory = _pathService.GetVirtualHardDiskPath(vmName);
+            if (!Directory.Exists(diskDirectory))
+                return;
+
+            try
+            {
+                var inUse = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (string p in await _hyperVManager.GetVmDiskChainPathsAsync(vmName, CancellationToken.None))
+                    inUse.Add(Path.GetFullPath(p));
+                foreach (string p in await _hyperVManager.GetVmDvdMediaPathsAsync(vmName, CancellationToken.None))
+                    inUse.Add(Path.GetFullPath(p));
+
+                // Every deployed VM has a disk or a DVD. An empty answer means
+                // the query went wrong, and pruning on it would delete the
+                // VM's own disk.
+                if (inUse.Count == 0)
+                {
+                    _logger.LogWarning("Not pruning {Directory}: Hyper-V reported no media for {VMName}", diskDirectory, vmName);
+                    return;
+                }
+
+                foreach (string file in Directory.EnumerateFiles(diskDirectory, "*", SearchOption.AllDirectories).ToList())
+                {
+                    if (inUse.Contains(Path.GetFullPath(file)))
+                        continue;
+                    try
+                    {
+                        File.Delete(file);
+                        _logger.LogInformation("Deleted deployment intermediate {Path}", file);
+                    }
+                    catch (Exception ex) { _logger.LogWarning(ex, "Failed to delete deployment intermediate {Path}", file); }
+                }
+
+                foreach (string dir in Directory.EnumerateDirectories(diskDirectory, "*", SearchOption.AllDirectories)
+                             .OrderByDescending(d => d.Length).ToList())
+                {
+                    if (!Directory.EnumerateFileSystemEntries(dir).Any())
+                        Directory.Delete(dir);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to prune deployment intermediates in {Directory}", diskDirectory);
+            }
+        }
+
+        internal const string CleanCheckpointName = "Clean deploy (VMCreate)";
+
+        private async Task CreateCleanCheckpointAsync(string vmName, IDeploymentLogger deploymentLogger)
+        {
+            try
+            {
+                await _hyperVManager.CreateCheckpointAsync(vmName, CleanCheckpointName, CancellationToken.None);
+                deploymentLogger.Log($"Created checkpoint '{CleanCheckpointName}'");
+            }
+            catch (Exception ex)
+            {
+                // The VM itself is fine; a missing checkpoint is not worth
+                // failing — and deleting — a finished deployment over.
+                _logger.LogWarning(ex, "Could not create the '{Checkpoint}' checkpoint for {VMName}", CleanCheckpointName, vmName);
+                deploymentLogger.LogWarning($"Could not create checkpoint '{CleanCheckpointName}': {ex.Message}");
+            }
+        }
+
+        private async Task<string[]> GetDiskChainBestEffortAsync(string vmName)
+        {
+            try
+            {
+                return await _hyperVManager.GetVmDiskChainPathsAsync(vmName, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not read the disk chain of {VMName}; falling back to the attached disks", vmName);
+                try { return await _hyperVManager.GetVmHardDiskPathsAsync(vmName, CancellationToken.None); }
+                catch { return Array.Empty<string>(); }
+            }
+        }
+
+        private void DeleteDisks(IEnumerable<string> paths, string context)
+        {
+            foreach (string path in paths)
+            {
+                if (!File.Exists(path))
+                    continue;
+                if (!path.EndsWith(".iso", StringComparison.OrdinalIgnoreCase))
+                    TryDismountVhdx(path);
+                try
+                {
+                    File.Delete(path);
+                    _logger.LogInformation("{Context}: deleted {Path}", context, path);
+                }
+                catch (Exception ex) { _logger.LogWarning(ex, "{Context}: failed to delete {Path}", context, path); }
+            }
+        }
+
+        private void DeleteDirectory(string path, string message)
+        {
+            try
+            {
+                if (Directory.Exists(path))
+                {
+                    Directory.Delete(path, true);
+                    _logger.LogInformation("{Message} {Path}", message, path);
+                }
+            }
+            catch (Exception ex) { _logger.LogWarning(ex, "Failed to delete folder {Path}", path); }
         }
 
         private void TryDismountVhdx(string vhdxPath)
@@ -275,7 +389,11 @@ namespace VMCreate.HyperV.VmCreation
                 cancellationToken.ThrowIfCancellationRequested();
                 _logger.LogInformation("Replacing existing VM: {ExistingVMName}", existingVmName);
 
-                string[] vhdxPaths = await _hyperVManager.GetVmHardDiskPathsAsync(existingVmName, cancellationToken);
+                // The whole chain, not just the attached disks: with a
+                // checkpoint the attached disk is an .avhdx, and deleting only
+                // that would strand the parent .vhdx underneath. Read before
+                // Remove-VM, which drops the checkpoint records.
+                string[] vhdxPaths = await _hyperVManager.GetVmDiskChainPathsAsync(existingVmName, cancellationToken);
 
                 await _hyperVManager.StopVMAsync(existingVmName, cancellationToken);
                 await _hyperVManager.RemoveVMAsync(existingVmName, cancellationToken);

@@ -542,6 +542,9 @@ namespace VMCreate.HyperV.VmCreation
                             }
                         }
                     }
+
+                    // Reached only when the SSH wait and post-boot completed.
+                    ctx.GuestReady = true;
                 }
                 else if (isCloudInit && seedIsoPath != null)
                 {

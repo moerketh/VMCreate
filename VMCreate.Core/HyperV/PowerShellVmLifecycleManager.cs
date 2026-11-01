@@ -63,6 +63,12 @@ namespace VMCreate
                 {
                     ["Name"] = plan.VmName,
                     ["AutomaticCheckpointsEnabled"] = false,
+                    // Production (with Hyper-V's own fallback to Standard when
+                    // the guest cannot quiesce): a disk-consistent checkpoint
+                    // without the VM's memory. This host's VMs default to
+                    // Standard, which saved the full RAM into the clean-deploy
+                    // checkpoint and restored to a frozen running moment.
+                    ["CheckpointType"] = "Production",
                 }, cancellationToken);
         }
 
@@ -127,6 +133,28 @@ namespace VMCreate
                 throw new Exception($"Failed to remove VM {vmName}: {result.ErrorSummary}");
 
             _logger.LogInformation("Removed VM: {VMName}", vmName);
+        }
+
+        public async Task<bool> VmExistsAsync(string vmName, CancellationToken cancellationToken)
+        {
+            var result = await _executor.RunCommandAsync("Get-VM", null, cancellationToken);
+            return result.Output.Any(vm => string.Equals(
+                vm.Properties["Name"]?.Value?.ToString(), vmName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        public async Task CreateCheckpointAsync(string vmName, string checkpointName, CancellationToken cancellationToken)
+        {
+            var result = await _executor.RunCommandAsync("Checkpoint-VM",
+                new System.Collections.Generic.Dictionary<string, object?>
+                {
+                    ["Name"] = vmName,
+                    ["SnapshotName"] = checkpointName,
+                }, cancellationToken);
+
+            if (result.HadErrors)
+                throw new Exception($"Failed to checkpoint VM {vmName}: {result.ErrorSummary}");
+
+            _logger.LogInformation("Created checkpoint '{Checkpoint}' for VM {VMName}", checkpointName, vmName);
         }
 
         public async Task<string[]> FindExistingVmsByBaseNameAsync(string baseName, CancellationToken cancellationToken)

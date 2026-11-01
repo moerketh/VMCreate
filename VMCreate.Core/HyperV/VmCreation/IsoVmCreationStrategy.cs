@@ -190,11 +190,19 @@ namespace VMCreate.HyperV.VmCreation
             progress.Report(CreateVMProgressInfo.ForPhase(VmDeploymentPhase.StartVM));
             await _lifecycleManager.StartVM(plan, cancellationToken);
 
+            // Manual-install ISOs stay not-ready: the VM is sitting in the
+            // installer, which is no state to checkpoint.
             if (item.IsWindows)
+            {
                 await RunWindowsPostBootAsync(ctx);
+                ctx.GuestReady = true;
+            }
 
             if (cidataIsoPath != null)
+            {
                 await WaitForOmarchyInstallAsync(ctx, cidataIsoPath);
+                ctx.GuestReady = true;
+            }
             else if (unattendIsoPath != null && File.Exists(unattendIsoPath))
             {
                 try
