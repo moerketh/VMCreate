@@ -37,6 +37,21 @@ namespace VMCreate.Manager.Inventory
     }
 
     /// <summary>One VM as shown in the Manager: the joined, display-ready view of the host snapshot.</summary>
+    /// <summary>How far a VM's network reaches, least to most exposed.</summary>
+    public enum NetworkExposure
+    {
+        /// <summary>No adapter, or none connected.</summary>
+        None,
+        /// <summary>Private switches only: other VMs on the same switch.</summary>
+        Private,
+        /// <summary>Internal switch: the host too.</summary>
+        Internal,
+        /// <summary>Internal switch that NATs out (Default Switch): outbound internet through the host.</summary>
+        Nat,
+        /// <summary>External switch: bridged onto the physical network.</summary>
+        External,
+    }
+
     public sealed record VmSummary
     {
         public required Guid Id { get; init; }
@@ -63,6 +78,12 @@ namespace VMCreate.Manager.Inventory
 
         /// <summary>Switch name per network adapter; "Not connected" for unplugged adapters.</summary>
         public IReadOnlyList<string> Switches { get; init; } = Array.Empty<string>();
+
+        /// <summary>Widest reach of any connected adapter.</summary>
+        public NetworkExposure Exposure { get; init; }
+
+        /// <summary>Adapters disconnected from a switch they remember (what "Isolate now" leaves behind).</summary>
+        public int DisconnectedAdapterCount { get; init; }
 
         public int CheckpointCount { get; init; }
 

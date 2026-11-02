@@ -34,9 +34,12 @@ namespace VMCreate
         private readonly IVmMetadataStore _store;
         private readonly ICredentialProtector _protector;
         private readonly ILogger<VmMetadataRecorder> _logger;
+        private readonly IAuditLog? _audit;
 
-        public VmMetadataRecorder(IPowerShellExecutor executor, IVmMetadataStore store, ICredentialProtector protector, ILogger<VmMetadataRecorder> logger)
+        public VmMetadataRecorder(IPowerShellExecutor executor, IVmMetadataStore store, ICredentialProtector protector,
+            ILogger<VmMetadataRecorder> logger, IAuditLog? audit = null)
         {
+            _audit = audit;
             _executor = executor ?? throw new ArgumentNullException(nameof(executor));
             _store = store ?? throw new ArgumentNullException(nameof(store));
             _protector = protector ?? throw new ArgumentNullException(nameof(protector));
@@ -71,7 +74,8 @@ namespace VMCreate
                 return d;
             }, cancellationToken);
 
-            string updated = NotesBlock.Update(notes, doc.ToNotesPayload(doc.FindVm(vmId)!));
+            var payload = doc.ToNotesPayload(doc.FindVm(vmId)!);
+            string updated = NotesBlock.Update(notes, payload);
             if (updated != notes)
             {
                 var result = await _executor.RunCommandAsync("Set-VM",
@@ -79,8 +83,50 @@ namespace VMCreate
                 if (result.HadErrors)
                     throw new Exception($"Failed to update VM notes: {result.ErrorSummary}");
             }
+            // Recorded only once Notes holds the block, so the Manager can tell later outside edits apart.
+            string fingerprint = NotesBlock.Fingerprint(payload);
+            await _store.UpdateAsync(d =>
+            {
+                if (d.FindVm(vmId) is { } entry)
+                {
+                    entry.NotesFingerprint = fingerprint;
+                    entry.LastKnownName = plan.VmName;
+                    entry.LastSeenOn = DateOnly.FromDateTime(DateTime.Today);
+                }
+                return true;
+            }, cancellationToken);
             _logger.LogInformation("Recorded deployment metadata for {VMName} (folder {Folder}, tags {Tags})",
                 plan.VmName, plan.Folder ?? "(none)", string.Join(",", plan.Tags));
+            await AuditCreateAsync(vmId, plan, galleryItem, cancellationToken);
+        }
+
+        /// <summary>Best effort: the VM exists either way, a missing audit line must not fail the deployment.</summary>
+        private async Task AuditCreateAsync(Guid vmId, VmDeploymentPlan plan, GalleryItem item, CancellationToken cancellationToken)
+        {
+            if (_audit == null)
+                return;
+            try
+            {
+                await _audit.AppendAsync(new AuditEntry
+                {
+                    Tool = "VMCreate",
+                    Action = AuditActions.VmCreate,
+                    VmId = vmId,
+                    VmName = plan.VmName,
+                    Detail = DescribeDeployment(plan, item),
+                }, cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex, "Could not write the audit entry for {VMName}", plan.VmName);
+            }
+        }
+
+        /// <summary>"Kali Linux 2025.3 in Engagements/ACME".</summary>
+        internal static string DescribeDeployment(VmDeploymentPlan plan, GalleryItem item)
+        {
+            string what = string.IsNullOrWhiteSpace(item.Version) ? item.Name : $"{item.Name} {item.Version}";
+            return string.IsNullOrWhiteSpace(plan.Folder) ? what : $"{what} in {plan.Folder}";
         }
 
         /// <summary>Pure part of <see cref="RecordDeploymentAsync"/>: what lands in the store.</summary>

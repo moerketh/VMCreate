@@ -6,6 +6,18 @@ namespace VMCreate.Manager.ViewModels
     /// <summary>Folder choice in the details pane; Id null = no folder.</summary>
     public sealed record FolderOption(Guid? Id, string Path);
 
+    /// <summary>A virtual switch in the "Connect all adapters to" menu.</summary>
+    public sealed record SwitchOption(Guid Id, string Name, NetworkExposure Exposure)
+    {
+        public string Label => Exposure switch
+        {
+            NetworkExposure.External => $"{Name}  (external)",
+            NetworkExposure.Nat => $"{Name}  (NAT)",
+            NetworkExposure.Internal => $"{Name}  (internal)",
+            _ => $"{Name}  (private)",
+        };
+    }
+
     /// <summary>
     /// Editable copy of the selected VM's name and metadata. Changes are only
     /// applied on Save, so a live refresh never clobbers half-typed text.
@@ -47,6 +59,14 @@ namespace VMCreate.Manager.ViewModels
         public Guid? FolderId { get => _folderId; set => Edit(ref _folderId, value); }
 
         public bool WasProtected => Item.Protected;
+
+        /// <summary>"Template for 3 linked clone(s)" / "Linked clone of kali-template"; set by the main view model.</summary>
+        public string? LineageText { get; init; }
+
+        /// <summary>Shown under the date picker when the VM has no date of its own but its folder has.</summary>
+        public string? InheritedExpiryText => Item.Folder.ExpiryFolder is string folder && Item.EffectiveExpiresOn is DateOnly d
+            ? $"Inherits {d:yyyy-MM-dd} from folder '{folder}'; set a date to override."
+            : null;
 
         // ── read-only facts ──
         public VmSummary Summary => Item.Summary;

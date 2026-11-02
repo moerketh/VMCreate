@@ -55,6 +55,32 @@ namespace VMCreate.Metadata
             return null;
         }
 
+        public static void SetFolderExpiry(this MetadataDocument doc, Guid folderId, DateOnly? expiresOn)
+        {
+            var folder = doc.FindFolder(folderId) ?? throw new ArgumentException($"Folder {folderId} does not exist.", nameof(folderId));
+            folder.ExpiresOn = expiresOn;
+        }
+
+        /// <summary>The nearest expiry date on the folder or its ancestors, with the folder that set it.</summary>
+        public static (DateOnly? ExpiresOn, VmFolder? From) GetFolderExpiry(this MetadataDocument doc, Guid? folderId)
+        {
+            var seen = new HashSet<Guid>();
+            for (Guid? cursor = folderId; cursor is Guid c && seen.Add(c); )
+            {
+                var folder = doc.FindFolder(c);
+                if (folder == null)
+                    break;
+                if (folder.ExpiresOn != null)
+                    return (folder.ExpiresOn, folder);
+                cursor = folder.ParentId;
+            }
+            return (null, null);
+        }
+
+        /// <summary>A VM's own expiry date wins; otherwise its folder's (inherited) one.</summary>
+        public static DateOnly? GetEffectiveExpiry(this MetadataDocument doc, VmMetadata? vm)
+            => vm?.ExpiresOn ?? doc.GetFolderExpiry(vm?.FolderId).ExpiresOn;
+
         public static void MoveFolder(this MetadataDocument doc, Guid folderId, Guid? newParentId)
         {
             var folder = doc.FindFolder(folderId) ?? throw new ArgumentException($"Folder {folderId} does not exist.", nameof(folderId));
@@ -141,12 +167,14 @@ namespace VMCreate.Metadata
                 Purpose = NullIfEmpty(vm.Purpose),
                 Description = NullIfEmpty(vm.Description),
                 Protected = vm.Protected ? true : null,
+                Template = vm.IsTemplate ? true : null,
+                TemplateId = vm.TemplateId,
                 ExpiresOn = vm.ExpiresOn,
                 Provenance = vm.Provenance,
             };
             bool empty = payload.Folder == null && payload.Tags == null && payload.Purpose == null
                 && payload.Description == null && payload.Protected == null && payload.ExpiresOn == null
-                && payload.Provenance == null;
+                && payload.Provenance == null && payload.Template == null && payload.TemplateId == null;
             return empty ? null : payload;
         }
 
@@ -162,12 +190,113 @@ namespace VMCreate.Metadata
             vm.Purpose = payload.Purpose;
             vm.Description = payload.Description;
             vm.Protected = payload.Protected ?? false;
+            vm.IsTemplate = payload.Template ?? false;
+            vm.TemplateId = payload.TemplateId;
             vm.ExpiresOn = payload.ExpiresOn;
             vm.Provenance = payload.Provenance;
+            vm.NotesFingerprint = NotesBlock.Fingerprint(payload);
             return vm;
         }
 
+        /// <summary>
+        /// Takes the fields of a Notes block edited outside VMCreate tools into an
+        /// existing entry. Protection can be switched on this way but not off:
+        /// removing it takes the Manager's confirmation. Returns the changed fields.
+        /// </summary>
+        public static List<string> ApplyNotes(this MetadataDocument doc, VmMetadata vm, NotesPayload payload)
+        {
+            var changed = new List<string>();
+            if (!string.Equals(doc.GetFolderPath(vm.FolderId), payload.Folder, StringComparison.Ordinal))
+            {
+                vm.FolderId = doc.EnsureFolderPath(payload.Folder);
+                changed.Add("folder");
+            }
+            var tags = NormalizeTags(payload.Tags ?? new List<string>());
+            if (!tags.SequenceEqual(vm.Tags, StringComparer.Ordinal))
+            {
+                vm.Tags = tags;
+                changed.Add("tags");
+            }
+            if (NullIfEmpty(payload.Purpose) != NullIfEmpty(vm.Purpose))
+            {
+                vm.Purpose = payload.Purpose;
+                changed.Add("purpose");
+            }
+            if (NullIfEmpty(payload.Description) != NullIfEmpty(vm.Description))
+            {
+                vm.Description = payload.Description;
+                changed.Add("description");
+            }
+            if (payload.Protected == true && !vm.Protected)
+            {
+                vm.Protected = true;
+                changed.Add("protected");
+            }
+            if ((payload.Template ?? false) != vm.IsTemplate)
+            {
+                vm.IsTemplate = payload.Template ?? false;
+                changed.Add("template");
+            }
+            if (payload.TemplateId != vm.TemplateId)
+            {
+                vm.TemplateId = payload.TemplateId;
+                changed.Add("template link");
+            }
+            if (payload.ExpiresOn != vm.ExpiresOn)
+            {
+                vm.ExpiresOn = payload.ExpiresOn;
+                changed.Add("expiry");
+            }
+            if (NotesBlock.Serialize(new NotesPayload { Provenance = payload.Provenance })
+                != NotesBlock.Serialize(new NotesPayload { Provenance = vm.Provenance }))
+            {
+                vm.Provenance = payload.Provenance;
+                changed.Add("provenance");
+            }
+            return changed;
+        }
+
+        /// <summary>Entries of VMs that are not on the host (any more), oldest sighting first.</summary>
+        public static List<VmMetadata> FindStaleEntries(this MetadataDocument doc, IReadOnlyCollection<Guid> existingVmIds)
+        {
+            var existing = existingVmIds as IReadOnlySet<Guid> ?? existingVmIds.ToHashSet();
+            return doc.Vms.Where(v => !existing.Contains(v.VmId))
+                .OrderBy(v => v.LastSeenOn ?? DateOnly.MinValue)
+                .ThenBy(v => v.LastKnownName, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
         public static void SetTags(this VmMetadata vm, IEnumerable<string> tags) => vm.Tags = NormalizeTags(tags);
+
+        /// <summary>
+        /// Metadata of a fresh linked clone: the template's folder, tags and provenance,
+        /// linked back to the template, and none of its template-only state.
+        /// </summary>
+        public static VmMetadata RecordLinkedClone(this MetadataDocument doc, Guid cloneId, VmMetadata? template, Guid templateId, DateTimeOffset now)
+        {
+            var clone = doc.GetOrAddVm(cloneId);
+            clone.FolderId = template?.FolderId;
+            clone.SetTags(template?.Tags ?? Enumerable.Empty<string>());
+            clone.TemplateId = templateId;
+            clone.IsTemplate = false;
+            clone.Protected = false;
+            var source = template?.Provenance;
+            clone.Provenance = new VmProvenance
+            {
+                Tool = "VMCreate Manager (linked clone)",
+                ToolVersion = source?.ToolVersion,
+                GalleryItem = source?.GalleryItem,
+                Distribution = source?.Distribution,
+                Version = source?.Version,
+                ImageChecksum = source?.ImageChecksum,
+                CreatedAt = now,
+                Customizations = source?.Customizations.ToList() ?? new List<string>(),
+            };
+            // Same disk contents, so the same login; the DPAPI blob is per user, not per VM.
+            if (template?.Credential is { } cred)
+                clone.Credential = new StoredCredential { Username = cred.Username, ProtectedPassword = cred.ProtectedPassword };
+            return clone;
+        }
 
         /// <summary>"kali, external; acme" → [acme, external, kali]. Shared by the VMCreate GUI, CLI and Manager.</summary>
         public static List<string> ParseTags(string? text)
@@ -182,19 +311,25 @@ namespace VMCreate.Metadata
                 .OrderBy(t => t, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-        public static bool IsExpired(this VmMetadata vm, DateOnly today) => vm.ExpiresOn is DateOnly d && d < today;
+        public static bool IsExpired(this VmMetadata vm, DateOnly today) => IsPast(vm.ExpiresOn, today);
+
+        /// <summary>Expired means the date has passed; the expiry day itself still counts as active.</summary>
+        public static bool IsPast(DateOnly? expiresOn, DateOnly today) => expiresOn is DateOnly d && d < today;
 
         /// <summary>
         /// Evaluates a smart-folder filter. <paramref name="metadata"/> may be
-        /// null for a VM that has never been annotated.
+        /// null for a VM that has never been annotated. <paramref name="effectiveExpiry"/>
+        /// is the VM's date including one inherited from its folder; when omitted
+        /// only the VM's own date counts.
         /// </summary>
-        public static bool Matches(this SmartFolderFilter filter, string vmName, string vmState, VmMetadata? metadata, DateOnly today)
+        public static bool Matches(this SmartFolderFilter filter, string vmName, string vmState, VmMetadata? metadata, DateOnly today,
+            DateOnly? effectiveExpiry = null)
         {
             if (filter.States.Count > 0 && !filter.States.Contains(vmState, StringComparer.OrdinalIgnoreCase))
                 return false;
             if (filter.ProtectedOnly && metadata?.Protected != true)
                 return false;
-            if (filter.ExpiredOnly && metadata?.IsExpired(today) != true)
+            if (filter.ExpiredOnly && !IsPast(effectiveExpiry ?? metadata?.ExpiresOn, today))
                 return false;
             if (filter.AnyTags.Count > 0 && (metadata == null || !metadata.Tags.Any(t => filter.AnyTags.Contains(t, StringComparer.OrdinalIgnoreCase))))
                 return false;

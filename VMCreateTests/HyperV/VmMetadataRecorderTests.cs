@@ -100,6 +100,29 @@ namespace VMCreate.Tests.HyperV
             Assert.AreEqual("user text", free);
             Assert.AreEqual("Engagements/ACME", payload!.Folder);
             Assert.IsFalse(_writtenNotes!.Contains("kali-pw"));
+            // The Manager compares this with Notes to spot edits made outside VMCreate tools.
+            vm = (await _store.LoadAsync()).FindVm(VmId)!;
+            Assert.AreEqual(NotesBlock.Fingerprint(payload), vm.NotesFingerprint);
+            Assert.IsNotNull(vm.LastKnownName);
+        }
+
+        [TestMethod]
+        public async Task RecordDeployment_AppendsCreateEntryToAuditLog()
+        {
+            var audit = new JsonlAuditLog(Path.Combine(_dir, "audit.jsonl"));
+            var recorder = new VmMetadataRecorder(_executor.Object, _store, new DpapiCredentialProtector(),
+                NullLogger<VmMetadataRecorder>.Instance, audit);
+
+            await recorder.RecordDeploymentAsync(Plan("Engagements/ACME"),
+                new GalleryItem { Name = "Kali Linux", Version = "2026.3", DiskUri = "x" }, CancellationToken.None);
+
+            var entry = (await audit.ReadAsync()).Single();
+            Assert.AreEqual(AuditActions.VmCreate, entry.Action);
+            Assert.AreEqual("VMCreate", entry.Tool);
+            Assert.AreEqual(VmId, entry.VmId);
+            Assert.AreEqual("Kali_20261101", entry.VmName);
+            Assert.AreEqual("Kali Linux 2026.3 in Engagements/ACME", entry.Detail);
+            Assert.IsTrue(entry.Succeeded);
         }
 
         [TestMethod]

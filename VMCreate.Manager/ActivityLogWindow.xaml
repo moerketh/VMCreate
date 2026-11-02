@@ -1,0 +1,41 @@
+<ui:FluentWindow x:Class="VMCreate.Manager.ActivityLogWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        Title="Activity log" Width="1000" Height="600" MinWidth="640" MinHeight="320"
+        WindowStartupLocation="CenterOwner"
+        ExtendsContentIntoTitleBar="True" WindowBackdropType="Mica">
+    <DockPanel>
+        <ui:TitleBar DockPanel.Dock="Top" Title="Activity log"/>
+        <DockPanel DockPanel.Dock="Top" Margin="14,4,14,8">
+            <ui:Button DockPanel.Dock="Right" Icon="{ui:SymbolIcon ArrowClockwise24}" ToolTip="Reload"
+                       Appearance="Transparent" Padding="6" Margin="8,0,0,0" Click="Reload_Click"/>
+            <ui:Button DockPanel.Dock="Right" Icon="{ui:SymbolIcon FolderOpen24}" ToolTip="Show the log file in Explorer"
+                       Appearance="Transparent" Padding="6" Margin="8,0,0,0" Click="ShowFile_Click"/>
+            <CheckBox x:Name="FailedOnly" DockPanel.Dock="Right" Content="Failures only" Margin="12,0,0,0"
+                      Checked="Filter_Changed" Unchecked="Filter_Changed"/>
+            <ui:TextBox x:Name="SearchBox" PlaceholderText="Search VM, action, detail, user…"
+                        Icon="{ui:SymbolIcon Search24}" TextChanged="Filter_Changed"/>
+        </DockPanel>
+        <TextBlock x:Name="FooterText" DockPanel.Dock="Bottom" Margin="14,6,14,8" FontSize="11"
+                   Foreground="{StaticResource SubtleTextBrush}"/>
+        <DataGrid x:Name="EntriesGrid" Margin="14,0,14,0" AutoGenerateColumns="False" IsReadOnly="True"
+                  HeadersVisibility="Column" GridLinesVisibility="None" SelectionMode="Extended">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="When" Binding="{Binding When}" Width="125"/>
+                <DataGridTextColumn Header="VM" Binding="{Binding Target}" Width="160"/>
+                <DataGridTextColumn Header="Action" Binding="{Binding What}" Width="150"/>
+                <DataGridTextColumn Header="Detail" Binding="{Binding Detail}" Width="2*"/>
+                <DataGridTextColumn Header="Error" Binding="{Binding Error}" Width="*">
+                    <DataGridTextColumn.ElementStyle>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Foreground" Value="#E5534B"/>
+                        </Style>
+                    </DataGridTextColumn.ElementStyle>
+                </DataGridTextColumn>
+                <DataGridTextColumn Header="Tool" Binding="{Binding Tool}" Width="80"/>
+                <DataGridTextColumn Header="User" Binding="{Binding User}" Width="140"/>
+            </DataGrid.Columns>
+        </DataGrid>
+    </DockPanel>
+</ui:FluentWindow>

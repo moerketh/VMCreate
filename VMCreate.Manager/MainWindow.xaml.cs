@@ -8,6 +8,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using VMCreate.Manager.ViewModels;
+using VMCreate.Metadata;
 
 namespace VMCreate.Manager
 {
@@ -17,15 +18,19 @@ namespace VMCreate.Manager
         private const string FolderDragFormat = "VMCreate.Manager.FolderId";
 
         private readonly MainViewModel _vm;
+        private readonly IAuditLog _audit;
+        private readonly Func<StorageWindow> _storageWindow;
         private Point? _gridDragStart;
         private Point? _treeDragStart;
         // Group containers are recreated on every view refresh, so expansion state lives here.
         private readonly HashSet<string> _collapsedGroups = new(StringComparer.OrdinalIgnoreCase);
 
-        public MainWindow(MainViewModel viewModel)
+        public MainWindow(MainViewModel viewModel, IAuditLog audit, Func<StorageWindow> storageWindow)
         {
             InitializeComponent();
             _vm = viewModel;
+            _audit = audit;
+            _storageWindow = storageWindow;
             DataContext = viewModel;
             VmGrid.PreviewMouseRightButtonDown += VmGrid_PreviewMouseRightButtonDown;
             BuildColumnChooser();
@@ -171,6 +176,18 @@ namespace VMCreate.Manager
                 col.Width = DataGridLength.Auto;
                 col.Width = new DataGridLength(width.Value, width.UnitType);
             }
+        }
+
+        private void OpenActivityLog_Click(object sender, RoutedEventArgs e)
+            => new ActivityLogWindow(_audit) { Owner = this }.Show();
+
+        private void OpenStorage_Click(object sender, RoutedEventArgs e)
+        {
+            var window = _storageWindow();
+            window.Owner = this;
+            // Deleting files changes what the VM list shows (disk sizes, missing disks).
+            window.Closed += (_, _) => _vm.RefreshCommand.Execute(null);
+            window.Show();
         }
 
         // ── folder groups ────────────────────────────────────────────────

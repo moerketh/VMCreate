@@ -16,6 +16,9 @@ namespace VMCreate.Metadata
         public List<SmartFolder> SmartFolders { get; set; } = new();
         public List<VmMetadata> Vms { get; set; } = new();
 
+        /// <summary>Manager storage view settings.</summary>
+        public StorageSettings Storage { get; set; } = new();
+
         public VmMetadata? FindVm(Guid vmId) => Vms.Find(v => v.VmId == vmId);
 
         public VmFolder? FindFolder(Guid folderId) => Folders.Find(f => f.Id == folderId);
@@ -54,6 +57,15 @@ namespace VMCreate.Metadata
         /// </summary>
         public bool Protected { get; set; }
 
+        /// <summary>
+        /// Template for linked clones: its disks are the parents of the clones'
+        /// differencing disks, so it must never boot again or be deleted while clones exist.
+        /// </summary>
+        public bool IsTemplate { get; set; }
+
+        /// <summary>For a linked clone: the template VM whose disks it builds on.</summary>
+        public Guid? TemplateId { get; set; }
+
         /// <summary>Date after which the VM is shown as expired. Never triggers automatic deletion.</summary>
         public DateOnly? ExpiresOn { get; set; }
 
@@ -61,6 +73,25 @@ namespace VMCreate.Metadata
 
         /// <summary>Credentials; the password is DPAPI-protected and never mirrored into Notes.</summary>
         public StoredCredential? Credential { get; set; }
+
+        /// <summary>
+        /// Network ports disconnected by "Isolate now"; "Restore network" reconnects
+        /// exactly these, leaving adapters the user unplugged themselves alone.
+        /// </summary>
+        public List<string>? IsolatedPorts { get; set; }
+
+        /// <summary>
+        /// Fingerprint (<see cref="NotesBlock.Fingerprint"/>) of the Notes block as a
+        /// VMCreate tool last wrote or read it. Tells a Notes edit made outside these
+        /// tools apart from a store change that has not reached Notes yet.
+        /// </summary>
+        public string? NotesFingerprint { get; set; }
+
+        /// <summary>The VM's name when last seen, to recognise entries of VMs that no longer exist.</summary>
+        public string? LastKnownName { get; set; }
+
+        /// <summary>The day the VM was last seen on the host.</summary>
+        public DateOnly? LastSeenOn { get; set; }
     }
 
     /// <summary>How a VM was built, recorded by VMCreate at deploy time.</summary>
@@ -75,6 +106,15 @@ namespace VMCreate.Metadata
         public string? ImageChecksum { get; set; }
         public DateTimeOffset? CreatedAt { get; set; }
         public List<string> Customizations { get; set; } = new();
+    }
+
+    public sealed class StorageSettings
+    {
+        /// <summary>Extra folders to search for orphaned files, besides Hyper-V's and the VMs' own.</summary>
+        public List<string> ExtraScanFolders { get; set; } = new();
+
+        /// <summary>Checkpoints older than this are listed as old in the storage overview.</summary>
+        public int OldCheckpointDays { get; set; } = 30;
     }
 
     public sealed class StoredCredential
@@ -96,6 +136,13 @@ namespace VMCreate.Metadata
         /// <summary>Icon colour as "#RRGGBB"; null inherits the parent's colour (or the default).</summary>
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? Color { get; set; }
+
+        /// <summary>
+        /// End of the engagement this folder holds. VMs inside without their own
+        /// date inherit it. A reminder only: nothing is ever deleted automatically.
+        /// </summary>
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public DateOnly? ExpiresOn { get; set; }
     }
 
     /// <summary>A saved filter shown alongside the folder tree.</summary>

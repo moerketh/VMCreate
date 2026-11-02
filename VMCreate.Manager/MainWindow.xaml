@@ -19,6 +19,11 @@
                       Command="{Binding PlacementTarget.Tag.RenameFolderCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
             <MenuItem Header="Delete folder" Icon="{ui:SymbolIcon Delete24}"
                       Command="{Binding PlacementTarget.Tag.DeleteFolderCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+            <MenuItem Header="Set expiry…" Icon="{ui:SymbolIcon CalendarClock24}"
+                      Command="{Binding PlacementTarget.Tag.SetFolderExpiryCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+            <MenuItem Header="Archive…" Icon="{ui:SymbolIcon Archive24}"
+                      ToolTip="Export every VM in this folder with a checksummed manifest, then optionally delete them"
+                      Command="{Binding PlacementTarget.Tag.ArchiveFolderCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
             <Separator/>
             <MenuItem Header="Color" Icon="{ui:SymbolIcon Color24}" ItemsSource="{x:Static local:FolderPalette.Options}">
                 <MenuItem.ItemTemplate>
@@ -63,6 +68,17 @@
             <ui:InfoBar Title="Error" Severity="Error" IsClosable="True"
                         IsOpen="{Binding IsErrorOpen, Mode=TwoWay}"
                         Message="{Binding ErrorMessage}"/>
+            <Border Visibility="{Binding ExpiredCount, Converter={StaticResource CountToVis}}"
+                    Background="{DynamicResource ControlFillColorDefaultBrush}" CornerRadius="6" Padding="12,8" Margin="0,4,0,0">
+                <DockPanel>
+                    <ui:Button DockPanel.Dock="Right" Content="Show" Command="{Binding ShowExpiredCommand}"/>
+                    <ui:SymbolIcon Symbol="CalendarCancel16" Foreground="#E8B33A" FontSize="18" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                    <TextBlock VerticalAlignment="Center" TextWrapping="Wrap">
+                        <Run Text="{Binding ExpiredCount, Mode=OneWay}"/>
+                        <Run Text="VM(s) are past their expiry date. Nothing is deleted automatically: archive or delete them when the engagement is done."/>
+                    </TextBlock>
+                </DockPanel>
+            </Border>
             <Border Visibility="{Binding LegacyCredentialCount, Converter={StaticResource CountToVis}}"
                     Background="{DynamicResource ControlFillColorDefaultBrush}" CornerRadius="6" Padding="12,8" Margin="0,4,0,0">
                 <DockPanel>
@@ -119,6 +135,20 @@
                                     </Style>
                                 </DockPanel.Style>
                                 <TextBlock DockPanel.Dock="Right" Text="{Binding Count}" Foreground="{StaticResource SubtleTextBrush}" Margin="8,0,0,0"/>
+                                <ui:SymbolIcon DockPanel.Dock="Right" Symbol="CalendarClock24" FontSize="13" Margin="6,0,0,0"
+                                               ToolTip="{Binding ExpiryText}"
+                                               Visibility="{Binding ExpiresOn, Converter={StaticResource NullToVis}}">
+                                    <ui:SymbolIcon.Style>
+                                        <Style TargetType="ui:SymbolIcon">
+                                            <Setter Property="Foreground" Value="{StaticResource SubtleTextBrush}"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsExpired}" Value="True">
+                                                    <Setter Property="Foreground" Value="#E8B33A"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </ui:SymbolIcon.Style>
+                                </ui:SymbolIcon>
                                 <ui:SymbolIcon Symbol="{Binding Icon}" Margin="0,0,6,0"
                                                Foreground="{Binding Color, Converter={StaticResource HexToBrush}}"/>
                                 <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
@@ -144,6 +174,8 @@
                         <ui:Button Icon="{ui:SymbolIcon WindowConsole20}" Command="{Binding SshCommand}" ToolTip="Open SSH (over the network when the VM has an IP, otherwise over vsock)" Appearance="Transparent" Padding="6"/>
                         <ui:Button Icon="{ui:SymbolIcon Copy24}" Command="{Binding CopyIpCommand}" ToolTip="Copy IP address" Appearance="Transparent" Padding="6"/>
                         <ui:Button Icon="{ui:SymbolIcon ArrowClockwise24}" Command="{Binding RefreshCommand}" ToolTip="Refresh" Appearance="Transparent" Padding="6"/>
+                        <ui:Button Icon="{ui:SymbolIcon History24}" Click="OpenActivityLog_Click" ToolTip="Activity log (who did what, when)" Appearance="Transparent" Padding="6"/>
+                        <ui:Button Icon="{ui:SymbolIcon HardDrive20}" Click="OpenStorage_Click" ToolTip="Storage: disk use, unused files, missing files" Appearance="Transparent" Padding="6"/>
                     </StackPanel>
                     <ui:TextBox PlaceholderText="Search name, purpose, tags, description, IP…"
                                 Icon="{ui:SymbolIcon Search24}"
@@ -175,6 +207,33 @@
                                 <MenuItem Header="Pause" Command="{Binding PauseCommand}" Icon="{ui:SymbolIcon Pause24}"/>
                                 <MenuItem Header="Resume" Command="{Binding ResumeCommand}"/>
                                 <Separator/>
+                                <MenuItem Header="New linked clone…" Command="{Binding NewLinkedCloneCommand}" Icon="{ui:SymbolIcon BranchFork20}"/>
+                                <MenuItem Header="Make template" Command="{Binding MarkTemplateCommand}" Icon="{ui:SymbolIcon Layer20}"/>
+                                <MenuItem Header="Unmark template" Command="{Binding UnmarkTemplateCommand}"/>
+                                <Separator/>
+                                <MenuItem Header="Network" Icon="{ui:SymbolIcon VirtualNetwork20}">
+                                    <MenuItem Header="Isolate now" Command="{Binding IsolateNetworkCommand}" Icon="{ui:SymbolIcon PlugDisconnected24}"
+                                              ToolTip="Disconnect every network adapter; Restore puts them back"/>
+                                    <MenuItem Header="Restore network" Command="{Binding RestoreNetworkCommand}" Icon="{ui:SymbolIcon PlugConnected24}"/>
+                                    <Separator/>
+                                    <MenuItem Header="Connect all adapters to" ItemsSource="{Binding SwitchOptions}">
+                                        <MenuItem.ItemTemplate>
+                                            <DataTemplate>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <ui:SymbolIcon Symbol="{Binding Exposure, Converter={StaticResource Exposure}}" FontSize="14"
+                                                                   Foreground="{Binding Exposure, Converter={StaticResource Exposure}, ConverterParameter=Brush}"/>
+                                                    <TextBlock Text="{Binding Label}" Margin="8,0,0,0"/>
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </MenuItem.ItemTemplate>
+                                        <MenuItem.ItemContainerStyle>
+                                            <Style TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}">
+                                                <Setter Property="Command" Value="{Binding DataContext.ConnectToSwitchCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                                                <Setter Property="CommandParameter" Value="{Binding}"/>
+                                            </Style>
+                                        </MenuItem.ItemContainerStyle>
+                                    </MenuItem>
+                                </MenuItem>
                                 <MenuItem Header="Move to folder" Icon="{ui:SymbolIcon FolderArrowRight24}" ItemsSource="{Binding FolderOptions}">
                                     <MenuItem.ItemContainerStyle>
                                         <Style TargetType="MenuItem" BasedOn="{StaticResource {x:Type MenuItem}}">
@@ -184,8 +243,14 @@
                                         </Style>
                                     </MenuItem.ItemContainerStyle>
                                 </MenuItem>
+                                <Separator/>
+                                <MenuItem Header="Delete VM and disks…" Command="{Binding DeleteVmCommand}" Icon="{ui:SymbolIcon Delete24}"
+                                          InputGestureText="Del"/>
                             </ContextMenu>
                         </DataGrid.ContextMenu>
+                        <DataGrid.InputBindings>
+                            <KeyBinding Key="Delete" Command="{Binding DeleteVmCommand}"/>
+                        </DataGrid.InputBindings>
                         <!-- Folder groups, only active in "All virtual machines" (see MainViewModel.UpdateGrouping). -->
                         <DataGrid.GroupStyle>
                             <GroupStyle>
@@ -253,9 +318,18 @@
                                                 </Border>
                                             </Grid>
                                             <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"/>
+                                            <ui:SymbolIcon Symbol="Layer20" FontSize="14" Margin="6,0,0,0" Foreground="#5B9BE6"
+                                                           ToolTip="Template for linked clones"
+                                                           Visibility="{Binding IsTemplate, Converter={StaticResource BoolToVis}}"/>
+                                            <ui:SymbolIcon Symbol="BranchFork16" Margin="6,0,0,0" Foreground="{StaticResource SubtleTextBrush}"
+                                                           ToolTip="Linked clone"
+                                                           Visibility="{Binding TemplateId, Converter={StaticResource NullToVis}}"/>
+                                            <ui:SymbolIcon Symbol="{Binding Exposure, Converter={StaticResource Exposure}}" FontSize="14" Margin="6,0,0,0"
+                                                           Foreground="{Binding Exposure, Converter={StaticResource Exposure}, ConverterParameter=Brush}"
+                                                           ToolTip="{Binding ExposureText}"/>
                                             <ui:SymbolIcon Symbol="ShieldLock16" Margin="6,0,0,0" ToolTip="Delete protection on"
                                                            Visibility="{Binding Protected, Converter={StaticResource BoolToVis}}"/>
-                                            <ui:SymbolIcon Symbol="CalendarCancel16" Margin="6,0,0,0" ToolTip="Expired" Foreground="#E8B33A"
+                                            <ui:SymbolIcon Symbol="CalendarCancel16" Margin="6,0,0,0" ToolTip="{Binding ExpiryText}" Foreground="#E8B33A"
                                                            Visibility="{Binding IsExpired, Converter={StaticResource BoolToVis}}"/>
                                         </StackPanel>
                                     </DataTemplate>
@@ -337,6 +411,9 @@
                                     <StackPanel Grid.Column="1">
                                         <TextBlock Style="{StaticResource FieldLabel}" Text="Expires on" Margin="0,0,0,2"/>
                                         <DatePicker SelectedDate="{Binding ExpiresOn}"/>
+                                        <TextBlock Text="{Binding InheritedExpiryText}" TextWrapping="Wrap" FontSize="12" Margin="0,2,0,0"
+                                                   Foreground="{StaticResource SubtleTextBrush}"
+                                                   Visibility="{Binding InheritedExpiryText, Converter={StaticResource NullToVis}}"/>
                                     </StackPanel>
                                 </Grid>
 
@@ -356,6 +433,10 @@
                                     </StackPanel>
                                 </StackPanel>
 
+                                <StackPanel Visibility="{Binding LineageText, Converter={StaticResource NullToVis}}">
+                                    <TextBlock Style="{StaticResource SectionHeader}" Text="LINKED CLONES"/>
+                                    <TextBlock Text="{Binding LineageText}" TextWrapping="Wrap"/>
+                                </StackPanel>
                                 <StackPanel Visibility="{Binding Provenance, Converter={StaticResource NullToVis}}">
                                     <TextBlock Style="{StaticResource SectionHeader}" Text="BUILT BY VMCREATE"/>
                                     <TextBlock Text="{Binding ProvenanceText}" TextWrapping="Wrap"/>
@@ -370,6 +451,10 @@
                                     <LineBreak/>
                                     <Run Text="Switch" Foreground="{StaticResource SubtleTextBrush}"/> <Run Text="{Binding Item.SwitchText, Mode=OneWay}"/>
                                     <LineBreak/>
+                                    <Run Text="Exposure" Foreground="{StaticResource SubtleTextBrush}"/>
+                                    <Run Text="{Binding Item.ExposureText, Mode=OneWay}"
+                                         Foreground="{Binding Item.Exposure, Mode=OneWay, Converter={StaticResource Exposure}, ConverterParameter=Brush}"/>
+                                    <LineBreak/>
                                     <Run Text="IP" Foreground="{StaticResource SubtleTextBrush}"/> <Run Text="{Binding Item.IpText, Mode=OneWay}"/>
                                     <LineBreak/>
                                     <Run Text="Guest OS" Foreground="{StaticResource SubtleTextBrush}"/> <Run Text="{Binding Summary.GuestOperatingSystem, Mode=OneWay}"/>
@@ -381,6 +466,27 @@
                                 <TextBox Text="{Binding Summary.ConfigurationPath, Mode=OneWay}" IsReadOnly="True" BorderThickness="0" Background="Transparent" TextWrapping="Wrap"/>
                                 <TextBox Text="{Binding Summary.Id, Mode=OneWay}" IsReadOnly="True" BorderThickness="0" Background="Transparent" FontFamily="Consolas"
                                          Foreground="{StaticResource SubtleTextBrush}"/>
+
+                                <TextBlock Style="{StaticResource SectionHeader}" Text="HISTORY"/>
+                                <ItemsControl ItemsSource="{Binding DataContext.SelectedVmHistory, RelativeSource={RelativeSource AncestorType=Window}}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="{x:Type vm:AuditEntryView}">
+                                            <DockPanel Margin="0,0,0,4" ToolTip="{Binding User}">
+                                                <TextBlock DockPanel.Dock="Left" Text="{Binding When}" Width="108"
+                                                           Foreground="{StaticResource SubtleTextBrush}" FontSize="12"/>
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding Summary}" TextWrapping="Wrap" FontSize="12"/>
+                                                    <TextBlock Text="{Binding Error, StringFormat='Failed: {0}'}" TextWrapping="Wrap" FontSize="12"
+                                                               Foreground="#E5534B" Visibility="{Binding Error, Converter={StaticResource NullToVis}}"/>
+                                                </StackPanel>
+                                            </DockPanel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <TextBlock Text="No recorded actions yet." Foreground="{StaticResource SubtleTextBrush}" FontSize="12"
+                                           Visibility="{Binding DataContext.SelectedVmHistory.Count, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource CountToVis}, ConverterParameter=Inverse}"/>
+                                <ui:Button Content="Open activity log" Icon="{ui:SymbolIcon History24}" Appearance="Transparent"
+                                           Padding="6,4" Margin="-6,4,0,0" Click="OpenActivityLog_Click"/>
                             </StackPanel>
                         </ScrollViewer>
                     </DockPanel>
@@ -393,7 +499,12 @@
             <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource SubtleTextBrush}" FontSize="11">
                 <Run Text="Metadata:"/> <Run Text="{Binding MetadataFilePath, Mode=OneWay}"/>
             </TextBlock>
-            <TextBlock Text="{Binding StatusMessage}" Foreground="{StaticResource SubtleTextBrush}" FontSize="11"/>
+            <ui:Button DockPanel.Dock="Left" Content="Cancel" Padding="10,1" Margin="0,0,10,0" FontSize="11"
+                       ToolTip="Stop the archive. VMs already exported stay in it; the one in progress is removed."
+                       Command="{Binding CancelArchiveCommand}"
+                       Visibility="{Binding IsArchiving, Converter={StaticResource BoolToVis}}"/>
+            <TextBlock Text="{Binding StatusMessage}" Foreground="{StaticResource SubtleTextBrush}" FontSize="11"
+                       VerticalAlignment="Center"/>
         </DockPanel>
     </Grid>
 </ui:FluentWindow>

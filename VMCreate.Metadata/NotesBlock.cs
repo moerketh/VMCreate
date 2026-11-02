@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -19,6 +21,8 @@ namespace VMCreate.Metadata
         public string? Purpose { get; set; }
         public string? Description { get; set; }
         public bool? Protected { get; set; }
+        public bool? Template { get; set; }
+        public Guid? TemplateId { get; set; }
         public DateOnly? ExpiresOn { get; set; }
         public VmProvenance? Provenance { get; set; }
     }
@@ -86,6 +90,19 @@ namespace VMCreate.Metadata
             string block = StartMarker + JsonSerializer.Serialize(payload, JsonOptions) + EndMarker;
             return text.Length == 0 ? block : text + "\r\n" + block;
         }
+
+        /// <summary>The block's JSON as written; null when there is no block.</summary>
+        public static string? Serialize(NotesPayload? payload)
+            => payload == null ? null : JsonSerializer.Serialize(payload, JsonOptions);
+
+        /// <summary>
+        /// Short hash of the block's content ("none" without a block). Equal
+        /// fingerprints mean equal blocks, whatever free text surrounds them.
+        /// </summary>
+        public static string Fingerprint(NotesPayload? payload)
+            => Serialize(payload) is string json
+                ? Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(json)))[..16]
+                : "none";
 
         /// <summary>Replaces (or adds) the block in existing Notes, preserving the free text.</summary>
         public static string Update(string? existingNotes, NotesPayload? payload)

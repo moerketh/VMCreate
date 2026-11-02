@@ -8,6 +8,9 @@ namespace VMCreate.Manager.Inventory
     {
         Task<IReadOnlyList<VmSummary>> GetAllAsync(CancellationToken cancellationToken = default);
 
+        /// <summary>Virtual switches as of the last <see cref="GetAllAsync"/>.</summary>
+        IReadOnlyList<RawSwitch> Switches { get; }
+
         /// <summary>See <see cref="IHyperVHost.WatchChanges"/>.</summary>
         IDisposable WatchChanges(Action onChange);
     }
@@ -20,8 +23,14 @@ namespace VMCreate.Manager.Inventory
 
         public VmInventoryService(IHyperVHost host) => _host = host;
 
+        public IReadOnlyList<RawSwitch> Switches { get; private set; } = Array.Empty<RawSwitch>();
+
         public async Task<IReadOnlyList<VmSummary>> GetAllAsync(CancellationToken cancellationToken = default)
-            => Build(await _host.ReadSnapshotAsync(cancellationToken).ConfigureAwait(false));
+        {
+            var snapshot = await _host.ReadSnapshotAsync(cancellationToken).ConfigureAwait(false);
+            Switches = snapshot.Switches.OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase).ToList();
+            return Build(snapshot);
+        }
 
         public IDisposable WatchChanges(Action onChange) => _host.WatchChanges(onChange);
 
@@ -30,7 +39,7 @@ namespace VMCreate.Manager.Inventory
         {
             var summaries = snapshot.Summaries.GroupBy(s => s.Id).ToDictionary(g => g.Key, g => g.First());
             var memory = snapshot.Memory.GroupBy(m => m.VmId).ToDictionary(g => g.Key, g => g.First());
-            var switchNames = snapshot.Switches.GroupBy(s => s.Id).ToDictionary(g => g.Key, g => g.First().Name);
+            var switchesById = snapshot.Switches.GroupBy(s => s.Id).ToDictionary(g => g.Key, g => g.First());
             var ips = snapshot.GuestAdapters.ToLookup(a => a.VmId);
             var ports = snapshot.SwitchPorts.ToLookup(p => p.VmId);
             var checkpoints = snapshot.Checkpoints.ToLookup(c => c.VmId);
@@ -60,14 +69,27 @@ namespace VMCreate.Manager.Inventory
                         GuestOperatingSystem = s?.GuestOperatingSystem,
                         IpAddresses = OrderIpAddresses(ips[vm.Id].SelectMany(a => a.IpAddresses)),
                         Switches = ports[vm.Id]
-                            .Select(p => p.SwitchId is Guid id && switchNames.TryGetValue(id, out var n) ? n : NotConnected)
+                            .Select(p => p.Connected && p.SwitchId is Guid id && switchesById.TryGetValue(id, out var sw) ? sw.Name : NotConnected)
                             .ToList(),
+                        Exposure = ports[vm.Id]
+                            .Where(p => p.Connected && p.SwitchId != null)
+                            .Select(p => switchesById.TryGetValue(p.SwitchId!.Value, out var sw) ? ExposureOf(sw) : NetworkExposure.None)
+                            .DefaultIfEmpty(NetworkExposure.None)
+                            .Max(),
+                        DisconnectedAdapterCount = ports[vm.Id].Count(p => !p.Connected && p.SwitchId != null),
                         CheckpointCount = checkpoints[vm.Id].Count(),
                     };
                 })
                 .OrderBy(v => v.Name, StringComparer.OrdinalIgnoreCase)
                 .ToList();
         }
+
+        internal static NetworkExposure ExposureOf(RawSwitch sw) => sw.Kind switch
+        {
+            SwitchKind.External => NetworkExposure.External,
+            SwitchKind.Internal => sw.Nat ? NetworkExposure.Nat : NetworkExposure.Internal,
+            _ => NetworkExposure.Private,
+        };
 
         /// <summary>IPv4 first, then global IPv6; link-local IPv6 is dropped (useless for connecting).</summary>
         internal static IReadOnlyList<string> OrderIpAddresses(IEnumerable<string> addresses)

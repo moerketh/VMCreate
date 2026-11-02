@@ -6,6 +6,9 @@ using VMCreate.Metadata;
 
 namespace VMCreate.Manager.Metadata
 {
+    /// <summary>A VM whose metadata was not simply in sync, and what was done about it.</summary>
+    public sealed record VmSyncChange(Guid VmId, string VmName, NotesReconcileResult Result, string? PushError = null);
+
     /// <summary>
     /// Keeps the local metadata store and the [vmcreate] block in each VM's
     /// Notes in step: the store is the source of truth, Notes is the portable
@@ -27,31 +30,62 @@ namespace VMCreate.Manager.Metadata
         }
 
         /// <summary>
-        /// Creates store entries from Notes for VMs the store doesn't know yet
-        /// (imported VMs, or a lost metadata file). Existing entries are never
-        /// overwritten from Notes. Returns the number of VMs adopted.
+        /// Brings store and Notes in step for every VM (<see cref="NotesReconciler"/>):
+        /// adopts blocks of VMs the store doesn't know, takes Notes edits made outside
+        /// VMCreate tools, pushes store changes Notes hasn't caught up with, and
+        /// records each VM's name and the day it was seen. The store is only written
+        /// when something changed. Returns everything that was not simply in sync.
         /// </summary>
-        public Task<int> AdoptFromNotesAsync(IEnumerable<VmSummary> vms, CancellationToken cancellationToken = default)
+        public async Task<IReadOnlyList<VmSyncChange>> ReconcileAsync(IReadOnlyCollection<VmSummary> vms, CancellationToken cancellationToken = default)
         {
-            var candidates = vms
-                .Select(vm => (vm.Id, Payload: NotesBlock.Parse(vm.Notes).Payload))
-                .Where(c => c.Payload != null)
-                .ToList();
-            if (candidates.Count == 0)
-                return Task.FromResult(0);
+            var today = DateOnly.FromDateTime(DateTime.Today);
+            var parsed = vms.Select(vm => (vm.Id, vm.Name, NotesBlock.Parse(vm.Notes).Payload)).ToList();
 
-            return _store.UpdateAsync(doc =>
+            List<VmSyncChange> Run(MetadataDocument doc, out bool dirty)
             {
-                int adopted = 0;
-                foreach (var (id, payload) in candidates)
+                dirty = false;
+                var changes = new List<VmSyncChange>();
+                foreach (var (id, name, payload) in parsed)
                 {
-                    if (doc.FindVm(id) != null)
-                        continue;
-                    doc.AdoptFromNotes(id, payload!);
-                    adopted++;
+                    string? before = doc.FindVm(id)?.NotesFingerprint;
+                    var result = NotesReconciler.Reconcile(doc, id, payload);
+                    var entry = doc.FindVm(id);
+                    if (entry != null && (NotesReconciler.MarkSeen(entry, name, today) || entry.NotesFingerprint != before))
+                        dirty = true;
+                    if (result.Action != NotesSyncAction.InSync)
+                    {
+                        dirty = true;
+                        changes.Add(new VmSyncChange(id, name, result));
+                    }
                 }
-                return adopted;
-            }, cancellationToken);
+                return changes;
+            }
+
+            // Dry run on a loaded copy first: most refreshes change nothing and must not rewrite the file.
+            Run(await _store.LoadAsync(cancellationToken).ConfigureAwait(false), out bool needed);
+            if (!needed)
+                return Array.Empty<VmSyncChange>();
+
+            var applied = await _store.UpdateAsync(doc => Run(doc, out _), cancellationToken).ConfigureAwait(false);
+            var report = new List<VmSyncChange>(applied.Count);
+            foreach (var change in applied)
+            {
+                string? error = null;
+                if (change.Result.NeedsPush)
+                {
+                    try
+                    {
+                        await PushToNotesAsync(change.VmId, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (HyperVOperationException ex)
+                    {
+                        _logger.LogWarning(ex, "Could not update notes of VM {VmId}", change.VmId);
+                        error = ex.Message;
+                    }
+                }
+                report.Add(change with { PushError = error });
+            }
+            return report;
         }
 
         /// <summary>Applies <paramref name="mutate"/> to the VM's entry, then mirrors the result into its Notes.</summary>
@@ -78,6 +112,20 @@ namespace VMCreate.Manager.Metadata
             string updated = NotesBlock.Update(current, payload);
             if (updated != current)
                 await _host.SetNotesAsync(vmId, updated, cancellationToken).ConfigureAwait(false);
+            if (vm != null)
+                await RecordFingerprintAsync(vmId, payload, cancellationToken).ConfigureAwait(false);
+        }
+
+        /// <summary>Only after Notes holds the block: a fingerprint of a failed write would read as an outside edit.</summary>
+        private Task<bool> RecordFingerprintAsync(Guid vmId, NotesPayload? written, CancellationToken cancellationToken)
+        {
+            string print = NotesBlock.Fingerprint(written);
+            return _store.UpdateAsync(doc =>
+            {
+                if (doc.FindVm(vmId) is { } entry)
+                    entry.NotesFingerprint = print;
+                return true;
+            }, cancellationToken);
         }
 
         /// <summary>Mirrors every VM in the folder tree into Notes, e.g. after a folder rename.</summary>
@@ -128,6 +176,7 @@ namespace VMCreate.Manager.Metadata
             // leaves the credentials in both places, never in neither.
             var payload = doc.ToNotesPayload(doc.FindVm(vmId)!);
             await _host.SetNotesAsync(vmId, NotesBlock.Compose(remaining, payload), cancellationToken).ConfigureAwait(false);
+            await RecordFingerprintAsync(vmId, payload, cancellationToken).ConfigureAwait(false);
             _logger.LogInformation("Moved legacy credentials of VM {VmId} from Notes into the encrypted store", vmId);
             return true;
         }

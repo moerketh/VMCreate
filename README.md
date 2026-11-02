@@ -86,13 +86,24 @@ Run `vmcreate create --help` for the full list of options: RDP backend, desktop 
 
 - **Folders and tags.** Drag VMs into folders, nest folders, and tag VMs. Built-in views show running, protected and expired VMs, and VMs that aren't in any folder.
 - **Purpose, description and expiry date** for each VM, so you remember what a lab box is for and when it can go.
-- **Delete protection.** Mark a VM as protected and VMCreate tools refuse to delete it. This can't stop `Remove-VM` or the old MMC.
+- **Delete protection.** Mark a VM as protected and VMCreate tools refuse to delete it. Protection only applies inside VMCreate's own tools: it can't stop `Remove-VM` or Hyper-V Manager.
 - **Live console preview** of the selected VM, updated every two seconds. Click it to connect.
 - **Search** across name, purpose, tags, description and IP address, plus **bulk actions**: start, shut down, turn off, save, pause, resume.
 - **One-click SSH**, over the network or over vsock. Vsock needs no guest networking, so it works for isolated lab VMs.
 - **Credentials** stored encrypted with Windows DPAPI. Older VMCreate versions wrote them into the VM's Notes in plain text; the Manager offers to move them into the encrypted store.
+- **Delete a VM with its disks.** A preview lists every file with its size and says why it goes or stays. Disks another VM still uses (a template's base disk, for example) are kept, and so are ISOs outside the VM's own folders. Protected VMs, running VMs and templates that still have clones can't be deleted. Files go to the Recycle Bin unless you choose otherwise, and you confirm by typing the VM's name.
+- **Templates and linked clones.** Mark a VM as a template, then create clones whose disks are differencing disks on top of the template's. A template must have no checkpoints.
+- **Network exposure.** Each VM shows whether it reaches an external network, the host, or only other VMs. **Isolate now** disconnects every adapter and **Restore** reconnects exactly those adapters.
+- **Engagement folders with an expiry date.** Expired VMs get a reminder banner and their own view. Nothing is ever deleted automatically.
+- **Archive a folder.** Exports every VM in the folder (configuration, checkpoints, disks) with a `manifest.json` that holds the metadata and a SHA-256 checksum per file. Linked clones include their parent disk, so each export imports on its own. Afterwards you can delete the archived VMs. A running archive can be cancelled; VMs that were already exported stay in the archive.
+- **Storage.** Shows disk use per drive and per VM (own disks vs. disks shared with clones), and checkpoints older than a number of days you choose. It also lists:
+  - unused files: virtual disks, ISOs and VM configuration files that no VM or checkpoint uses, plus empty leftover VM folders;
+  - files that VMs refer to but that are missing.
 
-Your metadata lives in `%LOCALAPPDATA%\VMCreate\Manager\metadata.json`. A copy, without credentials, is kept in each VM's Hyper-V Notes, so folders, tags and descriptions travel with exported VMs and come back if the file is lost. The Manager runs without elevation if your account is a member of **Hyper-V Administrators**.
+  Before deleting, the host is scanned again, and anything a VM uses by then or that changed is left alone. The scan skips disks belonging to WSL, Docker and Windows Sandbox, files another program has open, and archives made by the Manager.
+- **Activity log.** Every create, delete, archive, network and folder change is appended to `%LOCALAPPDATA%\VMCreate\Manager\audit.jsonl`. The log records who made the change, when and with which tool. VMCreate logs the VMs it creates there too.
+
+Your metadata lives in `%LOCALAPPDATA%\VMCreate\Manager\metadata.json`. A copy, without credentials, is kept in each VM's Hyper-V Notes, so folders, tags and descriptions travel with exported VMs and come back if the file is lost. If you edit that `[vmcreate]` block in Hyper-V Manager or with `Set-VM -Notes`, the Manager takes your edit over at the next refresh and records it in the activity log. The exception is the protected flag: an outside edit can turn it on but not off. Metadata of VMs removed outside the Manager is listed under Storage → Old metadata, where you can remove it. The Manager runs without elevation if your account is a member of **Hyper-V Administrators**.
 
 The MSI installs it next to VMCreate with its own Start menu entry; `vmcreate-manager-x.y.z.exe` is the portable version.
 

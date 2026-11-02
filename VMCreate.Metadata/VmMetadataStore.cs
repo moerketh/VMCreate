@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -41,7 +39,7 @@ namespace VMCreate.Metadata
             WriteIndented = true,
         };
 
-        private readonly string _mutexName;
+        private readonly FileLock _lock;
         private FileSystemWatcher? _watcher;
 
         public string FilePath { get; }
@@ -58,9 +56,7 @@ namespace VMCreate.Metadata
         public JsonVmMetadataStore(string filePath)
         {
             FilePath = Path.GetFullPath(filePath);
-            // One lock per file, shared by every process in the session.
-            byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(FilePath.ToUpperInvariant()));
-            _mutexName = @"Local\VMCreate.Metadata." + Convert.ToHexString(hash, 0, 8);
+            _lock = new FileLock("Metadata", FilePath);
         }
 
         public Task<MetadataDocument> LoadAsync(CancellationToken cancellationToken = default)
@@ -96,33 +92,7 @@ namespace VMCreate.Metadata
         public void Dispose() => _watcher?.Dispose();
 
         private T WithLock<T>(Func<T> action, CancellationToken cancellationToken)
-        {
-            using var mutex = new Mutex(false, _mutexName);
-            bool acquired = false;
-            try
-            {
-                while (!acquired)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    try
-                    {
-                        acquired = mutex.WaitOne(TimeSpan.FromMilliseconds(250));
-                    }
-                    catch (AbandonedMutexException)
-                    {
-                        // A writer died mid-update. The write itself is atomic
-                        // (temp file + rename), so the file is still consistent.
-                        acquired = true;
-                    }
-                }
-                return action();
-            }
-            finally
-            {
-                if (acquired)
-                    mutex.ReleaseMutex();
-            }
-        }
+            => _lock.Run(action, cancellationToken);
 
         private MetadataDocument ReadDocument()
         {
@@ -149,6 +119,7 @@ namespace VMCreate.Metadata
                 return new MetadataDocument();
             if (doc.SchemaVersion > MetadataDocument.CurrentSchemaVersion)
                 throw new MetadataStoreException($"Metadata file '{FilePath}' has schema version {doc.SchemaVersion}, newer than this build supports ({MetadataDocument.CurrentSchemaVersion}). Update VMCreate.");
+            doc.Storage ??= new StorageSettings();
             return doc;
         }
 

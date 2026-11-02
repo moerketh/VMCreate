@@ -3,9 +3,12 @@ using System.Windows;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Serilog;
+using VMCreate.Manager.Archive;
+using VMCreate.Manager.Deletion;
 using VMCreate.Manager.HyperV;
 using VMCreate.Manager.Inventory;
 using VMCreate.Manager.Metadata;
+using VMCreate.Manager.Storage;
 using VMCreate.Manager.ViewModels;
 using VMCreate.Metadata;
 
@@ -92,7 +95,15 @@ namespace VMCreate.Manager
             services.AddSingleton<IVmMetadataStore>(sp => sp.GetRequiredService<JsonVmMetadataStore>());
             services.AddSingleton<ICredentialProtector, DpapiCredentialProtector>();
             services.AddSingleton<VmMetadataSync>();
+            services.AddSingleton<IAuditLog>(_ => new JsonlAuditLog());
             services.AddSingleton<IDialogService, DialogService>();
+            services.AddSingleton<IFileRemover, ShellFileRemover>();
+            services.AddSingleton<VmDeletionService>();
+            services.AddSingleton<FolderArchiver>();
+            services.AddSingleton<StorageScanner>();
+            services.AddSingleton<OrphanCleanupService>();
+            services.AddTransient<StorageWindow>();
+            services.AddSingleton<Func<StorageWindow>>(sp => () => sp.GetRequiredService<StorageWindow>());
             services.AddSingleton<MainViewModel>();
             services.AddSingleton<MainWindow>();
             _services = services.BuildServiceProvider();

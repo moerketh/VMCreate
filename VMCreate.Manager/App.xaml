@@ -20,6 +20,7 @@
             <local:VmStateToSymbolConverter x:Key="StateSymbol"/>
             <local:FolderGroupNameConverter x:Key="FolderGroupName"/>
             <local:HexToBrushConverter x:Key="HexToBrush"/>
+            <local:NetworkExposureConverter x:Key="Exposure"/>
 
             <SolidColorBrush x:Key="SubtleTextBrush" Color="{DynamicResource TextFillColorSecondary}"/>
             <SolidColorBrush x:Key="ItemBorderBrush" Color="{DynamicResource ControlStrokeColorDefault}"/>

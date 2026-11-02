@@ -79,6 +79,7 @@ namespace VMCreate
             // credentials), shared with VMCreate.Manager through the same file.
             services.AddSingleton<VMCreate.Metadata.IVmMetadataStore>(_ => new VMCreate.Metadata.JsonVmMetadataStore());
             services.AddSingleton<VMCreate.Metadata.ICredentialProtector, VMCreate.Metadata.DpapiCredentialProtector>();
+            services.AddSingleton<VMCreate.Metadata.IAuditLog>(_ => new VMCreate.Metadata.JsonlAuditLog());
             services.AddSingleton<IVmMetadataRecorder, VmMetadataRecorder>();
             services.AddSingleton<IHyperVManager, PowerShellHyperVManagerFacade>();
             services.AddSingleton<IUnattendInjector, ElevatedUnattendInjector>();

@@ -51,6 +51,75 @@ namespace VMCreate.Manager.Tests.Metadata
         }
 
         [TestMethod]
+        public void EffectiveExpiry_OwnDateWins_ElseNearestFolder()
+        {
+            var doc = new MetadataDocument();
+            var engagement = doc.CreateFolder("ACME", null);
+            var web = doc.CreateFolder("Web", engagement.Id);
+            var end = new DateOnly(2026, 12, 31);
+            doc.SetFolderExpiry(engagement.Id, end);
+
+            var inherits = new VmMetadata { FolderId = web.Id };
+            var own = new VmMetadata { FolderId = web.Id, ExpiresOn = new DateOnly(2027, 1, 15) };
+            var unfiled = new VmMetadata();
+
+            Assert.AreEqual(end, doc.GetEffectiveExpiry(inherits));
+            Assert.AreEqual(engagement.Id, doc.GetFolderExpiry(web.Id).From!.Id);
+            Assert.AreEqual(new DateOnly(2027, 1, 15), doc.GetEffectiveExpiry(own));
+            Assert.IsNull(doc.GetEffectiveExpiry(unfiled));
+            Assert.IsNull(doc.GetEffectiveExpiry(null));
+
+            doc.SetFolderExpiry(engagement.Id, null);
+            Assert.IsNull(doc.GetEffectiveExpiry(inherits));
+        }
+
+        [TestMethod]
+        public void ExpiredFilter_UsesInheritedExpiryWhenGiven()
+        {
+            var today = new DateOnly(2027, 1, 1);
+            var filter = new SmartFolderFilter { ExpiredOnly = true };
+            var meta = new VmMetadata();
+
+            Assert.IsFalse(filter.Matches("vm", "Off", meta, today));
+            Assert.IsTrue(filter.Matches("vm", "Off", meta, today, effectiveExpiry: new DateOnly(2026, 12, 31)));
+            Assert.IsFalse(filter.Matches("vm", "Off", meta, today, effectiveExpiry: today), "the expiry day itself is not expired yet");
+        }
+
+        [TestMethod]
+        public void RecordLinkedClone_InheritsFolderTagsLogin_ButNotTemplateState()
+        {
+            var doc = new MetadataDocument();
+            var templateId = Guid.NewGuid();
+            var template = doc.GetOrAddVm(templateId);
+            template.FolderId = doc.EnsureFolderPath("Templates/Kali");
+            template.Tags.Add("kali");
+            template.IsTemplate = true;
+            template.Protected = true;
+            template.Purpose = "golden image";
+            template.Credential = new StoredCredential { Username = "kali", ProtectedPassword = "blob" };
+            template.Provenance = new VmProvenance { Tool = "VMCreate", GalleryItem = "Kali Linux", Version = "2026.3" };
+
+            var cloneId = Guid.NewGuid();
+            var clone = doc.RecordLinkedClone(cloneId, template, templateId, DateTimeOffset.Now);
+
+            Assert.AreEqual(template.FolderId, clone.FolderId);
+            CollectionAssert.AreEqual(new[] { "kali" }, clone.Tags);
+            Assert.AreEqual(templateId, clone.TemplateId);
+            Assert.IsFalse(clone.IsTemplate);
+            Assert.IsFalse(clone.Protected);
+            Assert.IsNull(clone.Purpose);
+            Assert.AreEqual("kali", clone.Credential!.Username);
+            Assert.AreNotSame(template.Credential, clone.Credential);
+            Assert.AreEqual("Kali Linux", clone.Provenance!.GalleryItem);
+            StringAssert.Contains(clone.Provenance.Tool, "linked clone");
+
+            var payload = doc.ToNotesPayload(template)!;
+            Assert.IsTrue(payload.Template);
+            var restored = new MetadataDocument().AdoptFromNotes(templateId, payload);
+            Assert.IsTrue(restored.IsTemplate, "the template flag survives a lost store via Notes");
+        }
+
+        [TestMethod]
         public void SetFolderColor_RejectsNonHex()
         {
             var doc = new MetadataDocument();

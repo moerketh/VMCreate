@@ -28,10 +28,54 @@ namespace VMCreate.Manager
     public sealed class CountToVisibilityConverter : IValueConverter
     {
         public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
-            => value is int n && n > 0 ? Visibility.Visible : Visibility.Collapsed;
+            => (value is int n && n > 0) != (parameter as string == "Inverse") ? Visibility.Visible : Visibility.Collapsed;
 
         public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
             => throw new NotSupportedException();
+    }
+
+    /// <summary>
+    /// Network exposure badge: the symbol, or with ConverterParameter "Brush" its colour.
+    /// Only symbols verified to render (several 16px network glyphs are missing).
+    /// </summary>
+    public sealed class NetworkExposureConverter : IValueConverter
+    {
+        private static readonly Brush Red = Frozen(Color.FromRgb(0xE5, 0x53, 0x4B));
+        private static readonly Brush Orange = Frozen(Color.FromRgb(0xE8, 0x91, 0x2D));
+        private static readonly Brush Amber = Frozen(Color.FromRgb(0xE3, 0xC1, 0x4B));
+        private static readonly Brush Grey = Frozen(Color.FromRgb(0x8A, 0x8A, 0x8A));
+
+        public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+        {
+            var exposure = value is NetworkExposure e ? e : NetworkExposure.None;
+            if (parameter as string == "Brush")
+            {
+                return exposure switch
+                {
+                    NetworkExposure.External => Red,
+                    NetworkExposure.Nat => Orange,
+                    NetworkExposure.Internal => Amber,
+                    _ => Grey,
+                };
+            }
+            return exposure switch
+            {
+                NetworkExposure.External or NetworkExposure.Nat => SymbolRegular.Globe16,
+                NetworkExposure.Internal => SymbolRegular.VirtualNetwork20,
+                NetworkExposure.Private => SymbolRegular.LockClosed16,
+                _ => SymbolRegular.PlugDisconnected24,
+            };
+        }
+
+        public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
+            => throw new NotSupportedException();
+
+        private static Brush Frozen(Color c)
+        {
+            var b = new SolidColorBrush(c);
+            b.Freeze();
+            return b;
+        }
     }
 
     /// <summary>"#RRGGBB" to a brush; null/invalid falls back to the theme's primary text colour.</summary>

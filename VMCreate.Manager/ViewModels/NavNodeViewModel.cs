@@ -19,10 +19,11 @@ namespace VMCreate.Manager.ViewModels
         private bool _isExpanded = true;
         private int _count;
 
-        public NavNodeViewModel(NavNodeKind kind, string name, string icon, Guid? folderId = null, SmartFolderFilter? filter = null, string? color = null)
+        public NavNodeViewModel(NavNodeKind kind, string name, string icon, Guid? folderId = null, SmartFolderFilter? filter = null, string? color = null, DateOnly? expiresOn = null)
         {
             Kind = kind;
             Color = color;
+            ExpiresOn = expiresOn;
             Name = name;
             Icon = icon;
             FolderId = folderId;
@@ -39,6 +40,11 @@ namespace VMCreate.Manager.ViewModels
 
         /// <summary>Folder icon colour ("#RRGGBB", own or inherited); null = default.</summary>
         public string? Color { get; }
+
+        /// <summary>The folder's own engagement end date.</summary>
+        public DateOnly? ExpiresOn { get; }
+        public bool IsExpired => MetadataOperations.IsPast(ExpiresOn, DateOnly.FromDateTime(DateTime.Today));
+        public string? ExpiryText => ExpiresOn is DateOnly d ? (IsExpired ? "Expired " : "Expires ") + d.ToString("yyyy-MM-dd") : null;
         public SmartFolderFilter? Filter { get; }
         public ObservableCollection<NavNodeViewModel> Children { get; } = new();
 
