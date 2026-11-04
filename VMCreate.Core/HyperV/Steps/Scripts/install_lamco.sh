@@ -567,9 +567,8 @@ codec = "avc420"
 encoder_backend = "x264"
 # QUALITY PROFILE: qp 20-28 (live-tested) keeps good 1080p fidelity while
 # roughly HALVING encoder CPU vs the old qp 8-10 on a 2-vCPU guest. (The older
-# qp_min=1 forced lossless-mode x264 for EVERY frame — combined with
-# damage_tracking.pixel_threshold=1's full-frame diff per frame at 1080p,
-# the encoder starved the very desktop it was encoding.) Adaptation is
+# qp_min=1 forced lossless-mode x264 for EVERY frame, and the encoder
+# starved the very desktop it was encoding.) Adaptation is
 # ON so sustained load can climb to max_qp instead of dropping frames.
 qp_min = 20
 qp_max = 28
@@ -601,12 +600,22 @@ enabled = true
 # the platform, cutting CPU vs the explicit full-frame "diff" walker.
 method = "recommended"
 tile_size = 16
-diff_threshold = 0.01
-# 100 (not 1): pixel_threshold=1 meant even a single changed pixel marked a
-# tile dirty — at 1080p the per-frame full-buffer diff plus the resulting
-# x264 near-lossless encodes starved the 2-vCPU desktop. 100 still catches
-# real damage while ignoring sensor-noise-level flicker.
-pixel_threshold = 100
+# A tile is re-sent only when MORE than diff_threshold*256 of its pixels
+# changed; a tile that is never re-sent keeps its stale pixels on the client
+# for good (the detector diffs frame-to-frame, not against what the client
+# shows). 0.0 = any changed pixel dirties its tile, so the trailing edge of
+# a moving Painted-mode cursor (KWin draws it into the frame) is always
+# repainted. 0.01 still needed >2 pixels per tile and could strand a
+# 1-2 pixel cursor tip.
+diff_threshold = 0.0
+# Per-CHANNEL delta (0-255) a pixel must exceed to count as changed — not a
+# pixel count. 100 made the dark cursor body over a dark desktop invisible
+# to the diff, so only the white outline registered, below the tile
+# threshold: every cursor move left white dots behind (live, HTB
+# Academy_20261031153025). The diff walks every pixel whatever this value,
+# so it never saved CPU (the 2-vCPU starvation was qp_min=1, fixed above);
+# compositor output is exact, so 1 (upstream default) has no noise to reject.
+pixel_threshold = 1
 merge_distance = 16
 min_region_area = 64
 
@@ -1099,6 +1108,46 @@ MONITORS_EOF
         fi
     fi
 
+    # -- KWin private-interface grant (zkde-screencast) ----------------------
+    # MUST precede the service restart below. KWin evaluates the allowlist
+    # once, when a client connects, and never re-advertises a gated global
+    # on an existing connection: a lamco process started before this file
+    # exists stays blind to zkde_screencast for its whole lifetime (live,
+    # HTB Academy_20261031153025: restart at 14:41:08, grant at 14:41:18 —
+    # every vmconnect failed "zkde_screencast global not bound" until a
+    # manual restart). Placed after the synchronous user@ start above so
+    # kbuildsycoca6 has the user bus.
+    # KWin-only; Hyprland does not gate screencast interfaces behind an
+    # executable allowlist, so this file is meaningless (though harmless)
+    # there.
+    if ! is_arch_family; then
+    # KWin 6.x gates private Wayland interfaces behind an allowlist:
+    # zkde_screencast_unstable_v1 is only advertised to clients whose
+    # .desktop file lists it under X-KDE-Wayland-Interfaces (matched by the
+    # client's executable path — see KWin wayland_server.cpp
+    # interfacesBlackList + serviceutils.h fetchRequestedInterfaces).
+    # xdg-desktop-portal-kde and krfb ship such entries; without one the
+    # kwin-virtual strategy cannot bind the global: every connect fails
+    # with "zkde stream creation failed: zkde_screencast global not bound",
+    # and the global stays invisible even to wayland-info.
+    cat > /usr/share/applications/lamco-rdp-server.desktop << 'DESKTOPEOF'
+[Desktop Entry]
+Type=Application
+Name=Lamco RDP Server
+Exec=/usr/bin/lamco-rdp-server
+NoDisplay=true
+X-KDE-Wayland-Interfaces=zkde_screencast_unstable_v1
+DESKTOPEOF
+    chmod 0644 /usr/share/applications/lamco-rdp-server.desktop
+    # Refresh KDE's service cache so the grant takes effect without relogin.
+    if command -v kbuildsycoca6 >/dev/null 2>&1; then
+        sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
+            DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u "$AUTOLOGIN_USER")/bus \
+            kbuildsycoca6 --noincremental 2>/dev/null || true
+    fi
+    echo "KWin private-interface grant installed (zkde_screencast_unstable_v1 for /usr/bin/lamco-rdp-server)."
+    fi
+
     sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
         systemctl --user daemon-reload 2>/dev/null || true
     sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
@@ -1316,37 +1365,8 @@ UNITEOF
     fi
     fi
 
-    # -- KWin private-interface grant (zkde-screencast) ----------------------
-    # KWin-only; Hyprland does not gate screencast interfaces behind an
-    # executable allowlist, so this file is meaningless (though harmless)
-    # there.
-    if ! is_arch_family; then
-    # KWin 6.x gates private Wayland interfaces behind an allowlist:
-    # zkde_screencast_unstable_v1 is only advertised to clients whose
-    # .desktop file lists it under X-KDE-Wayland-Interfaces (matched by the
-    # client's executable path — see KWin wayland_server.cpp
-    # interfacesBlackList + serviceutils.h fetchRequestedInterfaces).
-    # xdg-desktop-portal-kde and krfb ship such entries; without one the
-    # kwin-virtual strategy cannot bind the global: every connect fails
-    # with "zkde stream creation failed: zkde_screencast global not bound",
-    # and the global stays invisible even to wayland-info.
-    cat > /usr/share/applications/lamco-rdp-server.desktop << 'DESKTOPEOF'
-[Desktop Entry]
-Type=Application
-Name=Lamco RDP Server
-Exec=/usr/bin/lamco-rdp-server
-NoDisplay=true
-X-KDE-Wayland-Interfaces=zkde_screencast_unstable_v1
-DESKTOPEOF
-    chmod 0644 /usr/share/applications/lamco-rdp-server.desktop
-    # Refresh KDE's service cache so the grant takes effect without relogin.
-    if [ -n "$AUTOLOGIN_USER" ] && command -v kbuildsycoca6 >/dev/null 2>&1; then
-        sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
-            DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u "$AUTOLOGIN_USER")/bus \
-            kbuildsycoca6 --noincremental 2>/dev/null || true
-    fi
-    echo "KWin private-interface grant installed (zkde_screencast_unstable_v1 for /usr/bin/lamco-rdp-server)."
-    fi
+    # (The KWin zkde-screencast grant lives before the service restart above
+    # — see "KWin private-interface grant".)
 
     # linger + enable (the service starts on next graphical-session target)
     loginctl enable-linger "$AUTOLOGIN_USER" 2>/dev/null || { echo "DEGRADED: enable-linger failed for $AUTOLOGIN_USER — user units will not start at boot"; DEGRADED=1; }
