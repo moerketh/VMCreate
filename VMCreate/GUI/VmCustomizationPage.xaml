@@ -68,9 +68,9 @@
                         <RadioButton
                                      GroupName="RdpBackend" FontSize="14"
                                      IsChecked="{Binding IsRdpBackendAuto}"
-                                     ToolTip="Detects whether the desktop defaults to Wayland or X11 inside the booted VM, then installs the best-suited RDP backend: the Wayland-native Lamco RDP Server on supported Debian-family distros with a Wayland session, or xrdp otherwise. Nothing RDP-related is pre-installed before boot; the chosen backend is installed post-boot over SSH."
+                                     ToolTip="Detects whether the desktop defaults to Wayland or X11 inside the VM, then installs the best-suited RDP backend: the Wayland-native Lamco RDP Server on supported Debian-family distros with a Wayland session, or xrdp otherwise. Nothing RDP-related is pre-installed before boot; the chosen backend is installed post-boot over SSH."
                                      AutomationProperties.Name="Auto-select RDP backend">
-                            <TextBlock Text="Auto select (recommended) — detects Wayland vs X11 after first boot" TextWrapping="Wrap"/>
+                            <TextBlock Text="Auto select (recommended) — detects Wayland vs X11 in the VM" TextWrapping="Wrap"/>
                         </RadioButton>
                         <TextBlock Text="{Binding AutoRdpHint}" FontSize="11" Margin="22,2,0,4" TextWrapping="Wrap"
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}"
@@ -126,7 +126,7 @@
                     <StackPanel>
                         <TextBlock Text="Desktop Environment" FontSize="14" FontWeight="SemiBold"
                                    Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,0,4"/>
-                        <TextBlock Text="Choose the desktop for this VM. The desktop is installed after first boot — the remote-access solution adapts automatically (Wayland desktops use the Lamco RDP Server where available, X11 desktops use xrdp)."
+                        <TextBlock Text="Choose the desktop for this VM. The desktop is installed before the VM first boots (right after it on cloud images) — the remote-access solution adapts automatically (Wayland desktops use the Lamco RDP Server where available, X11 desktops use xrdp)."
                                    FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,10"
                                    TextWrapping="Wrap"/>
                         <RadioButton Content="{Binding DefaultDesktopName, StringFormat='Keep default ({0})'}"
