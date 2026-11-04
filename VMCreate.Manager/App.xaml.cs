@@ -82,6 +82,7 @@ namespace VMCreate.Manager
                 System.Windows.MessageBox.Show(args.Exception.Message, "VMCreate Manager", MessageBoxButton.OK, MessageBoxImage.Error);
                 args.Handled = true;
             };
+            DataGridRowFix.Register();
 
             var services = new ServiceCollection();
             services.AddLogging(b =>
