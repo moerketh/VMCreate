@@ -13,7 +13,7 @@
 
         <!-- Selected image summary card: pinned above scrollable content -->
         <Border Grid.Row="0" Background="{DynamicResource ControlFillColorDefaultBrush}"
-                CornerRadius="8" Padding="16,12" Margin="0,0,0,12"
+                CornerRadius="8" Padding="16,8" Margin="0,0,0,12"
                 BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
             <StackPanel Orientation="Horizontal">
                 <Image Source="{Binding SelectedItem.SymbolUri, Converter={StaticResource ImageConverter}}" 
@@ -43,154 +43,224 @@
                         Message="This Windows image needs to be modified before first boot (to create the user account and enable remote access). You will be prompted for administrator approval at deployment time."
                         IsOpen="{Binding NeedsUnattendInjection, Mode=OneWay}" IsClosable="False" Margin="0,0,0,8"/>
 
-            <!-- Integration Services card -->
-            <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
-                    CornerRadius="8" Padding="20,16" Margin="0,0,0,12"
-                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
-                <StackPanel>
-                    <TextBlock Text="Integration Services" FontSize="14" FontWeight="SemiBold"
-                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,0,4"/>
-                    <TextBlock Text="Hyper-V integration services enable clipboard sharing, drive redirection, and automatic IP discovery via Enhanced Session Mode."
-                               FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,10"
-                               TextWrapping="Wrap"/>
-                    <CheckBox Content="Enable Hyper-V integration services"
-                              IsChecked="{Binding EnableIntegrationServices}"
-                              FontSize="14"
-                              ToolTip="Controls Guest Service Interface and Enhanced Session Mode (RDP over VMBus)."
-                              AutomationProperties.Name="Enable Hyper-V integration services"/>
-                </StackPanel>
-            </Border>
+            <!-- Two columns: remote access, desktop and SSH key | integration and DNS. Wider cards
+                 (HTB VPN, distribution options, Elastic AI) follow at full width. -->
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="12"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Visibility="{Binding ShowLinuxOptions, Converter={StaticResource BoolToVis}}">
+                <!-- Remote Access card (Linux only) -->
+                <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
+                        CornerRadius="8" Padding="20,16" Margin="0,0,0,12"
+                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1"
+                        Visibility="{Binding ShowLinuxOptions, Converter={StaticResource BoolToVis}}">
+                    <StackPanel>
+                        <TextBlock Text="Remote Access" FontSize="14" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,0,4"/>
+                        <TextBlock Text="Configure remote desktop access for the virtual machine." TextWrapping="Wrap"
+                                   FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,10"/>
+                        <ui:InfoBar Title="Remote Access changed" Severity="Informational"
+                                    Message="{Binding RdpBackendNotice}"
+                                    IsOpen="{Binding HasRdpBackendNotice, Mode=OneWay}" IsClosable="False" Margin="0,0,0,8"/>
+                        <RadioButton
+                                     GroupName="RdpBackend" FontSize="14"
+                                     IsChecked="{Binding IsRdpBackendAuto}"
+                                     ToolTip="Detects whether the desktop defaults to Wayland or X11 inside the booted VM, then installs the best-suited RDP backend: the Wayland-native Lamco RDP Server on supported Debian-family distros with a Wayland session, or xrdp otherwise. Nothing RDP-related is pre-installed before boot; the chosen backend is installed post-boot over SSH."
+                                     AutomationProperties.Name="Auto-select RDP backend">
+                            <TextBlock Text="Auto select (recommended) — detects Wayland vs X11 after first boot" TextWrapping="Wrap"/>
+                        </RadioButton>
+                        <TextBlock Text="{Binding AutoRdpHint}" FontSize="11" Margin="22,2,0,4" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   Visibility="{Binding ShowAutoRdpHint, Converter={StaticResource BoolToVis}}"/>
+                        <RadioButton x:Name="XrdpCheckbox"
+                                     GroupName="RdpBackend" FontSize="14" Margin="0,4,0,0"
+                                     IsChecked="{Binding IsRdpBackendXrdp}"
+                                     IsEnabled="{Binding XrdpOptionEnabled}"
+                                     ToolTip="Installs and configures xrdp so Enhanced Session mode works with this Linux VM. A helper DVD will boot once to install xrdp, then the VM restarts normally. Disables Wayland and forces X11 for maximum compatibility. Not available when you switch to a Wayland desktop such as KDE Plasma or GNOME: use Auto or Lamco there."
+                                     AutomationProperties.Name="Configure xrdp for enhanced session">
+                            <TextBlock Text="xrdp — Hyper-V Enhanced Session (disables Wayland, forces X11)" TextWrapping="Wrap"/>
+                        </RadioButton>
+                        <RadioButton
+                                     GroupName="RdpBackend" FontSize="14" Margin="0,4,0,0"
+                                     IsChecked="{Binding IsRdpBackendLamco}"
+                                     IsEnabled="{Binding LamcoOptionEnabled}"
+                                     Visibility="{Binding LamcoOptionVisible, Converter={StaticResource BoolToVis}}"
+                                     ToolTip="Installs Lamco RDP Server, a Wayland-native RDP server built on IronRDP with XDG Desktop Portal + PipeWire. Keeps Wayland enabled. Requires a Wayland-capable desktop (GNOME 45+, KDE Plasma 6.3+) — X11-only desktops such as Xfce must use xrdp. Installs post-boot over SSH (no helper DVD). After first boot, log in at the console once and run 'lamco-rdp-server --grant-permission' to authorize screen sharing (one-time, interactive)."
+                                     AutomationProperties.Name="Configure Lamco RDP Server">
+                            <TextBlock Text="Lamco RDP Server — Wayland-native (preserves Wayland)" TextWrapping="Wrap"/>
+                        </RadioButton>
+                        <ui:InfoBar Title="Lamco: one-time permission grant required" Severity="Informational"
+                                    Message="After the VM first boots, log in at the Hyper-V console once and run 'lamco-rdp-server --grant-permission', then click Allow to authorize screen sharing. This is an interactive Portal dialog that cannot be run over SSH. The server auto-starts on subsequent boots via graphical autologin."
+                                    IsOpen="{Binding IsRdpBackendLamco, Mode=OneWay}" IsClosable="False" Margin="0,8,0,0"
+                                    Visibility="{Binding LamcoOptionVisible, Converter={StaticResource BoolToVis}}"/>
+                        <ui:InfoBar Title="Lamco license notice" Severity="Warning"
+                                    Message="Lamco RDP Server is third-party software under the Business Source License 1.1 (c) Lamco Development LLC. Production use is free for a single server instance (one VM), non-profits, and education/research; running it on multiple VMs requires a commercial license (lamco.ai). It converts to Apache-2.0 on 2029-06-01."
+                                    IsOpen="{Binding IsRdpBackendLamco, Mode=OneWay}" IsClosable="False" Margin="0,4,0,0"
+                                    Visibility="{Binding LamcoOptionVisible, Converter={StaticResource BoolToVis}}"/>
+                        <RadioButton
+                                     GroupName="RdpBackend" FontSize="14" Margin="0,4,0,0"
+                                     IsChecked="{Binding IsRdpBackendWayrdp}"
+                                     Visibility="{Binding WayrdpOptionVisible, Converter={StaticResource BoolToVis}}"
+                                     ToolTip="wayrdp is the project's own MIT-licensed Wayland-native RDP server on FreeRDP 3. Installs post-boot over SSH from a pinned public release download (sha256-verified). Keeps Wayland and captures the compositor headlessly. Supports Hyprland (Omarchy images) only at this time."
+                                     AutomationProperties.Name="Configure wayrdp RDP server">
+                            <TextBlock Text="wayrdp — MIT Wayland-native RDP on FreeRDP 3 (Hyprland)" TextWrapping="Wrap"/>
+                        </RadioButton>
+                        <RadioButton
+                                     GroupName="RdpBackend" FontSize="14" Margin="0,4,0,0"
+                                     IsChecked="{Binding IsRdpBackendNone}"
+                                     ToolTip="No RDP server is installed. Access the VM via the Hyper-V console or SSH only."
+                                     AutomationProperties.Name="No remote desktop">
+                            <TextBlock Text="None — no remote desktop (console/SSH only)" TextWrapping="Wrap"/>
+                        </RadioButton>
+                    </StackPanel>
+                </Border>
 
-            <!-- Desktop Environment card (Linux images with a desktop catalog only) -->
-            <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
-                    CornerRadius="8" Padding="20,16" Margin="0,0,0,12"
-                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1"
-                    Visibility="{Binding ShowDesktopOptions, Converter={StaticResource BoolToVis}}">
-                <StackPanel>
-                    <TextBlock Text="Desktop Environment" FontSize="14" FontWeight="SemiBold"
-                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,0,4"/>
-                    <TextBlock Text="Choose the desktop for this VM. The desktop is installed after first boot — the remote-access solution adapts automatically (Wayland desktops use the Lamco RDP Server where available, X11 desktops use xrdp)."
-                               FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,10"
-                               TextWrapping="Wrap"/>
-                    <RadioButton Content="{Binding DefaultDesktopName, StringFormat='Keep default ({0})'}"
-                                 GroupName="DesktopEnvironment" FontSize="14"
-                                 IsChecked="{Binding IsKeepDefaultDesktop, Mode=OneWay}"
-                                 Command="{Binding SelectDesktopCommand}"
-                                 CommandParameter="{x:Null}"
-                                 ToolTip="Keeps the desktop the image ships with. Nothing is installed or removed."
-                                 AutomationProperties.Name="Keep default desktop environment"/>
-                    <ItemsControl ItemsSource="{Binding DesktopOptions}">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <StackPanel Margin="0,4,0,0">
-                                    <RadioButton GroupName="DesktopEnvironment" FontSize="14"
-                                                 IsChecked="{Binding IsSelected, Mode=OneWay}"
-                                                 Command="{Binding DataContext.SelectDesktopCommand, RelativeSource={RelativeSource AncestorType=Page}}"
-                                                 CommandParameter="{Binding Id}"
-                                                 ToolTip="{Binding Description}"
-                                                 AutomationProperties.Name="{Binding DisplayName}">
-                                        <StackPanel Orientation="Horizontal">
-                                            <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                                            <TextBlock Text="{Binding DisplayServerText}" FontSize="11" Margin="8,0,0,0" VerticalAlignment="Center"
-                                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
-                                            <TextBlock Text="{Binding SizeText}" FontSize="11" Margin="8,0,0,0" VerticalAlignment="Center"
-                                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
-                                            <TextBlock Text="default" FontSize="11" Margin="8,0,0,0" VerticalAlignment="Center"
-                                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                                                       Visibility="{Binding IsDefault, Converter={StaticResource BoolToVis}}"/>
-                                        </StackPanel>
-                                    </RadioButton>
-                                    <TextBlock Text="{Binding Description}" FontSize="12" Margin="22,2,0,0"
-                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                                               TextWrapping="Wrap"/>
-                                </StackPanel>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </StackPanel>
-            </Border>
+                <!-- Desktop Environment card (Linux images with a desktop catalog only) -->
+                <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
+                        CornerRadius="8" Padding="20,16" Margin="0,0,0,12"
+                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1"
+                        Visibility="{Binding ShowDesktopOptions, Converter={StaticResource BoolToVis}}">
+                    <StackPanel>
+                        <TextBlock Text="Desktop Environment" FontSize="14" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,0,4"/>
+                        <TextBlock Text="Choose the desktop for this VM. The desktop is installed after first boot — the remote-access solution adapts automatically (Wayland desktops use the Lamco RDP Server where available, X11 desktops use xrdp)."
+                                   FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,10"
+                                   TextWrapping="Wrap"/>
+                        <RadioButton Content="{Binding DefaultDesktopName, StringFormat='Keep default ({0})'}"
+                                     GroupName="DesktopEnvironment" FontSize="14"
+                                     IsChecked="{Binding IsKeepDefaultDesktop, Mode=OneWay}"
+                                     Command="{Binding SelectDesktopCommand}"
+                                     CommandParameter="{x:Null}"
+                                     ToolTip="Keeps the desktop the image ships with. Nothing is installed or removed."
+                                     AutomationProperties.Name="Keep default desktop environment"/>
+                        <ItemsControl ItemsSource="{Binding DesktopOptions}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Margin="0,4,0,0">
+                                        <RadioButton GroupName="DesktopEnvironment" FontSize="14"
+                                                     IsChecked="{Binding IsSelected, Mode=OneWay}"
+                                                     Command="{Binding DataContext.SelectDesktopCommand, RelativeSource={RelativeSource AncestorType=Page}}"
+                                                     CommandParameter="{Binding Id}"
+                                                     ToolTip="{Binding Description}"
+                                                     AutomationProperties.Name="{Binding DisplayName}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                                <TextBlock Text="{Binding DisplayServerText}" FontSize="11" Margin="8,0,0,0" VerticalAlignment="Center"
+                                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+                                                <TextBlock Text="{Binding SizeText}" FontSize="11" Margin="8,0,0,0" VerticalAlignment="Center"
+                                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+                                                <TextBlock Text="default" FontSize="11" Margin="8,0,0,0" VerticalAlignment="Center"
+                                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                                           Visibility="{Binding IsDefault, Converter={StaticResource BoolToVis}}"/>
+                                            </StackPanel>
+                                        </RadioButton>
+                                        <TextBlock Text="{Binding Description}" FontSize="12" Margin="22,2,0,0"
+                                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                                   TextWrapping="Wrap"/>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
 
-            <!-- Remote Access card (Linux only) -->
-            <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
-                    CornerRadius="8" Padding="20,16" Margin="0,0,0,12"
-                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1"
-                    Visibility="{Binding ShowLinuxOptions, Converter={StaticResource BoolToVis}}">
-                <StackPanel>
-                    <TextBlock Text="Remote Access" FontSize="14" FontWeight="SemiBold"
-                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,0,4"/>
-                    <TextBlock Text="Configure remote desktop access for the virtual machine."
-                               FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,10"/>
-                    <RadioButton Content="Auto select (recommended) — detects Wayland vs X11 after first boot"
-                                 GroupName="RdpBackend" FontSize="14"
-                                 IsChecked="{Binding IsRdpBackendAuto}"
-                                 ToolTip="Detects whether the desktop defaults to Wayland or X11 inside the booted VM, then installs the best-suited RDP backend: the Wayland-native Lamco RDP Server on supported Debian-family distros with a Wayland session, or xrdp otherwise. Nothing RDP-related is pre-installed before boot; the chosen backend is installed post-boot over SSH."
-                                 AutomationProperties.Name="Auto-select RDP backend"/>
-                    <TextBlock Text="{Binding AutoRdpHint}" FontSize="11" Margin="22,2,0,4" TextWrapping="Wrap"
-                               Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                               Visibility="{Binding ShowAutoRdpHint, Converter={StaticResource BoolToVis}}"/>
-                    <RadioButton x:Name="XrdpCheckbox"
-                                 Content="xrdp — Hyper-V Enhanced Session (disables Wayland, forces X11)"
-                                 GroupName="RdpBackend" FontSize="14" Margin="0,4,0,0"
-                                 IsChecked="{Binding IsRdpBackendXrdp}"
-                                 ToolTip="Installs and configures xrdp so Enhanced Session mode works with this Linux VM. A helper DVD will boot once to install xrdp, then the VM restarts normally. Disables Wayland and forces X11 for maximum compatibility."
-                                 AutomationProperties.Name="Configure xrdp for enhanced session"/>
-                    <RadioButton Content="Lamco RDP Server — Wayland-native (preserves Wayland)"
-                                 GroupName="RdpBackend" FontSize="14" Margin="0,4,0,0"
-                                 IsChecked="{Binding IsRdpBackendLamco}"
-                                 IsEnabled="{Binding LamcoOptionEnabled}"
-                                 Visibility="{Binding LamcoOptionVisible, Converter={StaticResource BoolToVis}}"
-                                 ToolTip="Installs Lamco RDP Server, a Wayland-native RDP server built on IronRDP with XDG Desktop Portal + PipeWire. Keeps Wayland enabled. Requires a Wayland-capable desktop (GNOME 45+, KDE Plasma 6.3+) — X11-only desktops such as Xfce must use xrdp. Installs post-boot over SSH (no helper DVD). After first boot, log in at the console once and run 'lamco-rdp-server --grant-permission' to authorize screen sharing (one-time, interactive)."
-                                 AutomationProperties.Name="Configure Lamco RDP Server"/>
-                    <ui:InfoBar Title="Lamco: one-time permission grant required" Severity="Informational"
-                                Message="After the VM first boots, log in at the Hyper-V console once and run 'lamco-rdp-server --grant-permission', then click Allow to authorize screen sharing. This is an interactive Portal dialog that cannot be run over SSH. The server auto-starts on subsequent boots via graphical autologin."
-                                IsOpen="{Binding IsRdpBackendLamco, Mode=OneWay}" IsClosable="False" Margin="0,8,0,0"
-                                Visibility="{Binding LamcoOptionVisible, Converter={StaticResource BoolToVis}}"/>
-                    <ui:InfoBar Title="Lamco license notice" Severity="Warning"
-                                Message="Lamco RDP Server is third-party software under the Business Source License 1.1 (c) Lamco Development LLC. Production use is free for a single server instance (one VM), non-profits, and education/research; running it on multiple VMs requires a commercial license (lamco.ai). It converts to Apache-2.0 on 2029-06-01."
-                                IsOpen="{Binding IsRdpBackendLamco, Mode=OneWay}" IsClosable="False" Margin="0,4,0,0"
-                                Visibility="{Binding LamcoOptionVisible, Converter={StaticResource BoolToVis}}"/>
-                    <RadioButton Content="wayrdp — MIT Wayland-native RDP on FreeRDP 3"
-                                 GroupName="RdpBackend" FontSize="14" Margin="0,4,0,0"
-                                 IsChecked="{Binding IsRdpBackendWayrdp}"
-                                 Visibility="{Binding WayrdpOptionVisible, Converter={StaticResource BoolToVis}}"
-                                 ToolTip="wayrdp is the project's own MIT-licensed Wayland-native RDP server on FreeRDP 3. Installs post-boot over SSH from a pinned public release download (sha256-verified). Keeps Wayland and captures the compositor headlessly; requires a Wayland session (Debian-family or Arch-family distros)."
-                                 AutomationProperties.Name="Configure wayrdp RDP server"/>
-                    <RadioButton Content="None — no remote desktop (console/SSH only)"
-                                 GroupName="RdpBackend" FontSize="14" Margin="0,4,0,0"
-                                 IsChecked="{Binding IsRdpBackendNone}"
-                                 ToolTip="No RDP server is installed. Access the VM via the Hyper-V console or SSH only."
-                                 AutomationProperties.Name="No remote desktop"/>
-                </StackPanel>
-            </Border>
+                <!-- Advanced: SSH Key card (Linux only) -->
+                <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
+                        CornerRadius="8" Padding="20,16" Margin="0,0,0,12"
+                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1"
+                        Visibility="{Binding ShowLinuxOptions, Converter={StaticResource BoolToVis}}">
+                    <StackPanel>
+                        <TextBlock Text="Advanced" FontSize="14" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,0,4"/>
+                        <TextBlock Text="Override the auto-generated SSH key used for post-boot VM configuration." TextWrapping="Wrap"
+                                   FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,10"/>
+                        <CheckBox Content="Use custom SSH public key"
+                                  IsChecked="{Binding UseCustomSshKey}"
+                                  FontSize="14"
+                                  ToolTip="By default, VMCreate generates a per-user Ed25519 keypair. Enable this to provide your own SSH public key instead."
+                                  AutomationProperties.Name="Use custom SSH key"/>
+                        <Grid Margin="24,8,0,0" IsEnabled="{Binding IsSshKeyPathEnabled}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <ui:TextBox Grid.Column="0" PlaceholderText="Path to .pub file..."
+                                        Text="{Binding CustomSshPublicKeyPath, UpdateSourceTrigger=PropertyChanged}"
+                                        AutomationProperties.Name="SSH public key file path"/>
+                            <Button Grid.Column="1" Content="Browse..." Command="{Binding BrowseSshKeyCommand}"
+                                    Margin="8,0,0,0" Padding="12,6"
+                                    AutomationProperties.Name="Browse for SSH public key"/>
+                        </Grid>
+                    </StackPanel>
+                </Border>
 
-            <!-- DNS Configuration card (Linux only) -->
-            <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
-                    CornerRadius="8" Padding="20,16" Margin="0,0,0,12"
-                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1"
-                    Visibility="{Binding ShowLinuxOptions, Converter={StaticResource BoolToVis}}">
-                <StackPanel>
-                    <TextBlock Text="DNS Configuration" FontSize="14" FontWeight="SemiBold"
-                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,0,4"/>
-                    <TextBlock Text="Choose which DNS nameservers the guest VM will use during provisioning. By default, the host machine's DNS servers are forwarded to the guest."
-                               FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,10"
-                               TextWrapping="Wrap"/>
-                    <RadioButton Content="Use host DNS servers"
-                                 IsChecked="{Binding IsHostDns}"
-                                 GroupName="DnsMode" FontSize="14"
-                                 ToolTip="Forwards this machine's DNS servers to the guest VM."
-                                 AutomationProperties.Name="Use host DNS servers"/>
-                    <RadioButton Content="Custom nameservers"
-                                 IsChecked="{Binding IsCustomDns}"
-                                 GroupName="DnsMode" FontSize="14" Margin="0,4,0,0"
-                                 ToolTip="Specify custom DNS nameservers for the guest VM."
-                                 AutomationProperties.Name="Custom nameservers"/>
-                    <ui:TextBox Margin="24,8,0,0"
-                                PlaceholderText="e.g. 9.9.9.9, 1.1.1.1"
-                                Text="{Binding CustomNameservers, UpdateSourceTrigger=PropertyChanged}"
-                                IsEnabled="{Binding IsCustomDns}"
-                                AutomationProperties.Name="Custom DNS nameservers"/>
                 </StackPanel>
-            </Border>
+                <StackPanel>
+                    <!-- Right column; takes the full width when the Linux-only left column is hidden
+                         (Windows images), so the page never shows one half-empty column. -->
+                    <StackPanel.Style>
+                        <Style TargetType="StackPanel">
+                            <Setter Property="Grid.Column" Value="2"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding ShowLinuxOptions}" Value="False">
+                                    <Setter Property="Grid.Column" Value="0"/>
+                                    <Setter Property="Grid.ColumnSpan" Value="3"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </StackPanel.Style>
+                <!-- Integration Services card -->
+                <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
+                        CornerRadius="8" Padding="20,16" Margin="0,0,0,12"
+                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
+                    <StackPanel>
+                        <TextBlock Text="Integration Services" FontSize="14" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,0,4"/>
+                        <TextBlock Text="Hyper-V integration services enable clipboard sharing, drive redirection, and automatic IP discovery via Enhanced Session Mode."
+                                   FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,10"
+                                   TextWrapping="Wrap"/>
+                        <CheckBox Content="Enable Hyper-V integration services"
+                                  IsChecked="{Binding EnableIntegrationServices}"
+                                  FontSize="14"
+                                  ToolTip="Controls Guest Service Interface and Enhanced Session Mode (RDP over VMBus)."
+                                  AutomationProperties.Name="Enable Hyper-V integration services"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- DNS Configuration card (Linux only) -->
+                <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
+                        CornerRadius="8" Padding="20,16" Margin="0,0,0,12"
+                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1"
+                        Visibility="{Binding ShowLinuxOptions, Converter={StaticResource BoolToVis}}">
+                    <StackPanel>
+                        <TextBlock Text="DNS Configuration" FontSize="14" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,0,4"/>
+                        <TextBlock Text="Choose which DNS nameservers the guest VM will use during provisioning. By default, the host machine's DNS servers are forwarded to the guest."
+                                   FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,10"
+                                   TextWrapping="Wrap"/>
+                        <RadioButton Content="Use host DNS servers"
+                                     IsChecked="{Binding IsHostDns}"
+                                     GroupName="DnsMode" FontSize="14"
+                                     ToolTip="Forwards this machine's DNS servers to the guest VM."
+                                     AutomationProperties.Name="Use host DNS servers"/>
+                        <RadioButton Content="Custom nameservers"
+                                     IsChecked="{Binding IsCustomDns}"
+                                     GroupName="DnsMode" FontSize="14" Margin="0,4,0,0"
+                                     ToolTip="Specify custom DNS nameservers for the guest VM."
+                                     AutomationProperties.Name="Custom nameservers"/>
+                        <ui:TextBox Margin="24,8,0,0"
+                                    PlaceholderText="e.g. 9.9.9.9, 1.1.1.1"
+                                    Text="{Binding CustomNameservers, UpdateSourceTrigger=PropertyChanged}"
+                                    IsEnabled="{Binding IsCustomDns}"
+                                    AutomationProperties.Name="Custom DNS nameservers"/>
+                    </StackPanel>
+                </Border>
+
+                </StackPanel>
+            </Grid>
 
             <!-- HTB VPN card (security distributions only) -->
             <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
@@ -204,53 +274,65 @@
                                FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,10"
                                TextWrapping="Wrap"/>
 
-                    <!-- API Token input -->
-                    <TextBlock Text="App Token  (from app.hackthebox.com/profile/settings — stored securely after a successful deploy)"
-                               FontSize="12"
-                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,4"/>
-                    <Grid Margin="0,0,0,6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <ui:TextBox Grid.Column="0" PlaceholderText="Paste your HTB App Token..."
-                                    Text="{Binding HtbApiToken, UpdateSourceTrigger=PropertyChanged}"
-                                    AutomationProperties.Name="HTB API Token"/>
-                        <Button Grid.Column="1" Content="Download VPN Keys"
-                                Command="{Binding DownloadVpnKeysCommand}"
-                                Margin="8,0,0,0" Padding="12,6"
-                                AutomationProperties.Name="Download VPN keys from HTB"/>
-                    </Grid>
-
-                    <!-- Download status list -->
-                    <ItemsControl ItemsSource="{Binding VpnKeyStatuses}" Margin="0,0,0,4">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <StackPanel Orientation="Horizontal" Margin="4,2">
-                                    <TextBlock Text="{Binding StatusIcon}" FontSize="14" Margin="0,0,6,0" VerticalAlignment="Center"/>
-                                    <TextBlock Text="{Binding Name}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,6,0"
-                                               Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
-                                    <TextBlock Text="{Binding StatusText}" FontSize="12" VerticalAlignment="Center"
-                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
-                                </StackPanel>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-
-                    <!-- Manual fallback -->
-                    <TextBlock Text="Or select a .ovpn file manually:" FontSize="12"
-                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,6,0,4"/>
+                    <!-- Token download | manual .ovpn, side by side -->
                     <Grid>
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="3*"/>
+                            <ColumnDefinition Width="24"/>
+                            <ColumnDefinition Width="2*"/>
                         </Grid.ColumnDefinitions>
-                        <ui:TextBox Grid.Column="0" PlaceholderText="Path to .ovpn file..."
-                                    Text="{Binding OvpnFilePath, UpdateSourceTrigger=PropertyChanged}"
-                                    AutomationProperties.Name="OpenVPN configuration file path"/>
-                        <Button Grid.Column="1" Content="Browse..." Command="{Binding BrowseOvpnCommand}"
-                                Margin="8,0,0,0" Padding="12,6"
-                                AutomationProperties.Name="Browse for OVPN file"/>
+                        <StackPanel Grid.Column="0">
+                            <!-- API Token input -->
+                            <TextBlock Text="App Token  (from app.hackthebox.com/profile/settings — stored securely after a successful deploy)" TextWrapping="Wrap"
+                                       FontSize="12"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,4"/>
+                            <Grid Margin="0,0,0,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <ui:TextBox Grid.Column="0" PlaceholderText="Paste your HTB App Token..."
+                                            Text="{Binding HtbApiToken, UpdateSourceTrigger=PropertyChanged}"
+                                            AutomationProperties.Name="HTB API Token"/>
+                                <Button Grid.Column="1" Content="Download VPN Keys"
+                                        Command="{Binding DownloadVpnKeysCommand}"
+                                        Margin="8,0,0,0" Padding="12,6"
+                                        AutomationProperties.Name="Download VPN keys from HTB"/>
+                            </Grid>
+
+                            <!-- Download status list -->
+                            <ItemsControl ItemsSource="{Binding VpnKeyStatuses}" Margin="0,0,0,4">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Orientation="Horizontal" Margin="4,2">
+                                            <TextBlock Text="{Binding StatusIcon}" FontSize="14" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                                            <TextBlock Text="{Binding Name}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,6,0"
+                                                       Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
+                                            <TextBlock Text="{Binding StatusText}" FontSize="12" VerticalAlignment="Center"
+                                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <!-- Manual fallback -->
+                            <TextBlock Text="Or select a .ovpn file manually:" FontSize="12"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,4"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <ui:TextBox Grid.Column="0" PlaceholderText="Path to .ovpn file..."
+                                            Text="{Binding OvpnFilePath, UpdateSourceTrigger=PropertyChanged}"
+                                            AutomationProperties.Name="OpenVPN configuration file path"/>
+                                <Button Grid.Column="1" Content="Browse..." Command="{Binding BrowseOvpnCommand}"
+                                        Margin="8,0,0,0" Padding="12,6"
+                                        AutomationProperties.Name="Browse for OVPN file"/>
+                            </Grid>
+                        </StackPanel>
                     </Grid>
                 </StackPanel>
             </Border>
@@ -300,36 +382,6 @@
                               FontSize="12" Margin="24,6,0,0"
                               IsEnabled="{Binding ElasticAiEnabled}"
                               AutomationProperties.Name="Start Elastic trial license"/>
-                </StackPanel>
-            </Border>
-
-            <!-- Advanced: SSH Key card (Linux only) -->
-            <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
-                    CornerRadius="8" Padding="20,16" Margin="0,0,0,12"
-                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1"
-                    Visibility="{Binding ShowLinuxOptions, Converter={StaticResource BoolToVis}}">
-                <StackPanel>
-                    <TextBlock Text="Advanced" FontSize="14" FontWeight="SemiBold"
-                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,0,4"/>
-                    <TextBlock Text="Override the auto-generated SSH key used for post-boot VM configuration."
-                               FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,10"/>
-                    <CheckBox Content="Use custom SSH public key"
-                              IsChecked="{Binding UseCustomSshKey}"
-                              FontSize="14"
-                              ToolTip="By default, VMCreate generates a per-user Ed25519 keypair. Enable this to provide your own SSH public key instead."
-                              AutomationProperties.Name="Use custom SSH key"/>
-                    <Grid Margin="24,8,0,0" IsEnabled="{Binding IsSshKeyPathEnabled}">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <ui:TextBox Grid.Column="0" PlaceholderText="Path to .pub file..."
-                                    Text="{Binding CustomSshPublicKeyPath, UpdateSourceTrigger=PropertyChanged}"
-                                    AutomationProperties.Name="SSH public key file path"/>
-                        <Button Grid.Column="1" Content="Browse..." Command="{Binding BrowseSshKeyCommand}"
-                                Margin="8,0,0,0" Padding="12,6"
-                                AutomationProperties.Name="Browse for SSH public key"/>
-                    </Grid>
                 </StackPanel>
             </Border>
 
