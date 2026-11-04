@@ -300,6 +300,23 @@ done
 # kill any straggler so a wedged session (the black-screen login) cannot
 # hold the vsock listener open.
 pkill -x xrdp-sesexec 2>/dev/null || true
+# The session itself outlives both: its Xorg and desktop are reparented to
+# PID 1 inside the session scope (live, Kali + KDE: Enhanced Session reached
+# the stock xrdp mid-deployment, and the orphaned nested KWin wedged the
+# kscreen-doctor call below and held graphical-session.target). Ending the
+# logind session removes the whole scope.
+if command -v loginctl >/dev/null 2>&1; then
+    for sid in $(loginctl list-sessions --no-legend 2>/dev/null | awk '{ print $1 }'); do
+        if [ "$(loginctl show-session "$sid" -p Service --value 2>/dev/null)" = "xrdp-sesman" ]; then
+            if loginctl terminate-session "$sid" 2>/dev/null; then
+                echo "Ended orphaned xrdp session $sid."
+            else
+                echo "DEGRADED: could not end xrdp session $sid — its desktop may hold the user's graphical session."
+                DEGRADED=1
+            fi
+        fi
+    done
+fi
 # Belt-and-braces: pgrep is a single command — no pipeline that can
 # silently no-op (the ss|grep|grep chain died with the same class of
 # bug as the existence check above). Keyed on the process NAME, not the
@@ -1020,10 +1037,26 @@ MONITORS_EOF
     # This runs after the Wayland session starts (the systemd service has
     # ConditionEnvironment=WAYLAND_DISPLAY), so kscreen-doctor can connect.
     if command -v kscreen-doctor >/dev/null 2>&1; then
-        # Try to set the configured resolution — the best mode for RDP
-        sudo -u "$AUTOLOGIN_USER" WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/"$(id -u "$AUTOLOGIN_USER")" \
-            kscreen-doctor output.1.mode.__CONSOLE_RESOLUTION__ 2>/dev/null || true
-        echo "Set KScreen resolution to __CONSOLE_RESOLUTION__ via kscreen-doctor."
+        # Only against the user's local (seat0) Wayland session: wayland-0
+        # can belong to another session — an orphaned xrdp login ran a
+        # nested KWin there and kscreen-doctor waited on it forever (live,
+        # Kali + KDE). Bounded by a timeout either way.
+        KSCREEN_LOCAL=""
+        for sid in $(loginctl list-sessions --no-legend 2>/dev/null | awk -v u="$AUTOLOGIN_USER" '$3 == u { print $1 }'); do
+            if [ "$(loginctl show-session "$sid" -p Seat --value 2>/dev/null)" = "seat0" ] \
+                && [ "$(loginctl show-session "$sid" -p Type --value 2>/dev/null)" = "wayland" ]; then
+                KSCREEN_LOCAL="$sid"
+                break
+            fi
+        done
+        if [ -z "$KSCREEN_LOCAL" ]; then
+            echo "No local Wayland session for $AUTOLOGIN_USER yet — kscreen-doctor skipped (KWin applies its own default)."
+        elif timeout 10 sudo -u "$AUTOLOGIN_USER" WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/"$(id -u "$AUTOLOGIN_USER")" \
+            kscreen-doctor output.1.mode.__CONSOLE_RESOLUTION__ >/dev/null 2>&1; then
+            echo "Set KScreen resolution to __CONSOLE_RESOLUTION__ via kscreen-doctor."
+        else
+            echo "kscreen-doctor could not set __CONSOLE_RESOLUTION__ (failed or timed out) — KWin keeps its current mode."
+        fi
     else
         echo "kscreen-doctor not found — KWin will use DRM default (1024x768)."
     fi
