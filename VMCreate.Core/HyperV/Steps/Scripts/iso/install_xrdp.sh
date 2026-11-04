@@ -252,16 +252,28 @@ fi
 # KDE Plasma) requires UTF-8 for string handling, D-Bus messages, icon theme
 # names, config paths, and font rendering. Without it, kwin_x11 starts but
 # plasmashell fails to initialize — resulting in a black screen with only a
-# cursor. We detect the broken locale and upgrade to the best available UTF-8
-# locale before any DE is launched.
-if [ -z "$LANG" ] || [ "$LANG" = "C" ] || [ "$LANG" = "POSIX" ]; then
-    if locale -a 2>/dev/null | grep -qi 'en_US.utf8'; then
-        export LANG=en_US.UTF-8
-    elif locale -a 2>/dev/null | grep -qi 'C.utf8'; then
-        export LANG=C.UTF-8
-    fi
+# cursor. Before any DE is launched we pick a UTF-8 locale that is actually
+# installed: the session's own, the system default, en_US, C.UTF-8, or else any
+# UTF-8 locale. A LANG naming a missing locale (en_US on an image that only ships
+# en_IE, for example) is as broken as LANG=C, so it is replaced too.
+have_locale() {
+    want=$(printf '%s' "$1" | tr 'A-Z' 'a-z' | sed 's/utf-8/utf8/')
+    locale -a 2>/dev/null | tr 'A-Z' 'a-z' | grep -qx "$want"
+}
+pick=""
+system_lang=$(sed -n 's/^LANG=//p' /etc/default/locale /etc/locale.conf 2>/dev/null | tr -d '"' | head -n 1)
+for candidate in "$LANG" "$system_lang" en_US.UTF-8 C.UTF-8; do
+    case "$candidate" in
+        *[Uu][Tt][Ff]8|*[Uu][Tt][Ff]-8) have_locale "$candidate" && { pick="$candidate"; break; } ;;
+    esac
+done
+if [ -z "$pick" ]; then
+    pick=$(locale -a 2>/dev/null | grep -iE 'utf-?8$' | head -n 1)
 fi
-export LC_ALL="${LANG}"
+if [ -n "$pick" ]; then
+    export LANG="$pick"
+    export LC_ALL="$pick"
+fi
 
 # D-Bus session bus (required by KDE, GNOME and most modern DEs)
 if [ -z "$DBUS_SESSION_BUS_ADDRESS" ] && command -v dbus-launch >/dev/null 2>&1; then
