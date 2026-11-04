@@ -7,7 +7,8 @@ namespace VMCreate.Gallery
     /// Linux base (tag <c>blackarch</c>) that ships <b>headless</b>. Unlike
     /// Kali (whose Hyper-V image ships with Xfce), there is no pre-installed
     /// desktop, so the default is "No desktop" and every graphical option is
-    /// installed post-boot by <c>DesktopSwitchStep</c> with
+    /// installed (from the official Arch repos, before first boot) by
+    /// <c>DesktopSwitchStep</c> with
     /// <c>desktop_switch_pacman.sh</c>, which re-verifies package/group
     /// existence against the live pacman databases — the authoritative source
     /// is the distro itself, not this catalog.

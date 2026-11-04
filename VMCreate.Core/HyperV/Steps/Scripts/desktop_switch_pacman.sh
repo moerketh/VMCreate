@@ -1,20 +1,23 @@
 #!/bin/bash
 set -o pipefail
 
-# Switches an Arch Linux guest to a desktop environment post-boot. Generic
-# across desktops: the step (DesktopSwitchStep) injects the target desktop's
+# Switches an Arch Linux guest to a desktop environment. Generic across
+# desktops: the step (DesktopSwitchStep) injects the target desktop's
 # parameters directly below the shebang:
 #
 #   DESKTOP_PACKAGES            space-separated, shell-quoted package/group names
 #   DESKTOP_PACKAGES_TO_REMOVE  space-separated, shell-quoted packages to remove
 #   DESKTOP_SESSION_STARTER     session starter to make default ("" = DM decides)
 #   DESKTOP_DISPLAY_MANAGER     display manager to pin as default ("" = keep)
+#   DESKTOP_SWITCH_CONTEXT      "chroot" or "live" (informational here: every
+#                               action below is chroot-safe — packages, files
+#                               and enable-state only; pacman starts nothing)
 #
-# pacman-family counterpart to desktop_switch_apt.sh. Runs BEFORE the Auto
-# RDP backend detection (AutoRdpBackendResolveStep, order 232) so the
-# detector sees the new default session. In BlackArch deployments the repo
-# strap (BlackArchInstallStep, order 230) has already landed, so the BlackArch
-# repos are part of the package set pacman resolves against.
+# pacman-family counterpart to desktop_switch_apt.sh. Runs in the ISO chroot
+# (post-boot in the cloud-init flow), BEFORE the Auto RDP backend detection
+# (AutoRdpBackendResolveStep, order 232) so the detector sees the new
+# default session. The desktops come from the official Arch repos; the
+# BlackArch repo strap (BlackArchInstallStep, post-boot) is no prerequisite.
 #
 # Arch differs from Debian in ways that shape this script: there is no
 # update-alternatives x-session-manager mechanism (the display manager alone

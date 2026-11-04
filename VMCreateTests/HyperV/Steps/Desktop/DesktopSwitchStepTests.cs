@@ -200,6 +200,104 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
+        public async Task ExecuteAsync_RecordsSwitchedDisplayServer_ForTheAutoResolver()
+        {
+            SetupScriptResult("DESKTOP_SWITCH_RESULT=ok");
+            var c = new VmCustomizations { RdpBackend = RdpBackend.Auto, DesktopEnvironmentId = "gnome" };
+
+            await _step.ExecuteAsync(_shell.Object, _kaliItem, c, _logger.Object, CancellationToken.None);
+
+            Assert.IsNull(c.DesktopEnvironmentId);
+            Assert.AreEqual(DesktopDisplayServer.WaylandDefault, c.SwitchedDesktopDisplayServer,
+                "the resolver must know the switch landed on Wayland, so it never falls back to xrdp");
+        }
+
+        [TestMethod]
+        public void BuildScript_KaliGnome_PurgesXfceCore_AndUndoesX11Pins()
+        {
+            var gnome = new KaliDesktopCatalog().Resolve("gnome")!;
+
+            string script = DesktopSwitchStep.BuildScript(gnome, DesktopPackageManager.Apt);
+
+            StringAssert.Contains(script, "DESKTOP_DISPLAY_SERVER='wayland'");
+            // The meta alone left xfce4 installed (desktop-base's "... | xfce4"
+            // dependency keeps it out of autoremove).
+            foreach (var pkg in new[] { "kali-desktop-xfce", "xfce4", "xfce4-session", "xfwm4", "xfdesktop4", "xfce4-panel", "thunar", "lightdm" })
+                StringAssert.Contains(script.Split('\n').First(l => l.StartsWith("DESKTOP_PACKAGES_TO_REMOVE=")), pkg);
+            StringAssert.Contains(script, "apt-get -s purge", "dry run before the purge");
+            StringAssert.Contains(script, "#WaylandEnable=false", "gdm3's X11 pin is undone for a Wayland desktop");
+            StringAssert.Contains(script, "/var/lib/AccountsService/users/", "stale remembered sessions are dropped");
+        }
+
+        [TestMethod]
+        public void BuildScript_X11Desktop_InjectsX11()
+        {
+            var xfce = new BlackArchDesktopCatalog().Resolve("xfce")!;
+
+            string script = DesktopSwitchStep.BuildScript(xfce, DesktopPackageManager.Pacman);
+
+            StringAssert.Contains(script, "DESKTOP_DISPLAY_SERVER='x11'");
+        }
+
+        [TestMethod]
+        public void SupportsChroot_SwitchesBeforeFirstBoot()
+        {
+            // No desktop runs during the swap, so nothing can log into the
+            // half-built desktop (the stock-xrdp race). Both catalogs: the
+            // BlackArch desktops come from the official Arch repos, not the
+            // post-boot BlackArch strap.
+            Assert.IsTrue(_step.SupportsChroot);
+            Assert.IsFalse(((ICustomizationStep)_step).RunsAfterChroot, "a switch that landed in the chroot never re-runs post-boot");
+        }
+
+        [TestMethod]
+        public void BuildScript_InjectsExecutionContext()
+        {
+            var kde = new KaliDesktopCatalog().Resolve("kde")!;
+            var plasma = new BlackArchDesktopCatalog().Resolve("kde")!;
+
+            StringAssert.Contains(DesktopSwitchStep.BuildScript(kde, DesktopPackageManager.Apt),
+                "DESKTOP_SWITCH_CONTEXT='live'");
+            StringAssert.Contains(DesktopSwitchStep.BuildScript(kde, DesktopPackageManager.Apt, GuestExecutionContext.Chroot),
+                "DESKTOP_SWITCH_CONTEXT='chroot'");
+            StringAssert.Contains(DesktopSwitchStep.BuildScript(plasma, DesktopPackageManager.Pacman, GuestExecutionContext.Chroot),
+                "DESKTOP_SWITCH_CONTEXT='chroot'");
+        }
+
+        [TestMethod]
+        public void BuildScript_WaylandTarget_DisablesStockXrdp_AndEndsItsSessionsLive()
+        {
+            var kde = new KaliDesktopCatalog().Resolve("kde")!;
+
+            string script = DesktopSwitchStep.BuildScript(kde, DesktopPackageManager.Apt, GuestExecutionContext.Chroot);
+
+            // Live: Enhanced Session reached the stock xrdp mid-switch and the
+            // orphaned nested-KDE session wedged the Lamco install.
+            StringAssert.Contains(script, "for unit in xrdp.service xrdp-sesman.service");
+            StringAssert.Contains(script, "systemctl disable \"$unit\"", "enable-state works offline");
+            StringAssert.Contains(script, "loginctl terminate-session", "live: xrdp sessions outlive a stopped xrdp");
+            StringAssert.Contains(script, "if [ \"$DESKTOP_SWITCH_CONTEXT\" = \"live\" ]; then",
+                "stopping services and sessions is live-only (no systemd in the chroot)");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_ChrootShell_RunsTheScriptInChrootMode()
+        {
+            string? copiedContent = null;
+            _shell.Setup(s => s.Context).Returns(GuestExecutionContext.Chroot);
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, path, _) => copiedContent = content)
+                  .Returns(Task.CompletedTask);
+            SetupScriptResult("DESKTOP_SWITCH_RESULT=ok");
+
+            await _step.ExecuteAsync(_shell.Object, _kaliItem, _kdeCustomizations, _logger.Object, CancellationToken.None);
+
+            StringAssert.Contains(copiedContent, "DESKTOP_SWITCH_CONTEXT='chroot'");
+            Assert.IsNull(_kdeCustomizations.DesktopEnvironmentId,
+                "the switch landed in the chroot: the resolver and X11 fixups run right after it there");
+        }
+
+        [TestMethod]
         public void BuildScript_RejectsUnsafeCatalogValues()
         {
             // Catalog data is trusted offline data, but the injection must

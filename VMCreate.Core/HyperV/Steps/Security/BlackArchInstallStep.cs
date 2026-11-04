@@ -29,12 +29,11 @@ namespace VMCreate
     /// the core groups installed but a best-effort extra package failed.
     /// </para>
     /// <para>
-    /// Runs at Order 230, immediately BEFORE <see cref="DesktopSwitchStep"/>
-    /// (231): the BlackArch repos must be in place before the desktop switch
-    /// drives pacman, so a desktop chosen in the wizard resolves against the
-    /// combined Arch+BlackArch package set. Both steps run before
-    /// <see cref="AutoRdpBackendResolveStep"/> (232), so the Auto RDP
-    /// detection then sees the post-switch default session.
+    /// Runs post-boot at Order 230. The desktop switch
+    /// (<see cref="DesktopSwitchStep"/>, 231) does not depend on it: the
+    /// desktops come from the official Arch repos, and the switch is
+    /// chroot-capable, so on an ISO-stage deployment it has already run
+    /// before first boot.
     /// </para>
     /// </summary>
     public class BlackArchInstallStep : IConfigurableCustomizationStep, IDistributionOptionMetadata
