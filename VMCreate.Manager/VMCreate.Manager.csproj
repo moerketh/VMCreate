@@ -9,6 +9,7 @@
     <RootNamespace>VMCreate.Manager</RootNamespace>
     <AssemblyName>VMCreate.Manager</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\vmcreate-manager.ico</ApplicationIcon>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
@@ -19,6 +20,11 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="VMCreate.Manager.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Title bar icon; the .ico is the exe and taskbar icon (Assets/make_icons.py draws both). -->
+    <Resource Include="Assets\vmcreate-manager.png" />
   </ItemGroup>
 
   <ItemGroup>

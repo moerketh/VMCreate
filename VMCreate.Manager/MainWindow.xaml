@@ -59,7 +59,7 @@
 
         <ui:TitleBar Grid.Row="0" Title="VMCreate Manager">
             <ui:TitleBar.Icon>
-                <ui:SymbolIcon Symbol="Server24"/>
+                <ui:ImageIcon Source="pack://application:,,,/VMCreate.Manager;component/Assets/vmcreate-manager.png" Width="16" Height="16"/>
             </ui:TitleBar.Icon>
         </ui:TitleBar>
 
