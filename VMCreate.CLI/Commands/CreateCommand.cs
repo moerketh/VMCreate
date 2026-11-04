@@ -780,31 +780,19 @@ namespace VMCreate.CLI.Commands
             // Same fail-loudly contract as --rdp-backend: an unknown or
             // unoffered desktop must not silently deploy the stock desktop.
             string? desktopEnvironmentId = null;
-            DesktopEnvironmentOption? desktopOption = null;
+            var desktopCatalog = services.GetServices<IDesktopEnvironmentCatalog>().ForItem(galleryItem);
+            DesktopEnvironmentOption? desktopOption = desktopCatalog?.Default;
             if (!string.IsNullOrEmpty(args.Desktop))
             {
-                var catalogs = services.GetServices<IDesktopEnvironmentCatalog>();
-                var catalog = catalogs.ForItem(galleryItem);
-                desktopOption = catalog?.Resolve(args.Desktop);
+                desktopOption = desktopCatalog?.Resolve(args.Desktop);
 
                 if (desktopOption == null)
                 {
-                    string offered = catalog == null
+                    string offered = desktopCatalog == null
                         ? "this image offers no desktop switching"
-                        : $"valid values for this image: {string.Join(", ", catalog.Options.Select(o => o.Id))}";
+                        : $"valid values for this image: {string.Join(", ", desktopCatalog.Options.Select(o => o.Id))}";
                     PrintError(jsonMode, "validation",
                         $"Unknown --desktop value '{args.Desktop}' ({offered}).");
-                    return ExitCodes.InvalidArguments;
-                }
-
-                // Desktop/RDP coupling: the Wayland-native Lamco backend
-                // cannot serve an X11-only desktop (the GUI enforces the
-                // same rule at selection time).
-                if (rdpBackend == RdpBackend.Lamco && !desktopOption.LamcoSupported)
-                {
-                    PrintError(jsonMode, "validation",
-                        $"--rdp-backend lamco cannot be combined with the X11-only desktop " +
-                        $"'{desktopOption.DisplayName}' — use auto or xrdp.");
                     return ExitCodes.InvalidArguments;
                 }
 
@@ -812,6 +800,16 @@ namespace VMCreate.CLI.Commands
                 // keeping the default — no switch step needed.
                 if (!desktopOption.IsDefault)
                     desktopEnvironmentId = desktopOption.Id;
+            }
+
+            // Desktop/RDP coupling (the GUI enforces the same rules at
+            // selection time): xrdp only on X11 desktops, Lamco only on
+            // Lamco-capable ones, wayrdp only on Omarchy. Checked against the
+            // stock desktop too when --desktop is absent.
+            if (RdpDesktopCompatibility.Validate(galleryItem, rdpBackend, desktopOption) is { } rdpDesktopError)
+            {
+                PrintError(jsonMode, "validation", $"--rdp-backend {args.RdpBackend}: {rdpDesktopError}");
+                return ExitCodes.InvalidArguments;
             }
 
             // ── Validate static addressing ────────────────────────────────────

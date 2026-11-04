@@ -81,6 +81,7 @@ namespace VMCreate
             // re-typed. Editing the token here overrides the stored one for
             // this run only.
             _selectedRdpBackend = wizardData.Customizations.RdpBackend;
+            NormalizeRdpBackend();
             _isCustomDns = wizardData.Customizations.DnsMode == DnsMode.Custom;
             _customNameservers = wizardData.Customizations.CustomNameservers ?? "";
             _syncTimezone = wizardData.Customizations.SyncTimezone;
@@ -110,8 +111,39 @@ namespace VMCreate
         public RdpBackend SelectedRdpBackend
         {
             get => _selectedRdpBackend;
-            set => SetProperty(ref _selectedRdpBackend, value);
+            set
+            {
+                if (!SetProperty(ref _selectedRdpBackend, value))
+                    return;
+                RdpBackendNotice = null;
+                // The radios bind to these views; a programmatic reset (e.g.
+                // xrdp → Auto after picking GNOME) must move the check too.
+                OnPropertyChanged(nameof(IsRdpBackendAuto));
+                OnPropertyChanged(nameof(IsRdpBackendXrdp));
+                OnPropertyChanged(nameof(IsRdpBackendLamco));
+                OnPropertyChanged(nameof(IsRdpBackendWayrdp));
+                OnPropertyChanged(nameof(IsRdpBackendNone));
+                OnPropertyChanged(nameof(ConfigureXrdp));
+            }
         }
+
+        /// <summary>
+        /// Why the RDP backend was just changed for the user (e.g. xrdp reset
+        /// to Auto after picking GNOME); null when nothing was changed. Shown
+        /// under the Remote Access radios, cleared by the next explicit pick.
+        /// </summary>
+        public string? RdpBackendNotice
+        {
+            get => _rdpBackendNotice;
+            private set
+            {
+                if (SetProperty(ref _rdpBackendNotice, value))
+                    OnPropertyChanged(nameof(HasRdpBackendNotice));
+            }
+        }
+        private string? _rdpBackendNotice;
+
+        public bool HasRdpBackendNotice => !string.IsNullOrEmpty(_rdpBackendNotice);
 
         // Back-compat boolean view over SelectedRdpBackend for the Auto radio.
         public bool IsRdpBackendAuto
@@ -160,6 +192,15 @@ namespace VMCreate
         /// end-to-end). Same shape as <see cref="LamcoOptionVisible"/>.
         /// </summary>
         public bool WayrdpOptionVisible => SelectedItem?.SupportsWayrdp() ?? false;
+
+        /// <summary>
+        /// True when the xrdp radio is selectable: always on images without a
+        /// desktop catalog (they keep the Force X11 fallback), otherwise only
+        /// when the effective desktop is X11-only. KDE and GNOME run on
+        /// Wayland; forcing them onto X11 for xrdp is not offered.
+        /// </summary>
+        public bool XrdpOptionEnabled =>
+            _desktopCatalog == null || (EffectiveDesktop?.XrdpSupported ?? true);
 
         // ── Desktop Environment card ────────────────────────────────────
 
@@ -224,7 +265,7 @@ namespace VMCreate
                 if (!LamcoOptionVisible)
                     return "";
                 return LamcoOptionEnabled
-                    ? "Auto will detect the session after boot — typically the Lamco RDP Server for this desktop."
+                    ? "This desktop runs on Wayland — Auto will install the Lamco RDP Server (xrdp needs X11)."
                     : "This desktop is X11-only — Auto will install xrdp (the Lamco RDP Server needs Wayland).";
             }
         }
@@ -245,12 +286,38 @@ namespace VMCreate
                 {
                     OnPropertyChanged(nameof(EffectiveDesktop));
                     OnPropertyChanged(nameof(LamcoOptionEnabled));
+                    OnPropertyChanged(nameof(XrdpOptionEnabled));
                     OnPropertyChanged(nameof(AutoRdpHint));
                     OnPropertyChanged(nameof(ShowAutoRdpHint));
-                    if (!LamcoOptionEnabled && _selectedRdpBackend == RdpBackend.Lamco)
-                        SelectedRdpBackend = RdpBackend.Auto;
+                    NormalizeRdpBackend();
                 }
             }
+        }
+
+        /// <summary>
+        /// Resets an RDP backend the image or the effective desktop cannot
+        /// use to Auto, and says why (<see cref="RdpBackendNotice"/>), rather
+        /// than letting the deployment refuse it later.
+        /// </summary>
+        private void NormalizeRdpBackend()
+        {
+            string? reason = _selectedRdpBackend switch
+            {
+                RdpBackend.Xrdp when !XrdpOptionEnabled =>
+                    $"xrdp needs an X11 desktop and {EffectiveDesktop?.DisplayName} runs on Wayland, so Remote Access was set to Auto.",
+                RdpBackend.Lamco when !LamcoOptionEnabled && LamcoOptionVisible =>
+                    $"The Lamco RDP Server needs a Wayland desktop and {EffectiveDesktop?.DisplayName ?? "this desktop"} is X11-only, so Remote Access was set to Auto.",
+                RdpBackend.Lamco when !LamcoOptionVisible =>
+                    "The Lamco RDP Server is not available for this image, so Remote Access was set to Auto.",
+                RdpBackend.Wayrdp when !WayrdpOptionVisible =>
+                    "wayrdp only supports Hyprland (Omarchy) at this time, so Remote Access was set to Auto.",
+                _ => null,
+            };
+            if (reason == null)
+                return;
+            _logger.LogInformation("RDP backend {Backend} reset to Auto: {Reason}", _selectedRdpBackend, reason);
+            SelectedRdpBackend = RdpBackend.Auto;
+            RdpBackendNotice = reason;
         }
 
         /// <summary>
@@ -444,15 +511,11 @@ namespace VMCreate
                 ? null
                 : _selectedDesktopEnvironmentId;
 
-            // The desktop/RDP coupling is enforced at selection time (an
-            // X11-only desktop resets an explicit Lamco choice to Auto);
-            // re-check defensively in case state was set programmatically.
-            if (!LamcoOptionEnabled && _selectedRdpBackend == RdpBackend.Lamco)
-            {
-                _logger.LogWarning(
-                    "Explicit Lamco RDP backend with a non-Lamco desktop — resetting to Auto.");
-                _selectedRdpBackend = RdpBackend.Auto;
-            }
+            // The desktop/RDP coupling is enforced at selection time (a
+            // desktop the backend cannot serve resets it to Auto); re-check
+            // defensively in case state was set programmatically. The
+            // deployment refuses the same combinations.
+            NormalizeRdpBackend();
 
             _wizardData.Customizations.RdpBackend = _selectedRdpBackend;
             _wizardData.Customizations.HtbVpnKeys = new List<HtbVpnKey>(_downloadedKeys);

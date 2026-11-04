@@ -184,6 +184,63 @@ namespace VMCreate.Tests.HyperV.Steps
             Assert.IsTrue(LoggedWarning(_logger));
         }
 
+        // ── After a switch to a Wayland desktop: never xrdp ─────────────
+
+        [TestMethod]
+        public async Task ExecuteAsync_SwitchedToWayland_X11Detected_StillResolvesLamco()
+        {
+            // A leftover X11 pin can make detection read x11 after a switch
+            // to GNOME/KDE; xrdp there would force a Wayland desktop onto
+            // X11 (GNOME 49+ has no X11 session at all).
+            SetupScriptOutput("RDP_DETECT=x11");
+            var c = new VmCustomizations { RdpBackend = RdpBackend.Auto, SwitchedDesktopDisplayServer = DesktopDisplayServer.WaylandDefault };
+
+            await _step.ExecuteAsync(_shell.Object, _lamcoCapableItem, c, _logger.Object, CancellationToken.None);
+
+            Assert.AreEqual(RdpBackend.Lamco, c.RdpBackend);
+            Assert.IsTrue(LoggedWarning(_logger), "overriding the detection verdict must warn");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_SwitchedToWayland_DetectionFailed_ResolvesLamcoFromGalleryHint()
+        {
+            SetupScriptOutput("no detect line");
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .ThrowsAsync(new InvalidOperationException("ssh lost"));
+            var c = new VmCustomizations { RdpBackend = RdpBackend.Auto, SwitchedDesktopDisplayServer = DesktopDisplayServer.WaylandDefault };
+
+            await _step.ExecuteAsync(_shell.Object, _lamcoCapableItem, c, _logger.Object, CancellationToken.None);
+
+            Assert.AreEqual(RdpBackend.Lamco, c.RdpBackend, "unreadable guest: the Kali gallery hint stands in, never xrdp");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_SwitchedToWayland_LamcoIncapableDistro_ResolvesNoneWithWarning()
+        {
+            SetupScriptOutput("RDP_DETECT=wayland");
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .ReturnsAsync("ID=fedora\n");
+            var item = new GalleryItem { LinuxDistro = LinuxDistro.Fedora };
+            var c = new VmCustomizations { RdpBackend = RdpBackend.Auto, SwitchedDesktopDisplayServer = DesktopDisplayServer.WaylandDefault };
+
+            await _step.ExecuteAsync(_shell.Object, item, c, _logger.Object, CancellationToken.None);
+
+            Assert.AreEqual(RdpBackend.None, c.RdpBackend, "no Lamco and no xrdp for a Wayland desktop → no RDP");
+            Assert.IsTrue(LoggedWarning(_logger));
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_SwitchedToX11Desktop_X11Detected_ResolvesXrdp()
+        {
+            // BlackArch → Xfce: an X11 switch keeps the normal verdict.
+            SetupScriptOutput("RDP_DETECT=x11");
+            var c = new VmCustomizations { RdpBackend = RdpBackend.Auto, SwitchedDesktopDisplayServer = DesktopDisplayServer.X11Only };
+
+            await _step.ExecuteAsync(_shell.Object, _lamcoCapableItem, c, _logger.Object, CancellationToken.None);
+
+            Assert.AreEqual(RdpBackend.Xrdp, c.RdpBackend);
+        }
+
         [TestMethod]
         public async Task ExecuteAsync_WaylandOnLamcoIncapableDistro_ResolvesXrdp()
         {

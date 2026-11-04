@@ -71,6 +71,26 @@ namespace VMCreate.Tests.HyperV.VmCreation
         }
 
         [TestMethod]
+        public async Task DeployAsync_XrdpWithWaylandDesktopSwitch_RefusedBeforeAnythingIsCreated()
+        {
+            // Kali + GNOME + xrdp ran the X11 fixups against the stock Xfce
+            // pre-boot and then installed a GNOME xrdp could not serve.
+            var orchestrator = new VmDeploymentOrchestrator(
+                _logger.Object, _mediaHandlerFactory.Object, _hyperVManager.Object,
+                _cloningIsoDownloader.Object, new[] { _strategy.Object }, _pathService.Object,
+                desktopCatalogs: new IDesktopEnvironmentCatalog[] { new global::VMCreate.Gallery.KaliDesktopCatalog() });
+            var plan = VmDeploymentPlan.FromSettings(new VmSettings { VMName = "TestVM" });
+            var customizations = new VmCustomizations { RdpBackend = RdpBackend.Xrdp, DesktopEnvironmentId = "gnome" };
+            var kali = new GalleryItem { Name = "Kali", LinuxDistro = LinuxDistro.Kali, DiskUri = "http://example.com/kali.7z" };
+
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => orchestrator.DeployAsync(
+                plan, customizations, kali, CancellationToken.None, null, "kali.7z"));
+
+            StringAssert.Contains(ex.Message, "xrdp");
+            _hyperVManager.Verify(h => h.VmExistsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
+
+        [TestMethod]
         public async Task DeployAsync_StrategyThrows_CleansUpVmIfCreated()
         {
             // Arrange

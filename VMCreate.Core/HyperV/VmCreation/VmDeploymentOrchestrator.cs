@@ -23,6 +23,7 @@ namespace VMCreate.HyperV.VmCreation
         private readonly ICloningIsoDownloader _cloningIsoDownloader;
         private readonly IEnumerable<IVmCreationStrategy> _strategies;
         private readonly IVmMetadataRecorder? _metadataRecorder;
+        private readonly IReadOnlyList<IDesktopEnvironmentCatalog> _desktopCatalogs;
 
         public VmDeploymentOrchestrator(
             ILogger<VmDeploymentOrchestrator> logger,
@@ -31,9 +32,11 @@ namespace VMCreate.HyperV.VmCreation
             ICloningIsoDownloader cloningIsoDownloader,
             IEnumerable<IVmCreationStrategy> strategies,
             IVmPathService pathService,
-            IVmMetadataRecorder? metadataRecorder = null)
+            IVmMetadataRecorder? metadataRecorder = null,
+            IEnumerable<IDesktopEnvironmentCatalog>? desktopCatalogs = null)
         {
             _metadataRecorder = metadataRecorder;
+            _desktopCatalogs = desktopCatalogs?.ToArray() ?? Array.Empty<IDesktopEnvironmentCatalog>();
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _mediaHandlerFactory = mediaHandlerFactory ?? throw new ArgumentNullException(nameof(mediaHandlerFactory));
             _hyperVManager = hyperVManager ?? throw new ArgumentNullException(nameof(hyperVManager));
@@ -61,6 +64,14 @@ namespace VMCreate.HyperV.VmCreation
 
             if (string.IsNullOrWhiteSpace(sourceFileOrUri))
                 throw new ArgumentException("A source file or gallery disk URI must be provided.", nameof(sourceFile));
+
+            // Both front ends enforce the RDP backend / desktop rules at input
+            // time; refuse here too, before anything is downloaded or created.
+            // xrdp with a KDE/GNOME switch ran the X11 fixups against the stock
+            // Xfce pre-boot and then installed a Wayland-only GNOME xrdp could
+            // not serve.
+            if (RdpDesktopCompatibility.Validate(galleryItem, customizations, _desktopCatalogs) is { } rdpDesktopError)
+                throw new InvalidOperationException(rdpDesktopError);
 
             // A VM that already carries this exact name is not ours: failure
             // cleanup must never remove it or its disks.

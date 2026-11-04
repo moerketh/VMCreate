@@ -1,5 +1,6 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
+using System.Collections.Generic;
 using VMCreate;
 
 namespace VMCreate.Tests.GalleryTests
@@ -93,8 +94,19 @@ namespace VMCreate.Tests.GalleryTests
         {
             GalleryItem? item = null;
             Assert.IsFalse(item.SupportsWayrdp());
-            item = new GalleryItem { LinuxDistro = LinuxDistro.Ubuntu };
+            item = new GalleryItem { LinuxDistro = LinuxDistro.Arch, Tags = new List<string> { "omarchy" } };
             Assert.IsTrue(item.SupportsWayrdp());
+        }
+
+        [TestMethod]
+        public void GalleryItem_SupportsWayrdp_OmarchyOnly()
+        {
+            // wayrdp's only finished capture path is wlroots (Hyprland): a
+            // wayrdp-capable distro without the omarchy tag is not a target.
+            Assert.IsFalse(new GalleryItem { LinuxDistro = LinuxDistro.Kali }.SupportsWayrdp());
+            Assert.IsFalse(new GalleryItem { LinuxDistro = LinuxDistro.Arch }.SupportsWayrdp());
+            Assert.IsFalse(new GalleryItem { LinuxDistro = LinuxDistro.Fedora, Tags = new List<string> { "omarchy" } }.SupportsWayrdp(),
+                "the distro must still be wayrdp-capable");
         }
     }
 }

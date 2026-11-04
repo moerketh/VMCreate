@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Moq;
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using VMCreate;
@@ -40,7 +41,7 @@ namespace VMCreate.Tests.HyperV.Steps
             _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                   .ReturnsAsync("ID=parrot\nID_LIKE=debian\n");
             _logger = new Mock<ILogger<InstallWayrdpRdpStep>>();
-            _supportedItem = new GalleryItem { LinuxDistro = LinuxDistro.Ubuntu, InitialUsername = "testuser" };
+            _supportedItem = new GalleryItem { LinuxDistro = LinuxDistro.Arch, InitialUsername = "testuser", Tags = new List<string> { "omarchy" } };
             _unsupportedItem = new GalleryItem { LinuxDistro = LinuxDistro.Unknown };
             _wayrdpCustomizations = new VmCustomizations { RdpBackend = RdpBackend.Wayrdp };
             _lamcoCustomizations = new VmCustomizations { RdpBackend = RdpBackend.Lamco };
@@ -77,24 +78,24 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
-        public void IsApplicable_TrueForAllDebianFamilyDistros()
+        public void IsApplicable_FalseForNonOmarchyImages()
         {
-            // wayrdp's supported set tracks the Lamco set (Debian-family +
-            // Arch-family): freerdp3 runtime libs are packaged on both.
-            foreach (var distro in new[] { LinuxDistro.Ubuntu, LinuxDistro.Debian, LinuxDistro.Parrot, LinuxDistro.Kali })
+            // wayrdp only serves Hyprland (wlroots backend) today: a GNOME,
+            // KDE or Xfce image on a wayrdp-capable distro is not a target.
+            foreach (var distro in new[] { LinuxDistro.Ubuntu, LinuxDistro.Debian, LinuxDistro.Parrot, LinuxDistro.Kali, LinuxDistro.Arch })
             {
                 var item = new GalleryItem { LinuxDistro = distro };
-                Assert.IsTrue(_step.IsApplicable(item, _wayrdpCustomizations),
-                    $"{distro} should be wayrdp-targetable");
+                Assert.IsFalse(_step.IsApplicable(item, _wayrdpCustomizations),
+                    $"{distro} without the omarchy tag must not get wayrdp");
             }
         }
 
         [TestMethod]
-        public void IsApplicable_TrueForArchFamily()
+        public void IsApplicable_TrueForOmarchy()
         {
-            var item = new GalleryItem { LinuxDistro = LinuxDistro.Arch };
+            var item = new GalleryItem { LinuxDistro = LinuxDistro.Arch, Tags = new List<string> { "omarchy" } };
             Assert.IsTrue(_step.IsApplicable(item, _wayrdpCustomizations),
-                "Arch (Omarchy/Hyprland) is the wlroots backend's primary target");
+                "Omarchy (Arch + Hyprland) is the wlroots backend's target");
         }
 
         [TestMethod]

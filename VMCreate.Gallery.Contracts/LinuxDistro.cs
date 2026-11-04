@@ -92,10 +92,13 @@ namespace VMCreate
             distro.SupportsLamco();
 
         /// <summary>
-        /// Convenience overload: returns true when <see cref="GalleryItem.LinuxDistro"/>
-        /// indicates a wayrdp-targetable distribution. Null-safe.
+        /// True when wayrdp can serve this gallery item: an Omarchy image
+        /// (tag <c>omarchy</c>, Hyprland) on a wayrdp-targetable distro. The
+        /// distro check alone is not enough: wayrdp's only finished capture
+        /// path is the wlroots backend, so on GNOME, KDE or Xfce desktops it
+        /// would install and then serve nothing. Null-safe.
         /// </summary>
         public static bool SupportsWayrdp(this GalleryItem? item) =>
-            item?.LinuxDistro.SupportsWayrdp() == true;
+            item.HasTag("omarchy") && item!.LinuxDistro.SupportsWayrdp();
     }
 }

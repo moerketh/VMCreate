@@ -14,15 +14,17 @@ namespace VMCreate.Tests.GUI
     /// like Xfce can never be served by the Wayland-native Lamco RDP Server),
     /// reset now-impossible explicit Lamco choices to Auto, and normalize the
     /// finished wizard data so the stock desktop means "no switch". Also pins
-    /// the wayrdp radio's visibility: it renders exactly on wayrdp-targetable
-    /// distros, like the Lamco radio.
+    /// the xrdp coupling (X11 desktops only; a KDE/GNOME pick resets xrdp to
+    /// Auto with a notice) and the wayrdp radio (Omarchy images only).
     /// </summary>
     [TestClass]
     public sealed class VmCustomizationPageViewModelDesktopTests
     {
-        private static VmCustomizationPageViewModel Create(GalleryItem? item, out WizardData wizardData)
+        private static VmCustomizationPageViewModel Create(
+            GalleryItem? item, out WizardData wizardData, RdpBackend storedBackend = RdpBackend.Auto)
         {
             wizardData = new WizardData { SelectedItem = item };
+            wizardData.Customizations.RdpBackend = storedBackend;
             var htbApi = new Mock<IHtbApiClient>();
             htbApi.Setup(a => a.EndpointNames).Returns(Array.Empty<string>());
             return new VmCustomizationPageViewModel(
@@ -156,17 +158,96 @@ namespace VMCreate.Tests.GUI
         }
 
         // ── wayrdp radio visibility ────────────────────────────────────
-        // wayrdp now installs from a pinned public release download verified
-        // on the guest, so the radio renders for every wayrdp-targetable
-        // distro — same shape as the Lamco radio's visibility.
+        // wayrdp only serves Hyprland today, so the radio renders for
+        // Omarchy images only.
 
         [TestMethod]
-        public void WayrdpRadio_VisibleOnSupportedDistro()
+        public void WayrdpRadio_HiddenOnKali()
         {
             var vm = Create(KaliItem(), out _);
 
-            Assert.IsTrue(vm.WayrdpOptionVisible,
-                "Kali (Debian family) is wayrdp-targetable — the pinned-release install works from the GUI end-to-end");
+            Assert.IsFalse(vm.WayrdpOptionVisible,
+                "Kali's desktops (Xfce, KDE, GNOME) are not Hyprland — wayrdp has no capture path for them");
+        }
+
+        [TestMethod]
+        public void WayrdpRadio_VisibleOnOmarchy()
+        {
+            var vm = Create(new GalleryItem { Name = "Omarchy", LinuxDistro = LinuxDistro.Arch, Tags = new List<string> { "omarchy" } }, out _);
+
+            Assert.IsTrue(vm.WayrdpOptionVisible);
+        }
+
+        [TestMethod]
+        public void StoredWayrdpPreference_OnKali_ResetsToAutoWithNotice()
+        {
+            var vm = Create(KaliItem(), out _, RdpBackend.Wayrdp);
+
+            Assert.AreEqual(RdpBackend.Auto, vm.SelectedRdpBackend);
+            Assert.IsTrue(vm.HasRdpBackendNotice);
+        }
+
+        // ── xrdp only on X11 desktops ──────────────────────────────────
+
+        [TestMethod]
+        public void XrdpRadio_EnabledForStockXfce()
+        {
+            var vm = Create(KaliItem(), out _, RdpBackend.Xrdp);
+
+            Assert.IsTrue(vm.XrdpOptionEnabled);
+            Assert.AreEqual(RdpBackend.Xrdp, vm.SelectedRdpBackend, "Xfce is X11 — xrdp stays");
+            Assert.IsFalse(vm.HasRdpBackendNotice);
+        }
+
+        [TestMethod]
+        public void PickingGnome_ResetsXrdpToAutoWithNotice()
+        {
+            var vm = Create(KaliItem(), out _, RdpBackend.Xrdp);
+            var changed = new List<string?>();
+            vm.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+            vm.SelectDesktop("gnome");
+
+            Assert.IsFalse(vm.XrdpOptionEnabled);
+            Assert.AreEqual(RdpBackend.Auto, vm.SelectedRdpBackend);
+            Assert.IsTrue(vm.HasRdpBackendNotice);
+            StringAssert.Contains(vm.RdpBackendNotice, "GNOME");
+            CollectionAssert.Contains(changed, nameof(vm.IsRdpBackendAuto), "the Auto radio must re-check");
+            CollectionAssert.Contains(changed, nameof(vm.IsRdpBackendXrdp), "the xrdp radio must un-check");
+        }
+
+        [TestMethod]
+        public void PickingKde_DisablesXrdp_BackToXfceEnablesIt()
+        {
+            var vm = Create(KaliItem(), out _);
+
+            vm.SelectDesktop("kde");
+            Assert.IsFalse(vm.XrdpOptionEnabled);
+
+            vm.SelectDesktop(null);
+            Assert.IsTrue(vm.XrdpOptionEnabled);
+        }
+
+        [TestMethod]
+        public void ExplicitPick_ClearsNotice()
+        {
+            var vm = Create(KaliItem(), out _, RdpBackend.Xrdp);
+            vm.SelectDesktop("gnome");
+            Assert.IsTrue(vm.HasRdpBackendNotice);
+
+            vm.IsRdpBackendLamco = true;
+
+            Assert.IsFalse(vm.HasRdpBackendNotice);
+        }
+
+        [TestMethod]
+        public void XrdpRadio_AlwaysEnabledWithoutCatalog()
+        {
+            // Parrot has no desktop catalog: xrdp keeps its Force X11 fallback.
+            var vm = Create(new GalleryItem { Name = "Parrot", LinuxDistro = LinuxDistro.Parrot }, out _, RdpBackend.Xrdp);
+
+            Assert.IsTrue(vm.XrdpOptionEnabled);
+            Assert.AreEqual(RdpBackend.Xrdp, vm.SelectedRdpBackend);
         }
 
         [TestMethod]
