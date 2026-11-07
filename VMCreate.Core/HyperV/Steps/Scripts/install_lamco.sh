@@ -21,29 +21,29 @@ set -o pipefail
 #     flatpak assets are not built for this lineage.
 
 LAMCO_FORK_REPO="moerketh/lamco-rdp-server"
-LAMCO_FORK_TAG="v1.4.5-hyperv.7"
-LAMCO_FORK_DEB_VERSION="1.4.5-hyperv7"
+LAMCO_FORK_TAG="v1.4.5-hyperv.8"
+LAMCO_FORK_DEB_VERSION="1.4.5-hyperv8"
 # The fork's release policy: the Cargo.toml crate version stays at the
 # upstream base (1.4.5) and the distribution package versions carry the
 # lineage suffix — i.e. the BINARY deliberately reports only the base
 # version (verified on the pinned assets: /usr/bin/lamco-rdp-server
 # --version prints "lamco-rdp-server 1.4.5"), while dpkg reports
-# 1.4.5-hyperv7 and pacman reports 1.4.5.hyperv7-1 (the .PKGINFO pkgver —
+# 1.4.5-hyperv8 and pacman reports 1.4.5.hyperv8-1 (the .PKGINFO pkgver —
 # same upstream version plus the pkgrel '-1'; Arch pkgver cannot contain
 # hyphens, hence the dot; keep the pins and this sentence in step).
 LAMCO_FORK_CRATE_VERSION="1.4.5"
-LAMCO_FORK_DEB_SHA256="952d833c2f25e437d1f8da322cd62462aee43ba80ce8799292d71bb0156e304f"
+LAMCO_FORK_DEB_SHA256="8cc6dd6bc6b4c4802dffe3a326164e00c7ce3b45d8f7fc8c27207f1c9cf891ba"
 LAMCO_FORK_DEB_URL="https://github.com/${LAMCO_FORK_REPO}/releases/download/${LAMCO_FORK_TAG}/lamco-rdp-server_${LAMCO_FORK_DEB_VERSION}_amd64.deb"
 # Same release, pacman packaging. Built by the same workflow from the same
 # tag and carrying the same binary payload; the .PKGINFO pkgver is
-# 1.4.5.hyperv6-1 (upstream version + pkgrel), so pacman -Q reports the
-# full "1.4.5.hyperv6-1" string. NOTE the DOT: Arch pkgver grammar forbids
+# 1.4.5.hyperv8-1 (upstream version + pkgrel), so pacman -Q reports the
+# full "1.4.5.hyperv8-1" string. NOTE the DOT: Arch pkgver grammar forbids
 # hyphens (the pkgver-pkgrel split), and the original v1.4.5-hyperv.6 asset
 # shipped pkgver "1.4.5-hyperv6-1", which pacman rejects as "invalid
 # metadata" — every pacman-lineage install failed on it. The corrected
 # asset (same payload, fixed .PKGINFO) sits alongside the broken one.
-LAMCO_FORK_PKG_VERSION="1.4.5.hyperv7-1"
-LAMCO_FORK_PKG_SHA256="d5db19b1fd00e4e33de9876ce94e8c48304bd942885383149724170c7a07904f"
+LAMCO_FORK_PKG_VERSION="1.4.5.hyperv8-1"
+LAMCO_FORK_PKG_SHA256="903841bb4aa73afa8421c1a799b49dcf821d493639399368ce123f07d8d05576"
 LAMCO_FORK_PKG_URL="https://github.com/${LAMCO_FORK_REPO}/releases/download/${LAMCO_FORK_TAG}/lamco-rdp-server-${LAMCO_FORK_PKG_VERSION}-x86_64.pkg.tar.zst"
 
 # Result contract: 0 = ok, 1 = degraded (install completed with warnings —
@@ -239,7 +239,7 @@ rm -f "$FORK_PKG_TMP"
 
 # FORK IDENTITY (pacman lineage, same rationale as the dpkg check): pacman
 # must report EXACTLY 'name pkgver' with the pkgrel included —
-# 'lamco-rdp-server 1.4.5-hyperv7-1'.
+# 'lamco-rdp-server 1.4.5.hyperv8-1'.
 installed_status="install ok installed"
 installed_pkg_ver="$(pacman -Q lamco-rdp-server 2>/dev/null || true)"
 if [ "$installed_pkg_ver" != "lamco-rdp-server $LAMCO_FORK_PKG_VERSION" ]; then
