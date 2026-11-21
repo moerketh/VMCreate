@@ -505,20 +505,23 @@ SAM_FILE="$USER_HOME/.local/share/wayrdp/SAM"
 # seeded value and seeding is silently skipped.
 if [ "$WAYRDP_NLA_PASSWORD_B64" != "__WAYRDP_NLA_PASSWORD""_B64__" ] && ! run_as_user test -s "$SAM_FILE" 2>/dev/null; then
     NLA_PW="$(printf '%s' "$WAYRDP_NLA_PASSWORD_B64" | base64 -d 2>/dev/null || echo "")"
-    if [ -n "$NLA_PW" ] && command -v winpr-hash3 >/dev/null 2>&1; then
+    # Upstream installs winpr-hash3; Debian's 3.32 winpr-utils (Kali) ships
+    # it unversioned as winpr-hash. Same arguments.
+    WINPR_HASH="$(command -v winpr-hash3 || command -v winpr-hash || true)"
+    if [ -n "$NLA_PW" ] && [ -n "$WINPR_HASH" ]; then
         mkdir -p "$(dirname "$SAM_FILE")" && chown "$AUTOLOGIN_USER":"$AUTOLOGIN_USER" "$(dirname "$SAM_FILE")" 2>/dev/null || true
         SAM_TMP="$(dirname "$SAM_FILE")/.SAM.seed.$$"
-        if run_as_user winpr-hash3 -u "$AUTOLOGIN_USER" -p "$NLA_PW" -f sam > "$SAM_TMP" 2>/dev/null && [ -s "$SAM_TMP" ]; then
+        if run_as_user "$WINPR_HASH" -u "$AUTOLOGIN_USER" -p "$NLA_PW" -f sam > "$SAM_TMP" 2>/dev/null && [ -s "$SAM_TMP" ]; then
             cp "$SAM_TMP" "$SAM_FILE" && chmod 600 "$SAM_FILE" 2>/dev/null || true
             chown "$AUTOLOGIN_USER":"$AUTOLOGIN_USER" "$SAM_FILE" 2>/dev/null || true
             echo "NLA SAM seeded for '$AUTOLOGIN_USER'."
         else
-            echo "DEGRADED: winpr-hash3 SAM generation failed — wayrdp will refuse to start until a SAM is provisioned."
+            echo "DEGRADED: $WINPR_HASH SAM generation failed — wayrdp will refuse to start until a SAM is provisioned."
             DEGRADED=1
         fi
         rm -f "$SAM_TMP" 2>/dev/null || true
     elif [ -n "$NLA_PW" ]; then
-        echo "DEGRADED: winpr-hash3 not installed — cannot seed the wayrdp NLA SAM; wayrdp will refuse to start."
+        echo "DEGRADED: winpr-hash3 / winpr-hash not installed — cannot seed the wayrdp NLA SAM; wayrdp will refuse to start."
         DEGRADED=1
     fi
     unset NLA_PW
