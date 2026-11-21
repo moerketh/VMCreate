@@ -123,12 +123,19 @@ install_freerdp_deps() {
             PIPEWIRE_LIB="libpipewire-0.3-0"
         fi
         # winpr-hash3 seeds the NLA SAM below; without it wayrdp refuses TCP
-        # and restart-loops. Debian 13 / Kali name the package winpr-utils
-        # (winpr3-utils is the older or transitional name).
+        # and restart-loops. It ships as winpr-utils (Kali, newer Debian) or
+        # winpr3-utils (Debian 13). Take the one built from the same FreeRDP
+        # as the libwinpr3-3 apt installs: on Parrot, winpr-utils is a 3.32
+        # backport whose libwinpr-tools3-3 would sit next to 3.15 libraries.
+        winpr_candidate() { apt-cache policy "$1" 2>/dev/null | awk '/Candidate:/ {print $2}'; }
+        WINPR_VER="$(winpr_candidate libwinpr3-3)"
         WINPR_UTILS="winpr-utils"
-        if ! apt-cache show "$WINPR_UTILS" >/dev/null 2>&1; then
-            WINPR_UTILS="winpr3-utils"
-        fi
+        for p in winpr-utils winpr3-utils; do
+            if [ -n "$WINPR_VER" ] && [ "$(winpr_candidate "$p")" = "$WINPR_VER" ]; then
+                WINPR_UTILS="$p"
+                break
+            fi
+        done
         KDE_DEPS=""
         if is_plasma_guest; then
             KDE_DEPS="kscreen libglib2.0-bin procps"
