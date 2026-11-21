@@ -99,12 +99,18 @@ namespace VMCreate.Tests.GalleryTests
         }
 
         [TestMethod]
-        public void GalleryItem_SupportsWayrdp_OmarchyOnly()
+        public void GalleryItem_SupportsWayrdp_OmarchyOrKaliParrot()
         {
-            // wayrdp's only finished capture path is wlroots (Hyprland): a
-            // wayrdp-capable distro without the omarchy tag is not a target.
-            Assert.IsFalse(new GalleryItem { LinuxDistro = LinuxDistro.Kali }.SupportsWayrdp());
+            // wayrdp serves Hyprland (Omarchy, wlroots backend) and KDE
+            // Plasma on its validated distros (Kali, Parrot). Other
+            // wayrdp-capable distros are not targets without the omarchy tag.
+            Assert.IsTrue(new GalleryItem { LinuxDistro = LinuxDistro.Kali }.SupportsWayrdp());
+            Assert.IsTrue(new GalleryItem { LinuxDistro = LinuxDistro.Parrot }.SupportsWayrdp());
+            Assert.IsTrue(new GalleryItem { LinuxDistro = LinuxDistro.Arch, Tags = new List<string> { "omarchy" } }.SupportsWayrdp());
             Assert.IsFalse(new GalleryItem { LinuxDistro = LinuxDistro.Arch }.SupportsWayrdp());
+            Assert.IsFalse(new GalleryItem { LinuxDistro = LinuxDistro.Debian }.SupportsWayrdp());
+            Assert.IsFalse(new GalleryItem { LinuxDistro = LinuxDistro.Ubuntu }.SupportsWayrdp());
+            Assert.IsFalse(((GalleryItem?)null).SupportsWayrdp());
             Assert.IsFalse(new GalleryItem { LinuxDistro = LinuxDistro.Fedora, Tags = new List<string> { "omarchy" } }.SupportsWayrdp(),
                 "the distro must still be wayrdp-capable");
         }

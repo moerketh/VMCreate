@@ -68,6 +68,8 @@ namespace VMCreate
         /// (Ubuntu, Debian, Parrot, Kali — via libfreerdp3 runtime libs) and
         /// Arch-family (incl. Omarchy — via the <c>freerdp</c> package); the
         /// wlroots backend additionally requires <c>hyprctl</c> on the PATH.
+        /// Served desktops: Hyprland (Omarchy) and KDE Plasma 6.3+ on Kali and
+        /// Parrot, where Auto selects it.
         /// </summary>
         Wayrdp,
 
@@ -76,7 +78,8 @@ namespace VMCreate
         /// chosen statically. A detection step runs post-boot over SSH, inspects
         /// the guest's actual display-server state (Wayland session present,
         /// session-manager alternatives) and distro, and rewrites this value to
-        /// either <see cref="Lamco"/> (Wayland-default desktop on a
+        /// <see cref="Wayrdp"/> (KDE Plasma 6.3+ on Kali or Parrot),
+        /// <see cref="Lamco"/> (another Wayland-default desktop on a
         /// Debian-family distro) or <see cref="Xrdp"/> (everything else).
         /// <para>
         /// While in this state the deployment pipeline behaves conservatively:

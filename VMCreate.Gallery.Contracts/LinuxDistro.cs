@@ -92,13 +92,24 @@ namespace VMCreate
             distro.SupportsLamco();
 
         /// <summary>
+        /// True for the distros wayrdp's KDE backend is validated on: Kali
+        /// (Plasma 6.7) and Parrot (Plasma 6.3). Other Debian-family KDE
+        /// guests stay on Lamco until they are validated too.
+        /// </summary>
+        public static bool SupportsWayrdpKde(this LinuxDistro distro) =>
+            distro is LinuxDistro.Kali or LinuxDistro.Parrot;
+
+        /// <summary>
         /// True when wayrdp can serve this gallery item: an Omarchy image
-        /// (tag <c>omarchy</c>, Hyprland) on a wayrdp-targetable distro. The
-        /// distro check alone is not enough: wayrdp's only finished capture
-        /// path is the wlroots backend, so on GNOME, KDE or Xfce desktops it
-        /// would install and then serve nothing. Null-safe.
+        /// (tag <c>omarchy</c>, Hyprland: the wlroots backend) on a
+        /// wayrdp-targetable distro, or a Kali / Parrot image (the KDE
+        /// backend). The distro check alone is not enough: wayrdp has no
+        /// GNOME or Xfce backend, so the desktop is checked as well — by
+        /// <see cref="RdpDesktopCompatibility"/> for catalog desktops (Kali),
+        /// and by the Auto resolver's in-guest Plasma detection. Null-safe.
         /// </summary>
         public static bool SupportsWayrdp(this GalleryItem? item) =>
-            item.HasTag("omarchy") && item!.LinuxDistro.SupportsWayrdp();
+            (item.HasTag("omarchy") && item!.LinuxDistro.SupportsWayrdp())
+            || item?.LinuxDistro.SupportsWayrdpKde() == true;
     }
 }

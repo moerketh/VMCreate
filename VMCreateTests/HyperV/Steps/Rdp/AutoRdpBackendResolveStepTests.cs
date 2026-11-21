@@ -122,6 +122,100 @@ namespace VMCreate.Tests.HyperV.Steps
             Assert.AreEqual(RdpBackend.Lamco, c.RdpBackend, "Wayland default + Lamco-capable distro → Lamco");
         }
 
+        // ── KDE Plasma 6.3+ on Kali / Parrot → wayrdp ───────────────────
+
+        private void SetupOsRelease(string osRelease)
+            => _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .ReturnsAsync(osRelease);
+
+        [TestMethod]
+        [DataRow("ID=kali\nID_LIKE=debian\n", "6.7.4", LinuxDistro.Kali)]
+        [DataRow("ID=parrot\nID_LIKE=debian\n", "6.3.6", LinuxDistro.Parrot)]
+        public async Task ExecuteAsync_PlasmaOnKaliOrParrot_ResolvesWayrdp(string osRelease, string kwin, LinuxDistro distro)
+        {
+            SetupOsRelease(osRelease);
+            SetupScriptOutput($"Default Wayland desktop is KDE Plasma (KWin {kwin}).\nRDP_PLASMA={kwin}\nRDP_DETECT=wayland");
+            var c = new VmCustomizations { RdpBackend = RdpBackend.Auto };
+
+            await _step.ExecuteAsync(_shell.Object, new GalleryItem { LinuxDistro = distro }, c, _logger.Object, CancellationToken.None);
+
+            Assert.AreEqual(RdpBackend.Wayrdp, c.RdpBackend);
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_SwitchedToKdeOnKali_ResolvesWayrdp()
+        {
+            SetupOsRelease("ID=kali\nID_LIKE=debian\n");
+            SetupScriptOutput("RDP_PLASMA=6.7.4\nRDP_DETECT=wayland");
+            var c = new VmCustomizations { RdpBackend = RdpBackend.Auto, SwitchedDesktopDisplayServer = DesktopDisplayServer.WaylandDefault };
+
+            await _step.ExecuteAsync(_shell.Object, _lamcoCapableItem, c, _logger.Object, CancellationToken.None);
+
+            Assert.AreEqual(RdpBackend.Wayrdp, c.RdpBackend);
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_PlasmaOlderThan63_StaysLamco()
+        {
+            // wayrdp's preflight refuses KWin < 6.3: the VM would end up
+            // without RDP, so Lamco keeps it.
+            SetupOsRelease("ID=kali\nID_LIKE=debian\n");
+            SetupScriptOutput("RDP_PLASMA=6.2.5\nRDP_DETECT=wayland");
+            var c = new VmCustomizations { RdpBackend = RdpBackend.Auto };
+
+            await _step.ExecuteAsync(_shell.Object, _lamcoCapableItem, c, _logger.Object, CancellationToken.None);
+
+            Assert.AreEqual(RdpBackend.Lamco, c.RdpBackend);
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_PlasmaOnUnvalidatedDistro_StaysLamco()
+        {
+            SetupOsRelease("ID=debian\n");
+            SetupScriptOutput("RDP_PLASMA=6.3.6\nRDP_DETECT=wayland");
+            var c = new VmCustomizations { RdpBackend = RdpBackend.Auto };
+
+            await _step.ExecuteAsync(_shell.Object, _lamcoCapableItem, c, _logger.Object, CancellationToken.None);
+
+            Assert.AreEqual(RdpBackend.Lamco, c.RdpBackend, "only the detected distro counts, not the gallery hint");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_KaliWithoutPlasma_StaysLamco()
+        {
+            // GNOME on Kali: no RDP_PLASMA line.
+            SetupOsRelease("ID=kali\nID_LIKE=debian\n");
+            SetupScriptOutput("RDP_DETECT=wayland");
+            var c = new VmCustomizations { RdpBackend = RdpBackend.Auto };
+
+            await _step.ExecuteAsync(_shell.Object, _lamcoCapableItem, c, _logger.Object, CancellationToken.None);
+
+            Assert.AreEqual(RdpBackend.Lamco, c.RdpBackend);
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_PlasmaButX11Default_StaysXrdp()
+        {
+            SetupOsRelease("ID=kali\nID_LIKE=debian\n");
+            SetupScriptOutput("RDP_PLASMA=6.7.4\nRDP_DETECT=x11");
+            var c = new VmCustomizations { RdpBackend = RdpBackend.Auto };
+
+            await _step.ExecuteAsync(_shell.Object, _lamcoCapableItem, c, _logger.Object, CancellationToken.None);
+
+            Assert.AreEqual(RdpBackend.Xrdp, c.RdpBackend);
+        }
+
+        [TestMethod]
+        public void ParsePlasmaLine_TakesMajorMinorOfTheLastLine()
+        {
+            Assert.AreEqual((6, 7), AutoRdpBackendResolveStep.ParsePlasmaLine("x\nRDP_PLASMA=6.3.6\nRDP_PLASMA=6.7.4\r\nRDP_DETECT=wayland"));
+            Assert.AreEqual((6, 3), AutoRdpBackendResolveStep.ParsePlasmaLine("RDP_PLASMA=6.3"));
+            Assert.IsNull(AutoRdpBackendResolveStep.ParsePlasmaLine("RDP_DETECT=wayland"));
+            Assert.IsNull(AutoRdpBackendResolveStep.ParsePlasmaLine("RDP_PLASMA=6"));
+            Assert.IsNull(AutoRdpBackendResolveStep.ParsePlasmaLine("RDP_PLASMA=six.seven"));
+            Assert.IsNull(AutoRdpBackendResolveStep.ParsePlasmaLine("RDP_PLASMA=-6.7"));
+        }
+
         [TestMethod]
         public async Task ExecuteAsync_WaylandOnOmarchy_ResolvesLamco()
         {

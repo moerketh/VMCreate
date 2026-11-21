@@ -804,7 +804,7 @@ namespace VMCreate.CLI.Commands
 
             // Desktop/RDP coupling (the GUI enforces the same rules at
             // selection time): xrdp only on X11 desktops, Lamco only on
-            // Lamco-capable ones, wayrdp only on Omarchy. Checked against the
+            // Lamco-capable ones, wayrdp on Omarchy or KDE (Kali, Parrot). Checked against the
             // stock desktop too when --desktop is absent.
             if (RdpDesktopCompatibility.Validate(galleryItem, rdpBackend, desktopOption) is { } rdpDesktopError)
             {

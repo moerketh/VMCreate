@@ -103,10 +103,11 @@
                         <RadioButton
                                      GroupName="RdpBackend" FontSize="14" Margin="0,4,0,0"
                                      IsChecked="{Binding IsRdpBackendWayrdp}"
+                                     IsEnabled="{Binding WayrdpOptionEnabled}"
                                      Visibility="{Binding WayrdpOptionVisible, Converter={StaticResource BoolToVis}}"
-                                     ToolTip="wayrdp is the project's own MIT-licensed Wayland-native RDP server on FreeRDP 3. Installs post-boot over SSH from a pinned public release download (sha256-verified). Keeps Wayland and captures the compositor headlessly. Supports Hyprland (Omarchy images) only at this time."
+                                     ToolTip="wayrdp is the project's own MIT-licensed Wayland-native RDP server on FreeRDP 3. Installs post-boot over SSH from a pinned public release download (sha256-verified). Keeps Wayland and captures the compositor headlessly. Supports Hyprland (Omarchy images) and KDE Plasma 6.3+ (Kali, Parrot)."
                                      AutomationProperties.Name="Configure wayrdp RDP server">
-                            <TextBlock Text="wayrdp — MIT Wayland-native RDP on FreeRDP 3 (Hyprland)" TextWrapping="Wrap"/>
+                            <TextBlock Text="wayrdp — MIT Wayland-native RDP on FreeRDP 3 (Hyprland, KDE Plasma)" TextWrapping="Wrap"/>
                         </RadioButton>
                         <RadioButton
                                      GroupName="RdpBackend" FontSize="14" Margin="0,4,0,0"

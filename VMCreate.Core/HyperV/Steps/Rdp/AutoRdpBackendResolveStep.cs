@@ -24,7 +24,11 @@ namespace VMCreate
     /// <list type="bullet">
     /// <item><b>Wayland default + Lamco-capable distro</b> (Debian-family
     /// deb or Arch-family pacman package) →
-    /// <see cref="RdpBackend.Lamco"/> (Wayland-native; the right tool).</item>
+    /// <see cref="RdpBackend.Lamco"/> (Wayland-native; the right tool) —
+    /// except <b>KDE Plasma 6.3+ on Kali or Parrot</b> (the detection script's
+    /// <c>RDP_PLASMA</c> line), which resolves to <see cref="RdpBackend.Wayrdp"/>:
+    /// the project's own server, validated there. Applies to a switched
+    /// desktop as well (Kali → KDE).</item>
     /// <item><b>Nix-family distro</b> (NixOS / Athena Nix — detected at
     /// runtime) → <see cref="RdpBackend.None"/>: no installable backend
     /// exists there (post-boot installs through a package manager are
@@ -94,6 +98,7 @@ namespace VMCreate
                 shell.VmName);
 
             string? displayServer = null;
+            (int Major, int Minor)? plasma = null;
 
             // ── 1. Run the in-guest detection script ───────────────────────
             // Any failure (script exception, missing result line) leaves
@@ -115,6 +120,7 @@ namespace VMCreate
                     TimeSpan.FromMinutes(2), ct);
 
                 displayServer = ParseDetectLine(result);
+                plasma = ParsePlasmaLine(result);
                 if (displayServer is null)
                 {
                     logger.LogWarning(
@@ -210,6 +216,16 @@ namespace VMCreate
                     : RdpBackend.Xrdp;
             }
 
+            // KDE Plasma 6.3+ on Kali / Parrot: wayrdp instead of Lamco. Only
+            // a detected distro counts (not the gallery hint), and only a
+            // Plasma the detection script actually found: wayrdp refuses an
+            // older KWin at startup, which would leave the VM without RDP.
+            bool wayrdpKde = resolved == RdpBackend.Lamco
+                && detected is { } d && d.SupportsWayrdpKde()
+                && plasma is { } p && p.CompareTo(WayrdpMinPlasma) >= 0;
+            if (wayrdpKde)
+                resolved = RdpBackend.Wayrdp;
+
             // ── 4. Mutate the shared customizations IN PLACE ──────────────
             // The in-place mutation is the whole point: the deploy-progress
             // view model and every later step (InstallLamcoRdpStep 235,
@@ -220,7 +236,13 @@ namespace VMCreate
             // on every post-boot step report).
             customizations.RdpBackend = resolved;
 
-            if (switchedToWayland)
+            if (wayrdpKde)
+            {
+                logger.LogInformation(
+                    "Auto-select RDP backend: VM {VMName} runs KDE Plasma {Major}.{Minor} on {Distro}. Selected: WAYRDP (KDE backend).",
+                    shell.VmName, plasma!.Value.Major, plasma.Value.Minor, detected!.Value);
+            }
+            else if (switchedToWayland)
             {
                 if (resolved == RdpBackend.Lamco && displayServer != "wayland")
                     logger.LogWarning(
@@ -277,6 +299,32 @@ namespace VMCreate
                     {
                         last = value;
                     }
+                }
+            }
+            return last;
+        }
+
+        /// <summary>Oldest Plasma wayrdp's KDE backend accepts (its preflight refuses older KWin).</summary>
+        internal static readonly (int Major, int Minor) WayrdpMinPlasma = (6, 3);
+
+        /// <summary>
+        /// Parses the <c>RDP_PLASMA=&lt;kwin version&gt;</c> line (last
+        /// occurrence) into major.minor. Null when absent or unparseable.
+        /// </summary>
+        internal static (int Major, int Minor)? ParsePlasmaLine(string output)
+        {
+            (int, int)? last = null;
+            foreach (var line in output.Split('\n'))
+            {
+                var trimmed = line.Trim();
+                if (!trimmed.StartsWith("RDP_PLASMA=", StringComparison.Ordinal))
+                    continue;
+                var parts = trimmed["RDP_PLASMA=".Length..].Split('.');
+                if (parts.Length >= 2
+                    && int.TryParse(parts[0], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int major)
+                    && int.TryParse(parts[1], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int minor))
+                {
+                    last = (major, minor);
                 }
             }
             return last;

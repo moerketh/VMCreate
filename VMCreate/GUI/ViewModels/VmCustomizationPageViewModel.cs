@@ -187,11 +187,23 @@ namespace VMCreate
 
         /// <summary>
         /// True when the wayrdp radio should render: a wayrdp-targetable
-        /// gallery item (Debian-family or Arch-family — the install curls a
-        /// pinned public release asset, so the backend works from the GUI
-        /// end-to-end). Same shape as <see cref="LamcoOptionVisible"/>.
+        /// gallery item (Omarchy, or Kali / Parrot for the KDE backend — the
+        /// install curls a pinned public release asset, so the backend works
+        /// from the GUI end-to-end). Same shape as <see cref="LamcoOptionVisible"/>.
         /// </summary>
         public bool WayrdpOptionVisible => SelectedItem?.SupportsWayrdp() ?? false;
+
+        /// <summary>
+        /// True when the wayrdp radio is selectable: the image supports it AND,
+        /// on an image with a desktop catalog (Kali), the effective desktop is
+        /// one wayrdp serves (KDE Plasma). Omarchy and catalog-less images
+        /// (Parrot: KDE out of the box) need no desktop check.
+        /// </summary>
+        public bool WayrdpOptionEnabled =>
+            WayrdpOptionVisible
+            && (_desktopCatalog == null
+                || SelectedItem.HasTag("omarchy")
+                || (EffectiveDesktop?.WayrdpSupported ?? false));
 
         /// <summary>
         /// True when the xrdp radio is selectable: always on images without a
@@ -264,6 +276,8 @@ namespace VMCreate
             {
                 if (!LamcoOptionVisible)
                     return "";
+                if (WayrdpOptionEnabled && SelectedItem?.LinuxDistro.SupportsWayrdpKde() == true)
+                    return "This desktop is KDE Plasma — Auto will install wayrdp (Plasma 6.3+; the Lamco RDP Server otherwise).";
                 return LamcoOptionEnabled
                     ? "This desktop runs on Wayland — Auto will install the Lamco RDP Server (xrdp needs X11)."
                     : "This desktop is X11-only — Auto will install xrdp (the Lamco RDP Server needs Wayland).";
@@ -287,6 +301,7 @@ namespace VMCreate
                     OnPropertyChanged(nameof(EffectiveDesktop));
                     OnPropertyChanged(nameof(LamcoOptionEnabled));
                     OnPropertyChanged(nameof(XrdpOptionEnabled));
+                    OnPropertyChanged(nameof(WayrdpOptionEnabled));
                     OnPropertyChanged(nameof(AutoRdpHint));
                     OnPropertyChanged(nameof(ShowAutoRdpHint));
                     NormalizeRdpBackend();
@@ -310,7 +325,9 @@ namespace VMCreate
                 RdpBackend.Lamco when !LamcoOptionVisible =>
                     "The Lamco RDP Server is not available for this image, so Remote Access was set to Auto.",
                 RdpBackend.Wayrdp when !WayrdpOptionVisible =>
-                    "wayrdp only supports Hyprland (Omarchy) at this time, so Remote Access was set to Auto.",
+                    "wayrdp supports Hyprland (Omarchy) and KDE Plasma on Kali and Parrot at this time, so Remote Access was set to Auto.",
+                RdpBackend.Wayrdp when !WayrdpOptionEnabled =>
+                    $"wayrdp needs KDE Plasma on this image and {EffectiveDesktop?.DisplayName ?? "this desktop"} is not, so Remote Access was set to Auto.",
                 _ => null,
             };
             if (reason == null)

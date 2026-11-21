@@ -8,8 +8,10 @@ set -o pipefail
 # (post-boot SSH install, systemd USER unit, kept-Wayland headless capture)
 # but on the project's own protocol stack (libfreerdp-server) with
 # compositor-specific backends — the wlroots backend drives Hyprland via
-# `hyprctl output create headless` + ext-image-copy-capture, no portal
-# consent required.
+# `hyprctl output create headless` + ext-image-copy-capture, and the KDE
+# backend (Plasma 6.3+: Kali, Parrot) drives a KWin virtual output +
+# PipeWire + EIS input. Neither needs portal consent; wayrdp picks the
+# backend from XDG_CURRENT_DESKTOP at startup.
 #
 # SECURITY/RELIABILITY CONTRACT (same as install_lamco.sh):
 #   - FAIL LOUDLY: no fallback path, no partial install silently accepted.
@@ -33,6 +35,8 @@ set -o pipefail
 #     lib/systemd/user/wayrdp.service
 #     share/doc/wayrdp/LICENSE
 #     share/wayrdp/plugins/hyprland-capture/{Makefile,main.cpp}
+#     share/applications/wayrdp.desktop — KWin grants zkde_screencast only
+#                             to a binary a desktop file names (KDE backend)
 #     install.sh            — installs to /usr/local (default prefix)
 #
 # Pinned release constants — bump these three together when pinning a new
@@ -40,9 +44,9 @@ set -o pipefail
 # version-numbered, so a `releases/latest` that no longer carries this
 # exact asset 404s loudly instead of silently installing a different one.
 WAYRDP_REPO="moerketh/wayrdp"
-WAYRDP_VERSION="0.2.0"
+WAYRDP_VERSION="0.3.0"
 WAYRDP_TARBALL="wayrdp-${WAYRDP_VERSION}-linux-x86_64.tar.gz"
-WAYRDP_TARBALL_SHA256="80fb69f28539f8e96b4718cbe3feb9062ebfa949a7086a233ccda161155f0ac4"
+WAYRDP_TARBALL_SHA256="4aaa90879a00a128fb4cb69f99c89f8ec28d1a5b8e1270e1e7153841e894007f"
 WAYRDP_TARBALL_URL="https://github.com/${WAYRDP_REPO}/releases/latest/download/${WAYRDP_TARBALL}"
 
 DEGRADED=0
@@ -85,12 +89,20 @@ if ! is_debian_family && ! is_arch_family; then
 fi
 
 # -- Runtime dependency: FreeRDP 3 server libs ------------------------------
-# wayrdp links libfreerdp-server3 / libfreerdp3 / libwinpr3 at runtime.
+# wayrdp links libfreerdp-server3 / libfreerdp3 / libwinpr3 at runtime, and
+# (since 0.3.0, the KDE backend's capture) libpipewire-0.3 — on every
+# desktop, Hyprland included.
 # Debian: trixie (13, stable) has freerdp3; bookworm (12) needs backports.
 # Arch ships it as the 'freerdp' package.
+# KDE Plasma guests additionally need the tools wayrdp's KDE backend shells
+# out to (its preflight refuses to start without them): kscreen-doctor
+# (kscreen), gdbus (libglib2.0-bin) and pkill (procps).
+is_plasma_guest() {
+    [ -f /usr/share/wayland-sessions/plasma.desktop ]
+}
 install_freerdp_deps() {
     if is_arch_family; then
-        echo "Installing runtime deps via pacman: freerdp openssl libxkbcommon wayland"
+        echo "Installing runtime deps via pacman: freerdp openssl libxkbcommon wayland libpipewire"
         # -Syu, not a bare -Sy: refreshing databases without upgrading is a
         # partial upgrade, which Arch warns can break packages against the
         # mixed-version databases on a stale image.
@@ -98,15 +110,26 @@ install_freerdp_deps() {
         # hook (AbortOnFail) rejects every -S+-u transaction not run through
         # `omarchy update` (live: openvpn and the lamco -Syu both refused). The
         # variable is the guard's documented bypass; other Arch guests ignore it.
-        OMARCHY_ALLOW_DIRECT_PACMAN=1 pacman -Syu --noconfirm --needed freerdp openssl libxkbcommon wayland 2>&1 || {
+        OMARCHY_ALLOW_DIRECT_PACMAN=1 pacman -Syu --noconfirm --needed freerdp openssl libxkbcommon wayland libpipewire 2>&1 || {
             echo "ERROR: pacman failed to install freerdp runtime deps." >&2
             exit 1
         }
     elif is_debian_family; then
-        echo "Installing runtime deps via apt: libfreerdp-server3-3 libfreerdp3-3 libwinpr3-3 openssl"
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -qq 2>&1 || true
-        if ! apt-get install -y -qq libfreerdp-server3-3 libfreerdp3-3 libwinpr3-3 openssl 2>&1; then
+        # trixie renamed the lib for the 64-bit time_t transition (t64).
+        PIPEWIRE_LIB="libpipewire-0.3-0t64"
+        if ! apt-cache show "$PIPEWIRE_LIB" >/dev/null 2>&1; then
+            PIPEWIRE_LIB="libpipewire-0.3-0"
+        fi
+        KDE_DEPS=""
+        if is_plasma_guest; then
+            KDE_DEPS="kscreen libglib2.0-bin procps"
+        fi
+        echo "Installing runtime deps via apt: libfreerdp-server3-3 libfreerdp3-3 libwinpr3-3 openssl $PIPEWIRE_LIB $KDE_DEPS"
+        # $KDE_DEPS is a deliberate word list (or empty).
+        # shellcheck disable=SC2086
+        if ! apt-get install -y -qq libfreerdp-server3-3 libfreerdp3-3 libwinpr3-3 openssl "$PIPEWIRE_LIB" $KDE_DEPS 2>&1; then
             echo "ERROR: apt failed to install freerdp3 runtime libs." >&2
             echo "       wayrdp needs FreeRDP 3; on Debian bookworm enable backports first." >&2
             exit 1
@@ -408,6 +431,22 @@ USER_UID="$(id -u "$AUTOLOGIN_USER")"
 run_as_user() {
     sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR="/run/user/$USER_UID" "$@"
 }
+
+# -- KDE: idle lock off -------------------------------------------------------
+# wayrdp does not stream the KDE lock screen yet, and on Hyper-V the lock
+# greeter can wedge under hyperv_drm framebuffer-error spam and swallow all
+# input, vmconnect console included. Disable the idle autolock and the lock
+# on resume for the desktop user (read at session start, so the first
+# boot is covered). Same settings install_lamco.sh writes.
+if is_plasma_guest && command -v kwriteconfig6 >/dev/null 2>&1; then
+    if run_as_user kwriteconfig6 --file kscreenlockerrc --group Daemon --key Autolock false 2>/dev/null \
+        && run_as_user kwriteconfig6 --file kscreenlockerrc --group Daemon --key LockOnResume false 2>/dev/null; then
+        echo "KDE idle lock disabled (kscreenlockerrc Autolock=false, LockOnResume=false)."
+    else
+        echo "DEGRADED: could not disable the KDE idle lock for $AUTOLOGIN_USER."
+        DEGRADED=1
+    fi
+fi
 
 # -- TCP listener bind -------------------------------------------------------
 # Default TCP bind is loopback-only, which vmconnect (vsock) does not need

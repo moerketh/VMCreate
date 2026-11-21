@@ -38,6 +38,14 @@ namespace VMCreate
         public bool LamcoSupported { get; init; }
 
         /// <summary>
+        /// True when wayrdp's KDE backend can serve this desktop: KDE Plasma
+        /// 6.3+ on a validated distro (Kali, Parrot). Auto prefers wayrdp
+        /// over Lamco there; the guest's actual KWin version is re-checked
+        /// at resolve time.
+        /// </summary>
+        public bool WayrdpSupported { get; init; }
+
+        /// <summary>
         /// True when xrdp can serve this desktop: only X11-only desktops
         /// (Xfce). xrdp on a Wayland-default desktop means forcing it onto
         /// X11 — GNOME 49+ has no X11 session left at all, and KDE's X11

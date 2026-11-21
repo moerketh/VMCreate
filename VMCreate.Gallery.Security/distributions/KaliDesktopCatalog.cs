@@ -47,9 +47,10 @@ namespace VMCreate.Gallery
         {
             Id = "kde",
             DisplayName = "KDE Plasma",
-            Description = "Full-featured modern desktop, Wayland by default since Plasma 6. Lamco RDP Server works with Plasma 6.3+.",
+            Description = "Full-featured modern desktop, Wayland by default since Plasma 6. Served by wayrdp (Plasma 6.3+); Lamco RDP Server also works.",
             DisplayServer = DesktopDisplayServer.WaylandDefault,
             LamcoSupported = true,
+            WayrdpSupported = true,
             IsDefault = false,
             Packages = new List<string> { "kali-desktop-kde" },
             PackagesToRemove = XfceRemoval,

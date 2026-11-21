@@ -78,16 +78,26 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
-        public void IsApplicable_FalseForNonOmarchyImages()
+        public void IsApplicable_FalseForImagesWithoutAWayrdpBackend()
         {
-            // wayrdp only serves Hyprland (wlroots backend) today: a GNOME,
-            // KDE or Xfce image on a wayrdp-capable distro is not a target.
-            foreach (var distro in new[] { LinuxDistro.Ubuntu, LinuxDistro.Debian, LinuxDistro.Parrot, LinuxDistro.Kali, LinuxDistro.Arch })
+            // wayrdp serves Hyprland (Omarchy) and KDE Plasma on Kali and
+            // Parrot: other wayrdp-capable distros are not targets yet.
+            foreach (var distro in new[] { LinuxDistro.Ubuntu, LinuxDistro.Debian, LinuxDistro.Arch })
             {
                 var item = new GalleryItem { LinuxDistro = distro };
                 Assert.IsFalse(_step.IsApplicable(item, _wayrdpCustomizations),
                     $"{distro} without the omarchy tag must not get wayrdp");
             }
+        }
+
+        [TestMethod]
+        public void IsApplicable_TrueForKaliAndParrot()
+        {
+            // The KDE backend's validated distros; the desktop itself is
+            // checked up front (RdpDesktopCompatibility) and by Auto.
+            foreach (var distro in new[] { LinuxDistro.Kali, LinuxDistro.Parrot })
+                Assert.IsTrue(_step.IsApplicable(new GalleryItem { LinuxDistro = distro }, _wayrdpCustomizations),
+                    $"{distro} is a wayrdp KDE-backend target");
         }
 
         [TestMethod]
@@ -137,7 +147,7 @@ namespace VMCreate.Tests.HyperV.Steps
             _shell.Verify(s => s.CopyContentAsync(
                 It.Is<string>(content => content.Contains("WAYRDP_TARBALL_URL")
                                          && content.Contains("releases/latest/download/")
-                                         && content.Contains("80fb69f28539f8e96b4718cbe3feb9062ebfa949a7086a233ccda161155f0ac4")
+                                         && content.Contains("4aaa90879a00a128fb4cb69f99c89f8ec28d1a5b8e1270e1e7153841e894007f")
                                          && !content.Contains("__WAYRDP_PKG")),
                 It.Is<string>(p => p.StartsWith("/tmp/install_wayrdp_") && p.EndsWith(".sh")),
                 It.IsAny<CancellationToken>()), Times.Once);

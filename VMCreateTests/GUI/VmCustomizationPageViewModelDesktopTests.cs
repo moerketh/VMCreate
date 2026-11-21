@@ -162,12 +162,33 @@ namespace VMCreate.Tests.GUI
         // Omarchy images only.
 
         [TestMethod]
-        public void WayrdpRadio_HiddenOnKali()
+        public void WayrdpRadio_OnKali_EnabledOnlyForKde()
         {
             var vm = Create(KaliItem(), out _);
 
-            Assert.IsFalse(vm.WayrdpOptionVisible,
-                "Kali's desktops (Xfce, KDE, GNOME) are not Hyprland — wayrdp has no capture path for them");
+            Assert.IsTrue(vm.WayrdpOptionVisible, "Kali is a wayrdp KDE-backend target");
+            Assert.IsFalse(vm.WayrdpOptionEnabled, "stock Xfce: wayrdp has no Xfce backend");
+
+            vm.SelectDesktop("kde");
+            Assert.IsTrue(vm.WayrdpOptionEnabled);
+            StringAssert.Contains(vm.AutoRdpHint, "wayrdp");
+
+            vm.SelectDesktop("gnome");
+            Assert.IsFalse(vm.WayrdpOptionEnabled, "no GNOME backend");
+        }
+
+        [TestMethod]
+        public void WayrdpChoice_ResetsToAuto_WhenKdeIsDeselected()
+        {
+            var vm = Create(KaliItem(), out _);
+            vm.SelectDesktop("kde");
+            vm.IsRdpBackendWayrdp = true;
+            Assert.AreEqual(RdpBackend.Wayrdp, vm.SelectedRdpBackend);
+
+            vm.SelectDesktop(null);
+
+            Assert.AreEqual(RdpBackend.Auto, vm.SelectedRdpBackend);
+            Assert.IsTrue(vm.HasRdpBackendNotice);
         }
 
         [TestMethod]
