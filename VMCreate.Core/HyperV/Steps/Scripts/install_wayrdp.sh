@@ -122,14 +122,21 @@ install_freerdp_deps() {
         if ! apt-cache show "$PIPEWIRE_LIB" >/dev/null 2>&1; then
             PIPEWIRE_LIB="libpipewire-0.3-0"
         fi
+        # winpr-hash3 seeds the NLA SAM below; without it wayrdp refuses TCP
+        # and restart-loops. Debian 13 / Kali name the package winpr-utils
+        # (winpr3-utils is the older or transitional name).
+        WINPR_UTILS="winpr-utils"
+        if ! apt-cache show "$WINPR_UTILS" >/dev/null 2>&1; then
+            WINPR_UTILS="winpr3-utils"
+        fi
         KDE_DEPS=""
         if is_plasma_guest; then
             KDE_DEPS="kscreen libglib2.0-bin procps"
         fi
-        echo "Installing runtime deps via apt: libfreerdp-server3-3 libfreerdp3-3 libwinpr3-3 openssl $PIPEWIRE_LIB $KDE_DEPS"
+        echo "Installing runtime deps via apt: libfreerdp-server3-3 libfreerdp3-3 libwinpr3-3 $WINPR_UTILS openssl $PIPEWIRE_LIB $KDE_DEPS"
         # $KDE_DEPS is a deliberate word list (or empty).
         # shellcheck disable=SC2086
-        if ! apt-get install -y -qq libfreerdp-server3-3 libfreerdp3-3 libwinpr3-3 openssl "$PIPEWIRE_LIB" $KDE_DEPS 2>&1; then
+        if ! apt-get install -y -qq libfreerdp-server3-3 libfreerdp3-3 libwinpr3-3 "$WINPR_UTILS" openssl "$PIPEWIRE_LIB" $KDE_DEPS 2>&1; then
             echo "ERROR: apt failed to install freerdp3 runtime libs." >&2
             echo "       wayrdp needs FreeRDP 3; on Debian bookworm enable backports first." >&2
             exit 1
@@ -499,11 +506,13 @@ if [ "$WAYRDP_NLA_PASSWORD_B64" != "__WAYRDP_NLA_PASSWORD""_B64__" ] && ! run_as
             chown "$AUTOLOGIN_USER":"$AUTOLOGIN_USER" "$SAM_FILE" 2>/dev/null || true
             echo "NLA SAM seeded for '$AUTOLOGIN_USER'."
         else
-            echo "NOTE: winpr-hash3 SAM generation failed — wayrdp will refuse to start until a SAM is provisioned." >&2
+            echo "DEGRADED: winpr-hash3 SAM generation failed — wayrdp will refuse to start until a SAM is provisioned."
+            DEGRADED=1
         fi
         rm -f "$SAM_TMP" 2>/dev/null || true
     elif [ -n "$NLA_PW" ]; then
-        echo "NOTE: winpr-hash3 not installed — cannot seed wayrdp NLA SAM; first RDP connect will fail." >&2
+        echo "DEGRADED: winpr-hash3 not installed — cannot seed the wayrdp NLA SAM; wayrdp will refuse to start."
+        DEGRADED=1
     fi
     unset NLA_PW
 fi
