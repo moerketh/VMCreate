@@ -21,29 +21,29 @@ set -o pipefail
 #     flatpak assets are not built for this lineage.
 
 LAMCO_FORK_REPO="moerketh/lamco-rdp-server"
-LAMCO_FORK_TAG="v1.4.5-hyperv.7"
-LAMCO_FORK_DEB_VERSION="1.4.5-hyperv7"
+LAMCO_FORK_TAG="v1.4.5-hyperv.8"
+LAMCO_FORK_DEB_VERSION="1.4.5-hyperv8"
 # The fork's release policy: the Cargo.toml crate version stays at the
 # upstream base (1.4.5) and the distribution package versions carry the
 # lineage suffix — i.e. the BINARY deliberately reports only the base
 # version (verified on the pinned assets: /usr/bin/lamco-rdp-server
 # --version prints "lamco-rdp-server 1.4.5"), while dpkg reports
-# 1.4.5-hyperv7 and pacman reports 1.4.5.hyperv7-1 (the .PKGINFO pkgver —
+# 1.4.5-hyperv8 and pacman reports 1.4.5.hyperv8-1 (the .PKGINFO pkgver —
 # same upstream version plus the pkgrel '-1'; Arch pkgver cannot contain
 # hyphens, hence the dot; keep the pins and this sentence in step).
 LAMCO_FORK_CRATE_VERSION="1.4.5"
-LAMCO_FORK_DEB_SHA256="952d833c2f25e437d1f8da322cd62462aee43ba80ce8799292d71bb0156e304f"
+LAMCO_FORK_DEB_SHA256="8cc6dd6bc6b4c4802dffe3a326164e00c7ce3b45d8f7fc8c27207f1c9cf891ba"
 LAMCO_FORK_DEB_URL="https://github.com/${LAMCO_FORK_REPO}/releases/download/${LAMCO_FORK_TAG}/lamco-rdp-server_${LAMCO_FORK_DEB_VERSION}_amd64.deb"
 # Same release, pacman packaging. Built by the same workflow from the same
 # tag and carrying the same binary payload; the .PKGINFO pkgver is
-# 1.4.5.hyperv6-1 (upstream version + pkgrel), so pacman -Q reports the
-# full "1.4.5.hyperv6-1" string. NOTE the DOT: Arch pkgver grammar forbids
+# 1.4.5.hyperv8-1 (upstream version + pkgrel), so pacman -Q reports the
+# full "1.4.5.hyperv8-1" string. NOTE the DOT: Arch pkgver grammar forbids
 # hyphens (the pkgver-pkgrel split), and the original v1.4.5-hyperv.6 asset
 # shipped pkgver "1.4.5-hyperv6-1", which pacman rejects as "invalid
 # metadata" — every pacman-lineage install failed on it. The corrected
 # asset (same payload, fixed .PKGINFO) sits alongside the broken one.
-LAMCO_FORK_PKG_VERSION="1.4.5.hyperv7-1"
-LAMCO_FORK_PKG_SHA256="d5db19b1fd00e4e33de9876ce94e8c48304bd942885383149724170c7a07904f"
+LAMCO_FORK_PKG_VERSION="1.4.5.hyperv8-1"
+LAMCO_FORK_PKG_SHA256="903841bb4aa73afa8421c1a799b49dcf821d493639399368ce123f07d8d05576"
 LAMCO_FORK_PKG_URL="https://github.com/${LAMCO_FORK_REPO}/releases/download/${LAMCO_FORK_TAG}/lamco-rdp-server-${LAMCO_FORK_PKG_VERSION}-x86_64.pkg.tar.zst"
 
 # Result contract: 0 = ok, 1 = degraded (install completed with warnings —
@@ -239,7 +239,7 @@ rm -f "$FORK_PKG_TMP"
 
 # FORK IDENTITY (pacman lineage, same rationale as the dpkg check): pacman
 # must report EXACTLY 'name pkgver' with the pkgrel included —
-# 'lamco-rdp-server 1.4.5-hyperv7-1'.
+# 'lamco-rdp-server 1.4.5.hyperv8-1'.
 installed_status="install ok installed"
 installed_pkg_ver="$(pacman -Q lamco-rdp-server 2>/dev/null || true)"
 if [ "$installed_pkg_ver" != "lamco-rdp-server $LAMCO_FORK_PKG_VERSION" ]; then
@@ -300,6 +300,23 @@ done
 # kill any straggler so a wedged session (the black-screen login) cannot
 # hold the vsock listener open.
 pkill -x xrdp-sesexec 2>/dev/null || true
+# The session itself outlives both: its Xorg and desktop are reparented to
+# PID 1 inside the session scope (live, Kali + KDE: Enhanced Session reached
+# the stock xrdp mid-deployment, and the orphaned nested KWin wedged the
+# kscreen-doctor call below and held graphical-session.target). Ending the
+# logind session removes the whole scope.
+if command -v loginctl >/dev/null 2>&1; then
+    for sid in $(loginctl list-sessions --no-legend 2>/dev/null | awk '{ print $1 }'); do
+        if [ "$(loginctl show-session "$sid" -p Service --value 2>/dev/null)" = "xrdp-sesman" ]; then
+            if loginctl terminate-session "$sid" 2>/dev/null; then
+                echo "Ended orphaned xrdp session $sid."
+            else
+                echo "DEGRADED: could not end xrdp session $sid — its desktop may hold the user's graphical session."
+                DEGRADED=1
+            fi
+        fi
+    done
+fi
 # Belt-and-braces: pgrep is a single command — no pipeline that can
 # silently no-op (the ss|grep|grep chain died with the same class of
 # bug as the existence check above). Keyed on the process NAME, not the
@@ -567,9 +584,8 @@ codec = "avc420"
 encoder_backend = "x264"
 # QUALITY PROFILE: qp 20-28 (live-tested) keeps good 1080p fidelity while
 # roughly HALVING encoder CPU vs the old qp 8-10 on a 2-vCPU guest. (The older
-# qp_min=1 forced lossless-mode x264 for EVERY frame — combined with
-# damage_tracking.pixel_threshold=1's full-frame diff per frame at 1080p,
-# the encoder starved the very desktop it was encoding.) Adaptation is
+# qp_min=1 forced lossless-mode x264 for EVERY frame, and the encoder
+# starved the very desktop it was encoding.) Adaptation is
 # ON so sustained load can climb to max_qp instead of dropping frames.
 qp_min = 20
 qp_max = 28
@@ -601,12 +617,22 @@ enabled = true
 # the platform, cutting CPU vs the explicit full-frame "diff" walker.
 method = "recommended"
 tile_size = 16
-diff_threshold = 0.01
-# 100 (not 1): pixel_threshold=1 meant even a single changed pixel marked a
-# tile dirty — at 1080p the per-frame full-buffer diff plus the resulting
-# x264 near-lossless encodes starved the 2-vCPU desktop. 100 still catches
-# real damage while ignoring sensor-noise-level flicker.
-pixel_threshold = 100
+# A tile is re-sent only when MORE than diff_threshold*256 of its pixels
+# changed; a tile that is never re-sent keeps its stale pixels on the client
+# for good (the detector diffs frame-to-frame, not against what the client
+# shows). 0.0 = any changed pixel dirties its tile, so the trailing edge of
+# a moving Painted-mode cursor (KWin draws it into the frame) is always
+# repainted. 0.01 still needed >2 pixels per tile and could strand a
+# 1-2 pixel cursor tip.
+diff_threshold = 0.0
+# Per-CHANNEL delta (0-255) a pixel must exceed to count as changed — not a
+# pixel count. 100 made the dark cursor body over a dark desktop invisible
+# to the diff, so only the white outline registered, below the tile
+# threshold: every cursor move left white dots behind (live, HTB
+# Academy_20261031153025). The diff walks every pixel whatever this value,
+# so it never saved CPU (the 2-vCPU starvation was qp_min=1, fixed above);
+# compositor output is exact, so 1 (upstream default) has no noise to reject.
+pixel_threshold = 1
 merge_distance = 16
 min_region_area = 64
 
@@ -1011,10 +1037,26 @@ MONITORS_EOF
     # This runs after the Wayland session starts (the systemd service has
     # ConditionEnvironment=WAYLAND_DISPLAY), so kscreen-doctor can connect.
     if command -v kscreen-doctor >/dev/null 2>&1; then
-        # Try to set the configured resolution — the best mode for RDP
-        sudo -u "$AUTOLOGIN_USER" WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/"$(id -u "$AUTOLOGIN_USER")" \
-            kscreen-doctor output.1.mode.__CONSOLE_RESOLUTION__ 2>/dev/null || true
-        echo "Set KScreen resolution to __CONSOLE_RESOLUTION__ via kscreen-doctor."
+        # Only against the user's local (seat0) Wayland session: wayland-0
+        # can belong to another session — an orphaned xrdp login ran a
+        # nested KWin there and kscreen-doctor waited on it forever (live,
+        # Kali + KDE). Bounded by a timeout either way.
+        KSCREEN_LOCAL=""
+        for sid in $(loginctl list-sessions --no-legend 2>/dev/null | awk -v u="$AUTOLOGIN_USER" '$3 == u { print $1 }'); do
+            if [ "$(loginctl show-session "$sid" -p Seat --value 2>/dev/null)" = "seat0" ] \
+                && [ "$(loginctl show-session "$sid" -p Type --value 2>/dev/null)" = "wayland" ]; then
+                KSCREEN_LOCAL="$sid"
+                break
+            fi
+        done
+        if [ -z "$KSCREEN_LOCAL" ]; then
+            echo "No local Wayland session for $AUTOLOGIN_USER yet — kscreen-doctor skipped (KWin applies its own default)."
+        elif timeout 10 sudo -u "$AUTOLOGIN_USER" WAYLAND_DISPLAY=wayland-0 XDG_RUNTIME_DIR=/run/user/"$(id -u "$AUTOLOGIN_USER")" \
+            kscreen-doctor output.1.mode.__CONSOLE_RESOLUTION__ >/dev/null 2>&1; then
+            echo "Set KScreen resolution to __CONSOLE_RESOLUTION__ via kscreen-doctor."
+        else
+            echo "kscreen-doctor could not set __CONSOLE_RESOLUTION__ (failed or timed out) — KWin keeps its current mode."
+        fi
     else
         echo "kscreen-doctor not found — KWin will use DRM default (1024x768)."
     fi
@@ -1097,6 +1139,46 @@ MONITORS_EOF
         else
             echo "NOTICE: could not pre-authorize lamco in the KDE permission store — the one-time consent dialog will appear on the console."
         fi
+    fi
+
+    # -- KWin private-interface grant (zkde-screencast) ----------------------
+    # MUST precede the service restart below. KWin evaluates the allowlist
+    # once, when a client connects, and never re-advertises a gated global
+    # on an existing connection: a lamco process started before this file
+    # exists stays blind to zkde_screencast for its whole lifetime (live,
+    # HTB Academy_20261031153025: restart at 14:41:08, grant at 14:41:18 —
+    # every vmconnect failed "zkde_screencast global not bound" until a
+    # manual restart). Placed after the synchronous user@ start above so
+    # kbuildsycoca6 has the user bus.
+    # KWin-only; Hyprland does not gate screencast interfaces behind an
+    # executable allowlist, so this file is meaningless (though harmless)
+    # there.
+    if ! is_arch_family; then
+    # KWin 6.x gates private Wayland interfaces behind an allowlist:
+    # zkde_screencast_unstable_v1 is only advertised to clients whose
+    # .desktop file lists it under X-KDE-Wayland-Interfaces (matched by the
+    # client's executable path — see KWin wayland_server.cpp
+    # interfacesBlackList + serviceutils.h fetchRequestedInterfaces).
+    # xdg-desktop-portal-kde and krfb ship such entries; without one the
+    # kwin-virtual strategy cannot bind the global: every connect fails
+    # with "zkde stream creation failed: zkde_screencast global not bound",
+    # and the global stays invisible even to wayland-info.
+    cat > /usr/share/applications/lamco-rdp-server.desktop << 'DESKTOPEOF'
+[Desktop Entry]
+Type=Application
+Name=Lamco RDP Server
+Exec=/usr/bin/lamco-rdp-server
+NoDisplay=true
+X-KDE-Wayland-Interfaces=zkde_screencast_unstable_v1
+DESKTOPEOF
+    chmod 0644 /usr/share/applications/lamco-rdp-server.desktop
+    # Refresh KDE's service cache so the grant takes effect without relogin.
+    if command -v kbuildsycoca6 >/dev/null 2>&1; then
+        sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
+            DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u "$AUTOLOGIN_USER")/bus \
+            kbuildsycoca6 --noincremental 2>/dev/null || true
+    fi
+    echo "KWin private-interface grant installed (zkde_screencast_unstable_v1 for /usr/bin/lamco-rdp-server)."
     fi
 
     sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
@@ -1316,37 +1398,8 @@ UNITEOF
     fi
     fi
 
-    # -- KWin private-interface grant (zkde-screencast) ----------------------
-    # KWin-only; Hyprland does not gate screencast interfaces behind an
-    # executable allowlist, so this file is meaningless (though harmless)
-    # there.
-    if ! is_arch_family; then
-    # KWin 6.x gates private Wayland interfaces behind an allowlist:
-    # zkde_screencast_unstable_v1 is only advertised to clients whose
-    # .desktop file lists it under X-KDE-Wayland-Interfaces (matched by the
-    # client's executable path — see KWin wayland_server.cpp
-    # interfacesBlackList + serviceutils.h fetchRequestedInterfaces).
-    # xdg-desktop-portal-kde and krfb ship such entries; without one the
-    # kwin-virtual strategy cannot bind the global: every connect fails
-    # with "zkde stream creation failed: zkde_screencast global not bound",
-    # and the global stays invisible even to wayland-info.
-    cat > /usr/share/applications/lamco-rdp-server.desktop << 'DESKTOPEOF'
-[Desktop Entry]
-Type=Application
-Name=Lamco RDP Server
-Exec=/usr/bin/lamco-rdp-server
-NoDisplay=true
-X-KDE-Wayland-Interfaces=zkde_screencast_unstable_v1
-DESKTOPEOF
-    chmod 0644 /usr/share/applications/lamco-rdp-server.desktop
-    # Refresh KDE's service cache so the grant takes effect without relogin.
-    if [ -n "$AUTOLOGIN_USER" ] && command -v kbuildsycoca6 >/dev/null 2>&1; then
-        sudo -u "$AUTOLOGIN_USER" XDG_RUNTIME_DIR=/run/user/$(id -u "$AUTOLOGIN_USER") \
-            DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u "$AUTOLOGIN_USER")/bus \
-            kbuildsycoca6 --noincremental 2>/dev/null || true
-    fi
-    echo "KWin private-interface grant installed (zkde_screencast_unstable_v1 for /usr/bin/lamco-rdp-server)."
-    fi
+    # (The KWin zkde-screencast grant lives before the service restart above
+    # — see "KWin private-interface grant".)
 
     # linger + enable (the service starts on next graphical-session target)
     loginctl enable-linger "$AUTOLOGIN_USER" 2>/dev/null || { echo "DEGRADED: enable-linger failed for $AUTOLOGIN_USER — user units will not start at boot"; DEGRADED=1; }

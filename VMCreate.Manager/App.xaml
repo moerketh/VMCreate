@@ -1,0 +1,40 @@
+<Application x:Class="VMCreate.Manager.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:local="clr-namespace:VMCreate.Manager"
+             Startup="App_OnStartup"
+             Exit="App_OnExit">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ui:ThemesDictionary Theme="Dark" />
+                <ui:ControlsDictionary />
+            </ResourceDictionary.MergedDictionaries>
+
+            <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+            <local:NullToVisibilityConverter x:Key="NullToVis"/>
+            <local:InverseNullToVisibilityConverter x:Key="InverseNullToVis"/>
+            <local:CountToVisibilityConverter x:Key="CountToVis"/>
+            <local:VmStateToBrushConverter x:Key="StateBrush"/>
+            <local:VmStateToSymbolConverter x:Key="StateSymbol"/>
+            <local:FolderGroupNameConverter x:Key="FolderGroupName"/>
+            <local:HexToBrushConverter x:Key="HexToBrush"/>
+            <local:NetworkExposureConverter x:Key="Exposure"/>
+
+            <SolidColorBrush x:Key="SubtleTextBrush" Color="{DynamicResource TextFillColorSecondary}"/>
+            <SolidColorBrush x:Key="ItemBorderBrush" Color="{DynamicResource ControlStrokeColorDefault}"/>
+
+            <Style x:Key="SectionHeader" TargetType="TextBlock">
+                <Setter Property="FontSize" Value="12"/>
+                <Setter Property="FontWeight" Value="SemiBold"/>
+                <Setter Property="Foreground" Value="{StaticResource SubtleTextBrush}"/>
+                <Setter Property="Margin" Value="0,12,0,4"/>
+            </Style>
+            <Style x:Key="FieldLabel" TargetType="TextBlock">
+                <Setter Property="Foreground" Value="{StaticResource SubtleTextBrush}"/>
+                <Setter Property="Margin" Value="0,8,0,2"/>
+            </Style>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

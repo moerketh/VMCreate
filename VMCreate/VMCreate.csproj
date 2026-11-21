@@ -21,6 +21,7 @@
          R2R image, killing per-assembly cross-gen boundaries. -->
     <PublishReadyToRunComposite Condition="'$(SelfContained)' == 'true'">true</PublishReadyToRunComposite>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\vmcreate.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="App.xaml.cs" />
@@ -75,6 +76,8 @@
 
   <ItemGroup>
     <None Include="app.manifest" />
+    <!-- Title bar icon; the .ico is the exe and taskbar icon (Assets/make_icons.py draws both). -->
+    <Resource Include="Assets\vmcreate.png" />
   </ItemGroup>
 
   <ItemGroup>

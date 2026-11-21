@@ -30,6 +30,15 @@
                     Description="Linux VM Quick Create for Hyper-V"
                     Advertise="yes" />
         </Component>
+        <Component Id="ManagerExe" Guid="5E0C7A0B-3F6D-4B8E-9C1A-7D2F4E6B8A10" Bitness="always64">
+          <!-- Name is explicit: WiX would otherwise derive it from Source, bind-path prefix included. -->
+          <File Id="ManagerExe" Source="!(bindpath.manager)VMCreate.Manager.exe" Name="VMCreate.Manager.exe" KeyPath="yes" />
+          <Shortcut Id="ManagerStartMenu"
+                    Directory="ProgramMenuFolder"
+                    Name="VMCreate Manager"
+                    Description="Organize, protect and clean up Hyper-V virtual machines"
+                    Advertise="yes" />
+        </Component>
         <Component Id="License" Guid="B2C3D4E5-F6A7-8901-BCDE-F12345678901" Bitness="always64">
           <File Id="License" Source="$(var.SolutionDir)LICENSE.txt" Name="LICENSE.txt" KeyPath="yes" />
         </Component>
@@ -123,6 +132,7 @@
     <!-- ── Feature ──────────────────────────────────────────────────── -->
     <Feature Id="Main" Title="VMCreate" Level="1">
       <ComponentRef Id="VMCreateExe" />
+      <ComponentRef Id="ManagerExe" />
       <ComponentRef Id="License" />
       <ComponentRef Id="ThirdParty" />
     </Feature>

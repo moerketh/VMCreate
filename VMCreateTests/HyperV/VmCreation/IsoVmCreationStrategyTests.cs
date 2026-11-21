@@ -288,13 +288,13 @@ namespace VMCreate.Tests.HyperV.VmCreation
         }
 
         [TestMethod]
-        public async Task CreateVMAsync_Omarchy_WritesLoginNotes()
+        public async Task CreateVMAsync_Omarchy_RecordsLoginCredentials()
         {
             _item = CreateOmarchyItem();
 
             await ExecuteAsync();
 
-            _configManager.Verify(c => c.SetVMLoginNotes(_plan, "omarchy", "test-password", It.IsAny<CancellationToken>()), Times.Once);
+            _configManager.Verify(c => c.RecordLoginCredentials(_plan, "omarchy", "test-password", It.IsAny<CancellationToken>()), Times.Once);
         }
 
         [TestMethod]
@@ -409,7 +409,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
         }
 
         [TestMethod]
-        public async Task CreateVMAsync_Omarchy_SeedFailure_FallsBackToDvdBoot_WithoutLoginNotes()
+        public async Task CreateVMAsync_Omarchy_SeedFailure_FallsBackToDvdBoot_WithoutLoginCredentials()
         {
             _item = CreateOmarchyItem();
             _sshKeyManager.Setup(k => k.EnsureKeyPairAsync(It.IsAny<CancellationToken>()))
@@ -419,7 +419,7 @@ namespace VMCreate.Tests.HyperV.VmCreation
 
             _bootManager.Verify(b => b.SetFirstBootToDvd(_plan, It.IsAny<CancellationToken>()), Times.Once);
             _bootManager.Verify(b => b.SetFirstBootToHardDrive(_plan, It.IsAny<CancellationToken>()), Times.Never);
-            _configManager.Verify(c => c.SetVMLoginNotes(_plan, It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+            _configManager.Verify(c => c.RecordLoginCredentials(_plan, It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
             _guestShellFactory.Verify(f => f.Create(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
         }
 

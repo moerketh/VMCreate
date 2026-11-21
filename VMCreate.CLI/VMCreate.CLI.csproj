@@ -6,6 +6,7 @@
     <LangVersion>latest</LangVersion>
     <AssemblyName>VMCreate.CLI</AssemblyName>
     <RootNamespace>VMCreate.CLI</RootNamespace>
+    <ApplicationIcon>..\VMCreate\Assets\vmcreate.ico</ApplicationIcon>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>

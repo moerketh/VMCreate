@@ -1,5 +1,6 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
+using System.Collections.Generic;
 using VMCreate;
 
 namespace VMCreate.Tests.GalleryTests
@@ -38,7 +39,7 @@ namespace VMCreate.Tests.GalleryTests
             // NixOs (incl. Athena Nix / NixOS): declarative distro — no
             // package-manager install path possible. Arch-family distros
             // ARE supported since the fork pipeline ships an amd64 pacman
-            // package (lamco-rdp-server-1.4.5-hyperv7-1; Omarchy Phase D).
+            // package (lamco-rdp-server-1.4.5.hyperv8-1; Omarchy Phase D).
             Assert.IsFalse(LinuxDistro.NixOs.SupportsLamco());
         }
 
@@ -93,8 +94,25 @@ namespace VMCreate.Tests.GalleryTests
         {
             GalleryItem? item = null;
             Assert.IsFalse(item.SupportsWayrdp());
-            item = new GalleryItem { LinuxDistro = LinuxDistro.Ubuntu };
+            item = new GalleryItem { LinuxDistro = LinuxDistro.Arch, Tags = new List<string> { "omarchy" } };
             Assert.IsTrue(item.SupportsWayrdp());
+        }
+
+        [TestMethod]
+        public void GalleryItem_SupportsWayrdp_OmarchyOrKaliParrot()
+        {
+            // wayrdp serves Hyprland (Omarchy, wlroots backend) and KDE
+            // Plasma on its validated distros (Kali, Parrot). Other
+            // wayrdp-capable distros are not targets without the omarchy tag.
+            Assert.IsTrue(new GalleryItem { LinuxDistro = LinuxDistro.Kali }.SupportsWayrdp());
+            Assert.IsTrue(new GalleryItem { LinuxDistro = LinuxDistro.Parrot }.SupportsWayrdp());
+            Assert.IsTrue(new GalleryItem { LinuxDistro = LinuxDistro.Arch, Tags = new List<string> { "omarchy" } }.SupportsWayrdp());
+            Assert.IsFalse(new GalleryItem { LinuxDistro = LinuxDistro.Arch }.SupportsWayrdp());
+            Assert.IsFalse(new GalleryItem { LinuxDistro = LinuxDistro.Debian }.SupportsWayrdp());
+            Assert.IsFalse(new GalleryItem { LinuxDistro = LinuxDistro.Ubuntu }.SupportsWayrdp());
+            Assert.IsFalse(((GalleryItem?)null).SupportsWayrdp());
+            Assert.IsFalse(new GalleryItem { LinuxDistro = LinuxDistro.Fedora, Tags = new List<string> { "omarchy" } }.SupportsWayrdp(),
+                "the distro must still be wayrdp-capable");
         }
     }
 }

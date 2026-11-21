@@ -16,6 +16,9 @@
         </Grid.RowDefinitions>
 
         <ui:TitleBar Grid.Row="0" Title="New Virtual Machine Wizard">
+            <ui:TitleBar.Icon>
+                <ui:ImageIcon Source="pack://application:,,,/VMCreate;component/Assets/vmcreate.png" Width="16" Height="16"/>
+            </ui:TitleBar.Icon>
             <ui:TitleBar.Header>
                 <StackPanel Orientation="Horizontal">
                     <ui:Button x:Name="ThemeToggleButton"

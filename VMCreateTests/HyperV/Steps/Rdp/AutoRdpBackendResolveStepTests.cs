@@ -122,12 +122,106 @@ namespace VMCreate.Tests.HyperV.Steps
             Assert.AreEqual(RdpBackend.Lamco, c.RdpBackend, "Wayland default + Lamco-capable distro → Lamco");
         }
 
+        // ── KDE Plasma 6.3+ on Kali / Parrot → wayrdp ───────────────────
+
+        private void SetupOsRelease(string osRelease)
+            => _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .ReturnsAsync(osRelease);
+
+        [TestMethod]
+        [DataRow("ID=kali\nID_LIKE=debian\n", "6.7.4", LinuxDistro.Kali)]
+        [DataRow("ID=parrot\nID_LIKE=debian\n", "6.3.6", LinuxDistro.Parrot)]
+        public async Task ExecuteAsync_PlasmaOnKaliOrParrot_ResolvesWayrdp(string osRelease, string kwin, LinuxDistro distro)
+        {
+            SetupOsRelease(osRelease);
+            SetupScriptOutput($"Default Wayland desktop is KDE Plasma (KWin {kwin}).\nRDP_PLASMA={kwin}\nRDP_DETECT=wayland");
+            var c = new VmCustomizations { RdpBackend = RdpBackend.Auto };
+
+            await _step.ExecuteAsync(_shell.Object, new GalleryItem { LinuxDistro = distro }, c, _logger.Object, CancellationToken.None);
+
+            Assert.AreEqual(RdpBackend.Wayrdp, c.RdpBackend);
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_SwitchedToKdeOnKali_ResolvesWayrdp()
+        {
+            SetupOsRelease("ID=kali\nID_LIKE=debian\n");
+            SetupScriptOutput("RDP_PLASMA=6.7.4\nRDP_DETECT=wayland");
+            var c = new VmCustomizations { RdpBackend = RdpBackend.Auto, SwitchedDesktopDisplayServer = DesktopDisplayServer.WaylandDefault };
+
+            await _step.ExecuteAsync(_shell.Object, _lamcoCapableItem, c, _logger.Object, CancellationToken.None);
+
+            Assert.AreEqual(RdpBackend.Wayrdp, c.RdpBackend);
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_PlasmaOlderThan63_StaysLamco()
+        {
+            // wayrdp's preflight refuses KWin < 6.3: the VM would end up
+            // without RDP, so Lamco keeps it.
+            SetupOsRelease("ID=kali\nID_LIKE=debian\n");
+            SetupScriptOutput("RDP_PLASMA=6.2.5\nRDP_DETECT=wayland");
+            var c = new VmCustomizations { RdpBackend = RdpBackend.Auto };
+
+            await _step.ExecuteAsync(_shell.Object, _lamcoCapableItem, c, _logger.Object, CancellationToken.None);
+
+            Assert.AreEqual(RdpBackend.Lamco, c.RdpBackend);
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_PlasmaOnUnvalidatedDistro_StaysLamco()
+        {
+            SetupOsRelease("ID=debian\n");
+            SetupScriptOutput("RDP_PLASMA=6.3.6\nRDP_DETECT=wayland");
+            var c = new VmCustomizations { RdpBackend = RdpBackend.Auto };
+
+            await _step.ExecuteAsync(_shell.Object, _lamcoCapableItem, c, _logger.Object, CancellationToken.None);
+
+            Assert.AreEqual(RdpBackend.Lamco, c.RdpBackend, "only the detected distro counts, not the gallery hint");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_KaliWithoutPlasma_StaysLamco()
+        {
+            // GNOME on Kali: no RDP_PLASMA line.
+            SetupOsRelease("ID=kali\nID_LIKE=debian\n");
+            SetupScriptOutput("RDP_DETECT=wayland");
+            var c = new VmCustomizations { RdpBackend = RdpBackend.Auto };
+
+            await _step.ExecuteAsync(_shell.Object, _lamcoCapableItem, c, _logger.Object, CancellationToken.None);
+
+            Assert.AreEqual(RdpBackend.Lamco, c.RdpBackend);
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_PlasmaButX11Default_StaysXrdp()
+        {
+            SetupOsRelease("ID=kali\nID_LIKE=debian\n");
+            SetupScriptOutput("RDP_PLASMA=6.7.4\nRDP_DETECT=x11");
+            var c = new VmCustomizations { RdpBackend = RdpBackend.Auto };
+
+            await _step.ExecuteAsync(_shell.Object, _lamcoCapableItem, c, _logger.Object, CancellationToken.None);
+
+            Assert.AreEqual(RdpBackend.Xrdp, c.RdpBackend);
+        }
+
+        [TestMethod]
+        public void ParsePlasmaLine_TakesMajorMinorOfTheLastLine()
+        {
+            Assert.AreEqual((6, 7), AutoRdpBackendResolveStep.ParsePlasmaLine("x\nRDP_PLASMA=6.3.6\nRDP_PLASMA=6.7.4\r\nRDP_DETECT=wayland"));
+            Assert.AreEqual((6, 3), AutoRdpBackendResolveStep.ParsePlasmaLine("RDP_PLASMA=6.3"));
+            Assert.IsNull(AutoRdpBackendResolveStep.ParsePlasmaLine("RDP_DETECT=wayland"));
+            Assert.IsNull(AutoRdpBackendResolveStep.ParsePlasmaLine("RDP_PLASMA=6"));
+            Assert.IsNull(AutoRdpBackendResolveStep.ParsePlasmaLine("RDP_PLASMA=six.seven"));
+            Assert.IsNull(AutoRdpBackendResolveStep.ParsePlasmaLine("RDP_PLASMA=-6.7"));
+        }
+
         [TestMethod]
         public async Task ExecuteAsync_WaylandOnOmarchy_ResolvesLamco()
         {
             // Omarchy installs Arch + Hyprland (Wayland). Since the fork
             // pipeline ships the amd64 pacman package
-            // (lamco-rdp-server-1.4.5-hyperv7-1, built from the same tag as
+            // (lamco-rdp-server-1.4.5.hyperv8-1, built from the same tag as
             // the deb), Arch is Lamco-capable: Wayland + Arch → Lamco.
             _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                   .ReturnsAsync("ID=omarchy\nID_LIKE=arch\n");
@@ -182,6 +276,63 @@ namespace VMCreate.Tests.HyperV.Steps
 
             Assert.AreEqual(RdpBackend.Xrdp, c.RdpBackend);
             Assert.IsTrue(LoggedWarning(_logger));
+        }
+
+        // ── After a switch to a Wayland desktop: never xrdp ─────────────
+
+        [TestMethod]
+        public async Task ExecuteAsync_SwitchedToWayland_X11Detected_StillResolvesLamco()
+        {
+            // A leftover X11 pin can make detection read x11 after a switch
+            // to GNOME/KDE; xrdp there would force a Wayland desktop onto
+            // X11 (GNOME 49+ has no X11 session at all).
+            SetupScriptOutput("RDP_DETECT=x11");
+            var c = new VmCustomizations { RdpBackend = RdpBackend.Auto, SwitchedDesktopDisplayServer = DesktopDisplayServer.WaylandDefault };
+
+            await _step.ExecuteAsync(_shell.Object, _lamcoCapableItem, c, _logger.Object, CancellationToken.None);
+
+            Assert.AreEqual(RdpBackend.Lamco, c.RdpBackend);
+            Assert.IsTrue(LoggedWarning(_logger), "overriding the detection verdict must warn");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_SwitchedToWayland_DetectionFailed_ResolvesLamcoFromGalleryHint()
+        {
+            SetupScriptOutput("no detect line");
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .ThrowsAsync(new InvalidOperationException("ssh lost"));
+            var c = new VmCustomizations { RdpBackend = RdpBackend.Auto, SwitchedDesktopDisplayServer = DesktopDisplayServer.WaylandDefault };
+
+            await _step.ExecuteAsync(_shell.Object, _lamcoCapableItem, c, _logger.Object, CancellationToken.None);
+
+            Assert.AreEqual(RdpBackend.Lamco, c.RdpBackend, "unreadable guest: the Kali gallery hint stands in, never xrdp");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_SwitchedToWayland_LamcoIncapableDistro_ResolvesNoneWithWarning()
+        {
+            SetupScriptOutput("RDP_DETECT=wayland");
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .ReturnsAsync("ID=fedora\n");
+            var item = new GalleryItem { LinuxDistro = LinuxDistro.Fedora };
+            var c = new VmCustomizations { RdpBackend = RdpBackend.Auto, SwitchedDesktopDisplayServer = DesktopDisplayServer.WaylandDefault };
+
+            await _step.ExecuteAsync(_shell.Object, item, c, _logger.Object, CancellationToken.None);
+
+            Assert.AreEqual(RdpBackend.None, c.RdpBackend, "no Lamco and no xrdp for a Wayland desktop → no RDP");
+            Assert.IsTrue(LoggedWarning(_logger));
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_SwitchedToX11Desktop_X11Detected_ResolvesXrdp()
+        {
+            // BlackArch → Xfce: an X11 switch keeps the normal verdict.
+            SetupScriptOutput("RDP_DETECT=x11");
+            var c = new VmCustomizations { RdpBackend = RdpBackend.Auto, SwitchedDesktopDisplayServer = DesktopDisplayServer.X11Only };
+
+            await _step.ExecuteAsync(_shell.Object, _lamcoCapableItem, c, _logger.Object, CancellationToken.None);
+
+            Assert.AreEqual(RdpBackend.Xrdp, c.RdpBackend);
         }
 
         [TestMethod]

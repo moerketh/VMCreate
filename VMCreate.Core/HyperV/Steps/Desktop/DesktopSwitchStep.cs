@@ -8,21 +8,33 @@ using System.Threading.Tasks;
 namespace VMCreate
 {
     /// <summary>
-    /// Switches a Linux guest's desktop environment post-boot — the engine
-    /// behind the desktop-environment card on the customization page
+    /// Switches a Linux guest's desktop environment — the engine behind the
+    /// desktop-environment card on the customization page
     /// (<see cref="VmCustomizations.DesktopEnvironmentId"/>). Replaces the
     /// per-flavor gallery twins ("Kali … (KDE)"): one gallery item per
     /// distro, any desktop the distro's <see cref="IDesktopEnvironmentCatalog"/>
     /// offers.
     /// <para>
+    /// Chroot-capable: the switch runs in the ISO chroot when the deployment
+    /// has an ISO stage, post-boot otherwise (the cloud-init flow). With no
+    /// desktop running during the swap, nothing can log into the half-built
+    /// desktop. (Live: Enhanced Session reached the image's stock xrdp
+    /// mid-switch, xrdp started the new KDE nested on its own X server, and
+    /// the orphaned session outlived xrdp and wedged the Lamco install.) The
+    /// first boot then comes up in the chosen desktop directly. Both scripts
+    /// only touch packages, files and enable-state there; the desktops come
+    /// from the distro's own repos (on BlackArch the official Arch repos, so
+    /// the post-boot BlackArch strap, Order 230, is no prerequisite).
+    /// </para>
+    /// <para>
     /// Runs at Order 231, deliberately BEFORE
-    /// <see cref="AutoRdpBackendResolveStep"/> (232): after the switch, the
-    /// guest's default session matches the chosen desktop (e.g. Plasma
-    /// Wayland), so Auto RDP-backend detection sees the session the user
-    /// will actually get and picks Lamco/xrdp accordingly. Explicit backend
-    /// choices are unaffected. On the Arch lineage the BlackArch repo strap
-    /// (Order 230) has already landed, so pacman resolves the desktop against
-    /// the combined Arch+BlackArch package set.
+    /// <see cref="AutoRdpBackendResolveStep"/> (232) and the X11 fixups
+    /// (240-270), which wait while a switch is pending
+    /// (<see cref="VmCustomizations.AutoRdpAwaitsDesktopSwitch"/>) and run
+    /// right after it, in the same context: the executors check
+    /// applicability just-in-time. The switch records the display server it
+    /// landed on (<see cref="VmCustomizations.SwitchedDesktopDisplayServer"/>)
+    /// for the resolver. Explicit backend choices are unaffected.
     /// </para>
     /// <para>
     /// The script is parameterized by this step: a variable block naming the
@@ -53,6 +65,7 @@ namespace VMCreate
         public CustomizationPhase Phase => CustomizationPhase.PostBoot;
         public StepPlatform Platform => StepPlatform.Linux;
         public int Order => 231;
+        public bool SupportsChroot => true;
 
         public string? ProgressPhaseId => (this as IDistributionOptionMetadata)?.DeployPhaseId;
 
@@ -82,10 +95,10 @@ namespace VMCreate
                     "The desktop selection and the image have diverged — refusing to guess.");
 
             logger.LogInformation(
-                "Switching VM {VMName} to the {Desktop} desktop ({DesktopId}) via {PackageManager}...",
-                shell.VmName, option.DisplayName, option.Id, catalog.PackageManager);
+                "Switching VM {VMName} to the {Desktop} desktop ({DesktopId}) via {PackageManager} ({Context})...",
+                shell.VmName, option.DisplayName, option.Id, catalog.PackageManager, shell.Context);
 
-            string script = BuildScript(option, catalog.PackageManager);
+            string script = BuildScript(option, catalog.PackageManager, shell.Context);
 
             // /tmp hardening: unpredictable GUID path (no pre-creation /
             // TOCTOU), then ownership+perms tightened before root execution
@@ -122,6 +135,7 @@ namespace VMCreate
             // auto-resolver (order 232, gated on "no pending switch") runs
             // live against the SWITCHED desktop instead of deferring.
             customizations.DesktopEnvironmentId = null;
+            customizations.SwitchedDesktopDisplayServer = option.DisplayServer;
         }
 
         // ── IConfigurableCustomizationStep (UI metadata) ────────────────
@@ -130,9 +144,9 @@ namespace VMCreate
         // catalog; this step's card metadata only surfaces on the deploy
         // page, so the texts are desktop-agnostic.
         public string CardTitle => "Desktop Environment";
-        public string CardDescription => "Switch the VM's desktop environment after deployment. Choose the desktop on the customization page.";
+        public string CardDescription => "Switch the VM's desktop environment during deployment. Choose the desktop on the customization page.";
         public string Label => "Switch desktop environment";
-        public string Tooltip => "Installs the selected desktop environment (e.g. KDE Plasma, GNOME) post-boot and makes it the default session, before the RDP backend is resolved.";
+        public string Tooltip => "Installs the selected desktop environment (e.g. KDE Plasma, GNOME) before the VM's first boot and makes it the default session, before the RDP backend is resolved.";
         public bool DefaultEnabled => false;
         public bool IsOptional => false;
 
@@ -169,7 +183,9 @@ namespace VMCreate
         /// from the catalog, never free-form user input — and are still
         /// shell-quoted and validated).
         /// </summary>
-        internal static string BuildScript(DesktopEnvironmentOption option, DesktopPackageManager packageManager)
+        internal static string BuildScript(
+            DesktopEnvironmentOption option, DesktopPackageManager packageManager,
+            GuestExecutionContext context = GuestExecutionContext.Live)
         {
             string resourceName = ScriptResourceFor(packageManager);
             string script = ScriptResourceLoader.Load(resourceName);
@@ -180,7 +196,9 @@ namespace VMCreate
                 $"DESKTOP_PACKAGES='{packages}'\n" +
                 $"DESKTOP_PACKAGES_TO_REMOVE='{packagesToRemove}'\n" +
                 $"DESKTOP_SESSION_STARTER='{ShellQuote(option.SessionStarter ?? "")}'\n" +
-                $"DESKTOP_DISPLAY_MANAGER='{ShellQuote(option.DisplayManager ?? "")}'\n";
+                $"DESKTOP_DISPLAY_MANAGER='{ShellQuote(option.DisplayManager ?? "")}'\n" +
+                $"DESKTOP_DISPLAY_SERVER='{(option.DisplayServer == DesktopDisplayServer.X11Only ? "x11" : "wayland")}'\n" +
+                $"DESKTOP_SWITCH_CONTEXT='{(context == GuestExecutionContext.Chroot ? "chroot" : "live")}'\n";
 
             int firstNewline = script.IndexOf('\n');
             if (firstNewline < 0)

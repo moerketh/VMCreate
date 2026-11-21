@@ -13,11 +13,11 @@
         <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" Padding="0,0,0,4">
         <StackPanel FocusManager.FocusedElement="{Binding ElementName=VMNameTextBox}">
 
-            <TextBlock Text="Configure Virtual Machine Settings" Style="{StaticResource TitleText}" Margin="0,0,0,12"/>
+            <TextBlock Text="Configure Virtual Machine Settings" Style="{StaticResource TitleText}" Margin="0,0,0,8"/>
 
             <!-- Selected image summary card -->
             <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
-                    CornerRadius="8" Padding="16,12" Margin="0,0,0,12"
+                    CornerRadius="8" Padding="16,8" Margin="0,0,0,12"
                     BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
                 <StackPanel Orientation="Horizontal">
                     <Image Source="{Binding SelectedItem.SymbolUri, Converter={StaticResource ImageConverter}}" 
@@ -89,23 +89,59 @@
                        FontSize="12" Margin="4,0,4,8" TextWrapping="Wrap"
                        Visibility="{Binding HasValidationError, Converter={StaticResource BoolToVis}}"/>
 
-            <!-- Settings form card -->
+            <!-- Settings form card: name | memory | CPU | drive size side by side, so the page fills
+                 the window's width instead of running down one narrow column. -->
             <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
                     CornerRadius="8" Padding="20,16" Margin="0,0,0,12"
                     BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
-                <StackPanel>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="1.2*"/>
+                        <ColumnDefinition Width="24"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="24"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="24"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
                     <!-- VM Name -->
+                    <StackPanel Grid.Column="0" VerticalAlignment="Top">
                     <TextBlock Text="VM Name" FontSize="14" FontWeight="SemiBold"
                                Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,0,6"/>
                     <ui:TextBox x:Name="VMNameTextBox"
                              Text="{Binding VmName, UpdateSourceTrigger=PropertyChanged}"
-                             FontSize="14" PlaceholderText="Enter VM name" Margin="0,0,0,16"
-                             MaxWidth="500" HorizontalAlignment="Left" MinWidth="300"
+                             FontSize="14" PlaceholderText="Enter VM name"
                              ToolTip="Enter a unique name for the VM."
                              AutomationProperties.Name="VM Name"/>
+                    </StackPanel>
+
+                    <!-- New Drive Size (hidden for diskless RAM-boot images) -->
+                    <StackPanel Grid.Column="6" VerticalAlignment="Top"
+                                Visibility="{Binding ShowDiskSizeSection, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="Drive size (GB)" FontSize="14" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,0,6"/>
+                        <CheckBox Content="Auto-detect"
+                                  IsChecked="{Binding AutoDetectDiskSize}"
+                                  FontSize="14" Margin="0,0,0,4"
+                                  Visibility="{Binding IsDiskImage, Converter={StaticResource BoolToVis}}"
+                                  ToolTip="Automatically size the new drive based on the source disk image (recommended)."
+                                  AutomationProperties.Name="Auto-detect disk size"/>
+                        <TextBlock Text="Sized from the source image when the VM is created."
+                                   FontSize="12" FontStyle="Italic" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   Visibility="{Binding ShowAutoSizeHint, Converter={StaticResource BoolToVis}}"/>
+                        <ui:TextBox x:Name="NewDriveSizeTextBox"
+                                 Text="{Binding NewDriveSizeText, UpdateSourceTrigger=PropertyChanged}"
+                                 FontSize="14" PlaceholderText="40"
+                                 MaxWidth="200" HorizontalAlignment="Left" MinWidth="100"
+                                 PreviewTextInput="NumberValidationTextBox" DataObject.Pasting="TextBoxPasting"
+                                 Visibility="{Binding ShowManualDiskSize, Converter={StaticResource BoolToVis}}"
+                                 ToolTip="Enter new drive size in GB (at least 10, must be larger than the original disk size)."
+                                 AutomationProperties.Name="New drive size in gigabytes"/>
+                    </StackPanel>
 
                     <!-- Memory slider -->
-                    <Grid Margin="0,0,0,16" MaxWidth="500" MinWidth="300" HorizontalAlignment="Left">
+                    <Grid Grid.Column="2" VerticalAlignment="Top">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
@@ -134,7 +170,7 @@
                     </Grid>
 
                     <!-- CPU slider -->
-                    <Grid Margin="0,16,0,16" MaxWidth="500" MinWidth="300" HorizontalAlignment="Left">
+                    <Grid Grid.Column="4" VerticalAlignment="Top">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
@@ -164,38 +200,23 @@
                         <!-- Host capability hint -->
                         <TextBlock Grid.Row="2" Grid.ColumnSpan="2" Text="{Binding HostCapabilityHint, Mode=OneWay}"
                                    FontSize="11" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                                   HorizontalAlignment="Center" Margin="0,2,0,0"/>
+                                   TextWrapping="Wrap" TextAlignment="Center"
+                                   HorizontalAlignment="Center" Margin="0,18,0,0"/>
                     </Grid>
-
-                    <!-- New Drive Size (hidden for diskless RAM-boot images) -->
-                    <StackPanel Visibility="{Binding ShowDiskSizeSection, Converter={StaticResource BoolToVis}}" Margin="0,8,0,0">
-                        <TextBlock Text="New Drive Size (GB)" FontSize="14" FontWeight="SemiBold"
-                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,0,6"/>
-                        <CheckBox Content="Auto-detect from source image"
-                                  IsChecked="{Binding AutoDetectDiskSize}"
-                                  FontSize="14" Margin="0,0,0,6"
-                                  Visibility="{Binding IsDiskImage, Converter={StaticResource BoolToVis}}"
-                                  ToolTip="Automatically size the new drive based on the source disk image (recommended)."
-                                  AutomationProperties.Name="Auto-detect disk size"/>
-                        <TextBlock Text="Disk size will be calculated from the source image at creation time."
-                                   FontSize="12" FontStyle="Italic"
-                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,6"
-                                   Visibility="{Binding ShowAutoSizeHint, Converter={StaticResource BoolToVis}}"/>
-                        <ui:TextBox x:Name="NewDriveSizeTextBox"
-                                 Text="{Binding NewDriveSizeText, UpdateSourceTrigger=PropertyChanged}"
-                                 FontSize="14" PlaceholderText="40"
-                                 MaxWidth="200" HorizontalAlignment="Left" MinWidth="120"
-                                 PreviewTextInput="NumberValidationTextBox" DataObject.Pasting="TextBoxPasting"
-                                 Visibility="{Binding ShowManualDiskSize, Converter={StaticResource BoolToVis}}"
-                                 ToolTip="Enter new drive size in GB (at least 10, must be larger than the original disk size)."
-                                 AutomationProperties.Name="New drive size in gigabytes"/>
-                    </StackPanel>
-                </StackPanel>
+                </Grid>
             </Border>
 
+            <!-- Options and Organize side by side; the Grid gives both cards the same height. -->
+            <Grid Margin="0,0,0,12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="12"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
             <!-- Options card -->
-            <Border Background="{DynamicResource ControlFillColorDefaultBrush}"
-                    CornerRadius="8" Padding="20,16" Margin="0,0,0,12"
+            <Border Grid.Column="0" Background="{DynamicResource ControlFillColorDefaultBrush}"
+                    CornerRadius="8" Padding="20,16"
                     BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
                 <StackPanel>
                     <TextBlock Text="Options" FontSize="14" FontWeight="SemiBold"
@@ -205,18 +226,56 @@
                               FontSize="14"
                               ToolTip="Allows running Hyper-V or other hypervisors inside this VM."
                               AutomationProperties.Name="Enable nested virtualization"/>
-                    <CheckBox Content="Replace existing VM with the same name"
-                              IsChecked="{Binding ReplacePreviousVm}"
-                              FontSize="14" Margin="0,8,0,0"
+                    <!-- TextBlock content so the label wraps instead of clipping in a narrow window. -->
+                    <CheckBox IsChecked="{Binding ReplacePreviousVm}"
+                              FontSize="14" Margin="0,4,0,0"
                               ToolTip="If a VM with the same base name already exists, stop and remove it (including its VHDX) before creating the new one."
-                              AutomationProperties.Name="Replace existing VM"/>
-                    <CheckBox Content="Create a checkpoint after deployment"
-                              IsChecked="{Binding CreateCleanCheckpoint}"
-                              FontSize="14" Margin="0,8,0,0"
+                              AutomationProperties.Name="Replace existing VM">
+                        <TextBlock Text="Replace existing VM with the same name" TextWrapping="Wrap"/>
+                    </CheckBox>
+                    <CheckBox IsChecked="{Binding CreateCleanCheckpoint}"
+                              FontSize="14" Margin="0,4,0,0"
                               ToolTip="Once the guest is set up, take a 'Clean deploy (VMCreate)' checkpoint so you can return the VM to its just-deployed state."
-                              AutomationProperties.Name="Create a checkpoint after deployment"/>
+                              AutomationProperties.Name="Create a checkpoint after deployment">
+                        <TextBlock Text="Create a checkpoint after deployment" TextWrapping="Wrap"/>
+                    </CheckBox>
                 </StackPanel>
             </Border>
+
+            <!-- Organize card: VMCreate Manager folder and tags -->
+            <Border Grid.Column="2" Background="{DynamicResource ControlFillColorDefaultBrush}"
+                    CornerRadius="8" Padding="20,16"
+                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
+                <StackPanel>
+                    <TextBlock Text="Organize" FontSize="14" FontWeight="SemiBold"
+                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" Margin="0,0,0,4"/>
+                    <TextBlock Text="Where the VM shows up in VMCreate Manager. Both are optional."
+                               FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                               TextWrapping="Wrap" Margin="0,0,0,10"/>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="Folder" FontSize="13" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,4"/>
+                            <ComboBox IsEditable="True" ItemsSource="{Binding FolderSuggestions}"
+                                      Text="{Binding Folder, UpdateSourceTrigger=PropertyChanged}"
+                                      ToolTip="Pick an existing folder or type a new path, e.g. Engagements/ACME. Missing folders are created."
+                                      AutomationProperties.Name="VMCreate Manager folder"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Tags" FontSize="13" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,4"/>
+                            <ui:TextBox Text="{Binding TagsText, UpdateSourceTrigger=PropertyChanged}"
+                                        PlaceholderText="kali, external, acme"
+                                        ToolTip="Comma-separated tags"
+                                        AutomationProperties.Name="VMCreate Manager tags"/>
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </Border>
+            </Grid>
 
         </StackPanel>
         </ScrollViewer>

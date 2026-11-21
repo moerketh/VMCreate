@@ -116,10 +116,7 @@ namespace VMCreate.Tests.GalleryTests
             // controls both image and digest. It must never badge as
             // "verified against a digest pinned in VMCreate's source".
             Assert.IsFalse(runtime.HasChecksum, "runtime-scraped digest must not badge as verified");
-            Assert.IsTrue(runtime.HasNoChecksum, "runtime-scraped digest badges unverified");
             Assert.IsFalse(none.HasChecksum, "no checksum at all must badge as unverified");
-            Assert.IsTrue(none.HasNoChecksum, "HasNoChecksum is the XAML-facing inverse");
-            Assert.IsTrue(viaUri.HasNoChecksum, "mirror-served checksum file badges unverified");
         }
 
         [TestMethod]

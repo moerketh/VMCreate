@@ -25,7 +25,7 @@ fi
 # startwm.sh may also not set XDG_SESSION_TYPE=x11, causing toolkits to
 # attempt Wayland rendering.  We write a startwm.sh that:
 #   - Sources /etc/profile and ~/.profile for a sane environment
-#   - Sets LANG/LC_ALL (xrdp sessions often have no locale)
+#   - Sets LANG/LC_ALL to an installed UTF-8 locale (xrdp sessions often have none)
 #   - Forces XDG_SESSION_TYPE=x11 so toolkits use X11
 #   - Disables KWin compositing via KWIN_COMPOSE=N
 #   - Forces Qt software rendering (QT_QUICK_BACKEND=software,
@@ -44,8 +44,28 @@ if [ -d /etc/xrdp ]; then
 if test -r /etc/profile; then . /etc/profile; fi
 if test -r ~/.profile; then . ~/.profile; fi
 
-export LANG=en_US.UTF-8
-export LC_ALL=en_US.UTF-8
+# Use a UTF-8 locale that is actually installed: the session's own, the system default,
+# en_US, C.UTF-8, or else any UTF-8 locale. Exporting a missing one (en_US on an image
+# that only ships en_IE, for example) drops programs to the ASCII C locale and garbles
+# UTF-8 output such as zsh prompts.
+have_locale() {
+    want=$(printf '%s' "$1" | tr 'A-Z' 'a-z' | sed 's/utf-8/utf8/')
+    locale -a 2>/dev/null | tr 'A-Z' 'a-z' | grep -qx "$want"
+}
+pick=""
+system_lang=$(sed -n 's/^LANG=//p' /etc/default/locale /etc/locale.conf 2>/dev/null | tr -d '"' | head -n 1)
+for candidate in "$LANG" "$system_lang" en_US.UTF-8 C.UTF-8; do
+    case "$candidate" in
+        *[Uu][Tt][Ff]8|*[Uu][Tt][Ff]-8) have_locale "$candidate" && { pick="$candidate"; break; } ;;
+    esac
+done
+if [ -z "$pick" ]; then
+    pick=$(locale -a 2>/dev/null | grep -iE 'utf-?8$' | head -n 1)
+fi
+if [ -n "$pick" ]; then
+    export LANG="$pick"
+    export LC_ALL="$pick"
+fi
 export XDG_SESSION_TYPE=x11
 export KWIN_COMPOSE=N
 export QT_QUICK_BACKEND=software

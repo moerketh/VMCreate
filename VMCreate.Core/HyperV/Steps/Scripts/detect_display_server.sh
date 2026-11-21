@@ -18,7 +18,9 @@ set -o pipefail
 #
 # Output contract: the machine-readable terminal line
 #     RDP_DETECT=wayland|x11
-# AutoRdpBackendResolveStep parses ONLY this line; everything above it is
+# preceded, when the Wayland default is KDE Plasma, by
+#     RDP_PLASMA=<kwin version, e.g. 6.7.4>
+# AutoRdpBackendResolveStep parses ONLY these lines; everything else is
 # diagnostic output for the deployment log.
 
 verdict="x11"
@@ -119,6 +121,33 @@ if [ "$verdict" = "x11" ] && command -v gdm3 >/dev/null 2>&1; then
         verdict="wayland"
         echo "GDM with a Wayland session installed and no WaylandEnable=false opt-out — Wayland default."
     fi
+fi
+
+# -- 5. Is the Wayland default KDE Plasma? (wayrdp's KDE backend) -----------
+# AutoRdpBackendResolveStep prefers wayrdp over Lamco on Plasma 6.3+ (Kali,
+# Parrot). Plasma is the default when the session-manager slot names
+# startplasma (Kali after a KDE switch: startplasma-wayland; stock Parrot:
+# startplasma-x11, overridden to Wayland by its unpinned SDDM above) and the
+# Plasma Wayland session is installed. The KWin version comes from the
+# package database, not `kwin_wayland --version`: this also runs in the ISO
+# chroot, where nothing can be executed against a live session.
+if [ "$verdict" = "wayland" ] && [ -f /usr/share/wayland-sessions/plasma.desktop ]; then
+    case "$default_sm" in
+        *startplasma*|"")
+            kwin_ver=""
+            if command -v dpkg-query >/dev/null 2>&1; then
+                kwin_ver=$(dpkg-query -W -f='${Version}' kwin-wayland 2>/dev/null)
+            elif command -v pacman >/dev/null 2>&1; then
+                kwin_ver=$(pacman -Q kwin 2>/dev/null | awk '{print $2}')
+            fi
+            # 4:6.7.4-2+b1 -> 6.7.4 (strip epoch, then Debian/Arch revision).
+            kwin_ver=$(printf '%s' "$kwin_ver" | sed -E 's/^[0-9]+://; s/[-+~].*$//')
+            if [ -n "$kwin_ver" ]; then
+                echo "Default Wayland desktop is KDE Plasma (KWin $kwin_ver)."
+                echo "RDP_PLASMA=$kwin_ver"
+            fi
+            ;;
+    esac
 fi
 
 echo "RDP_DETECT=$verdict"

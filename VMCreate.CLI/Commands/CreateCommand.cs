@@ -126,6 +126,19 @@ namespace VMCreate.CLI.Commands
                 Description = "Hyper-V virtual switch to connect the VM's network adapter to (default: Default Switch)."
             };
 
+            // ── VMCreate Manager ───────────────────────────────────────────────
+            var folderOpt = new Option<string>("--folder")
+            {
+                Description = "VMCreate Manager folder to file the VM under, e.g. \"Engagements/ACME\". Missing folders are created."
+            };
+
+            var tagOpt = new Option<string[]>("--tag")
+            {
+                Description = "VMCreate Manager tag (repeatable, or comma-separated). E.g. --tag kali --tag acme",
+                AllowMultipleArgumentsPerToken = false,
+                Arity = ArgumentArity.ZeroOrMore
+            };
+
             var staticIpOpt = new Option<string>("--static-ip")
             {
                 Description = "Configure the guest with a static IPv4 address in CIDR form (e.g. 192.168.10.50/24) instead of DHCP. " +
@@ -251,6 +264,8 @@ namespace VMCreate.CLI.Commands
             cmd.Options.Add(releaseOpt);
             cmd.Options.Add(noIntegrationSvcOpt);
             cmd.Options.Add(switchOpt);
+            cmd.Options.Add(folderOpt);
+            cmd.Options.Add(tagOpt);
             cmd.Options.Add(staticIpOpt);
             cmd.Options.Add(gatewayOpt);
             cmd.Options.Add(staticDnsOpt);
@@ -292,6 +307,8 @@ namespace VMCreate.CLI.Commands
                     Release = parseResult.GetValue(releaseOpt),
                     NoIntegrationServices = parseResult.GetValue(noIntegrationSvcOpt),
                     SwitchName = parseResult.GetValue(switchOpt),
+                    Folder = parseResult.GetValue(folderOpt),
+                    Tags = parseResult.GetValue(tagOpt) ?? Array.Empty<string>(),
                     StaticIp = parseResult.GetValue(staticIpOpt),
                     StaticGateway = parseResult.GetValue(gatewayOpt),
                     StaticDns = parseResult.GetValue(staticDnsOpt),
@@ -694,6 +711,8 @@ namespace VMCreate.CLI.Commands
                 SecureBootTemplate = galleryItem.SecureBootTemplate ?? "MicrosoftUEFICertificateAuthority",
                 SwitchName = args.SwitchName,
                 CreateCleanCheckpoint = !args.NoCheckpoint,
+                Folder = string.IsNullOrWhiteSpace(args.Folder) ? null : args.Folder.Trim().Trim('/'),
+                Tags = VMCreate.Metadata.MetadataOperations.ParseTags(string.Join(",", args.Tags)),
             };
 
             // ── Parse --option key=value pairs ───────────────────────────────
@@ -761,31 +780,19 @@ namespace VMCreate.CLI.Commands
             // Same fail-loudly contract as --rdp-backend: an unknown or
             // unoffered desktop must not silently deploy the stock desktop.
             string? desktopEnvironmentId = null;
-            DesktopEnvironmentOption? desktopOption = null;
+            var desktopCatalog = services.GetServices<IDesktopEnvironmentCatalog>().ForItem(galleryItem);
+            DesktopEnvironmentOption? desktopOption = desktopCatalog?.Default;
             if (!string.IsNullOrEmpty(args.Desktop))
             {
-                var catalogs = services.GetServices<IDesktopEnvironmentCatalog>();
-                var catalog = catalogs.ForItem(galleryItem);
-                desktopOption = catalog?.Resolve(args.Desktop);
+                desktopOption = desktopCatalog?.Resolve(args.Desktop);
 
                 if (desktopOption == null)
                 {
-                    string offered = catalog == null
+                    string offered = desktopCatalog == null
                         ? "this image offers no desktop switching"
-                        : $"valid values for this image: {string.Join(", ", catalog.Options.Select(o => o.Id))}";
+                        : $"valid values for this image: {string.Join(", ", desktopCatalog.Options.Select(o => o.Id))}";
                     PrintError(jsonMode, "validation",
                         $"Unknown --desktop value '{args.Desktop}' ({offered}).");
-                    return ExitCodes.InvalidArguments;
-                }
-
-                // Desktop/RDP coupling: the Wayland-native Lamco backend
-                // cannot serve an X11-only desktop (the GUI enforces the
-                // same rule at selection time).
-                if (rdpBackend == RdpBackend.Lamco && !desktopOption.LamcoSupported)
-                {
-                    PrintError(jsonMode, "validation",
-                        $"--rdp-backend lamco cannot be combined with the X11-only desktop " +
-                        $"'{desktopOption.DisplayName}' — use auto or xrdp.");
                     return ExitCodes.InvalidArguments;
                 }
 
@@ -793,6 +800,16 @@ namespace VMCreate.CLI.Commands
                 // keeping the default — no switch step needed.
                 if (!desktopOption.IsDefault)
                     desktopEnvironmentId = desktopOption.Id;
+            }
+
+            // Desktop/RDP coupling (the GUI enforces the same rules at
+            // selection time): xrdp only on X11 desktops, Lamco only on
+            // Lamco-capable ones, wayrdp on Omarchy or KDE (Kali, Parrot). Checked against the
+            // stock desktop too when --desktop is absent.
+            if (RdpDesktopCompatibility.Validate(galleryItem, rdpBackend, desktopOption) is { } rdpDesktopError)
+            {
+                PrintError(jsonMode, "validation", $"--rdp-backend {args.RdpBackend}: {rdpDesktopError}");
+                return ExitCodes.InvalidArguments;
             }
 
             // ── Validate static addressing ────────────────────────────────────
@@ -940,6 +957,10 @@ namespace VMCreate.CLI.Commands
             AnsiConsole.MarkupLine($"  CPUs     : {vmSettings.CPUCount}");
             if (!string.IsNullOrEmpty(vmSettings.SwitchName))
                 AnsiConsole.MarkupLine($"  Switch   : {Markup.Escape(vmSettings.SwitchName)}");
+            if (!string.IsNullOrEmpty(vmSettings.Folder))
+                AnsiConsole.MarkupLine($"  Folder   : {Markup.Escape(vmSettings.Folder)}");
+            if (vmSettings.Tags.Count > 0)
+                AnsiConsole.MarkupLine($"  Tags     : {Markup.Escape(string.Join(", ", vmSettings.Tags))}");
             if (vmCustomizations.HasStaticNetwork)
             {
                 string network = vmCustomizations.StaticIp!;
@@ -1134,6 +1155,8 @@ namespace VMCreate.CLI.Commands
         public string? Release { get; set; }
         public bool NoIntegrationServices { get; set; }
         public string? SwitchName { get; set; }
+        public string? Folder { get; set; }
+        public string[] Tags { get; set; } = Array.Empty<string>();
         public string? StaticIp { get; set; }
         public string? StaticGateway { get; set; }
         public string? StaticDns { get; set; }

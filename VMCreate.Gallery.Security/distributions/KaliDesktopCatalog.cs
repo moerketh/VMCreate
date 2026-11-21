@@ -14,6 +14,20 @@ namespace VMCreate.Gallery
     /// </summary>
     public sealed class KaliDesktopCatalog : IDesktopEnvironmentCatalog
     {
+        // Switching away from the stock Xfce purges it for real: the meta plus
+        // the Xfce core by name. Purging only kali-desktop-xfce (the retired
+        // kali_kde_switch.sh behavior) left xfce4 installed, because
+        // desktop-base's "... | xfce4" dependency keeps it out of autoremove;
+        // xrdp's startwm then still found startxfce4. Once these are gone the
+        // rest of Xfce (panel plugins, terminal, libs) autoremoves. lightdm is
+        // Xfce's display manager; KDE and GNOME bring sddm/gdm3, and the
+        // switch script hands the display manager over before purging.
+        private static readonly IReadOnlyList<string> XfceRemoval = new List<string>
+        {
+            "kali-desktop-xfce", "xfce4", "xfce4-session", "xfwm4", "xfdesktop4",
+            "xfce4-panel", "thunar", "lightdm"
+        };
+
         private static readonly DesktopEnvironmentOption Xfce = new()
         {
             Id = "xfce",
@@ -33,15 +47,13 @@ namespace VMCreate.Gallery
         {
             Id = "kde",
             DisplayName = "KDE Plasma",
-            Description = "Full-featured modern desktop, Wayland by default since Plasma 6. Lamco RDP Server works with Plasma 6.3+.",
+            Description = "Full-featured modern desktop, Wayland by default since Plasma 6. Served by wayrdp (Plasma 6.3+); Lamco RDP Server also works.",
             DisplayServer = DesktopDisplayServer.WaylandDefault,
             LamcoSupported = true,
+            WayrdpSupported = true,
             IsDefault = false,
             Packages = new List<string> { "kali-desktop-kde" },
-            // Kali's historical KDE-switch behavior: purge the Xfce meta after
-            // the switch (what the retired kali_kde_switch.sh always did).
-            // Degraded, not fatal, when removal fails.
-            PackagesToRemove = new List<string> { "kali-desktop-xfce" },
+            PackagesToRemove = XfceRemoval,
             SessionStarter = "startplasma-wayland",
             DisplayManager = "sddm",
             EstimatedDownloadMb = 1400
@@ -56,7 +68,7 @@ namespace VMCreate.Gallery
             LamcoSupported = true,
             IsDefault = false,
             Packages = new List<string> { "kali-desktop-gnome" },
-            PackagesToRemove = new List<string> { "kali-desktop-xfce" },
+            PackagesToRemove = XfceRemoval,
             SessionStarter = "gnome-session",
             DisplayManager = "gdm3",
             EstimatedDownloadMb = 1100

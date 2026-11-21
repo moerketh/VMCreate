@@ -24,7 +24,11 @@ namespace VMCreate
     /// <list type="bullet">
     /// <item><b>Wayland default + Lamco-capable distro</b> (Debian-family
     /// deb or Arch-family pacman package) →
-    /// <see cref="RdpBackend.Lamco"/> (Wayland-native; the right tool).</item>
+    /// <see cref="RdpBackend.Lamco"/> (Wayland-native; the right tool) —
+    /// except <b>KDE Plasma 6.3+ on Kali or Parrot</b> (the detection script's
+    /// <c>RDP_PLASMA</c> line), which resolves to <see cref="RdpBackend.Wayrdp"/>:
+    /// the project's own server, validated there. Applies to a switched
+    /// desktop as well (Kali → KDE).</item>
     /// <item><b>Nix-family distro</b> (NixOS / Athena Nix — detected at
     /// runtime) → <see cref="RdpBackend.None"/>: no installable backend
     /// exists there (post-boot installs through a package manager are
@@ -33,6 +37,11 @@ namespace VMCreate
     /// deliberately ends without RDP (console/SSH only) with a loud
     /// warning, and <see cref="InstallXrdpPostBootStep"/> is gated off
     /// NixOs items for the same reason.</item>
+    /// <item><b>Switched to a Wayland desktop</b>
+    /// (<see cref="VmCustomizations.SwitchedDesktopDisplayServer"/>, set by
+    /// <see cref="DesktopSwitchStep"/>) → <see cref="RdpBackend.Lamco"/> on a
+    /// Lamco-capable distro, else <see cref="RdpBackend.None"/> with a
+    /// warning. Never xrdp, whatever detection reports.</item>
     /// <item><b>Anything else</b> → <see cref="RdpBackend.Xrdp"/>, and
     /// <see cref="InstallXrdpPostBootStep"/> (order 236) backfills the
     /// install that the skipped chroot step would have done.</item>
@@ -71,11 +80,12 @@ namespace VMCreate
             // the switch completes: any display-server verdict produced now
             // would read the STOCK desktop (e.g. Kali's Xfce/X11) while the
             // backend must match the SWITCHED desktop (KDE/GNOME, Wayland).
-            // DesktopSwitchStep (order 231) runs post-boot only and clears
-            // DesktopEnvironmentId when it completes — so under Auto with a
-            // switch pending, this gate keeps the resolver out of the ISO
-            // chroot (whose verdict would be wrong and sticky) and the live
-            // loop re-evaluates it at order 232, right after the switch.
+            // DesktopSwitchStep (order 231) clears DesktopEnvironmentId when
+            // it completes, and both executors re-evaluate this gate
+            // just-in-time — so the resolver runs at 232 right after the
+            // switch, in the same context (the ISO chroot, or post-boot in
+            // the cloud-init flow), never before it: a verdict before the
+            // switch would read the stock desktop and stick.
             => !item.HasTag("headless")
                && customizations?.RdpBackend == RdpBackend.Auto
                && !customizations.AutoRdpAwaitsDesktopSwitch;
@@ -88,6 +98,7 @@ namespace VMCreate
                 shell.VmName);
 
             string? displayServer = null;
+            (int Major, int Minor)? plasma = null;
 
             // ── 1. Run the in-guest detection script ───────────────────────
             // Any failure (script exception, missing result line) leaves
@@ -109,6 +120,7 @@ namespace VMCreate
                     TimeSpan.FromMinutes(2), ct);
 
                 displayServer = ParseDetectLine(result);
+                plasma = ParsePlasmaLine(result);
                 if (displayServer is null)
                 {
                     logger.LogWarning(
@@ -178,10 +190,24 @@ namespace VMCreate
                 && detected.Value.SupportsLamco();
 
             // ── 3. Verdict ────────────────────────────────────────────────
+            // A switch to a Wayland desktop (KDE, GNOME) never lands on xrdp:
+            // xrdp there means forcing the desktop onto X11, and GNOME 49+
+            // has no X11 session at all. Lamco when the distro can take it —
+            // the gallery hint stands in when the guest could not be read —
+            // otherwise no RDP backend rather than a broken one.
+            bool switchedToWayland = customizations.SwitchedDesktopDisplayServer is { } switched
+                && switched != DesktopDisplayServer.X11Only;
+
             RdpBackend resolved;
             if (detected == LinuxDistro.NixOs)
             {
                 resolved = RdpBackend.None;
+            }
+            else if (switchedToWayland)
+            {
+                resolved = lamcoCandidate || (detected is null && item.SupportsLamco())
+                    ? RdpBackend.Lamco
+                    : RdpBackend.None;
             }
             else
             {
@@ -189,6 +215,16 @@ namespace VMCreate
                     ? RdpBackend.Lamco
                     : RdpBackend.Xrdp;
             }
+
+            // KDE Plasma 6.3+ on Kali / Parrot: wayrdp instead of Lamco. Only
+            // a detected distro counts (not the gallery hint), and only a
+            // Plasma the detection script actually found: wayrdp refuses an
+            // older KWin at startup, which would leave the VM without RDP.
+            bool wayrdpKde = resolved == RdpBackend.Lamco
+                && detected is { } d && d.SupportsWayrdpKde()
+                && plasma is { } p && p.CompareTo(WayrdpMinPlasma) >= 0;
+            if (wayrdpKde)
+                resolved = RdpBackend.Wayrdp;
 
             // ── 4. Mutate the shared customizations IN PLACE ──────────────
             // The in-place mutation is the whole point: the deploy-progress
@@ -200,7 +236,28 @@ namespace VMCreate
             // on every post-boot step report).
             customizations.RdpBackend = resolved;
 
-            if (resolved == RdpBackend.Lamco)
+            if (wayrdpKde)
+            {
+                logger.LogInformation(
+                    "Auto-select RDP backend: VM {VMName} runs KDE Plasma {Major}.{Minor} on {Distro}. Selected: WAYRDP (KDE backend).",
+                    shell.VmName, plasma!.Value.Major, plasma.Value.Minor, detected!.Value);
+            }
+            else if (switchedToWayland)
+            {
+                if (resolved == RdpBackend.Lamco && displayServer != "wayland")
+                    logger.LogWarning(
+                        "Auto-select RDP backend: VM {VMName} was switched to a Wayland desktop, but detection reported '{DisplayServer}'. Selected: LAMCO RDP SERVER anyway — xrdp cannot serve a Wayland desktop.",
+                        shell.VmName, displayServer ?? "nothing");
+                else if (resolved == RdpBackend.Lamco)
+                    logger.LogInformation(
+                        "Auto-select RDP backend: VM {VMName} was switched to a Wayland desktop. Selected: LAMCO RDP SERVER.",
+                        shell.VmName);
+                else
+                    logger.LogWarning(
+                        "Auto-select RDP backend: VM {VMName} was switched to a Wayland desktop, but the distro ('{Distro}') cannot run the Lamco RDP Server, and xrdp cannot serve a Wayland desktop. Selected: NONE — the VM is deployed console/SSH only.",
+                        shell.VmName, detected?.ToString() ?? "unreadable");
+            }
+            else if (resolved == RdpBackend.Lamco)
             {
                 logger.LogInformation(
                     "Auto-select RDP backend: VM {VMName} uses a Wayland session by default and runs {Distro} (Lamco-capable). Selected: LAMCO RDP SERVER.",
@@ -242,6 +299,32 @@ namespace VMCreate
                     {
                         last = value;
                     }
+                }
+            }
+            return last;
+        }
+
+        /// <summary>Oldest Plasma wayrdp's KDE backend accepts (its preflight refuses older KWin).</summary>
+        internal static readonly (int Major, int Minor) WayrdpMinPlasma = (6, 3);
+
+        /// <summary>
+        /// Parses the <c>RDP_PLASMA=&lt;kwin version&gt;</c> line (last
+        /// occurrence) into major.minor. Null when absent or unparseable.
+        /// </summary>
+        internal static (int Major, int Minor)? ParsePlasmaLine(string output)
+        {
+            (int, int)? last = null;
+            foreach (var line in output.Split('\n'))
+            {
+                var trimmed = line.Trim();
+                if (!trimmed.StartsWith("RDP_PLASMA=", StringComparison.Ordinal))
+                    continue;
+                var parts = trimmed["RDP_PLASMA=".Length..].Split('.');
+                if (parts.Length >= 2
+                    && int.TryParse(parts[0], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int major)
+                    && int.TryParse(parts[1], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int minor))
+                {
+                    last = (major, minor);
                 }
             }
             return last;

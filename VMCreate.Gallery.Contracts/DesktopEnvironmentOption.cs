@@ -38,6 +38,23 @@ namespace VMCreate
         public bool LamcoSupported { get; init; }
 
         /// <summary>
+        /// True when wayrdp's KDE backend can serve this desktop: KDE Plasma
+        /// 6.3+ on a validated distro (Kali, Parrot). Auto prefers wayrdp
+        /// over Lamco there; the guest's actual KWin version is re-checked
+        /// at resolve time.
+        /// </summary>
+        public bool WayrdpSupported { get; init; }
+
+        /// <summary>
+        /// True when xrdp can serve this desktop: only X11-only desktops
+        /// (Xfce). xrdp on a Wayland-default desktop means forcing it onto
+        /// X11 — GNOME 49+ has no X11 session left at all, and KDE's X11
+        /// session is a side path. A Wayland desktop gets Lamco (or Auto)
+        /// instead; images without a catalog keep the Force X11 fallback.
+        /// </summary>
+        public bool XrdpSupported => DisplayServer == DesktopDisplayServer.X11Only;
+
+        /// <summary>
         /// True when this is the desktop the gallery image already ships
         /// with. Selecting the default (or nothing at all) performs no
         /// switch; it only pins the RDP-backend coupling hints.
@@ -53,10 +70,15 @@ namespace VMCreate
         public IReadOnlyList<string> Packages { get; init; } = new List<string>();
 
         /// <summary>
-        /// Metapackages removed after the switch (the stock desktop's meta,
-        /// e.g. "kali-desktop-xfce"). Empty for the keep-old-desktop policy
-        /// (Phase 2 distros); Kali keeps its historical purge behavior.
-        /// Removal failures are degraded, not fatal.
+        /// Packages removed after the switch: the stock desktop's meta (e.g.
+        /// "kali-desktop-xfce") AND its core packages by name. Purging only
+        /// the meta is not enough: another installed package (Kali's
+        /// desktop-base) has an "a | b | xfce4" dependency that the installed
+        /// xfce4 keeps satisfying, so autoremove never removes it and xrdp
+        /// sessions kept landing in the leftover Xfce. Empty for the
+        /// keep-old-desktop policy (Phase 2 distros). The switch script
+        /// refuses a purge that would also take the new desktop's packages,
+        /// and removal failures are degraded, not fatal.
         /// </summary>
         public IReadOnlyList<string> PackagesToRemove { get; init; } = new List<string>();
 

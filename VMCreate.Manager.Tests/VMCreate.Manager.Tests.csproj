@@ -1,0 +1,19 @@
+<Project Sdk="MSTest.Sdk/4.5.1">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseVSTest>true</UseVSTest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Moq" Version="4.21.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VMCreate.Metadata\VMCreate.Metadata.csproj" />
+    <ProjectReference Include="..\VMCreate.Manager.Core\VMCreate.Manager.Core.csproj" />
+  </ItemGroup>
+
+</Project>

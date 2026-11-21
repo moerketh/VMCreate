@@ -208,13 +208,22 @@ namespace VMCreate
         /// the switch reads the STOCK desktop. Everything that depends on the
         /// resolved backend — the resolver itself and the xrdp/X11 fixups —
         /// waits; <c>DesktopSwitchStep</c> clears <see cref="DesktopEnvironmentId"/>
-        /// when the switch lands, and the post-boot loop re-evaluates them.
+        /// when the switch lands, and the executors (chroot and post-boot)
+        /// re-evaluate them just-in-time, in the switch's own context.
         /// (Live: Kali + GNOME ran the X11 fixups in the ISO stage under the
         /// unresolved Auto, pre-seeding gdm3's WaylandEnable=false, so the
         /// switched GNOME came up X11-only and Auto picked xrdp.)
         /// </summary>
         public bool AutoRdpAwaitsDesktopSwitch =>
             RdpBackend == RdpBackend.Auto && !string.IsNullOrEmpty(DesktopEnvironmentId);
+
+        /// <summary>
+        /// The display server of the desktop <c>DesktopSwitchStep</c> switched
+        /// to, set when the switch lands (null = no switch ran). The Auto RDP
+        /// resolver reads it: after a switch to a Wayland desktop it never
+        /// falls back to xrdp, whatever the in-guest detection says.
+        /// </summary>
+        public DesktopDisplayServer? SwitchedDesktopDisplayServer { get; set; }
 
         /// <summary>
         /// Per-distribution options selected by the user on the customization page.

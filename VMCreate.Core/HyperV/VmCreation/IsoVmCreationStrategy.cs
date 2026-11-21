@@ -167,7 +167,7 @@ namespace VMCreate.HyperV.VmCreation
                 // boot order that reboot would loop straight back into the
                 // installer, so the hard drive must stay first.
                 await _bootManager.SetFirstBootToHardDrive(plan, cancellationToken);
-                await _configManager.SetVMLoginNotes(plan, item.InitialUsername, item.InitialPassword, cancellationToken);
+                await _configManager.RecordLoginCredentials(plan, item.InitialUsername, item.InitialPassword, cancellationToken);
             }
             else
             {

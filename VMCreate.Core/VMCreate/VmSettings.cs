@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 
 namespace VMCreate
@@ -33,5 +34,14 @@ namespace VMCreate
         /// state. Automatic (per-start) checkpoints stay disabled regardless.
         /// </summary>
         public bool CreateCleanCheckpoint { get; set; } = true;
+
+        /// <summary>
+        /// VMCreate Manager folder to file the VM under, as a path of names
+        /// ("Engagements/ACME"); missing folders are created. Null = no folder.
+        /// </summary>
+        public string? Folder { get; set; }
+
+        /// <summary>VMCreate Manager tags for the VM.</summary>
+        public IReadOnlyList<string> Tags { get; set; } = Array.Empty<string>();
     }
 }

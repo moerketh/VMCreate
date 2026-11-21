@@ -14,11 +14,13 @@ namespace VMCreate
     {
         private readonly IPowerShellExecutor _executor;
         private readonly ILogger<PowerShellVmConfigManager> _logger;
+        private readonly IVmMetadataRecorder _metadataRecorder;
 
-        public PowerShellVmConfigManager(IPowerShellExecutor executor, ILogger<PowerShellVmConfigManager> logger)
+        public PowerShellVmConfigManager(IPowerShellExecutor executor, ILogger<PowerShellVmConfigManager> logger, IVmMetadataRecorder metadataRecorder)
         {
             _executor = executor ?? throw new ArgumentNullException(nameof(executor));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _metadataRecorder = metadataRecorder ?? throw new ArgumentNullException(nameof(metadataRecorder));
         }
 
         public async Task SetCpuCount(VmDeploymentPlan plan, CancellationToken cancellationToken)
@@ -89,21 +91,11 @@ namespace VMCreate
                 throw new Exception($"Failed to set enhanced session transport: {result.ErrorSummary}");
         }
 
-        public async Task SetVMLoginNotes(VmDeploymentPlan plan, string? initialUsername, string? initialPassword, CancellationToken cancellationToken)
-        {
-            // Record the full login credentials in VM notes. These are the gallery
-            // item's published distro defaults (e.g. omarchy/omarchy, parrot/parrot),
-            // not user-chosen secrets, and the notes field is the only place today
-            // where the user can rediscover them after deployment.
-            var result = await _executor.RunCommandAsync("Set-VM",
-                new System.Collections.Generic.Dictionary<string, object?>
-                {
-                    ["Name"] = plan.VmName,
-                    ["Notes"] = $"Initial Username: {initialUsername}\r\nInitial Password: {initialPassword}",
-                }, cancellationToken);
-            if (result.HadErrors)
-                throw new Exception($"Failed to set VM login notes: {result.ErrorSummary}");
-        }
+        public Task RecordLoginCredentials(VmDeploymentPlan plan, string? initialUsername, string? initialPassword, CancellationToken cancellationToken)
+            // The gallery item's published distro defaults (e.g. parrot/parrot).
+            // Earlier builds wrote them into VM Notes in plaintext; they now go
+            // to the DPAPI-encrypted metadata store that VMCreate Manager shows.
+            => _metadataRecorder.RecordCredentialsAsync(plan.VmName, initialUsername, initialPassword, cancellationToken);
 
         public async Task StartVMConnect(VmDeploymentPlan plan, CancellationToken cancellationToken)
         {

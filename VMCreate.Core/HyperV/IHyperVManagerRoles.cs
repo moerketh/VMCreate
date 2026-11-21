@@ -118,7 +118,12 @@ namespace VMCreate
         Task EnableGuestServices(VmDeploymentPlan plan, CancellationToken cancellationToken);
         Task EnableVirtualization(VmDeploymentPlan plan, CancellationToken cancellationToken);
         Task SetEnhancedSession(VmDeploymentPlan plan, CancellationToken cancellationToken);
-        Task SetVMLoginNotes(VmDeploymentPlan plan, string? initialUsername, string? initialPassword, CancellationToken cancellationToken);
+        /// <summary>
+        /// Stores the gallery item's published login for the VM in the
+        /// encrypted metadata store shown by VMCreate Manager. Strategies call
+        /// it only when those credentials actually apply to the deployed guest.
+        /// </summary>
+        Task RecordLoginCredentials(VmDeploymentPlan plan, string? initialUsername, string? initialPassword, CancellationToken cancellationToken);
         Task StartVMConnect(VmDeploymentPlan plan, CancellationToken cancellationToken);
     }
 }

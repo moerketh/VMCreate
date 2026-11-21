@@ -345,13 +345,13 @@ namespace VMCreate.Tests.HyperV.Steps
             Assert.IsTrue(System.Text.RegularExpressions.Regex.IsMatch(
                     captured, "LAMCO_FORK_TAG=\"v[^\"]+\""),
                 "fork deb tag pinned in the script");
-            StringAssert.Contains(captured, "LAMCO_FORK_TAG=\"v1.4.5-hyperv.7\"",
-                "current fork lineage at v1.4.5-hyperv.7 (clipboard reliability round)");
+            StringAssert.Contains(captured, "LAMCO_FORK_TAG=\"v1.4.5-hyperv.8\"",
+                "current fork lineage at v1.4.5-hyperv.8 (pointer and shutdown fixes)");
             Assert.IsTrue(captured.Contains("LAMCO_FORK_DEB_SHA256=\"") && !captured.Contains("LAMCO_FORK_DEB_SHA256=\"PENDING"),
                 "fork deb sha256 pinned — whoever can push a release asset must not get root on every VM");
             StringAssert.Contains(captured, "sha256sum \"$FORK_DEB_TMP\"",
                 "digest verified before dpkg -i");
-            // Fork identity comes from the dpkg database: the -hyperv7 marker
+            // Fork identity comes from the dpkg database: the -hyperv8 marker
             // lives in the deb's Package Version field, NOT in the binary.
             // Fork policy pins Cargo.toml at the upstream base version, so the
             // binary's --version prints bare 1.4.5 forever (verified on the
@@ -367,7 +367,7 @@ namespace VMCreate.Tests.HyperV.Steps
             // Arch/pacman lineage: the same fork tag ships an amd64 pacman
             // package; install_lamco.sh branches on is_arch_family and
             // installs the sha256-verified download via pacman -U.
-            StringAssert.Contains(captured, "LAMCO_FORK_PKG_VERSION=\"1.4.5.hyperv7-1\"",
+            StringAssert.Contains(captured, "LAMCO_FORK_PKG_VERSION=\"1.4.5.hyperv8-1\"",
                 "fork pacman pkgver pinned in the script (dot, not hyphen — Arch pkgver grammar)");
             Assert.IsTrue(captured.Contains("LAMCO_FORK_PKG_SHA256=\"") && !captured.Contains("LAMCO_FORK_PKG_SHA256=\"PENDING"),
                 "fork pacman package sha256 pinned");
@@ -489,6 +489,61 @@ namespace VMCreate.Tests.HyperV.Steps
                 "the private interface must be declared for KWin to advertise it");
             StringAssert.Contains(captured, "kbuildsycoca6 --noincremental",
                 "service cache refreshed so the grant applies without relogin");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_KwinGrantPrecedesServiceRestart()
+        {
+            // KWin evaluates the X-KDE-Wayland-Interfaces allowlist once, at
+            // client connect, and never re-advertises a gated global on an
+            // existing connection. A lamco process started before the grant
+            // exists stays blind to zkde_screencast for its lifetime (live,
+            // HTB Academy_20261031153025: installer restart at 14:41:08, grant
+            // at 14:41:18 — every vmconnect failed "global not bound").
+            string? captured = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("LAMCO_RESULT=ok");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(captured);
+            int grantIdx = captured.IndexOf("cat > /usr/share/applications/lamco-rdp-server.desktop", StringComparison.Ordinal);
+            int sycocaIdx = captured.IndexOf("kbuildsycoca6 --noincremental", StringComparison.Ordinal);
+            int restartIdx = captured.IndexOf("systemctl --user restart lamco-rdp-server.service", StringComparison.Ordinal);
+            Assert.IsTrue(grantIdx >= 0, "KWin grant present");
+            Assert.IsTrue(sycocaIdx >= 0, "sycoca refresh present");
+            Assert.IsTrue(restartIdx >= 0, "service restart present");
+            Assert.IsTrue(grantIdx < restartIdx,
+                "the KWin grant must be written before the installer (re)starts lamco-rdp-server");
+            Assert.IsTrue(sycocaIdx < restartIdx,
+                "the sycoca refresh must run before the installer (re)starts lamco-rdp-server");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_DamageTrackingRepaintsCursorTrail()
+        {
+            // pixel_threshold is a per-CHANNEL delta, not a pixel count. At 100
+            // the dark body of a compositor-painted cursor over a dark desktop
+            // did not register when the cursor left a tile, the white outline
+            // alone stayed under diff_threshold, and the tile was never re-sent:
+            // white dots trailed every cursor move (live, HTB Academy_20261031153025).
+            string? captured = null;
+            _shell.Setup(s => s.CopyContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                  .Callback<string, string, CancellationToken>((content, _, _) => captured = content);
+            _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>())).ReturnsAsync("LAMCO_RESULT=ok");
+
+            await _step.ExecuteAsync(_shell.Object, _supportedItem, _lamcoCustomizations, _logger.Object, CancellationToken.None);
+
+            Assert.IsNotNull(captured);
+            int section = captured.IndexOf("[damage_tracking]", StringComparison.Ordinal);
+            Assert.IsTrue(section >= 0, "[damage_tracking] section present");
+            int next = captured.IndexOf("\n[", section + 1, StringComparison.Ordinal);
+            string block = captured.Substring(section, (next < 0 ? captured.Length : next) - section);
+            StringAssert.Contains(block, "\npixel_threshold = 1\n",
+                "any visible channel change must count — a high threshold strands cursor residue");
+            StringAssert.Contains(block, "\ndiff_threshold = 0.0\n",
+                "any changed pixel must dirty its tile — undamaged tiles are never re-sent");
         }
 
         [TestMethod]

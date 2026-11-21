@@ -1,21 +1,27 @@
 #!/bin/bash
 set -o pipefail
 
-# Switches a Linux guest's desktop environment post-boot. Generic across
-# desktops: the step (DesktopSwitchStep) injects the target desktop's
-# parameters directly below the shebang:
+# Switches a Linux guest's desktop environment. Generic across desktops:
+# the step (DesktopSwitchStep) injects the target desktop's parameters
+# directly below the shebang:
 #
 #   DESKTOP_PACKAGES          space-separated, shell-quoted metapackage names
 #   DESKTOP_PACKAGES_TO_REMOVE  space-separated, shell-quoted metapackages to purge
 #   DESKTOP_SESSION_STARTER   session starter to make default ("" = DM decides)
 #   DESKTOP_DISPLAY_MANAGER   display manager to pin as default ("" = keep)
+#   DESKTOP_DISPLAY_SERVER    "wayland" or "x11": what the new desktop runs on
+#   DESKTOP_SWITCH_CONTEXT    "chroot" (ISO stage, the normal path: no
+#                             systemd, no running desktop — files, packages
+#                             and enable-state only) or "live" (booted guest,
+#                             the cloud-init flow: running services and
+#                             sessions are stopped too)
 #
 # Runs BEFORE the Auto RDP backend detection (AutoRdpBackendResolveStep,
 # order 232) so the detector sees the new default session and selects the
 # RDP backend the user will actually experience.
 #
 # Sequence (mirrors the documented manual post-configure steps):
-#   1. apt-get update
+#   1. apt-get update (retried on network/DNS failure; the output decides)
 #   2. verify every metapackage exists in the live index (the catalog is
 #      static; the distro's package index is the authority — probe before
 #      installing so a renamed metapackage fails loudly, pre-install)
@@ -26,9 +32,14 @@ set -o pipefail
 #   6. hand the display manager over to <dm> and verify systemd wiring
 #      (enable without || true, display-manager.service alias exists,
 #      graphical.target default) — degraded, never silently swallowed
-#   7. apt-get purge <packages-to-remove> (old desktop meta), with dpkg
-#      recovery when the purge wedges on the outgoing DM's prerm
-#   8. final consistency check over everything first boot reads
+#   7. apt-get purge <packages-to-remove> (old desktop meta + core), dry-run
+#      first so it never takes the new desktop along, with dpkg recovery when
+#      the purge wedges on the outgoing DM's prerm
+#   8. Wayland desktop: undo X11 pins left by the xrdp path, and disable the
+#      image's stock xrdp (live: stop it and end its sessions too)
+#   9. drop AccountsService session choices that name removed sessions
+#  10. final consistency check over everything first boot reads, including
+#      the session list (new desktop present, old desktop gone)
 #
 # Output contract: the machine-readable terminal line
 #     DESKTOP_SWITCH_RESULT=ok|degraded
@@ -39,16 +50,56 @@ set -o pipefail
 # fabricated-success bug class.
 
 DEGRADED=0
+DESKTOP_SWITCH_CONTEXT="${DESKTOP_SWITCH_CONTEXT:-live}"
+echo "Desktop switch context: $DESKTOP_SWITCH_CONTEXT"
 
-echo "Updating package indexes..."
-if ! apt-get update 2>&1; then
-    echo "ERROR: apt-get update failed."
+# apt-get update exits 0 when a source fails to download (it only warns
+# "W: Failed to fetch ..."), so the output decides. A transient DNS or mirror
+# failure is retried with backoff; only a clean update lets a missing
+# metapackage below count as a stale catalog (Kali, 2026-11-21: one DNS blip
+# in the chroot was reported as "the desktop catalog is stale").
+APT_FETCH_FAILED_RE='Failed to fetch|Temporary failure resolving|Could not resolve|Some index files failed to download|Network is unreachable|Connection timed out'
+apt_update_ok=0
+for attempt in 1 2 3 4; do
+    echo "Updating package indexes (attempt $attempt/4)..."
+    update_out="$(apt-get update 2>&1)"
+    update_rc=$?
+    printf '%s\n' "$update_out"
+    if [ "$update_rc" -eq 0 ] && ! printf '%s\n' "$update_out" | grep -qE "$APT_FETCH_FAILED_RE"; then
+        apt_update_ok=1
+        break
+    fi
+    if [ "$attempt" -lt 4 ]; then
+        wait_s=$((attempt * 15))
+        echo "Package index download failed (network/DNS?); retrying in ${wait_s}s..."
+        sleep "$wait_s"
+    fi
+done
+
+if [ "$apt_update_ok" != "1" ]; then
+    echo "ERROR: could not download the package indexes after 4 attempts."
+    # Name the cause: a resolver problem in this environment is not a
+    # catalog problem, and the fix is different.
+    # The hosts apt failed on, from its "Err:N http://host/..." lines.
+    failed_hosts="$(printf '%s\n' "$update_out" \
+        | sed -nE 's#^Err:[0-9]+[[:space:]]+[a-z]+://([^/ ]+).*#\1#p' | sort -u)"
+    for host in $failed_hosts; do
+        if getent hosts "$host" >/dev/null 2>&1; then
+            echo "  mirror $host resolves now (the failure is past DNS: mirror or route)."
+        else
+            echo "  mirror $host does NOT resolve: no working DNS in the $DESKTOP_SWITCH_CONTEXT environment."
+        fi
+    done
+    nameservers="$(grep -E '^nameserver' /etc/resolv.conf 2>/dev/null | awk '{print $2}' | tr '\n' ' ')"
+    echo "  /etc/resolv.conf nameservers: ${nameservers:-<none>}"
+    echo "This is a network failure, not a stale desktop catalog; retrying the deployment may succeed."
     exit 1
 fi
 
 # The catalog is static offline data; the live package index is the
 # authority. Probe each metapackage before installing so a renamed/removed
-# metapackage fails the deployment BEFORE anything is touched.
+# metapackage fails the deployment BEFORE anything is touched. The index
+# downloaded cleanly above, so a miss here really is a catalog problem.
 for pkg in $DESKTOP_PACKAGES; do
     if ! apt-cache show "$pkg" >/dev/null 2>&1; then
         echo "ERROR: metapackage '$pkg' does not exist in the live package index."
@@ -178,35 +229,146 @@ if [ -n "$DESKTOP_DISPLAY_MANAGER" ]; then
     fi
 fi
 
-# -- Remove the old desktop's metapackage(s) -------------------------------
-# (e.g. the stock desktop meta). Degraded, not fatal: a failed purge
-# leaves both desktops installed, the new one still being the default
-# session — but recover dpkg when the purge wedges on the outgoing DM's
-# prerm (TEST_20260910165003: lightdm's prerm failed under --autoremove,
-# exit 10, "too many errors, stopping" — lightdm SURVIVED as the active
-# DM. Recover: hand the DM over inside dpkg's expected flow, then
-# configure pending packages so the purge completes.)
+# -- Remove the old desktop ------------------------------------------------
+# The old desktop's meta AND its core packages by name: purging only the
+# meta left Kali's Xfce installed (desktop-base's "... | xfce4" dependency
+# keeps xfce4 out of autoremove), and xrdp sessions kept landing in it.
+# Only installed names are passed (apt-get purge errors on a name the index
+# no longer knows). A dry run comes first: a purge that would also remove
+# the new desktop or its display manager (a shared dependency) does not run.
+# Degraded, not fatal: a failed purge leaves both desktops installed, the
+# new one still being the default session — but recover dpkg when the purge
+# wedges on the outgoing DM's prerm (TEST_20260910165003: lightdm's prerm
+# failed under --autoremove, exit 10, "too many errors, stopping" — lightdm
+# SURVIVED as the active DM. Recover: hand the DM over inside dpkg's
+# expected flow, then configure pending packages so the purge completes.)
 if [ -n "$DESKTOP_PACKAGES_TO_REMOVE" ]; then
-    echo "Removing old desktop metapackage(s): $DESKTOP_PACKAGES_TO_REMOVE"
-    if ! DEBIAN_FRONTEND=noninteractive apt-get purge -y --autoremove --allow-remove-essential $DESKTOP_PACKAGES_TO_REMOVE 2>&1; then
-        echo "WARNING: purge of $DESKTOP_PACKAGES_TO_REMOVE failed — attempting $DESKTOP_DISPLAY_MANAGER handover + dpkg recovery."
-        echo "shared/default-x-display-manager select $DESKTOP_DISPLAY_MANAGER" \
-            | debconf-set-selections 2>/dev/null || true
-        if command -v dpkg-reconfigure >/dev/null 2>&1 && [ -n "$DESKTOP_DISPLAY_MANAGER" ]; then
-            DEBIAN_FRONTEND=noninteractive dpkg-reconfigure "$DESKTOP_DISPLAY_MANAGER" 2>&1 || true
+    to_remove=""
+    for pkg in $DESKTOP_PACKAGES_TO_REMOVE; do
+        if dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q 'install ok installed'; then
+            to_remove="$to_remove $pkg"
         fi
-        if [ -n "$DESKTOP_DISPLAY_MANAGER" ] && command -v "$DESKTOP_DISPLAY_MANAGER" >/dev/null 2>&1; then
-            echo "$(command -v "$DESKTOP_DISPLAY_MANAGER")" > /etc/X11/default-display-manager
-        fi
-        if DEBIAN_FRONTEND=noninteractive dpkg --configure -a 2>&1; then
-            echo "dpkg recovered after purge failure."
-        else
+    done
+    to_remove="${to_remove# }"
+    if [ -z "$to_remove" ]; then
+        echo "Old desktop already absent ($DESKTOP_PACKAGES_TO_REMOVE)."
+    else
+        sim_removed=$(apt-get -s purge --autoremove $to_remove 2>/dev/null | awk '/^(Purg|Remv) / { print $2 }')
+        clash=""
+        for pkg in $DESKTOP_PACKAGES $DESKTOP_DISPLAY_MANAGER; do
+            if printf '%s\n' "$sim_removed" | grep -qx "$pkg"; then
+                clash="$clash $pkg"
+            fi
+        done
+        if [ -n "$clash" ]; then
             DEGRADED=1
-            echo "WARNING: dpkg --configure -a failed after the purge failure — dpkg may be in a broken state."
+            echo "WARNING: purging the old desktop ($to_remove) would also remove:$clash — old desktop left installed."
+        else
+            echo "Removing old desktop package(s): $to_remove"
+            if ! DEBIAN_FRONTEND=noninteractive apt-get purge -y --autoremove --allow-remove-essential $to_remove 2>&1; then
+                echo "WARNING: purge of $to_remove failed — attempting $DESKTOP_DISPLAY_MANAGER handover + dpkg recovery."
+                echo "shared/default-x-display-manager select $DESKTOP_DISPLAY_MANAGER" \
+                    | debconf-set-selections 2>/dev/null || true
+                if command -v dpkg-reconfigure >/dev/null 2>&1 && [ -n "$DESKTOP_DISPLAY_MANAGER" ]; then
+                    DEBIAN_FRONTEND=noninteractive dpkg-reconfigure "$DESKTOP_DISPLAY_MANAGER" 2>&1 || true
+                fi
+                if [ -n "$DESKTOP_DISPLAY_MANAGER" ] && command -v "$DESKTOP_DISPLAY_MANAGER" >/dev/null 2>&1; then
+                    echo "$(command -v "$DESKTOP_DISPLAY_MANAGER")" > /etc/X11/default-display-manager
+                fi
+                if DEBIAN_FRONTEND=noninteractive dpkg --configure -a 2>&1; then
+                    echo "dpkg recovered after purge failure."
+                else
+                    DEGRADED=1
+                    echo "WARNING: dpkg --configure -a failed after the purge failure — dpkg may be in a broken state."
+                fi
+                DEGRADED=1
+            fi
         fi
-        DEGRADED=1
     fi
 fi
+
+# -- Wayland desktop: undo X11 pins ------------------------------------------
+# force_x11.sh and disable_wayland.sh (the xrdp path) pin the display
+# managers to X11 and park Wayland sessions in wayland-sessions/disabled.
+# A Wayland desktop never runs with xrdp (the front ends and the deployment
+# refuse the combination), so a pin left behind by an earlier xrdp run would
+# only keep the new desktop off Wayland. Stock gdm3 ships the line commented.
+if [ "$DESKTOP_DISPLAY_SERVER" = "wayland" ]; then
+    for f in /usr/share/wayland-sessions/disabled/*.desktop /usr/share/wayland-sessions/*.desktop.disabled; do
+        [ -f "$f" ] || continue
+        base=$(basename "$f" .disabled)
+        # A parked session of the desktop just purged (xfce-wayland.desktop)
+        # is no longer dpkg's to remove — it was moved. Drop it, don't offer it.
+        exec_bin=$(sed -n 's/^Exec=//p' "$f" | head -n 1 | awk '{ print $1 }')
+        if [ -n "$exec_bin" ] && ! command -v "$exec_bin" >/dev/null 2>&1; then
+            rm -f "$f" && echo "Dropped parked session $base ($exec_bin is gone)."
+            continue
+        fi
+        if mv "$f" "/usr/share/wayland-sessions/$base" 2>/dev/null; then
+            echo "Restored Wayland session $base."
+        fi
+    done
+    rmdir /usr/share/wayland-sessions/disabled 2>/dev/null || true
+    for gdm_conf in /etc/gdm3/custom.conf /etc/gdm/custom.conf; do
+        if [ -f "$gdm_conf" ] && grep -q '^WaylandEnable=false' "$gdm_conf"; then
+            sed -i 's/^WaylandEnable=false/#WaylandEnable=false/' "$gdm_conf" \
+                && echo "Re-enabled Wayland in $gdm_conf."
+        fi
+    done
+    if [ -f /etc/sddm.conf.d/force-x11.conf ]; then
+        rm -f /etc/sddm.conf.d/force-x11.conf && echo "Removed the SDDM X11 pin."
+    fi
+
+    # The image's stock xrdp (Kali ships it enabled) cannot serve a Wayland
+    # desktop: a login starts the new desktop nested on xrdp's own X server.
+    # Live: Enhanced Session reached it during a post-boot switch, and the
+    # orphaned session (it outlives a stopped xrdp) wedged the Lamco
+    # install's kscreen-doctor. A Wayland desktop's backend is Lamco or none
+    # (the front ends and the deployment refuse xrdp), so the stock xrdp
+    # goes dark here; the Lamco install takes vsock:3389 later.
+    for unit in xrdp.service xrdp-sesman.service; do
+        [ "$(systemctl is-enabled "$unit" 2>/dev/null)" = "enabled" ] || continue
+        if systemctl disable "$unit" 2>&1; then
+            echo "Disabled the stock $unit (cannot serve a Wayland desktop)."
+        else
+            DEGRADED=1
+            echo "WARNING: could not disable the stock $unit — Enhanced Session may land in an xrdp session."
+        fi
+    done
+    if [ "$DESKTOP_SWITCH_CONTEXT" = "live" ]; then
+        for unit in xrdp.service xrdp-sesman.service; do
+            if systemctl is-active --quiet "$unit" 2>/dev/null; then
+                systemctl stop "$unit" 2>&1 && echo "Stopped the stock $unit."
+            fi
+        done
+        # Stopping xrdp leaves its sessions running (Xorg, the nested
+        # desktop): end them, or they hold the user's session bus and
+        # graphical-session.target.
+        if command -v loginctl >/dev/null 2>&1; then
+            for sid in $(loginctl list-sessions --no-legend 2>/dev/null | awk '{ print $1 }'); do
+                if [ "$(loginctl show-session "$sid" -p Service --value 2>/dev/null)" = "xrdp-sesman" ]; then
+                    loginctl terminate-session "$sid" 2>&1 && echo "Ended xrdp session $sid."
+                fi
+            done
+        fi
+    fi
+fi
+
+# -- Drop stale AccountsService session choices -----------------------------
+# A remembered session (XSession=/Session=) naming a session file that is
+# gone (lightdm-xsession, xfce after the purge) makes the display manager
+# start a desktop that no longer exists. Drop it; the DM then starts its
+# default, the new desktop.
+for acct in /var/lib/AccountsService/users/*; do
+    [ -f "$acct" ] || continue
+    for key in XSession Session; do
+        value=$(sed -n "s/^$key=//p" "$acct" | head -n 1)
+        [ -n "$value" ] || continue
+        if [ ! -f "/usr/share/xsessions/$value.desktop" ] && [ ! -f "/usr/share/wayland-sessions/$value.desktop" ]; then
+            sed -i "/^$key=/d" "$acct" && echo "Dropped stale $key=$value for $(basename "$acct")."
+        fi
+    done
+done
 
 # -- Final consistency check ------------------------------------------------
 # "Reboot and make sure all our changes were made properly" is the doc's
@@ -242,6 +404,29 @@ if [ -n "$DESKTOP_DISPLAY_MANAGER" ] && command -v systemctl >/dev/null 2>&1; th
         DEGRADED=1
         echo "WARNING: default target is '$final_target', expected graphical.target — boot lands on a text console."
     fi
+fi
+
+# The session list is what the display manager (and xrdp's startwm) offers:
+# the new desktop must have a session, the removed one must not.
+session_files=$(ls /usr/share/xsessions/*.desktop /usr/share/wayland-sessions/*.desktop 2>/dev/null)
+echo "Installed sessions: $(printf '%s\n' "$session_files" | xargs -r -n1 basename | paste -sd' ')"
+if [ -n "$DESKTOP_SESSION_STARTER" ]; then
+    if [ -z "$session_files" ] \
+        || ! grep -qsE "^Exec=.*$DESKTOP_SESSION_STARTER" $session_files; then
+        DEGRADED=1
+        echo "WARNING: no session file starts $DESKTOP_SESSION_STARTER — the display manager will not offer the new desktop."
+    fi
+fi
+if [ -n "$DESKTOP_PACKAGES_TO_REMOVE" ]; then
+    for session_file in $session_files; do
+        owner=$(dpkg-query -S "$session_file" 2>/dev/null | grep -v '^diversion' | head -n 1 | cut -d: -f1)
+        for pkg in $DESKTOP_PACKAGES_TO_REMOVE; do
+            if [ "$owner" = "$pkg" ]; then
+                DEGRADED=1
+                echo "WARNING: session $(basename "$session_file") of the old desktop ($pkg) is still installed."
+            fi
+        done
+    done
 fi
 
 if [ "$DEGRADED" = "1" ]; then

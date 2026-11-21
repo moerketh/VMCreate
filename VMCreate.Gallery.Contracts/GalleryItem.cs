@@ -260,16 +260,14 @@ namespace VMCreate
         /// <summary>
         /// True when the image bytes can be verified against a digest the
         /// download mirror cannot alter — a hash pinned in this application's
-        /// source (<see cref="Checksum"/>). Drives the verified/unverified
-        /// badge on gallery cards: a <see cref="ChecksumUri"/> fetched from the
-        /// same mirror as the image, or a <see cref="RuntimeChecksum"/> scraped
-        /// from publisher pages, only proves transport consistency, never
-        /// publisher authenticity, so neither may surface as "verified".
+        /// source (<see cref="Checksum"/>). A <see cref="ChecksumUri"/> fetched
+        /// from the same mirror as the image, or a <see cref="RuntimeChecksum"/>
+        /// scraped from publisher pages, only proves transport consistency, never
+        /// publisher authenticity. The gallery shows no verified/unverified badge
+        /// (a pinned hash copied from the publisher's site proves no more), but
+        /// every available digest is still checked on download.
         /// </summary>
         public bool HasChecksum => !string.IsNullOrEmpty(Checksum);
-
-        /// <summary>Inverse of <see cref="HasChecksum"/> for XAML visibility bindings.</summary>
-        public bool HasNoChecksum => !HasChecksum;
 
         /// <summary>
         /// What Deploy will actually do with this image, in the user-facing

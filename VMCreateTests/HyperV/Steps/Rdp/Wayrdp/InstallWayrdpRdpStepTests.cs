@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Moq;
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using VMCreate;
@@ -40,7 +41,7 @@ namespace VMCreate.Tests.HyperV.Steps
             _shell.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                   .ReturnsAsync("ID=parrot\nID_LIKE=debian\n");
             _logger = new Mock<ILogger<InstallWayrdpRdpStep>>();
-            _supportedItem = new GalleryItem { LinuxDistro = LinuxDistro.Ubuntu, InitialUsername = "testuser" };
+            _supportedItem = new GalleryItem { LinuxDistro = LinuxDistro.Arch, InitialUsername = "testuser", Tags = new List<string> { "omarchy" } };
             _unsupportedItem = new GalleryItem { LinuxDistro = LinuxDistro.Unknown };
             _wayrdpCustomizations = new VmCustomizations { RdpBackend = RdpBackend.Wayrdp };
             _lamcoCustomizations = new VmCustomizations { RdpBackend = RdpBackend.Lamco };
@@ -77,24 +78,34 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
-        public void IsApplicable_TrueForAllDebianFamilyDistros()
+        public void IsApplicable_FalseForImagesWithoutAWayrdpBackend()
         {
-            // wayrdp's supported set tracks the Lamco set (Debian-family +
-            // Arch-family): freerdp3 runtime libs are packaged on both.
-            foreach (var distro in new[] { LinuxDistro.Ubuntu, LinuxDistro.Debian, LinuxDistro.Parrot, LinuxDistro.Kali })
+            // wayrdp serves Hyprland (Omarchy) and KDE Plasma on Kali and
+            // Parrot: other wayrdp-capable distros are not targets yet.
+            foreach (var distro in new[] { LinuxDistro.Ubuntu, LinuxDistro.Debian, LinuxDistro.Arch })
             {
                 var item = new GalleryItem { LinuxDistro = distro };
-                Assert.IsTrue(_step.IsApplicable(item, _wayrdpCustomizations),
-                    $"{distro} should be wayrdp-targetable");
+                Assert.IsFalse(_step.IsApplicable(item, _wayrdpCustomizations),
+                    $"{distro} without the omarchy tag must not get wayrdp");
             }
         }
 
         [TestMethod]
-        public void IsApplicable_TrueForArchFamily()
+        public void IsApplicable_TrueForKaliAndParrot()
         {
-            var item = new GalleryItem { LinuxDistro = LinuxDistro.Arch };
+            // The KDE backend's validated distros; the desktop itself is
+            // checked up front (RdpDesktopCompatibility) and by Auto.
+            foreach (var distro in new[] { LinuxDistro.Kali, LinuxDistro.Parrot })
+                Assert.IsTrue(_step.IsApplicable(new GalleryItem { LinuxDistro = distro }, _wayrdpCustomizations),
+                    $"{distro} is a wayrdp KDE-backend target");
+        }
+
+        [TestMethod]
+        public void IsApplicable_TrueForOmarchy()
+        {
+            var item = new GalleryItem { LinuxDistro = LinuxDistro.Arch, Tags = new List<string> { "omarchy" } };
             Assert.IsTrue(_step.IsApplicable(item, _wayrdpCustomizations),
-                "Arch (Omarchy/Hyprland) is the wlroots backend's primary target");
+                "Omarchy (Arch + Hyprland) is the wlroots backend's target");
         }
 
         [TestMethod]
@@ -136,7 +147,7 @@ namespace VMCreate.Tests.HyperV.Steps
             _shell.Verify(s => s.CopyContentAsync(
                 It.Is<string>(content => content.Contains("WAYRDP_TARBALL_URL")
                                          && content.Contains("releases/latest/download/")
-                                         && content.Contains("80fb69f28539f8e96b4718cbe3feb9062ebfa949a7086a233ccda161155f0ac4")
+                                         && content.Contains("4aaa90879a00a128fb4cb69f99c89f8ec28d1a5b8e1270e1e7153841e894007f")
                                          && !content.Contains("__WAYRDP_PKG")),
                 It.Is<string>(p => p.StartsWith("/tmp/install_wayrdp_") && p.EndsWith(".sh")),
                 It.IsAny<CancellationToken>()), Times.Once);

@@ -71,6 +71,26 @@ namespace VMCreate.Tests.HyperV.VmCreation
         }
 
         [TestMethod]
+        public async Task DeployAsync_XrdpWithWaylandDesktopSwitch_RefusedBeforeAnythingIsCreated()
+        {
+            // Kali + GNOME + xrdp ran the X11 fixups against the stock Xfce
+            // pre-boot and then installed a GNOME xrdp could not serve.
+            var orchestrator = new VmDeploymentOrchestrator(
+                _logger.Object, _mediaHandlerFactory.Object, _hyperVManager.Object,
+                _cloningIsoDownloader.Object, new[] { _strategy.Object }, _pathService.Object,
+                desktopCatalogs: new IDesktopEnvironmentCatalog[] { new global::VMCreate.Gallery.KaliDesktopCatalog() });
+            var plan = VmDeploymentPlan.FromSettings(new VmSettings { VMName = "TestVM" });
+            var customizations = new VmCustomizations { RdpBackend = RdpBackend.Xrdp, DesktopEnvironmentId = "gnome" };
+            var kali = new GalleryItem { Name = "Kali", LinuxDistro = LinuxDistro.Kali, DiskUri = "http://example.com/kali.7z" };
+
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => orchestrator.DeployAsync(
+                plan, customizations, kali, CancellationToken.None, null, "kali.7z"));
+
+            StringAssert.Contains(ex.Message, "xrdp");
+            _hyperVManager.Verify(h => h.VmExistsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
+
+        [TestMethod]
         public async Task DeployAsync_StrategyThrows_CleansUpVmIfCreated()
         {
             // Arrange
@@ -497,6 +517,82 @@ namespace VMCreate.Tests.HyperV.VmCreation
                 .Returns(new FakeMediaHandler(format));
             _strategy.Setup(s => s.CanHandle(It.IsAny<GalleryItem>(), It.IsAny<DiskImageFormat>())).Returns(true);
             _strategy.Setup(s => s.CreateVMAsync(It.IsAny<VmCreationContext>())).Returns(createVm);
+        }
+
+        [TestMethod]
+        public async Task DeployAsync_Success_RecordsManagerMetadata()
+        {
+            var recorder = UseMetadataRecorder();
+            string baseDir = NewTempDir();
+            try
+            {
+                UseTempPaths(baseDir);
+                SetupStrategy(DiskImageFormat.Vhdx, _ => Task.CompletedTask);
+
+                VmDeploymentResult result = await DeployAsync("TestVM_20250601120000", "disk.vhdx");
+
+                Assert.IsTrue(result.Success);
+                recorder.Verify(r => r.RecordDeploymentAsync(
+                        It.Is<VmDeploymentPlan>(p => p.VmName == "TestVM_20250601120000"),
+                        It.Is<GalleryItem>(g => g.Name == "Test"),
+                        It.IsAny<CancellationToken>()),
+                    Times.Once);
+            }
+            finally { DeleteTempDir(baseDir); }
+        }
+
+        [TestMethod]
+        public async Task DeployAsync_MetadataFailure_KeepsTheDeployment()
+        {
+            var recorder = UseMetadataRecorder();
+            recorder.Setup(r => r.RecordDeploymentAsync(It.IsAny<VmDeploymentPlan>(), It.IsAny<GalleryItem>(), It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new Exception("store locked"));
+            string baseDir = NewTempDir();
+            try
+            {
+                UseTempPaths(baseDir);
+                SetupStrategy(DiskImageFormat.Vhdx, _ => Task.CompletedTask);
+
+                VmDeploymentResult result = await DeployAsync("TestVM_20250601120000", "disk.vhdx");
+
+                Assert.IsTrue(result.Success, "bookkeeping must not fail (and delete) a finished VM");
+                _hyperVManager.Verify(h => h.RemoveVMAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+                StringAssert.Contains(result.DeploymentLog, "Could not record folder/tags/provenance");
+            }
+            finally { DeleteTempDir(baseDir); }
+        }
+
+        [TestMethod]
+        public async Task DeployAsync_StrategyThrows_RecordsNoMetadata()
+        {
+            var recorder = UseMetadataRecorder();
+            string baseDir = NewTempDir();
+            try
+            {
+                UseTempPaths(baseDir);
+                SetupStrategy(DiskImageFormat.Vhdx, _ => throw new InvalidOperationException("boom"));
+
+                VmDeploymentResult result = await DeployAsync("TestVM_20250601120000", "disk.vhdx");
+
+                Assert.IsFalse(result.Success);
+                recorder.Verify(r => r.RecordDeploymentAsync(It.IsAny<VmDeploymentPlan>(), It.IsAny<GalleryItem>(), It.IsAny<CancellationToken>()), Times.Never);
+            }
+            finally { DeleteTempDir(baseDir); }
+        }
+
+        /// <summary>Rebuilds the orchestrator with a metadata recorder (the default fixture has none).</summary>
+        private Mock<IVmMetadataRecorder> UseMetadataRecorder()
+        {
+            var recorder = new Mock<IVmMetadataRecorder>();
+            _orchestrator = new VmDeploymentOrchestrator(
+                _logger.Object,
+                _mediaHandlerFactory.Object,
+                _hyperVManager.Object,
+                _cloningIsoDownloader.Object,
+                new[] { _strategy.Object },
+                _pathService.Object,
+                recorder.Object);
+            return recorder;
         }
 
         private Task<VmDeploymentResult> DeployAsync(string vmName, string sourceFile,
