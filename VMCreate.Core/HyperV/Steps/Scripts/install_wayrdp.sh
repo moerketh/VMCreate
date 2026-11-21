@@ -456,6 +456,16 @@ fi
 USER_HOME="$(getent passwd "$AUTOLOGIN_USER" | cut -d: -f6)"
 AUTO_DROPIN_DIR="$USER_HOME/.config/systemd/user/wayrdp.service.d"
 mkdir -p "$AUTO_DROPIN_DIR" 2>/dev/null || true
+# mkdir ran as root: every directory it created is root-owned. A root-owned
+# ~/.config/systemd/user makes the user's `systemctl --user enable` fail
+# (it cannot create graphical-session.target.wants), and on KDE nothing else
+# starts the unit (Kali, 2026-11-21: wayrdp stayed disabled). Hand the whole
+# chain to the user; this also repairs directories an earlier run left.
+for d in "$USER_HOME/.config" "$USER_HOME/.config/systemd" "$USER_HOME/.config/systemd/user"; do
+    if [ -d "$d" ] && [ "$(stat -c %u "$d")" = "0" ]; then
+        chown "$AUTOLOGIN_USER":"$AUTOLOGIN_USER" "$d" 2>/dev/null || true
+    fi
+done
 cat > "$AUTO_DROPIN_DIR/tcp.conf" <<'TCP_EOF'
 # Bind the RDP TCP listener on all interfaces (loopback-only by default) so
 # mstsc from the Hyper-V host can reach the guest. vsock is unaffected.
@@ -498,8 +508,18 @@ if [ "$WAYRDP_NLA_PASSWORD_B64" != "__WAYRDP_NLA_PASSWORD""_B64__" ] && ! run_as
     unset NLA_PW
 fi
 
+# enable-linger starts the user manager asynchronously; start it
+# synchronously so the --user calls below cannot race it (same as
+# install_lamco.sh). Idempotent when it already runs.
+systemctl start "user@$USER_UID.service" 2>/dev/null || true
 run_as_user systemctl --user daemon-reload 2>/dev/null || true
-run_as_user systemctl --user enable wayrdp.service 2>/dev/null || true
+# Enabled = started by graphical-session.target at every login. On KDE that
+# is the ONLY start path (Hyprland also has the autostart hook below), so a
+# failed enable must not pass silently.
+if ! ENABLE_ERR="$(run_as_user systemctl --user enable wayrdp.service 2>&1)"; then
+    echo "DEGRADED: systemctl --user enable wayrdp.service failed for $AUTOLOGIN_USER: $ENABLE_ERR"
+    DEGRADED=1
+fi
 
 # Boot model (decision 2026-10-13): keep the stable socket-guarded autostart.
 # Omarchy boots Hyprland WITHOUT UWSM ("started without start-hyprland"), so
