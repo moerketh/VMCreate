@@ -21,7 +21,7 @@ set -o pipefail
 # RDP backend the user will actually experience.
 #
 # Sequence (mirrors the documented manual post-configure steps):
-#   1. apt-get update
+#   1. apt-get update (retried on network/DNS failure; the output decides)
 #   2. verify every metapackage exists in the live index (the catalog is
 #      static; the distro's package index is the authority — probe before
 #      installing so a renamed metapackage fails loudly, pre-install)
@@ -53,15 +53,53 @@ DEGRADED=0
 DESKTOP_SWITCH_CONTEXT="${DESKTOP_SWITCH_CONTEXT:-live}"
 echo "Desktop switch context: $DESKTOP_SWITCH_CONTEXT"
 
-echo "Updating package indexes..."
-if ! apt-get update 2>&1; then
-    echo "ERROR: apt-get update failed."
+# apt-get update exits 0 when a source fails to download (it only warns
+# "W: Failed to fetch ..."), so the output decides. A transient DNS or mirror
+# failure is retried with backoff; only a clean update lets a missing
+# metapackage below count as a stale catalog (Kali, 2026-11-21: one DNS blip
+# in the chroot was reported as "the desktop catalog is stale").
+APT_FETCH_FAILED_RE='Failed to fetch|Temporary failure resolving|Could not resolve|Some index files failed to download|Network is unreachable|Connection timed out'
+apt_update_ok=0
+for attempt in 1 2 3 4; do
+    echo "Updating package indexes (attempt $attempt/4)..."
+    update_out="$(apt-get update 2>&1)"
+    update_rc=$?
+    printf '%s\n' "$update_out"
+    if [ "$update_rc" -eq 0 ] && ! printf '%s\n' "$update_out" | grep -qE "$APT_FETCH_FAILED_RE"; then
+        apt_update_ok=1
+        break
+    fi
+    if [ "$attempt" -lt 4 ]; then
+        wait_s=$((attempt * 15))
+        echo "Package index download failed (network/DNS?); retrying in ${wait_s}s..."
+        sleep "$wait_s"
+    fi
+done
+
+if [ "$apt_update_ok" != "1" ]; then
+    echo "ERROR: could not download the package indexes after 4 attempts."
+    # Name the cause: a resolver problem in this environment is not a
+    # catalog problem, and the fix is different.
+    # The hosts apt failed on, from its "Err:N http://host/..." lines.
+    failed_hosts="$(printf '%s\n' "$update_out" \
+        | sed -nE 's#^Err:[0-9]+[[:space:]]+[a-z]+://([^/ ]+).*#\1#p' | sort -u)"
+    for host in $failed_hosts; do
+        if getent hosts "$host" >/dev/null 2>&1; then
+            echo "  mirror $host resolves now (the failure is past DNS: mirror or route)."
+        else
+            echo "  mirror $host does NOT resolve: no working DNS in the $DESKTOP_SWITCH_CONTEXT environment."
+        fi
+    done
+    nameservers="$(grep -E '^nameserver' /etc/resolv.conf 2>/dev/null | awk '{print $2}' | tr '\n' ' ')"
+    echo "  /etc/resolv.conf nameservers: ${nameservers:-<none>}"
+    echo "This is a network failure, not a stale desktop catalog; retrying the deployment may succeed."
     exit 1
 fi
 
 # The catalog is static offline data; the live package index is the
 # authority. Probe each metapackage before installing so a renamed/removed
-# metapackage fails the deployment BEFORE anything is touched.
+# metapackage fails the deployment BEFORE anything is touched. The index
+# downloaded cleanly above, so a miss here really is a catalog problem.
 for pkg in $DESKTOP_PACKAGES; do
     if ! apt-cache show "$pkg" >/dev/null 2>&1; then
         echo "ERROR: metapackage '$pkg' does not exist in the live package index."
