@@ -23,7 +23,7 @@
 
                 <!-- ── Security ─────────────────────────────────── -->
                 <TextBlock Text="Security" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                <TextBlock Text="HTB App Token — used to download VPN keys; asked once, never per VM." FontSize="12" Opacity="0.7" Margin="0,0,0,4"/>
+                <TextBlock Text="Hack The Box App Token (app.hackthebox.com → Profile Settings). When set, every Linux security VM gets VPN configs for your assigned Labs, Starting Point and Fortresses servers in NetworkManager. Leave empty to skip HTB VPN." FontSize="12" Opacity="0.7" TextWrapping="Wrap" Margin="0,0,0,4"/>
                 <PasswordBox x:Name="HtbTokenBox" Margin="0,0,0,16"/>
 
                 <!-- ── AI ───────────────────────────────────────── -->

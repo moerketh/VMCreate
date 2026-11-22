@@ -193,7 +193,7 @@ namespace VMCreate.CLI.Commands
 
             var htbVpnOpt = new Option<string>("--htb-vpn")
             {
-                Description = "Comma-separated HTB VPN endpoint types: labs, sp, academy."
+                Description = "Comma-separated HTB products to deploy VPN configs for: labs, sp (Starting Point), fortress. Default: every product the account can access."
             };
 
             // ── Elastic SIEM AI ─────────────────────────────────────────────────
@@ -842,6 +842,7 @@ namespace VMCreate.CLI.Commands
                 ConfigureHtbVpn = hasHtbVpn,
                 OvpnFilePath = args.OvpnPath,
                 HtbVpnKeys = new List<HtbVpnKey>(),
+                HtbVpnProducts = args.HtbVpn,
                 DistributionOptions = distributionOptions,
             };
 
@@ -894,8 +895,10 @@ namespace VMCreate.CLI.Commands
                 vmCustomizations.DistributionOptions.Add(new DistributionOptionSelection { Name = "PwnCloudOS Sync", IsEnabled = true });
             }
 
-            // ── Download HTB VPN keys if token is provided ───────────────────
-            if (!string.IsNullOrEmpty(effectiveHtbToken) && !string.IsNullOrEmpty(args.HtbVpn))
+            // ── Download HTB VPN keys for an explicit --htb-token ─────────────
+            // With only the stored token, DeployVpnConfigsStep downloads them
+            // at deploy time, as it does for the GUI.
+            if (!string.IsNullOrEmpty(args.HtbToken))
             {
                 var htbResult = await DownloadHtbKeysAsync(services, effectiveHtbToken, args.HtbVpn, jsonMode, ct);
                 if (htbResult == null)
@@ -1080,23 +1083,18 @@ namespace VMCreate.CLI.Commands
         private static async Task<List<HtbVpnKey>?> DownloadHtbKeysAsync(
             IServiceProvider services,
             string token,
-            string types,
+            string? types,
             bool jsonMode,
             CancellationToken ct)
         {
             try
             {
                 var htbClient = services.GetRequiredService<IHtbApiClient>();
-                var requestedTypes = new HashSet<string>(
-                    types.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
-                    StringComparer.OrdinalIgnoreCase);
-
                 var results = await htbClient.DownloadAllKeysAsync(token, ct);
 
                 var keys = results
                     .Where(r => r.Success && r.Key != null &&
-                                (requestedTypes.Count == 0 ||
-                                 requestedTypes.Contains(r.EndpointName)))
+                                HtbApiClient.MatchesProductFilter(r.Product, types))
                     .Select(r => r.Key!)
                     .ToList();
 

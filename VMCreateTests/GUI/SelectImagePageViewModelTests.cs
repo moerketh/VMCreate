@@ -50,6 +50,26 @@ namespace VMCreate.Tests.GUI
             vm.GalleryView.Cast<GalleryItem>().Select(i => i.Name).ToList();
 
         [TestMethod]
+        public void HasSelection_FalseUntilItemSelected_AndRaisesChange()
+        {
+            // The detail panel shows a welcome prompt while nothing is selected,
+            // rather than empty fields with a dead download link.
+            var item = PreInstalled("Ubuntu 24.04");
+            var vm = CreateViewModel(item);
+            var raised = new List<string?>();
+            vm.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+            Assert.IsFalse(vm.HasSelection);
+
+            vm.SelectedItem = item;
+            Assert.IsTrue(vm.HasSelection);
+            CollectionAssert.Contains(raised, nameof(SelectImagePageViewModel.HasSelection));
+
+            vm.SelectedItem = null;
+            Assert.IsFalse(vm.HasSelection);
+        }
+
+        [TestMethod]
         public void DefaultFilter_HidesManualIsoInstallers()
         {
             var vm = CreateViewModel(ManualIso("Athena OS (Arch)"), ManualIso("Kali Linux"));

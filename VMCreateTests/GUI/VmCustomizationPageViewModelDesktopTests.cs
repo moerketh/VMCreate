@@ -25,10 +25,8 @@ namespace VMCreate.Tests.GUI
         {
             wizardData = new WizardData { SelectedItem = item };
             wizardData.Customizations.RdpBackend = storedBackend;
-            var htbApi = new Mock<IHtbApiClient>();
-            htbApi.Setup(a => a.EndpointNames).Returns(Array.Empty<string>());
             return new VmCustomizationPageViewModel(
-                wizardData, htbApi.Object, NullLogger.Instance,
+                wizardData, NullLogger.Instance,
                 configurableSteps: Enumerable.Empty<IConfigurableCustomizationStep>(),
                 desktopCatalogs: new[] { new KaliDesktopCatalog() });
         }
@@ -170,9 +168,9 @@ namespace VMCreate.Tests.GUI
             Assert.IsFalse(vm.WayrdpOptionEnabled, "stock Xfce: wayrdp has no Xfce backend");
 
             vm.SelectDesktop("kde");
-            StringAssert.Contains(vm.AutoRdpHint, "KDE Plasma");
             Assert.IsTrue(vm.WayrdpOptionEnabled);
             StringAssert.Contains(vm.AutoRdpHint, "wayrdp");
+            StringAssert.Contains(vm.AutoRdpHint, "KDE Plasma");
 
             vm.SelectDesktop("gnome");
             Assert.IsTrue(vm.WayrdpOptionEnabled, "wayrdp's GNOME backend");

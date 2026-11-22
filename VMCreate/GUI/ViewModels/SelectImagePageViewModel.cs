@@ -77,9 +77,18 @@ namespace VMCreate
             set
             {
                 if (SetProperty(ref _selectedItem, value))
+                {
+                    OnPropertyChanged(nameof(HasSelection));
                     _logger.LogDebug("Selection changed to: {Name}", value?.Name ?? "(none)");
+                }
             }
         }
+
+        /// <summary>
+        /// True once an image is selected; the detail panel shows a welcome
+        /// prompt until then instead of empty fields.
+        /// </summary>
+        public bool HasSelection => _selectedItem != null;
 
         public bool IsLoading
         {

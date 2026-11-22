@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text.Json;
@@ -15,21 +16,41 @@ namespace VMCreate
     /// </summary>
     public class HtbVpnDownloadResult
     {
+        /// <summary>Display name, e.g. "Labs EU VIP 7".</summary>
         public string EndpointName { get; set; } = null!;
+
+        /// <summary>
+        /// The HTB product this key is for, as the v5 API names it
+        /// ("labs", "starting_point", "fortresses"); null for an error that
+        /// isn't tied to one product.
+        /// </summary>
+        public string? Product { get; set; }
+
         public bool Success { get; set; }
         public string? ErrorMessage { get; set; }
         public HtbVpnKey? Key { get; set; }
     }
 
     /// <summary>
-    /// Downloads HTB VPN configuration files from the HTB API using a Bearer token.
-    /// 
-    /// Labs flow (from htb-toolkit):
-    ///   1. GET /api/v4/connections → parse assigned server IDs for lab, starting_point, fortresses
-    ///   2. GET /api/v4/access/ovpnfile/{server_id}/0  → raw .ovpn content
-    /// 
-    /// Academy flow:
-    ///   GET /api/v2/vpn-servers/key/download?type=regular&amp;protocol=udp → raw .ovpn content
+    /// A VPN server HTB has assigned to the account for one product, parsed
+    /// from <c>GET /api/v5/connections</c>.
+    /// </summary>
+    internal sealed record HtbVpnConnection(
+        string Product, string DisplayName, long ServerId, string FriendlyName, string GuestFileName);
+
+    /// <summary>
+    /// Downloads HTB VPN configuration files from the HTB API using a Bearer
+    /// App Token. Mirrors the flow of Athena OS's htb-toolkit (src/vpn.rs):
+    /// <list type="number">
+    ///   <item><c>GET /api/v5/connections</c>: a <c>data</c> array with one
+    ///   entry per product (<c>type</c>), its <c>assigned_server</c> and an
+    ///   optional <c>available</c> flag.</item>
+    ///   <item><c>GET /api/v4/access/ovpnfile/{server_id}/0</c>: the raw
+    ///   UDP .ovpn for that server.</item>
+    /// </list>
+    /// Only Labs (Machines), Starting Point and Fortresses are fetched, the
+    /// products htb-toolkit supports. Academy is not: its VPN sits behind
+    /// OAuth SSO and rejects the App Token.
     /// </summary>
     public class HtbApiClient : IHtbApiClient, IDisposable
     {
@@ -38,12 +59,24 @@ namespace VMCreate
         private readonly bool _ownsHttpClient;
 
         private const string LabsBase = "https://labs.hackthebox.com";
-        private const string AcademyBase = "https://academy.hackthebox.com";
+
+        /// <summary>
+        /// The products fetched, keyed by the v5 <c>type</c> value, with the
+        /// display name, guest file prefix and the aliases the CLI's
+        /// <c>--htb-vpn</c> filter accepts (htb-toolkit's <c>-v</c> aliases).
+        /// </summary>
+        internal static readonly IReadOnlyList<(string Type, string DisplayName, string FilePrefix, string[] Aliases)> Products =
+            new[]
+            {
+                ("labs", "Labs", "labs", new[] { "labs", "lab", "machine", "machines" }),
+                ("starting_point", "Starting Point", "starting_point", new[] { "starting_point", "starting", "sp" }),
+                ("fortresses", "Fortresses", "fortress", new[] { "fortresses", "fortress", "fort" }),
+            };
 
         /// <summary>
         /// Display names shown in the UI status list.
         /// </summary>
-        public static readonly string[] EndpointNamesStatic = { "Labs", "Starting Point", "Academy" };
+        public static readonly string[] EndpointNamesStatic = Products.Select(p => p.DisplayName).ToArray();
 
         /// <inheritdoc />
         IReadOnlyList<string> IHtbApiClient.EndpointNames => EndpointNamesStatic;
@@ -66,9 +99,8 @@ namespace VMCreate
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-            // Use a custom handler that preserves Authorization headers across redirects.
-            // Academy redirects (e.g. path normalization) and the default HttpClient
-            // strips auth headers on redirect, causing the request to hit a login page.
+            // Redirects are followed by hand (SendWithAuthRedirectAsync) so the
+            // Authorization header survives in-scope hops only.
             var handler = new HttpClientHandler
             {
                 AllowAutoRedirect = false
@@ -78,8 +110,29 @@ namespace VMCreate
         }
 
         /// <summary>
-        /// Downloads VPN keys from all known HTB endpoints using the provided App Token.
-        /// Returns a result for each endpoint (success with key content, or failure with error).
+        /// True when <paramref name="product"/> (a v5 <c>type</c> value) is
+        /// selected by a comma-separated filter of product aliases such as
+        /// "labs,sp". An empty or null filter selects every product.
+        /// </summary>
+        public static bool MatchesProductFilter(string? product, string? filter)
+        {
+            var requested = (filter ?? "")
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (requested.Length == 0)
+                return true;
+
+            var entry = Products.FirstOrDefault(p => string.Equals(p.Type, product, StringComparison.OrdinalIgnoreCase));
+            if (entry.Type == null)
+                return false;
+
+            return requested.Any(r => entry.Aliases.Contains(r, StringComparer.OrdinalIgnoreCase));
+        }
+
+        /// <summary>
+        /// Downloads the VPN key of every server HTB has assigned to the
+        /// account, for each supported product the account can access.
+        /// Returns a result per server (success with key content, or failure
+        /// with error); a failed connections query yields one failed result.
         /// </summary>
         public async Task<List<HtbVpnDownloadResult>> DownloadAllKeysAsync(string apiToken, CancellationToken ct = default)
         {
@@ -88,38 +141,33 @@ namespace VMCreate
 
             var results = new List<HtbVpnDownloadResult>();
 
-            // ── Labs + Starting Point: use /api/v4/connections to discover assigned servers ──
+            List<HtbVpnConnection> connections;
             try
             {
-                var connections = await GetLabConnectionsAsync(apiToken, ct);
-
-                foreach (var conn in connections)
-                {
-                    ct.ThrowIfCancellationRequested();
-                    results.Add(await DownloadLabOvpnAsync(conn.Name, conn.ServerId, apiToken, conn.GuestFileName, ct));
-                }
+                connections = await GetConnectionsAsync(apiToken, ct);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger.LogError(ex, "Failed to query Labs connections API");
-                results.Add(new HtbVpnDownloadResult { EndpointName = "Labs", Success = false, ErrorMessage = ex.Message });
+                _logger.LogError(ex, "Failed to query HTB VPN connections API");
+                results.Add(new HtbVpnDownloadResult { EndpointName = "HTB connections", Success = false, ErrorMessage = ex.Message });
+                return results;
             }
 
-            // ── Academy ──
-            ct.ThrowIfCancellationRequested();
-            results.Add(await DownloadAcademyOvpnAsync(apiToken, ct));
+            foreach (var conn in connections)
+            {
+                ct.ThrowIfCancellationRequested();
+                results.Add(await DownloadOvpnAsync(conn, apiToken, ct));
+            }
 
             return results;
         }
 
-        // ─── Labs connections discovery ────────────────────────────────────
+        // ─── Connections discovery (v5) ────────────────────────────────────
 
-        private record LabConnection(string Name, long ServerId, string GuestFileName);
-
-        private async Task<List<LabConnection>> GetLabConnectionsAsync(string apiToken, CancellationToken ct)
+        private async Task<List<HtbVpnConnection>> GetConnectionsAsync(string apiToken, CancellationToken ct)
         {
-            string url = $"{LabsBase}/api/v4/connections";
-            _logger.LogInformation("Querying Labs connections: {Url}", url);
+            string url = $"{LabsBase}/api/v5/connections";
+            _logger.LogInformation("Querying HTB VPN connections: {Url}", url);
 
             using var response = await SendWithAuthRedirectAsync(url, apiToken, ct);
             string body = await response.Content.ReadAsStringAsync(ct);
@@ -128,132 +176,104 @@ namespace VMCreate
             {
                 // SECURITY: classification, not content — an error body
                 // could echo request data or embed rejected key material.
-                _logger.LogWarning("Labs connections returned HTTP {Code} (body: {Length} bytes, {Classification})",
+                _logger.LogWarning("HTB connections returned HTTP {Code} (body: {Length} bytes, {Classification})",
                     (int)response.StatusCode, body?.Length ?? 0, ClassifyContent(body));
                 throw new HttpRequestException($"HTTP {(int)response.StatusCode} from connections API");
             }
 
-            var connections = new List<LabConnection>();
-            using var doc = JsonDocument.Parse(body);
-            var data = doc.RootElement.GetProperty("data");
-
-            // Log all top-level section names from the connections response for discovery
-            var sectionNames = new List<string>();
-            foreach (var prop in data.EnumerateObject())
-                sectionNames.Add(prop.Name);
-            _logger.LogDebug("Connections API sections: {Sections}", string.Join(", ", sectionNames));
-
-            // For each known section, log its property names to help discover server-list fields
-            foreach (string key in new[] { "lab", "starting_point", "fortresses", "endgames", "pro_labs", "competitive", "release_arena" })
-            {
-                if (data.TryGetProperty(key, out var sec) && sec.ValueKind == JsonValueKind.Object)
-                {
-                    var propNames = new List<string>();
-                    foreach (var p in sec.EnumerateObject())
-                        propNames.Add($"{p.Name}({p.Value.ValueKind})");
-                    _logger.LogDebug("Section '{Key}' properties: {Props}", key, string.Join(", ", propNames));
-                }
-            }
-
-            // lab (Machines)
-            TryParseAllServers(data, "lab", "Labs", "labs", connections);
-            // starting_point
-            TryParseAllServers(data, "starting_point", "Starting Point", "starting_point", connections);
-            // fortresses
-            TryParseAllServers(data, "fortresses", "Fortresses", "fortress", connections);
-            // endgames
-            TryParseAllServers(data, "endgames", "Endgames", "endgames", connections);
-            // pro_labs
-            TryParseAllServers(data, "pro_labs", "Pro Labs", "pro_labs", connections);
-            // competitive
-            TryParseAllServers(data, "competitive", "Competitive", "competitive", connections);
-            // release_arena
-            TryParseAllServers(data, "release_arena", "Release Arena", "release_arena", connections);
-
-            _logger.LogInformation("Discovered {Count} assigned VPN server(s) from Labs API", connections.Count);
+            var connections = ParseConnections(body);
+            foreach (var c in connections)
+                _logger.LogInformation("{Category}: assigned server {FriendlyName} (id={Id})",
+                    c.DisplayName, c.FriendlyName, c.ServerId);
+            _logger.LogInformation("Discovered {Count} assigned VPN server(s) from HTB", connections.Count);
             return connections;
         }
 
         /// <summary>
-        /// Parses all available VPN servers for a given category from the connections API response.
-        /// Falls back to the single assigned_server if no servers array is present.
+        /// Parses a <c>/api/v5/connections</c> body the way htb-toolkit does:
+        /// <c>data</c> must be an array; entries need a supported <c>type</c>,
+        /// <c>available</c> not false (it is absent on most entries), and a
+        /// non-null <c>assigned_server</c> with a positive <c>id</c>.
+        /// Internal and pure so tests can pin the shape.
         /// </summary>
-        private void TryParseAllServers(
-            JsonElement data, string jsonKey, string displayName, string filePrefix,
-            List<LabConnection> connections)
+        internal static List<HtbVpnConnection> ParseConnections(string body)
         {
-            if (!data.TryGetProperty(jsonKey, out var section))
-                return;
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
 
-            if (!section.TryGetProperty("can_access", out var canAccess) || !canAccess.GetBoolean())
+            if (!root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array)
             {
-                _logger.LogDebug("{Name}: can_access = false, skipping", displayName);
-                return;
+                // HTB answers removed endpoints with 200 + a message.
+                string? message = root.TryGetProperty("message", out var m) && m.ValueKind == JsonValueKind.String
+                    ? m.GetString() : null;
+                throw new HttpRequestException(message != null
+                    ? $"Unexpected connections response: {message}"
+                    : "Missing or invalid 'data' array in connections response");
             }
 
-            int countBefore = connections.Count;
-
-            // Enumerate all available servers if the API exposes them
-            if (section.TryGetProperty("servers", out var servers) && servers.ValueKind == JsonValueKind.Array)
+            var connections = new List<HtbVpnConnection>();
+            foreach (var entry in data.EnumerateArray())
             {
-                foreach (var server in servers.EnumerateArray())
-                {
-                    if (server.TryGetProperty("id", out var idProp))
-                    {
-                        long serverId = idProp.GetInt64();
-                        string? friendlyName = server.TryGetProperty("friendly_name", out var fn)
-                            ? fn.GetString() : $"Server {serverId}";
-                        string safeName = SanitizeFileName(friendlyName);
+                if (entry.ValueKind != JsonValueKind.Object
+                    || !entry.TryGetProperty("type", out var typeProp)
+                    || typeProp.ValueKind != JsonValueKind.String)
+                    continue;
 
-                        _logger.LogInformation("{Category}: server {FriendlyName} (id={Id})",
-                            displayName, friendlyName, serverId);
-                        connections.Add(new LabConnection(
-                            $"{displayName} {friendlyName}",
-                            serverId,
-                            $"{filePrefix}_{safeName}.ovpn"));
-                    }
-                }
+                var product = Products.FirstOrDefault(p => p.Type == typeProp.GetString());
+                if (product.Type == null)
+                    continue;
+
+                if (entry.TryGetProperty("available", out var available)
+                    && available.ValueKind == JsonValueKind.False)
+                    continue;
+
+                if (!entry.TryGetProperty("assigned_server", out var server)
+                    || server.ValueKind != JsonValueKind.Object
+                    || !server.TryGetProperty("id", out var idProp)
+                    || !idProp.TryGetInt64(out long serverId)
+                    || serverId <= 0)
+                    continue;
+
+                string friendlyName = server.TryGetProperty("friendly_name", out var fn) && fn.ValueKind == JsonValueKind.String
+                    ? fn.GetString() ?? $"Server {serverId}"
+                    : $"Server {serverId}";
+
+                // One server per product; skip a duplicate the API might repeat.
+                if (connections.Any(c => c.Product == product.Type && c.ServerId == serverId))
+                    continue;
+
+                connections.Add(new HtbVpnConnection(
+                    product.Type,
+                    $"{product.DisplayName} {friendlyName}",
+                    serverId,
+                    friendlyName,
+                    $"{product.FilePrefix}_{SanitizeFileName(friendlyName)}.ovpn"));
             }
 
-            // Fallback: use the single assigned_server when no servers array is present
-            if (connections.Count == countBefore)
-            {
-                if (section.TryGetProperty("assigned_server", out var server)
-                    && server.ValueKind != JsonValueKind.Null
-                    && server.TryGetProperty("id", out var idProp))
-                {
-                    long serverId = idProp.GetInt64();
-                    string? friendlyName = server.TryGetProperty("friendly_name", out var fn)
-                        ? fn.GetString() : "unknown";
-                    string safeName = SanitizeFileName(friendlyName);
-                    _logger.LogInformation("{Category}: assigned server = {FriendlyName} (id={Id})",
-                        displayName, friendlyName, serverId);
-                    connections.Add(new LabConnection(
-                        $"{displayName} {friendlyName}",
-                        serverId,
-                        $"{filePrefix}_{safeName}.ovpn"));
-                }
-                else
-                {
-                    _logger.LogDebug("{Name}: no servers found", displayName);
-                }
-            }
+            return connections;
         }
 
         /// <summary>
         /// Converts a friendly server name like "EU Free 1" to a safe filename component "eu_free_1".
         /// </summary>
-        private static string SanitizeFileName(string? name) =>
-            name?.Trim().Replace(' ', '_').Replace('-', '_').ToLowerInvariant() ?? "unknown";
-
-        // ─── Labs .ovpn download ───────────────────────────────────────────
-
-        private async Task<HtbVpnDownloadResult> DownloadLabOvpnAsync(
-            string name, long serverId, string apiToken, string guestFileName, CancellationToken ct)
+        internal static string SanitizeFileName(string? name)
         {
-            // TCP flag: 0 = UDP, 1 = TCP — we use UDP
-            string url = $"{LabsBase}/api/v4/access/ovpnfile/{serverId}/0";
-            _logger.LogInformation("Downloading {Name} VPN key from {Url}", name, url);
+            if (string.IsNullOrWhiteSpace(name))
+                return "unknown";
+            var chars = name.Trim().ToLowerInvariant()
+                .Select(ch => char.IsAsciiLetterOrDigit(ch) ? ch : '_')
+                .ToArray();
+            return new string(chars);
+        }
+
+        // ─── .ovpn download ────────────────────────────────────────────────
+
+        private async Task<HtbVpnDownloadResult> DownloadOvpnAsync(
+            HtbVpnConnection conn, string apiToken, CancellationToken ct)
+        {
+            // Trailing segment selects the protocol: /0 = UDP, /0/1 = TCP. UDP, as htb-toolkit defaults.
+            string url = $"{LabsBase}/api/v4/access/ovpnfile/{conn.ServerId}/0";
+            _logger.LogInformation("Downloading {Name} VPN key from {Url}", conn.DisplayName, url);
 
             try
             {
@@ -267,101 +287,27 @@ namespace VMCreate
                     // could be a rejected-but-valid config; its first 200
                     // chars can embed certificate/key material.
                     _logger.LogWarning("{Name} VPN download failed: {Status} (body: {Length} bytes, {Classification})",
-                        name, msg, content?.Length ?? 0, ClassifyContent(content));
-                    return new HtbVpnDownloadResult { EndpointName = name, Success = false, ErrorMessage = msg };
+                        conn.DisplayName, msg, content?.Length ?? 0, ClassifyContent(content));
+                    return new HtbVpnDownloadResult { EndpointName = conn.DisplayName, Product = conn.Product, Success = false, ErrorMessage = msg };
                 }
 
-                return ValidateAndReturn(name, guestFileName, content);
+                var result = ValidateAndReturn(conn.DisplayName, conn.GuestFileName, content);
+                result.Product = conn.Product;
+                return result;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger.LogError(ex, "Error downloading {Name} VPN key", name);
-                return new HtbVpnDownloadResult { EndpointName = name, Success = false, ErrorMessage = ex.Message };
+                _logger.LogError(ex, "Error downloading {Name} VPN key", conn.DisplayName);
+                return new HtbVpnDownloadResult { EndpointName = conn.DisplayName, Product = conn.Product, Success = false, ErrorMessage = ex.Message };
             }
         }
 
-        // ─── Academy .ovpn download ────────────────────────────────────────
-
-        private async Task<HtbVpnDownloadResult> DownloadAcademyOvpnAsync(string apiToken, CancellationToken ct)
-        {
-            const string name = "Academy";
-            const string guestFileName = "academy.ovpn";
-            string url = $"{AcademyBase}/api/v2/vpn-servers/key/download?type=regular&protocol=udp";
-
-            _logger.LogInformation("Downloading {Name} VPN key from {Url}", name, url);
-
-            try
-            {
-                using var response = await SendWithAuthRedirectAsync(url, apiToken, ct);
-                string content = await response.Content.ReadAsStringAsync(ct);
-
-                if (!response.IsSuccessStatusCode)
-                {
-                    string msg = $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}";
-                    // SECURITY: classification, not content — see Labs path.
-                    _logger.LogWarning("{Name} VPN download failed: {Status} (body: {Length} bytes, {Classification})",
-                        name, msg, content?.Length ?? 0, ClassifyContent(content));
-                    return new HtbVpnDownloadResult { EndpointName = name, Success = false, ErrorMessage = msg };
-                }
-
-                // Academy may return JSON-wrapped content — try to unwrap
-                if (content.TrimStart().StartsWith("{"))
-                {
-                    _logger.LogDebug("Academy response looks like JSON, attempting to unwrap");
-                    try
-                    {
-                        using var doc = JsonDocument.Parse(content);
-                        // Try common wrapper patterns: { "data": "..ovpn.." } or { "key": "..ovpn.." }
-                        foreach (string prop in new[] { "data", "key", "ovpn", "content", "config" })
-                        {
-                            if (doc.RootElement.TryGetProperty(prop, out var val) && val.ValueKind == JsonValueKind.String)
-                            {
-                                string? inner = val.GetString();
-                                if (!string.IsNullOrEmpty(inner) && inner.Contains("remote "))
-                                {
-                                    _logger.LogInformation("Extracted .ovpn from JSON property '{Prop}'", prop);
-                                    content = inner;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    catch (JsonException)
-                    {
-                        // Not valid JSON — proceed with raw content validation
-                    }
-                }
-
-                // Check if content is HTML (login redirect)
-                if (content.TrimStart().StartsWith("<!") || content.TrimStart().StartsWith("<html"))
-                {
-                    // SECURITY: classification only — an HTML login page has
-                    // no key material, but a false negative on the heuristic
-                    // would write a real config's first 300 chars to disk.
-                    _logger.LogWarning("Academy returned HTML (likely auth redirect): {Length} bytes",
-                        content.Length);
-                    return new HtbVpnDownloadResult
-                    {
-                        EndpointName = name,
-                        Success = false,
-                        ErrorMessage = "Academy uses OAuth SSO — download your .ovpn manually from academy.hackthebox.com and use Browse below"
-                    };
-                }
-
-                return ValidateAndReturn(name, guestFileName, content);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger.LogError(ex, "Error downloading {Name} VPN key", name);
-                return new HtbVpnDownloadResult { EndpointName = name, Success = false, ErrorMessage = ex.Message };
-            }
-        }
 
         // ─── Helpers ───────────────────────────────────────────────────────
 
         /// <summary>
         /// Sends a GET request, manually following redirects while preserving the Authorization header.
-        /// .NET's default HttpClient strips auth headers on redirect which breaks Academy auth.
+        /// .NET's default HttpClient strips auth headers on redirect which would drop the token on in-scope hops.
         /// The token is only re-sent while the redirect stays on an https://
         /// *.hackthebox.com host; hops to any other origin or scheme are
         /// followed without the Authorization header so the bearer token can

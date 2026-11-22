@@ -36,15 +36,6 @@ namespace VMCreate
         public UserPreferences Preferences { get; set; } = new UserPreferences();
 
         /// <summary>
-        /// The HTB API token actually used during this run (typed on the
-        /// customization page). Deliberately <b>not</b> part of
-        /// <see cref="VmCustomizations"/> — the guest never needs the token —
-        /// but DeployPage persists it into the preferences store on success so
-        /// the user types it exactly once. Transient; never serialized to the guest.
-        /// </summary>
-        public string? LastUsedHtbApiToken { get; set; }
-
-        /// <summary>
         /// Seeds <see cref="Settings"/> and <see cref="Customizations"/> from
         /// <see cref="Preferences"/>. Called when the wizard starts (and after a
         /// Settings-window save) so every run starts from the user's habitual
@@ -68,7 +59,6 @@ namespace VMCreate
             Settings = new VmSettings();
             Customizations = new VmCustomizations();
             SelectedReleaseId = null;
-            LastUsedHtbApiToken = null;
             // Preferences survive a reset (machine-level, not per-wizard); the
             // fresh Settings/Customizations instances re-seed from them.
             ApplyPreferences();

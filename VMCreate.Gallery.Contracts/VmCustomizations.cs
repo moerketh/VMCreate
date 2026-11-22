@@ -166,14 +166,28 @@ namespace VMCreate
         /// </summary>
         public bool InstallOpenVpn { get; set; } = true;
 
-        /// <summary>When true, deploy VPN configs to the VM (requires an .ovpn source).</summary>
+        /// <summary>
+        /// When true, deploy HTB VPN configs to the VM. With no
+        /// <see cref="HtbVpnKeys"/> preloaded, the deploy step downloads them
+        /// with the App Token stored in Settings.
+        /// </summary>
         public bool ConfigureHtbVpn { get; set; }
 
         /// <summary>Host path to a manually selected .ovpn file (fallback).</summary>
         public string? OvpnFilePath { get; set; }
 
-        /// <summary>Pre-downloaded HTB VPN keys to deploy to the VM.</summary>
+        /// <summary>
+        /// HTB VPN keys downloaded before deployment (the CLI does this for an
+        /// explicit --htb-token). When empty, the deploy step downloads them.
+        /// </summary>
         public List<HtbVpnKey> HtbVpnKeys { get; set; } = new();
+
+        /// <summary>
+        /// Comma-separated HTB products to fetch keys for when the deploy step
+        /// downloads them (labs, sp, fortress; htb-toolkit's aliases). Null or
+        /// empty means every product the account can access.
+        /// </summary>
+        public string? HtbVpnProducts { get; set; }
 
         /// <summary>When true, read the host timezone and set it on the guest.</summary>
         public bool SyncTimezone { get; set; }

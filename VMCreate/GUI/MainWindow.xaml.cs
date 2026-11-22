@@ -23,7 +23,6 @@ namespace VMCreate
         private readonly ILoggerFactory _loggerFactory;
         private readonly IGalleryService _galleryService;
         private readonly Func<WizardData, DeployPage> _deployPageFactory;
-        private readonly IHtbApiClient _htbApiClient;
         private readonly IEnumerable<IConfigurableCustomizationStep> _configurableSteps;
         private readonly IEnumerable<IDesktopEnvironmentCatalog> _desktopCatalogs;
         private readonly IUserPreferencesStore _preferencesStore;
@@ -33,7 +32,6 @@ namespace VMCreate
         public MainWindow(
             IGalleryService galleryService,
             Func<WizardData, DeployPage> deployPageFactory,
-            IHtbApiClient htbApiClient,
             IEnumerable<IConfigurableCustomizationStep> configurableSteps,
             IEnumerable<IDesktopEnvironmentCatalog> desktopCatalogs,
             IUserPreferencesStore preferencesStore,
@@ -42,7 +40,6 @@ namespace VMCreate
         {
             _galleryService = galleryService ?? throw new ArgumentNullException(nameof(galleryService));
             _deployPageFactory = deployPageFactory ?? throw new ArgumentNullException(nameof(deployPageFactory));
-            _htbApiClient = htbApiClient ?? throw new ArgumentNullException(nameof(htbApiClient));
             _configurableSteps = configurableSteps ?? throw new ArgumentNullException(nameof(configurableSteps));
             _desktopCatalogs = desktopCatalogs ?? throw new ArgumentNullException(nameof(desktopCatalogs));
             _preferencesStore = preferencesStore ?? throw new ArgumentNullException(nameof(preferencesStore));
@@ -223,7 +220,7 @@ namespace VMCreate
             _wizardData = new WizardData { GalleryItems = _galleryItems, DemoMode = App.DemoMode };
             _wizardData.Preferences = _preferencesStore.Load();
             _wizardData.ApplyPreferences();
-            var firstPage = new SelectImagePage(_wizardData, _htbApiClient, _configurableSteps, _desktopCatalogs, _loggerFactory);
+            var firstPage = new SelectImagePage(_wizardData, _configurableSteps, _desktopCatalogs, _loggerFactory);
             firstPage.WizardCompleted += WizardPage_Completed;
             _mainFrame.Navigate(firstPage);
 
@@ -319,7 +316,7 @@ namespace VMCreate
                     _wizardData = new WizardData { GalleryItems = _galleryItems, DemoMode = App.DemoMode };
                     _wizardData.Preferences = _preferencesStore.Load();
                     _wizardData.ResetForNewWizard();
-                    var firstPage = new SelectImagePage(_wizardData, _htbApiClient, _configurableSteps, _desktopCatalogs, _loggerFactory);
+                    var firstPage = new SelectImagePage(_wizardData, _configurableSteps, _desktopCatalogs, _loggerFactory);
                     firstPage.WizardCompleted += WizardPage_Completed;
                     _mainFrame.Navigate(firstPage);
                     return;

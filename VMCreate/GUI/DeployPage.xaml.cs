@@ -77,10 +77,9 @@ namespace VMCreate
         }
 
         /// <summary>
-        /// Persists the last-used wizard values (DNS, RDP backend, sizing and,
-        /// when provided this run, the HTB token) so the next run pre-fills from
-        /// them. Credentials are never blanked out by a run that didn't use
-        /// them; LLM credentials are owned by the Settings window only.
+        /// Persists the last-used wizard values (DNS, RDP backend, sizing) so the
+        /// next run pre-fills from them. Credentials (HTB token, LLM) are owned
+        /// by the Settings window only.
         /// </summary>
         private void SaveBackPreferences()
         {
@@ -99,8 +98,6 @@ namespace VMCreate
                 prefs.DefaultMemoryInMB = s.MemoryInMB;
                 prefs.DefaultCpuCount = s.CPUCount;
                 prefs.DefaultDiskSizeInGB = s.NewDriveSizeInGB;
-                if (!string.IsNullOrWhiteSpace(_wizardData.LastUsedHtbApiToken))
-                    prefs.HtbApiToken = _wizardData.LastUsedHtbApiToken;
 
                 _preferencesStore.Save(prefs);
             }

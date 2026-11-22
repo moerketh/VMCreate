@@ -10,16 +10,6 @@ using VMCreate.MediaHandlers;
 namespace VMCreate
 {
     /// <summary>
-    /// Display model for VPN key download status shown in the UI.
-    /// </summary>
-    public class VpnKeyStatusItem
-    {
-        public string StatusIcon { get; set; } = "";
-        public string Name { get; set; } = "";
-        public string StatusText { get; set; } = "";
-    }
-
-    /// <summary>
     /// ViewModel for the VM customization page.
     /// Manages post-install options (e.g. xrdp, HTB VPN, timezone sync) and conversion banner visibility.
     /// </summary>
@@ -27,14 +17,9 @@ namespace VMCreate
     {
         private readonly WizardData _wizardData;
         private readonly ILogger _logger;
-        private readonly IHtbApiClient _htbApiClient;
-        private readonly List<HtbVpnKey> _downloadedKeys = new();
         private readonly IDesktopEnvironmentCatalog? _desktopCatalog;
         private RdpBackend _selectedRdpBackend = RdpBackend.Auto;
         private string? _selectedDesktopEnvironmentId;
-        private string _htbApiToken = "";
-        private bool _isDownloading;
-        private string _ovpnFilePath = "";
         private bool _syncTimezone;
         private bool _useCustomSshKey;
         private string _customSshPublicKeyPath = "";
@@ -51,13 +36,12 @@ namespace VMCreate
         public event Action? RequestNavigateBack;
 
         public VmCustomizationPageViewModel(
-            WizardData wizardData, IHtbApiClient htbApiClient, ILogger logger,
+            WizardData wizardData, ILogger logger,
             IEnumerable<IConfigurableCustomizationStep> configurableSteps,
             IEnumerable<IDesktopEnvironmentCatalog>? desktopCatalogs = null)
         {
             _wizardData = wizardData ?? throw new ArgumentNullException(nameof(wizardData));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            _htbApiClient = htbApiClient ?? throw new ArgumentNullException(nameof(htbApiClient));
 
             // Resolve the desktop catalog for the selected image (null when
             // the distro offers no desktop switching — card hidden).
@@ -77,25 +61,18 @@ namespace VMCreate
             }
 
             // Seed from Customizations (pre-filled from the user's stored
-            // preferences) and the stored HTB token so credentials are never
-            // re-typed. Editing the token here overrides the stored one for
-            // this run only.
+            // preferences).
             _selectedRdpBackend = wizardData.Customizations.RdpBackend;
             NormalizeRdpBackend();
             _isCustomDns = wizardData.Customizations.DnsMode == DnsMode.Custom;
             _customNameservers = wizardData.Customizations.CustomNameservers ?? "";
             _syncTimezone = wizardData.Customizations.SyncTimezone;
             _enableIntegrationServices = wizardData.Customizations.EnableIntegrationServices;
-            _htbApiToken = wizardData.Preferences.HtbApiToken ?? "";
 
             FinishCommand = new RelayCommand(OnFinish);
             BackCommand = new RelayCommand(() => RequestNavigateBack?.Invoke());
             CancelCommand = new RelayCommand(() => RequestWizardComplete?.Invoke(WizardResult.Canceled));
             SelectDesktopCommand = new RelayCommand<string>(id => SelectDesktop(string.IsNullOrEmpty(id) ? null : id));
-            DownloadVpnKeysCommand = new RelayCommand(
-                () => _ = DownloadVpnKeysAsync(),
-                () => !_isDownloading && !string.IsNullOrWhiteSpace(_htbApiToken));
-            BrowseOvpnCommand = new RelayCommand(OnBrowseOvpn);
             BrowseSshKeyCommand = new RelayCommand(OnBrowseSshKey);
         }
 
@@ -370,34 +347,6 @@ namespace VMCreate
             set => SelectedRdpBackend = value ? RdpBackend.Xrdp : RdpBackend.None;
         }
 
-        public string HtbApiToken
-        {
-            get => _htbApiToken;
-            set
-            {
-                if (SetProperty(ref _htbApiToken, value))
-                    CommandManager.InvalidateRequerySuggested();
-            }
-        }
-
-        public bool IsDownloading
-        {
-            get => _isDownloading;
-            set
-            {
-                if (SetProperty(ref _isDownloading, value))
-                    CommandManager.InvalidateRequerySuggested();
-            }
-        }
-
-        public ObservableCollection<VpnKeyStatusItem> VpnKeyStatuses { get; } = new();
-
-        public string OvpnFilePath
-        {
-            get => _ovpnFilePath;
-            set => SetProperty(ref _ovpnFilePath, value);
-        }
-
         public bool SyncTimezone
         {
             get => _syncTimezone;
@@ -462,7 +411,15 @@ namespace VMCreate
 
         /// <summary>True for security distributions (e.g. Kali, Parrot, PwnCloudOS). Windows
         /// security distributions are excluded — HTB VPN provisioning is SSH/Linux-based.</summary>
-        public bool ShowHtbVpn => SelectedItem?.IsSecurity == true && SelectedItem?.IsWindows != true;
+        public bool IsHtbVpnEligible => SelectedItem?.IsSecurity == true && SelectedItem?.IsWindows != true;
+
+        /// <summary>
+        /// True when HTB VPN configs will be deployed: an eligible image and
+        /// an HTB App Token stored in Settings. There is no per-VM HTB input;
+        /// the deploy step downloads the keys with the stored token.
+        /// </summary>
+        public bool WillConfigureHtbVpn =>
+            IsHtbVpnEligible && !string.IsNullOrWhiteSpace(_wizardData.Preferences.HtbApiToken);
 
         /// <summary>
         /// True when an Elastic SIEM step targets this image (the appliance
@@ -496,6 +453,9 @@ namespace VMCreate
         /// <summary>Distribution-specific options discovered from plugin assemblies.</summary>
         public ObservableCollection<DistributionOptionItem> DistributionOptions { get; } = new();
 
+        /// <summary>True when the image has optional add-ons; the Add-Ons card is hidden otherwise.</summary>
+        public bool HasDistributionOptions => DistributionOptions.Count > 0;
+
         /// <summary>True when the selected image is not in VHDX format and needs conversion.
         /// Native Hyper-V images (e.g. Windows) are already in VHDX format and need no conversion.</summary>
         public bool IsNotVhdx =>
@@ -515,8 +475,6 @@ namespace VMCreate
         public ICommand CancelCommand { get; }
         /// <summary>Radio-group command: selects a desktop by id (null/"" = keep default).</summary>
         public ICommand SelectDesktopCommand { get; }
-        public ICommand DownloadVpnKeysCommand { get; }
-        public ICommand BrowseOvpnCommand { get; }
         public ICommand BrowseSshKeyCommand { get; }
 
         private void OnFinish()
@@ -538,18 +496,14 @@ namespace VMCreate
             NormalizeRdpBackend();
 
             _wizardData.Customizations.RdpBackend = _selectedRdpBackend;
-            _wizardData.Customizations.HtbVpnKeys = new List<HtbVpnKey>(_downloadedKeys);
-            _wizardData.Customizations.OvpnFilePath = _ovpnFilePath;
-            _wizardData.Customizations.ConfigureHtbVpn =
-                _downloadedKeys.Count > 0 || !string.IsNullOrEmpty(_ovpnFilePath);
+            _wizardData.Customizations.HtbVpnKeys = new List<HtbVpnKey>();
+            _wizardData.Customizations.OvpnFilePath = null;
+            _wizardData.Customizations.ConfigureHtbVpn = WillConfigureHtbVpn;
             _wizardData.Customizations.SyncTimezone = _syncTimezone;
             _wizardData.Customizations.CustomSshPublicKeyPath = _useCustomSshKey ? _customSshPublicKeyPath : null;
             _wizardData.Customizations.EnableIntegrationServices = _enableIntegrationServices;
             _wizardData.Customizations.DnsMode = _isCustomDns ? DnsMode.Custom : DnsMode.Host;
             _wizardData.Customizations.CustomNameservers = _isCustomDns ? _customNameservers : null;
-            // The token used this run — DeployPage persists it into the
-            // preferences store on success so the user types it exactly once.
-            _wizardData.LastUsedHtbApiToken = string.IsNullOrWhiteSpace(_htbApiToken) ? null : _htbApiToken;
 
             _wizardData.Customizations.DistributionOptions.Clear();
             foreach (var opt in DistributionOptions.Where(o => o.IsEnabled))
@@ -573,94 +527,13 @@ namespace VMCreate
             };
 
             _logger.LogDebug(
-                "Finished customization: RdpBackend={RdpBackend}, Desktop={Desktop}, HtbVpnKeys={KeyCount}, ManualOvpn={ManualPath}, SyncTimezone={Tz}, CustomKey={Key}, IntegrationServices={IntSvc}, DnsMode={DnsMode}, DistOptions={DistOpts}",
+                "Finished customization: RdpBackend={RdpBackend}, Desktop={Desktop}, HtbVpn={HtbVpn}, SyncTimezone={Tz}, CustomKey={Key}, IntegrationServices={IntSvc}, DnsMode={DnsMode}, DistOptions={DistOpts}",
                 _selectedRdpBackend, _wizardData.Customizations.DesktopEnvironmentId ?? "(default)",
-                _downloadedKeys.Count, _ovpnFilePath, _syncTimezone, _useCustomSshKey, _enableIntegrationServices,
+                _wizardData.Customizations.ConfigureHtbVpn, _syncTimezone, _useCustomSshKey, _enableIntegrationServices,
                 _isCustomDns ? "Custom" : "Host",
                 string.Join(", ", DistributionOptions.Select(o => $"{o.Name}={o.IsEnabled}")));
 
             RequestWizardComplete?.Invoke(WizardResult.Finished);
-        }
-
-        private async System.Threading.Tasks.Task DownloadVpnKeysAsync()
-        {
-            if (string.IsNullOrWhiteSpace(_htbApiToken))
-                return;
-
-            IsDownloading = true;
-            VpnKeyStatuses.Clear();
-            _downloadedKeys.Clear();
-
-            // Show pending status for each known endpoint
-            foreach (var name in _htbApiClient.EndpointNames)
-            {
-                VpnKeyStatuses.Add(new VpnKeyStatusItem
-                {
-                    StatusIcon = "\u23F3",
-                    Name = name,
-                    StatusText = "Downloading..."
-                });
-            }
-
-            try
-            {
-                var results = await _htbApiClient.DownloadAllKeysAsync(_htbApiToken, CancellationToken.None);
-
-                VpnKeyStatuses.Clear();
-                foreach (var result in results)
-                {
-                    if (result.Success && result.Key != null)
-                    {
-                        _downloadedKeys.Add(result.Key);
-                        VpnKeyStatuses.Add(new VpnKeyStatusItem
-                        {
-                            StatusIcon = "\u2714",
-                            Name = result.EndpointName,
-                            StatusText = $"Downloaded ({result.Key.OvpnContent.Length:N0} bytes)"
-                        });
-                    }
-                    else
-                    {
-                        VpnKeyStatuses.Add(new VpnKeyStatusItem
-                        {
-                            StatusIcon = "\u2718",
-                            Name = result.EndpointName,
-                            StatusText = result.ErrorMessage ?? "Unknown error"
-                        });
-                    }
-                }
-
-                _logger.LogInformation("VPN key download complete: {Success}/{Total} successful",
-                    _downloadedKeys.Count, results.Count);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error downloading VPN keys");
-                VpnKeyStatuses.Clear();
-                VpnKeyStatuses.Add(new VpnKeyStatusItem
-                {
-                    StatusIcon = "\u2718",
-                    Name = "Error",
-                    StatusText = ex.Message
-                });
-            }
-            finally
-            {
-                IsDownloading = false;
-            }
-        }
-
-        private void OnBrowseOvpn()
-        {
-            var dialog = new Microsoft.Win32.OpenFileDialog
-            {
-                Title = "Select HTB VPN configuration file",
-                Filter = "OpenVPN files (*.ovpn)|*.ovpn|All files (*.*)|*.*",
-                DefaultExt = ".ovpn"
-            };
-
-            if (dialog.ShowDialog() == true)
-                OvpnFilePath = dialog.FileName;
         }
 
         private void OnBrowseSshKey()

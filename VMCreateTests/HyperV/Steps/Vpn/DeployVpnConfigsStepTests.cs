@@ -176,5 +176,98 @@ namespace VMCreate.Tests.HyperV.Steps
                 File.Delete(tempFile);
             }
         }
+
+        private static HtbVpnDownloadResult Downloaded(string product, string name, string file) => new()
+        {
+            EndpointName = name,
+            Product = product,
+            Success = true,
+            Key = new HtbVpnKey { Name = name, GuestFileName = file, OvpnContent = $"{name} config" },
+        };
+
+        private static Mock<IUserPreferencesStore> StoreWithToken(string? token)
+        {
+            var store = new Mock<IUserPreferencesStore>();
+            store.Setup(s => s.Load()).Returns(new UserPreferences { HtbApiToken = token });
+            return store;
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_NoPreloadedKeys_DownloadsWithStoredToken_AndFiltersProducts()
+        {
+            var api = new Mock<IHtbApiClient>();
+            api.Setup(a => a.DownloadAllKeysAsync("stored-token", It.IsAny<CancellationToken>()))
+               .ReturnsAsync(new List<HtbVpnDownloadResult>
+               {
+                   Downloaded("labs", "Labs EU VIP 7", "labs_eu_vip_7.ovpn"),
+                   Downloaded("fortresses", "Fortresses EU Fortress 1", "fortress_eu_fortress_1.ovpn"),
+               });
+            _shellMock.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                      .ReturnsAsync("");
+            var step = new DeployVpnConfigsStep(api.Object, StoreWithToken("stored-token").Object);
+
+            await step.ExecuteAsync(_shellMock.Object, new GalleryItem(),
+                new VmCustomizations { ConfigureHtbVpn = true, HtbVpnProducts = "labs" },
+                _loggerMock.Object, CancellationToken.None);
+
+            _shellMock.Verify(s => s.CopySecretAsync(
+                "Labs EU VIP 7 config", "/etc/openvpn/client/labs_eu_vip_7.ovpn", It.IsAny<CancellationToken>()), Times.Once);
+            _shellMock.Verify(s => s.CopySecretAsync(
+                It.IsAny<string>(), "/etc/openvpn/client/fortress_eu_fortress_1.ovpn", It.IsAny<CancellationToken>()), Times.Never);
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_NoStoredToken_DoesNotCallHtb()
+        {
+            var api = new Mock<IHtbApiClient>();
+            _shellMock.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                      .ReturnsAsync("");
+            var step = new DeployVpnConfigsStep(api.Object, StoreWithToken(null).Object);
+
+            await step.ExecuteAsync(_shellMock.Object, new GalleryItem(),
+                new VmCustomizations { ConfigureHtbVpn = true },
+                _loggerMock.Object, CancellationToken.None);
+
+            api.Verify(a => a.DownloadAllKeysAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+            _shellMock.Verify(s => s.CopySecretAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_DownloadThrows_ContinuesWithoutFailingDeployment()
+        {
+            var api = new Mock<IHtbApiClient>();
+            api.Setup(a => a.DownloadAllKeysAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+               .ThrowsAsync(new System.Net.Http.HttpRequestException("offline"));
+            _shellMock.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                      .ReturnsAsync("");
+            var step = new DeployVpnConfigsStep(api.Object, StoreWithToken("t").Object);
+
+            await step.ExecuteAsync(_shellMock.Object, new GalleryItem(),
+                new VmCustomizations { ConfigureHtbVpn = true },
+                _loggerMock.Object, CancellationToken.None);
+
+            _shellMock.Verify(s => s.CopySecretAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_PreloadedKeys_SkipsDownload()
+        {
+            var api = new Mock<IHtbApiClient>();
+            _shellMock.Setup(s => s.RunCommandAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                      .ReturnsAsync("");
+            var step = new DeployVpnConfigsStep(api.Object, StoreWithToken("t").Object);
+
+            await step.ExecuteAsync(_shellMock.Object, new GalleryItem(),
+                new VmCustomizations
+                {
+                    ConfigureHtbVpn = true,
+                    HtbVpnKeys = new List<HtbVpnKey> { new() { Name = "Lab", GuestFileName = "lab.ovpn", OvpnContent = "c" } },
+                },
+                _loggerMock.Object, CancellationToken.None);
+
+            api.Verify(a => a.DownloadAllKeysAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
     }
 }

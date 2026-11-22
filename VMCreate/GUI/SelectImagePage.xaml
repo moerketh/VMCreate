@@ -104,8 +104,25 @@
                            HorizontalAlignment="Center" Margin="0,6,0,0"
                            TextWrapping="Wrap" TextAlignment="Center"/>
             </Grid>
+            <!-- Welcome prompt — shown until an image is selected -->
+            <StackPanel Grid.Column="1" Margin="10,0,10,0"
+                        VerticalAlignment="Center" HorizontalAlignment="Center"
+                        Visibility="{Binding HasSelection, Converter={StaticResource InverseBoolToVis}}">
+                <ui:SymbolIcon Symbol="Image24" FontSize="48" HorizontalAlignment="Center"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                               Margin="0,0,0,12"/>
+                <TextBlock Text="Welcome to VMCreate" FontSize="20" FontWeight="SemiBold"
+                           HorizontalAlignment="Center" TextAlignment="Center"
+                           Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                           Margin="0,0,0,6"/>
+                <TextBlock Text="Select a distribution on the left to see its details, then choose Next to configure your virtual machine."
+                           FontSize="13" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="360"
+                           HorizontalAlignment="Center"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+            </StackPanel>
             <!-- Detail panel — bound directly to SelectedItem properties -->
-            <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="10,0,10,0">
+            <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="10,0,10,0"
+                          Visibility="{Binding HasSelection, Converter={StaticResource BoolToVis}}">
             <StackPanel>
                 <Image Source="{Binding SelectedItem.ThumbnailUri, Converter={StaticResource ImageConverter}}"
                        Stretch="Uniform" MaxHeight="300" Margin="0,0,0,10"/>

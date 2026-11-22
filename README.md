@@ -32,7 +32,7 @@ It replaces Hyper-V **Quick Create** with a gallery you'll actually want to use.
 | Fix a BIOS-only disk so it boots as a Gen 2 UEFI VM | Migrates MBR → GPT so the VM boots under Gen 2 |
 | Get networking, SSH and Hyper-V integration working in the guest | Configures the guest after first boot, then **restores distribution defaults** |
 | Fight with Enhanced Session / RDP (and Wayland) | Detects X11 vs Wayland and installs a matching RDP backend (xRDP, Lamco, or WayRDP) |
-| Copy your Hack The Box VPN config into the VM | Deploys your **HTB Labs / Starting Point / Academy** OpenVPN profile directly |
+| Copy your Hack The Box VPN config into the VM | With your HTB App Token in Settings, imports your assigned **Labs / Starting Point / Fortresses** VPN servers into NetworkManager |
 | Set the timezone, CPU, memory, disk size | Syncs the timezone and applies sensible defaults that you can override |
 
 ## The gallery

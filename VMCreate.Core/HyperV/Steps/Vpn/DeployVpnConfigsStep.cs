@@ -1,5 +1,8 @@
 using Microsoft.Extensions.Logging;
+using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -9,9 +12,23 @@ namespace VMCreate
     /// Deploys .ovpn VPN configuration files to the guest and imports them
     /// into NetworkManager so they appear in the system tray VPN menu.
     /// Runs after <see cref="InstallOpenVpnStep"/> (Order 300 > 200).
+    /// <para>
+    /// When no keys were preloaded, downloads them here with the HTB App
+    /// Token stored in Settings, so both front ends go by the stored token
+    /// alone. A download failure is a warning, not a failed deployment.
+    /// </para>
     /// </summary>
     public class DeployVpnConfigsStep : ICustomizationStep, IStepDisplayInfo
     {
+        private readonly IHtbApiClient? _htbApiClient;
+        private readonly IUserPreferencesStore? _preferencesStore;
+
+        public DeployVpnConfigsStep(IHtbApiClient? htbApiClient = null, IUserPreferencesStore? preferencesStore = null)
+        {
+            _htbApiClient = htbApiClient;
+            _preferencesStore = preferencesStore;
+        }
+
         public string Name => "Deploy VPN Configs";
         public CustomizationPhase Phase => CustomizationPhase.PostBoot;
         public StepPlatform Platform => StepPlatform.Linux;
@@ -27,10 +44,14 @@ namespace VMCreate
 
         public async Task ExecuteAsync(IGuestShell shell, GalleryItem item, VmCustomizations customizations, ILogger logger, CancellationToken ct)
         {
+            IReadOnlyList<HtbVpnKey> keys = customizations.HtbVpnKeys is { Count: > 0 }
+                ? customizations.HtbVpnKeys
+                : await DownloadKeysAsync(customizations.HtbVpnProducts, logger, ct);
+
             // Deploy API-downloaded keys and import into NetworkManager
-            if (customizations.HtbVpnKeys != null)
+            if (keys.Count > 0)
             {
-                foreach (var key in customizations.HtbVpnKeys)
+                foreach (var key in keys)
                 {
                     string guestPath = $"/etc/openvpn/client/{key.GuestFileName}";
                     // .ovpn bodies embed client certificates AND private keys —
@@ -109,6 +130,42 @@ namespace VMCreate
             logger.LogInformation("NetworkManager VPN connections: {Connections}", connections?.Trim());
 
             logger.LogInformation("HTB VPN configured for VM {VMName}", shell.VmName);
+        }
+
+        /// <summary>
+        /// Downloads the account's VPN keys with the stored App Token, keeping
+        /// the products selected by <paramref name="products"/>. Returns an
+        /// empty list, with a warning, when there is no token or the download
+        /// fails.
+        /// </summary>
+        private async Task<IReadOnlyList<HtbVpnKey>> DownloadKeysAsync(string? products, ILogger logger, CancellationToken ct)
+        {
+            if (_htbApiClient == null || _preferencesStore == null)
+                return Array.Empty<HtbVpnKey>();
+
+            string? token = _preferencesStore.Load().HtbApiToken;
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                logger.LogInformation("No HTB App Token in Settings; no HTB VPN keys to download");
+                return Array.Empty<HtbVpnKey>();
+            }
+
+            try
+            {
+                var results = await _htbApiClient.DownloadAllKeysAsync(token, ct);
+                foreach (var failed in results.Where(r => !r.Success))
+                    logger.LogWarning("HTB VPN key for {Name} not downloaded: {Error}", failed.EndpointName, failed.ErrorMessage);
+
+                return results
+                    .Where(r => r.Success && r.Key != null && HtbApiClient.MatchesProductFilter(r.Product, products))
+                    .Select(r => r.Key!)
+                    .ToList();
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogWarning(ex, "HTB VPN key download failed; continuing without HTB VPN configs");
+                return Array.Empty<HtbVpnKey>();
+            }
         }
 
         /// <summary>
