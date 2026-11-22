@@ -44,9 +44,9 @@ set -o pipefail
 # version-numbered, so a `releases/latest` that no longer carries this
 # exact asset 404s loudly instead of silently installing a different one.
 WAYRDP_REPO="moerketh/wayrdp"
-WAYRDP_VERSION="0.3.0"
+WAYRDP_VERSION="0.4.0"
 WAYRDP_TARBALL="wayrdp-${WAYRDP_VERSION}-linux-x86_64.tar.gz"
-WAYRDP_TARBALL_SHA256="4aaa90879a00a128fb4cb69f99c89f8ec28d1a5b8e1270e1e7153841e894007f"
+WAYRDP_TARBALL_SHA256="4579c8f08473d894d0c123105f91c49e36759c35ce545b55e5c2b438f7b142dd"
 WAYRDP_TARBALL_URL="https://github.com/${WAYRDP_REPO}/releases/latest/download/${WAYRDP_TARBALL}"
 
 DEGRADED=0
