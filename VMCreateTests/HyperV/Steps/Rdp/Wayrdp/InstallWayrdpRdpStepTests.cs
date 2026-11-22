@@ -147,7 +147,7 @@ namespace VMCreate.Tests.HyperV.Steps
             _shell.Verify(s => s.CopyContentAsync(
                 It.Is<string>(content => content.Contains("WAYRDP_TARBALL_URL")
                                          && content.Contains("releases/latest/download/")
-                                         && content.Contains("4aaa90879a00a128fb4cb69f99c89f8ec28d1a5b8e1270e1e7153841e894007f")
+                                         && content.Contains("4579c8f08473d894d0c123105f91c49e36759c35ce545b55e5c2b438f7b142dd")
                                          && !content.Contains("__WAYRDP_PKG")),
                 It.Is<string>(p => p.StartsWith("/tmp/install_wayrdp_") && p.EndsWith(".sh")),
                 It.IsAny<CancellationToken>()), Times.Once);
