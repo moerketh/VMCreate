@@ -28,7 +28,8 @@ namespace VMCreate
     /// except <b>KDE Plasma 6.3+ on Kali or Parrot</b> (the detection script's
     /// <c>RDP_PLASMA</c> line), which resolves to <see cref="RdpBackend.Wayrdp"/>:
     /// the project's own server, validated there. Applies to a switched
-    /// desktop as well (Kali → KDE).</item>
+    /// desktop as well (Kali → KDE). Likewise <b>GNOME 50+ on Kali</b> (the
+    /// <c>RDP_GNOME</c> line) resolves to wayrdp's GNOME backend.</item>
     /// <item><b>Nix-family distro</b> (NixOS / Athena Nix — detected at
     /// runtime) → <see cref="RdpBackend.None"/>: no installable backend
     /// exists there (post-boot installs through a package manager are
@@ -99,6 +100,7 @@ namespace VMCreate
 
             string? displayServer = null;
             (int Major, int Minor)? plasma = null;
+            (int Major, int Minor)? gnome = null;
 
             // ── 1. Run the in-guest detection script ───────────────────────
             // Any failure (script exception, missing result line) leaves
@@ -121,6 +123,7 @@ namespace VMCreate
 
                 displayServer = ParseDetectLine(result);
                 plasma = ParsePlasmaLine(result);
+                gnome = ParseGnomeLine(result);
                 if (displayServer is null)
                 {
                     logger.LogWarning(
@@ -223,7 +226,13 @@ namespace VMCreate
             bool wayrdpKde = resolved == RdpBackend.Lamco
                 && detected is { } d && d.SupportsWayrdpKde()
                 && plasma is { } p && p.CompareTo(WayrdpMinPlasma) >= 0;
-            if (wayrdpKde)
+            // GNOME 50+ on Kali: wayrdp's GNOME backend (Mutter virtual
+            // monitor). Same rules: detected distro only, and a GNOME version
+            // the script actually read — wayrdp refuses older GNOME at startup.
+            bool wayrdpGnome = !wayrdpKde && resolved == RdpBackend.Lamco
+                && detected is { } dg && dg.SupportsWayrdpGnome()
+                && gnome is { } g && g.CompareTo(WayrdpMinGnome) >= 0;
+            if (wayrdpKde || wayrdpGnome)
                 resolved = RdpBackend.Wayrdp;
 
             // ── 4. Mutate the shared customizations IN PLACE ──────────────
@@ -241,6 +250,12 @@ namespace VMCreate
                 logger.LogInformation(
                     "Auto-select RDP backend: VM {VMName} runs KDE Plasma {Major}.{Minor} on {Distro}. Selected: WAYRDP (KDE backend).",
                     shell.VmName, plasma!.Value.Major, plasma.Value.Minor, detected!.Value);
+            }
+            else if (wayrdpGnome)
+            {
+                logger.LogInformation(
+                    "Auto-select RDP backend: VM {VMName} runs GNOME {Major} on {Distro}. Selected: WAYRDP (GNOME backend).",
+                    shell.VmName, gnome!.Value.Major, detected!.Value);
             }
             else if (switchedToWayland)
             {
@@ -307,20 +322,39 @@ namespace VMCreate
         /// <summary>Oldest Plasma wayrdp's KDE backend accepts (its preflight refuses older KWin).</summary>
         internal static readonly (int Major, int Minor) WayrdpMinPlasma = (6, 3);
 
+        /// <summary>Oldest GNOME wayrdp's GNOME backend accepts (its preflight refuses older GNOME).</summary>
+        internal static readonly (int Major, int Minor) WayrdpMinGnome = (50, 0);
+
         /// <summary>
         /// Parses the <c>RDP_PLASMA=&lt;kwin version&gt;</c> line (last
         /// occurrence) into major.minor. Null when absent or unparseable.
         /// </summary>
         internal static (int Major, int Minor)? ParsePlasmaLine(string output)
+            => ParseVersionLine(output, "RDP_PLASMA=");
+
+        /// <summary>
+        /// Parses the <c>RDP_GNOME=&lt;gnome-shell version&gt;</c> line (last
+        /// occurrence) into major.minor; a bare major ("50") reads as 50.0.
+        /// Null when absent or unparseable.
+        /// </summary>
+        internal static (int Major, int Minor)? ParseGnomeLine(string output)
+            => ParseVersionLine(output, "RDP_GNOME=", minorOptional: true);
+
+        private static (int Major, int Minor)? ParseVersionLine(string output, string prefix, bool minorOptional = false)
         {
             (int, int)? last = null;
             foreach (var line in output.Split('\n'))
             {
                 var trimmed = line.Trim();
-                if (!trimmed.StartsWith("RDP_PLASMA=", StringComparison.Ordinal))
+                if (!trimmed.StartsWith(prefix, StringComparison.Ordinal))
                     continue;
-                var parts = trimmed["RDP_PLASMA=".Length..].Split('.');
-                if (parts.Length >= 2
+                var parts = trimmed[prefix.Length..].Split('.');
+                if (minorOptional && parts.Length == 1
+                    && int.TryParse(parts[0], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int onlyMajor))
+                {
+                    last = (onlyMajor, 0);
+                }
+                else if (parts.Length >= 2
                     && int.TryParse(parts[0], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int major)
                     && int.TryParse(parts[1], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int minor))
                 {

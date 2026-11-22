@@ -44,17 +44,17 @@ namespace VMCreate.Tests.GalleryTests
         }
 
         [TestMethod]
-        public void Wayrdp_OnOmarchyAndOnKaliParrotKde()
+        public void Wayrdp_OnOmarchy_KaliParrotKde_AndKaliGnome()
         {
             var omarchy = new GalleryItem { Name = "Omarchy", LinuxDistro = LinuxDistro.Arch, Tags = new List<string> { "omarchy" } };
             Assert.IsNull(Check(omarchy, RdpBackend.Wayrdp, null));
 
-            // Kali: KDE only — not the stock Xfce (also the effective desktop
-            // when none is chosen) and not GNOME.
+            // Kali: KDE or GNOME — not the stock Xfce (also the effective
+            // desktop when none is chosen).
             Assert.IsNull(Check(Kali(), RdpBackend.Wayrdp, "kde"));
+            Assert.IsNull(Check(Kali(), RdpBackend.Wayrdp, "gnome"));
             Assert.IsNotNull(Check(Kali(), RdpBackend.Wayrdp, null));
             Assert.IsNotNull(Check(Kali(), RdpBackend.Wayrdp, "xfce"));
-            Assert.IsNotNull(Check(Kali(), RdpBackend.Wayrdp, "gnome"));
 
             // Parrot has no catalog: its stock desktop is KDE Plasma.
             var parrot = new GalleryItem { Name = "Parrot", LinuxDistro = LinuxDistro.Parrot };

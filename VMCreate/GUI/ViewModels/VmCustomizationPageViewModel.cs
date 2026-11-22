@@ -253,6 +253,9 @@ namespace VMCreate
         /// True when the Lamco radio is selectable: the distro supports
         /// Lamco AND the effective desktop is Lamco-capable (Wayland session
         /// + supported portal stack). An X11-only desktop (e.g. Xfce) can
+                if (WayrdpOptionEnabled && EffectiveDesktop?.Id == "gnome"
+                    && SelectedItem?.LinuxDistro.SupportsWayrdpGnome() == true)
+                    return "This desktop is GNOME — Auto will install wayrdp (GNOME 50+; the Lamco RDP Server otherwise).";
         /// never be served by the Wayland-native Lamco server.
         /// </summary>
         public bool LamcoOptionEnabled =>

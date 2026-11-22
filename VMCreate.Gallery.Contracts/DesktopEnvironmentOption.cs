@@ -38,10 +38,10 @@ namespace VMCreate
         public bool LamcoSupported { get; init; }
 
         /// <summary>
-        /// True when wayrdp's KDE backend can serve this desktop: KDE Plasma
-        /// 6.3+ on a validated distro (Kali, Parrot). Auto prefers wayrdp
-        /// over Lamco there; the guest's actual KWin version is re-checked
-        /// at resolve time.
+        /// True when a wayrdp backend can serve this desktop: KDE Plasma 6.3+
+        /// on a validated distro (Kali, Parrot) or GNOME 50+ (Kali). Auto
+        /// prefers wayrdp over Lamco there; the guest's actual KWin / GNOME
+        /// version is re-checked at resolve time.
         /// </summary>
         public bool WayrdpSupported { get; init; }
 

@@ -63,9 +63,10 @@ namespace VMCreate.Gallery
         {
             Id = "gnome",
             DisplayName = "GNOME",
-            Description = "Clean modern desktop, Wayland by default since GNOME 40. Lamco RDP Server works with GNOME 45+.",
+            Description = "Clean modern desktop, Wayland by default since GNOME 40. Served by wayrdp (GNOME 50+); Lamco RDP Server also works.",
             DisplayServer = DesktopDisplayServer.WaylandDefault,
             LamcoSupported = true,
+            WayrdpSupported = true,
             IsDefault = false,
             Packages = new List<string> { "kali-desktop-gnome" },
             PackagesToRemove = XfceRemoval,

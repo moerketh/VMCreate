@@ -20,6 +20,8 @@ set -o pipefail
 #     RDP_DETECT=wayland|x11
 # preceded, when the Wayland default is KDE Plasma, by
 #     RDP_PLASMA=<kwin version, e.g. 6.7.4>
+# or, when it is GNOME, by
+#     RDP_GNOME=<gnome-shell version, e.g. 50.5>
 # AutoRdpBackendResolveStep parses ONLY these lines; everything else is
 # diagnostic output for the deployment log.
 
@@ -145,6 +147,32 @@ if [ "$verdict" = "wayland" ] && [ -f /usr/share/wayland-sessions/plasma.desktop
             if [ -n "$kwin_ver" ]; then
                 echo "Default Wayland desktop is KDE Plasma (KWin $kwin_ver)."
                 echo "RDP_PLASMA=$kwin_ver"
+            fi
+            ;;
+    esac
+fi
+
+# -- 6. Is the Wayland default GNOME? (wayrdp's GNOME backend) ---------------
+# AutoRdpBackendResolveStep prefers wayrdp over Lamco on GNOME 50+ (Kali).
+# GNOME is the default when no Plasma default was found above, the GNOME
+# Wayland session is installed, and the session-manager slot names
+# gnome-session (Kali after a GNOME switch) or nothing (GDM picks GNOME).
+# Version from the package database, as for Plasma (also runs in the chroot).
+if [ "$verdict" = "wayland" ] && [ -z "${kwin_ver:-}" ] \
+        && [ -f /usr/share/wayland-sessions/gnome.desktop ]; then
+    case "$default_sm" in
+        *gnome-session*|"")
+            gnome_ver=""
+            if command -v dpkg-query >/dev/null 2>&1; then
+                gnome_ver=$(dpkg-query -W -f='${Version}' gnome-shell 2>/dev/null)
+            elif command -v pacman >/dev/null 2>&1; then
+                gnome_ver=$(pacman -Q gnome-shell 2>/dev/null | awk '{print $2}')
+            fi
+            # 50.5-1 -> 50.5, 1:50.5-1 -> 50.5, 50~rc-1 -> 50.
+            gnome_ver=$(printf '%s' "$gnome_ver" | sed -E 's/^[0-9]+://; s/[-+~].*$//')
+            if [ -n "$gnome_ver" ]; then
+                echo "Default Wayland desktop is GNOME (gnome-shell $gnome_ver)."
+                echo "RDP_GNOME=$gnome_ver"
             fi
             ;;
     esac

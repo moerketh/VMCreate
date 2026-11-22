@@ -12,9 +12,9 @@ namespace VMCreate
     /// xrdp could not serve (Kali, 2026-11-03).</item>
     /// <item>Lamco only on Lamco-capable desktops (Wayland + supported portal).</item>
     /// <item>wayrdp only where <see cref="LinuxDistroExtensions.SupportsWayrdp(GalleryItem)"/>
-    /// holds (Omarchy / Hyprland, Kali / Parrot KDE), and on a catalog
-    /// desktop only when it is <see cref="DesktopEnvironmentOption.WayrdpSupported"/>
-    /// (Kali: KDE, not the stock Xfce or GNOME).</item>
+    /// holds (Omarchy / Hyprland, Kali / Parrot KDE, Kali GNOME), and on a
+    /// catalog desktop only when it is <see cref="DesktopEnvironmentOption.WayrdpSupported"/>
+    /// (Kali: KDE or GNOME, not the stock Xfce).</item>
     /// </list>
     /// Images without a desktop catalog (Parrot, Ubuntu, …) are not desktop
     /// checked: there xrdp keeps its Force X11 fallback.
@@ -31,13 +31,13 @@ namespace VMCreate
             GalleryItem? item, RdpBackend backend, DesktopEnvironmentOption? effectiveDesktop)
         {
             if (backend == RdpBackend.Wayrdp && !item.SupportsWayrdp())
-                return "wayrdp supports Hyprland (Omarchy images) and KDE Plasma on Kali and Parrot at this time — use auto, lamco or xrdp.";
+                return "wayrdp supports Hyprland (Omarchy images), KDE Plasma on Kali and Parrot, and GNOME on Kali at this time — use auto, lamco or xrdp.";
 
             if (effectiveDesktop == null)
                 return null;
 
             if (backend == RdpBackend.Wayrdp && !item.HasTag("omarchy") && !effectiveDesktop.WayrdpSupported)
-                return $"wayrdp cannot serve {effectiveDesktop.DisplayName}: on this image it needs KDE Plasma. Pick KDE, or use auto, lamco or xrdp.";
+                return $"wayrdp cannot serve {effectiveDesktop.DisplayName}: on this image it needs KDE Plasma or GNOME. Pick one of those, or use auto, lamco or xrdp.";
 
             if (backend == RdpBackend.Xrdp && !effectiveDesktop.XrdpSupported)
                 return $"xrdp cannot serve {effectiveDesktop.DisplayName}: it runs on Wayland, and xrdp needs an X11 desktop. " +

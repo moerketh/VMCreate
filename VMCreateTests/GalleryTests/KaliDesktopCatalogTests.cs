@@ -59,6 +59,7 @@ namespace VMCreate.Tests.GalleryTests
                 var option = _catalog.Options.Single(o => o.Id == id);
                 Assert.AreEqual(DesktopDisplayServer.WaylandDefault, option.DisplayServer, id);
                 Assert.IsTrue(option.LamcoSupported, $"{id} must support lamco");
+                Assert.IsTrue(option.WayrdpSupported, $"{id} is served by a wayrdp backend");
                 CollectionAssert.Contains(option.Packages.ToList(), $"kali-desktop-{id}", id);
                 CollectionAssert.Contains(option.PackagesToRemove.ToList(), "kali-desktop-xfce",
                     $"{id} replaces the shipped Xfce desktop");

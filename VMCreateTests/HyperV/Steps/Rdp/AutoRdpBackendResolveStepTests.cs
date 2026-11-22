@@ -181,9 +181,10 @@ namespace VMCreate.Tests.HyperV.Steps
         }
 
         [TestMethod]
-        public async Task ExecuteAsync_KaliWithoutPlasma_StaysLamco()
+        public async Task ExecuteAsync_KaliWithoutPlasmaOrGnome_StaysLamco()
         {
-            // GNOME on Kali: no RDP_PLASMA line.
+            // A Wayland default the script could not name: no RDP_PLASMA or
+            // RDP_GNOME line.
             SetupOsRelease("ID=kali\nID_LIKE=debian\n");
             SetupScriptOutput("RDP_DETECT=wayland");
             var c = new VmCustomizations { RdpBackend = RdpBackend.Auto };
@@ -191,6 +192,82 @@ namespace VMCreate.Tests.HyperV.Steps
             await _step.ExecuteAsync(_shell.Object, _lamcoCapableItem, c, _logger.Object, CancellationToken.None);
 
             Assert.AreEqual(RdpBackend.Lamco, c.RdpBackend);
+        }
+
+        // ── GNOME 50+ on Kali → wayrdp ──────────────────────────────────
+
+        [TestMethod]
+        [DataRow("50.5")]
+        [DataRow("51")]
+        public async Task ExecuteAsync_GnomeOnKali_ResolvesWayrdp(string gnome)
+        {
+            SetupOsRelease("ID=kali\nID_LIKE=debian\n");
+            SetupScriptOutput($"Default Wayland desktop is GNOME (gnome-shell {gnome}).\nRDP_GNOME={gnome}\nRDP_DETECT=wayland");
+            var c = new VmCustomizations { RdpBackend = RdpBackend.Auto };
+
+            await _step.ExecuteAsync(_shell.Object, new GalleryItem { LinuxDistro = LinuxDistro.Kali }, c, _logger.Object, CancellationToken.None);
+
+            Assert.AreEqual(RdpBackend.Wayrdp, c.RdpBackend);
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_SwitchedToGnomeOnKali_ResolvesWayrdp()
+        {
+            SetupOsRelease("ID=kali\nID_LIKE=debian\n");
+            SetupScriptOutput("RDP_GNOME=50.5\nRDP_DETECT=wayland");
+            var c = new VmCustomizations { RdpBackend = RdpBackend.Auto, SwitchedDesktopDisplayServer = DesktopDisplayServer.WaylandDefault };
+
+            await _step.ExecuteAsync(_shell.Object, _lamcoCapableItem, c, _logger.Object, CancellationToken.None);
+
+            Assert.AreEqual(RdpBackend.Wayrdp, c.RdpBackend);
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_GnomeOlderThan50_StaysLamco()
+        {
+            // wayrdp's preflight refuses GNOME < 50: Lamco keeps the VM.
+            SetupOsRelease("ID=kali\nID_LIKE=debian\n");
+            SetupScriptOutput("RDP_GNOME=48.4\nRDP_DETECT=wayland");
+            var c = new VmCustomizations { RdpBackend = RdpBackend.Auto };
+
+            await _step.ExecuteAsync(_shell.Object, _lamcoCapableItem, c, _logger.Object, CancellationToken.None);
+
+            Assert.AreEqual(RdpBackend.Lamco, c.RdpBackend);
+        }
+
+        [TestMethod]
+        [DataRow("ID=ubuntu\nID_LIKE=debian\n")]
+        [DataRow("ID=parrot\nID_LIKE=debian\n")]
+        public async Task ExecuteAsync_GnomeOnUnvalidatedDistro_StaysLamco(string osRelease)
+        {
+            SetupOsRelease(osRelease);
+            SetupScriptOutput("RDP_GNOME=50.1\nRDP_DETECT=wayland");
+            var c = new VmCustomizations { RdpBackend = RdpBackend.Auto };
+
+            await _step.ExecuteAsync(_shell.Object, _lamcoCapableItem, c, _logger.Object, CancellationToken.None);
+
+            Assert.AreEqual(RdpBackend.Lamco, c.RdpBackend, "GNOME is validated on Kali only");
+        }
+
+        [TestMethod]
+        public async Task ExecuteAsync_GnomeButX11Default_StaysXrdp()
+        {
+            SetupOsRelease("ID=kali\nID_LIKE=debian\n");
+            SetupScriptOutput("RDP_GNOME=50.5\nRDP_DETECT=x11");
+            var c = new VmCustomizations { RdpBackend = RdpBackend.Auto };
+
+            await _step.ExecuteAsync(_shell.Object, _lamcoCapableItem, c, _logger.Object, CancellationToken.None);
+
+            Assert.AreEqual(RdpBackend.Xrdp, c.RdpBackend);
+        }
+
+        [TestMethod]
+        public void ParseGnomeLine_AcceptsBareMajor()
+        {
+            Assert.AreEqual((50, 5), AutoRdpBackendResolveStep.ParseGnomeLine("RDP_GNOME=46.0\nRDP_GNOME=50.5\r\nRDP_DETECT=wayland"));
+            Assert.AreEqual((50, 0), AutoRdpBackendResolveStep.ParseGnomeLine("RDP_GNOME=50"));
+            Assert.IsNull(AutoRdpBackendResolveStep.ParseGnomeLine("RDP_PLASMA=6.7.4"));
+            Assert.IsNull(AutoRdpBackendResolveStep.ParseGnomeLine("RDP_GNOME=fifty"));
         }
 
         [TestMethod]

@@ -100,6 +100,11 @@ fi
 is_plasma_guest() {
     [ -f /usr/share/wayland-sessions/plasma.desktop ]
 }
+# GNOME guest = the GNOME Wayland session without Plasma (Plasma wins, as in
+# detect_display_server.sh): wayrdp's GNOME backend (Mutter).
+is_gnome_guest() {
+    [ -f /usr/share/wayland-sessions/gnome.desktop ] && ! is_plasma_guest
+}
 install_freerdp_deps() {
     if is_arch_family; then
         echo "Installing runtime deps via pacman: freerdp openssl libxkbcommon wayland libpipewire"
@@ -460,6 +465,38 @@ if is_plasma_guest && command -v kwriteconfig6 >/dev/null 2>&1; then
         echo "DEGRADED: could not disable the KDE idle lock for $AUTOLOGIN_USER."
         DEGRADED=1
     fi
+fi
+
+# -- GNOME: lock screen off, gnome-remote-desktop out of the way ------------
+# Mutter refuses remote-desktop sessions while the screen is locked
+# ("Session creation inhibited": gnome-shell inhibits remote access outside
+# screencast-allowed session modes), so an idle-locked GNOME guest shows
+# vmconnect nothing. Turn off the idle lock and the idle blank for the
+# desktop user. gsettings needs a session bus: use the live one when the
+# user is logged in, else a private one (dconf writes ~/.config/dconf/user,
+# read at the next login).
+gnome_gsettings() {
+    if [ -S "/run/user/$USER_UID/bus" ]; then
+        run_as_user env DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$USER_UID/bus" gsettings "$@"
+    else
+        run_as_user dbus-run-session -- gsettings "$@"
+    fi
+}
+if is_gnome_guest; then
+    if command -v gsettings >/dev/null 2>&1 \
+        && gnome_gsettings set org.gnome.desktop.screensaver lock-enabled false 2>/dev/null \
+        && gnome_gsettings set org.gnome.desktop.session idle-delay 'uint32 0' 2>/dev/null; then
+        echo "GNOME idle lock disabled (screensaver lock-enabled=false, session idle-delay=0)."
+    else
+        echo "DEGRADED: could not disable the GNOME idle lock for $AUTOLOGIN_USER (Mutter refuses remote desktop on the lock screen)."
+        DEGRADED=1
+    fi
+    # gnome-remote-desktop (GNOME's own RDP server) would compete for TCP
+    # 3389 and for Mutter's remote-desktop session. Disable it for the
+    # desktop user and system-wide (headless mode); absent units are fine.
+    run_as_user systemctl --user disable --now gnome-remote-desktop.service >/dev/null 2>&1 || true
+    systemctl disable --now gnome-remote-desktop.service >/dev/null 2>&1 || true
+    echo "gnome-remote-desktop disabled (user and system units, where present)."
 fi
 
 # -- TCP listener bind -------------------------------------------------------

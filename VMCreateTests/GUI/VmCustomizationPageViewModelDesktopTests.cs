@@ -162,19 +162,22 @@ namespace VMCreate.Tests.GUI
         // Omarchy images only.
 
         [TestMethod]
-        public void WayrdpRadio_OnKali_EnabledOnlyForKde()
+        public void WayrdpRadio_OnKali_EnabledForKdeAndGnome()
         {
             var vm = Create(KaliItem(), out _);
 
-            Assert.IsTrue(vm.WayrdpOptionVisible, "Kali is a wayrdp KDE-backend target");
+            Assert.IsTrue(vm.WayrdpOptionVisible, "Kali is a wayrdp KDE- and GNOME-backend target");
             Assert.IsFalse(vm.WayrdpOptionEnabled, "stock Xfce: wayrdp has no Xfce backend");
 
             vm.SelectDesktop("kde");
+            StringAssert.Contains(vm.AutoRdpHint, "KDE Plasma");
             Assert.IsTrue(vm.WayrdpOptionEnabled);
             StringAssert.Contains(vm.AutoRdpHint, "wayrdp");
 
             vm.SelectDesktop("gnome");
-            Assert.IsFalse(vm.WayrdpOptionEnabled, "no GNOME backend");
+            Assert.IsTrue(vm.WayrdpOptionEnabled, "wayrdp's GNOME backend");
+            StringAssert.Contains(vm.AutoRdpHint, "GNOME");
+            StringAssert.Contains(vm.AutoRdpHint, "wayrdp");
         }
 
         [TestMethod]
